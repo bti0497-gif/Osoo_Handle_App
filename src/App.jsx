@@ -1,12 +1,19 @@
 import React, { useState } from 'react';
 import { useAuthViewModel } from './viewmodels/AuthViewModel';
+import AttendanceView from './views/AttendanceView';
+import MemberManagementView from './views/MemberManagementView';
+import FlowManagementView from './views/FlowManagementView';
+import MedicineManagementView from './views/MedicineManagementView';
+import WaterQualityView from './views/WaterQualityView';
+import FacilityManagementView from './views/FacilityManagementView';
+import DailyLogView from './views/DailyLogView';
 import LoginView from './views/LoginView';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import StatusBar from './components/StatusBar';
 import Dashboard from './views/Dashboard';
 
-const App = () => {
+function App() {
     const { user, isAuthenticated, login, logout, updatePassword } = useAuthViewModel();
     const [activeTab, setActiveTab] = useState('flow');
 
@@ -24,11 +31,17 @@ const App = () => {
 
     const renderContent = () => {
         switch (activeTab) {
-            case 'flow': return <Dashboard title="유량관리" />;
-            case 'medicine': return <Dashboard title="약품관리" />;
-            case 'water': return <Dashboard title="수질관리" />;
-            case 'facility': return <Dashboard title="시설관리" />;
-            case 'board': return <Dashboard title="소통게시판" />;
+            case 'flow': return <FlowManagementView />;
+            case 'medicine': return <MedicineManagementView />;
+            case 'water': return <WaterQualityView />;
+            case 'facility': return <FacilityManagementView />;
+            case 'log': return <DailyLogView />;
+            case 'attendance':
+                return <AttendanceView />;
+            case 'members':
+                return <MemberManagementView />;
+            case 'dashboard':
+                return <Dashboard title="소통게시판" />;
             case 'settings': return <Dashboard title="설정메뉴" />;
             default: return <Dashboard title="유량관리" />;
         }
@@ -40,7 +53,9 @@ const App = () => {
             medicine: '약품관리',
             water: '수질관리',
             facility: '시설관리',
+            log: '일지작성',
             board: '소통게시판',
+            members: '회원 및 현장 관리',
             settings: '설정메뉴'
         };
         return labels[activeTab] || '유량관리';

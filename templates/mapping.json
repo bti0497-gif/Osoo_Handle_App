@@ -1,0 +1,46 @@
+{
+    "excel": {
+        "B5": {
+            "field": "date",
+            "type": "text"
+        },
+        "B7": {
+            "field": "flow_inflow_raw",
+            "type": "number"
+        },
+        "C7": {
+            "field": "flow_inflow_calc",
+            "type": "number"
+        },
+        "B8": {
+            "field": "flow_discharge_raw",
+            "type": "number"
+        },
+        "C8": {
+            "field": "flow_discharge_calc",
+            "type": "number"
+        },
+        "E5": {
+            "field": "photo_experiment",
+            "type": "image",
+            "width": 400,
+            "height": 300
+        },
+        "E15": {
+            "field": "photo_delivery",
+            "type": "image",
+            "width": 400,
+            "height": 300
+        }
+    },
+    "hwp": {
+        "date_bookmark": "date",
+        "inflow_bookmark": "flow_inflow_calc",
+        "experiment_photo_bookmark": {
+            "field": "photo_experiment",
+            "type": "image",
+            "width": 60,
+            "height": 45
+        }
+    }
+}

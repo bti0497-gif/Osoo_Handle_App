@@ -1,61 +1,87 @@
 import { useState } from 'react';
-
-// 초기 회원 데이터 (실제 서비스에서는 보안을 위해 외부에서 관리해야 함)
-const INITIAL_MEMBERS = [
-    { id: 'admin_sys', name: 'admin', pass: '1234' },
-    { id: 'admin', name: '김관리', pass: '1234' },
-    { id: 'user1', name: '이근무', pass: '1111' },
-];
+import { AuthModel } from '../models/AuthModel';
 
 export const useAuthViewModel = () => {
     const [user, setUser] = useState(null);
-    const [attendance, setAttendance] = useState([]);
+    const [isLoading, setIsLoading] = useState(false);
 
-    const login = (name, password) => {
-        const member = INITIAL_MEMBERS.find((m) => m.name === name && m.pass === password);
-        if (member) {
-            const now = new Date();
-            const newAttendance = {
-                id: member.id,
-                date: now.toLocaleDateString(),
-                intime: now.toLocaleTimeString(),
-                outtime: null,
-            };
+    const login = async (name, password) => {
+        setIsLoading(true);
+        try {
+            const currentPos = await getCurrentCoords();
 
-            setUser(member);
-            setAttendance(prev => [...prev, newAttendance]);
-            return { success: true, user: member };
+            // 1. Try Login
+            let userData = await AuthModel.localLogin(name, password);
+            if (!userData) {
+                userData = await AuthModel.discoveryLogin(name, password);
+            }
+
+            if (userData) {
+                // 2. Presence Verification
+                const isRemote = checkIsRemote(userData, currentPos);
+
+                // 3. Record Attendance
+                await AuthModel.recordAttendance(userData.name, isRemote);
+
+                setUser({ ...userData, isRemote });
+                setIsLoading(false);
+                return { success: true, user: userData, isRemote };
+            }
+
+            setIsLoading(false);
+            return { success: false, message: '이름 또는 비밀번호가 올바르지 않습니다.' };
+        } catch (err) {
+            console.error("Login Error:", err);
+            setIsLoading(false);
+            return { success: false, message: '서버 연결 실패: ' + err.message };
         }
-        return { success: false, message: '이름 또는 비밀번호가 올바르지 않습니다.' };
     };
 
-    const logout = () => {
+    const logout = async () => {
         if (user) {
-            const now = new Date();
-            setAttendance(prev => prev.map(record =>
-                (record.id === user.id && record.date === now.toLocaleDateString() && !record.outtime)
-                    ? { ...record, outtime: now.toLocaleTimeString() }
-                    : record
-            ));
+            try {
+                const date = new Date().toISOString().split('T')[0];
+                await AuthModel.syncTodayData(user.name, date);
+                await AuthModel.recordLogout(user.name);
+            } catch (err) {
+                console.error("Logout sync failed:", err);
+            }
         }
         setUser(null);
     };
 
-    const updatePassword = (newPassword) => {
-        if (user) {
-            // 실제 환경에서는 멤버 리스트 저장 로직 필요
-            setUser(prev => ({ ...prev, pass: newPassword }));
-            return true;
-        }
-        return false;
+    // Helpers
+    const getCurrentCoords = () => new Promise((resolve) => {
+        navigator.geolocation.getCurrentPosition(resolve, () => resolve(null), { timeout: 5000 });
+    });
+
+    const checkIsRemote = (userData, currentPos) => {
+        if (!userData.target_lat || !userData.target_lng || !currentPos) return true;
+        const dist = calculateDistance(
+            currentPos.coords.latitude, currentPos.coords.longitude,
+            userData.target_lat, userData.target_lng
+        );
+        return dist > (userData.radius_m || 500);
+    };
+
+    const calculateDistance = (lat1, lon1, lat2, lon2) => {
+        const R = 6371e3; // metres
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
     };
 
     return {
         user,
         isAuthenticated: !!user,
+        isLoading,
         login,
-        logout,
-        updatePassword,
-        attendance,
+        logout
     };
 };

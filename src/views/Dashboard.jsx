@@ -15,51 +15,51 @@ const Dashboard = ({ title = '통합 대시보드' }) => {
     ];
 
     return (
-        <div className="dashboard-container">
-            <header className="header">
-                <h1 className="title">{title}</h1>
-                <div className="badge badge-success">System Status: Online</div>
-            </header>
+        <div style={{
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '2rem'
+        }}>
+            <div className="glass-card" style={{
+                maxWidth: '600px',
+                width: '100%',
+                padding: '4rem',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.05)'
+            }}>
+                <div style={{
+                    width: '5rem',
+                    height: '5rem',
+                    backgroundColor: '#f8fafc',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: '1.5rem'
+                }}>
+                    <span className="material-icons" style={{ fontSize: '3rem', color: '#cbd5e1' }}>pending_actions</span>
+                </div>
 
-            <div className="grid">
-                {stats.map((stat, index) => (
-                    <div key={index} className="glass-card stat-card">
-                        <span className="stat-label">{stat.label}</span>
-                        <span className="stat-value">{stat.value}</span>
-                        <span className="badge badge-success" style={{ width: 'fit-content' }}>
-                            {stat.status}
-                        </span>
+                <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1e293b', marginBottom: '0.5rem' }}>
+                    대시보드 준비 중입니다
+                </h2>
+
+                <p style={{ color: '#64748b', marginBottom: '2rem', lineHeight: '1.6' }}>
+                    현재 시스템 초기화 및 데이터 동기화 작업이 진행 중입니다.<br />
+                    잠시 후 상세 관리 현황을 확인하실 수 있습니다.
+                </p>
+
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <div style={{ height: '6px', width: '3rem', backgroundColor: '#e2e8f0', borderRadius: '9999px', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: '50%', backgroundColor: 'var(--primary)', borderRadius: '9999px' }}></div>
                     </div>
-                ))}
-            </div>
-
-            <div className="glass-card" style={{ marginTop: '2rem' }}>
-                <h2 style={{ marginBottom: '1.5rem', fontSize: '1.125rem' }}>최근 주요 알림</h2>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                    {recentAlerts.map((alert, index) => (
-                        <div
-                            key={index}
-                            style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                padding: '1rem',
-                                borderRadius: '0.5rem',
-                                backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                            }}
-                        >
-                            <div>
-                                <div style={{ fontWeight: '600', color: 'var(--accent-color)' }}>
-                                    {alert.site}
-                                </div>
-                                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                                    {alert.issue}
-                                </div>
-                            </div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                {alert.time}
-                            </div>
-                        </div>
-                    ))}
+                    <div style={{ height: '6px', width: '3rem', backgroundColor: '#f1f5f9', borderRadius: '9999px' }}></div>
+                    <div style={{ height: '6px', width: '3rem', backgroundColor: '#f1f5f9', borderRadius: '9999px' }}></div>
                 </div>
             </div>
         </div>
