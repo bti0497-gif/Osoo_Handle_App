@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { WaterQualityModel } from '../models/WaterQualityModel';
+import { DriveSyncService } from '../services/DriveSyncService';
 
-export const useWaterQualityViewModel = (initialDate) => {
+export const useWaterQualityViewModel = (initialDate, currentUser) => {
     const [date, setDate] = useState(initialDate || new Date().toISOString().split('T')[0]);
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -20,6 +21,9 @@ export const useWaterQualityViewModel = (initialDate) => {
     const loadData = async () => {
         setLoading(true);
         try {
+            // 1. 클라우드 데이터 동기화 확인
+            await DriveSyncService.syncOperationalDataFromCloud(currentUser?.name, date);
+
             const data = await WaterQualityModel.fetchData(date);
             setRecords(data);
         } catch (err) {
@@ -36,6 +40,11 @@ export const useWaterQualityViewModel = (initialDate) => {
     const submitForm = async () => {
         try {
             await WaterQualityModel.saveRecord({ ...form, date });
+
+            // 3. 전체 데이터 클라우드 동기화
+            const allRecords = await WaterQualityModel.fetchData(date);
+            await DriveSyncService.syncDetailedDataToCloud(currentUser?.name, date, { waterQuality: allRecords });
+
             alert("상태: 분석 데이터 저장 완료");
             await loadData();
             setForm(prev => ({ ...prev, nh3_n: '', no3_n: '', po4_p: '', alkalinity: '' }));

@@ -2,6 +2,7 @@ const express = require('express');
 const sqlite3 = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const { exec } = require('child_process');
 const cors = require('cors');
 const multer = require('multer');
 const sharp = require('sharp');
@@ -11,10 +12,11 @@ require('dotenv').config({ path: '.env.local' });
 const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
-const port = process.env.VITE_PORT || 8900;
+const port = Number(process.env.VITE_PORT) || 8900;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Setup AppData directory for the database
 const appDataPath = path.join(process.env.APPDATA, 'Osoo_Handle_App');
@@ -50,7 +52,10 @@ db.exec(`
     date DATE NOT NULL,
     login_time DATETIME,
     logout_time DATETIME,
-    is_remote BOOLEAN DEFAULT 0
+    login_lat REAL,
+    login_lng REAL,
+    location_matched BOOLEAN DEFAULT 0,
+    auto_logout BOOLEAN DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS posts (
@@ -60,7 +65,9 @@ db.exec(`
     author TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     view_count INTEGER DEFAULT 0,
-    attachments TEXT
+    attachments TEXT,
+    parent_id INTEGER,
+    updated_at DATETIME
   );
 
   CREATE TABLE IF NOT EXISTS comments (
@@ -118,47 +125,300 @@ db.exec(`
   );
 `);
 
+// Migration: Add new columns to existing attendance table (safe to run multiple times)
+try {
+  const attCols = db.pragma('table_info(attendance)').map(c => c.name);
+  if (!attCols.includes('login_lat')) db.exec('ALTER TABLE attendance ADD COLUMN login_lat REAL');
+  if (!attCols.includes('login_lng')) db.exec('ALTER TABLE attendance ADD COLUMN login_lng REAL');
+  if (!attCols.includes('location_matched')) db.exec('ALTER TABLE attendance ADD COLUMN location_matched BOOLEAN DEFAULT 0');
+  if (!attCols.includes('auto_logout')) db.exec('ALTER TABLE attendance ADD COLUMN auto_logout BOOLEAN DEFAULT 0');
+
+  // Posts migration
+  const postCols = db.pragma('table_info(posts)').map(c => c.name);
+  if (!postCols.includes('is_notice')) db.exec('ALTER TABLE posts ADD COLUMN is_notice INTEGER DEFAULT 0');
+  if (!postCols.includes('updated_at')) db.exec('ALTER TABLE posts ADD COLUMN updated_at DATETIME');
+  if (!postCols.includes('parent_id')) db.exec('ALTER TABLE posts ADD COLUMN parent_id INTEGER');
+
+  console.log('Database migration check complete.');
+} catch (e) {
+  console.warn('Migration warning:', e.message);
+}
+
+// Static uploads directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Windows Location API (WinRT via PowerShell)
+app.get('/api/location/current', (req, res) => {
+  const scriptPath = path.join(__dirname, 'scripts', 'get_location.ps1');
+
+  exec(`powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`,
+    { timeout: 20000 },
+    (error, stdout, stderr) => {
+      if (error) {
+        const errMsg = stderr || error.message;
+        console.error('Location error:', errMsg);
+
+        if (errMsg.includes('denied') || errMsg.includes('Access') || errMsg.includes('0x80070005')) {
+          return res.status(403).json({
+            success: false,
+            code: 'LOCATION_DENIED',
+            message: 'Windows 위치 서비스가 비활성화되어 있습니다.\n설정 > 개인 정보 > 위치 에서 위치 서비스를 켜주세요.'
+          });
+        }
+
+        return res.status(500).json({
+          success: false,
+          code: 'LOCATION_ERROR',
+          message: '위치 정보를 가져올 수 없습니다: ' + errMsg.trim()
+        });
+      }
+
+      const parts = stdout.trim().split(',');
+      if (parts.length >= 2) {
+        res.json({
+          success: true,
+          latitude: parseFloat(parts[0]),
+          longitude: parseFloat(parts[1]),
+          accuracy: parts[2] ? parseFloat(parts[2]) : null
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          code: 'PARSE_ERROR',
+          message: '위치 데이터 파싱 실패'
+        });
+      }
+    }
+  );
+});
+
 // API Endpoints
+app.get('/', (req, res) => {
+  res.send(`
+    <div style="font-family: sans-serif; padding: 2rem; line-height: 1.6;">
+        <h1 style="color: #1e293b;">Osoo Handle App - Local Bridge Server</h1>
+        <p>백엔드 API 서버가 정상적으로 작동 중입니다.</p>
+        <p><strong>참고:</strong> 사용자 인터페이스(UI)를 보려면 프론트엔드 개발 서버(포트 8900)를 실행해야 합니다.</p>
+        <div style="background: #f1f5f9; padding: 1rem; border-radius: 8px; display: inline-block;">
+            <code>npm run dev</code> 를 터미널에서 실행하세요.
+        </div>
+        <br><br>
+        <a href="http://localhost:8900" style="color: #0a58ca; font-weight: bold;">프론트엔드로 이동하기 (포트 8900) &rarr;</a>
+    </div>
+  `);
+});
 
 // Authentication & Member Sync
 app.post('/api/auth/login', (req, res) => {
   const { name, password } = req.body;
-
-  // 1. Check local DB first
   const member = db.prepare('SELECT * FROM members WHERE name = ? AND password = ?').get(name, password);
-
   if (member) {
     return res.json({ success: true, user: member, source: 'local' });
   }
-
-  // 2. If not found, frontend will handle cloud sync (Drive API)
-  // After cloud sync, frontend will call /api/members to "install" the user locally
   res.status(404).json({ success: false, message: 'User not found locally' });
 });
 
-app.post('/api/members', (req, res) => {
-  const { name, password, phone, site_name1, site_name2, target_lat, target_lng, radius_m, notes, role } = req.body;
+// 회원 목록 조회
+app.get('/api/members', (req, res) => {
   try {
-    const info = db.prepare(`
-            INSERT OR REPLACE INTO members (name, password, phone, site_name1, site_name2, target_lat, target_lng, radius_m, notes, role, last_sync_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        `).run(name, password, phone, site_name1, site_name2, target_lat, target_lng, radius_m, notes, role);
-
-    res.json({ success: true, id: info.lastInsertRowid });
+    const members = db.prepare('SELECT * FROM members ORDER BY id ASC').all();
+    res.json(members);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Attendance tracking
+// 회원 등록/수정
+app.post('/api/members', (req, res) => {
+  const { id, name, password, phone, site_name1, site_name2, target_lat, target_lng, radius_m, notes, role } = req.body;
+  try {
+    let info;
+    if (id) {
+      // 기존 회원 수정
+      info = db.prepare(`
+        UPDATE members SET name=?, password=?, phone=?, site_name1=?, site_name2=?, target_lat=?, target_lng=?, radius_m=?, notes=?, role=?, last_sync_at=CURRENT_TIMESTAMP
+        WHERE id=?
+      `).run(name, password, phone, site_name1, site_name2, target_lat, target_lng, radius_m, notes, role, id);
+      res.json({ success: true, id: id });
+    } else {
+      // 신규 등록
+      info = db.prepare(`
+        INSERT INTO members (name, password, phone, site_name1, site_name2, target_lat, target_lng, radius_m, notes, role, last_sync_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      `).run(name, password, phone, site_name1, site_name2, target_lat, target_lng, radius_m, notes, role);
+      res.json({ success: true, id: info.lastInsertRowid });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 회원 삭제
+app.delete('/api/members/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM members WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Posts (소통게시판)
+app.get('/api/posts', (req, res) => {
+  try {
+    const { user } = req.query;
+    let sql, params;
+    if (user && user !== 'admin') {
+      // 일반사용자: 자기 글 + admin 글만
+      sql = `SELECT p.id, p.title, p.author, STRFTIME('%Y-%m-%dT%H:%M:%SZ', p.created_at) as created_at, p.view_count, p.is_notice, p.attachments, p.parent_id,
+             (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) as comment_count
+             FROM posts p WHERE p.author = ? OR p.author = 'admin'
+             ORDER BY p.is_notice DESC, COALESCE(p.parent_id, p.id) DESC, p.id ASC`;
+      params = [user];
+    } else {
+      // admin: 모든 글
+      sql = `SELECT p.id, p.title, p.author, STRFTIME('%Y-%m-%dT%H:%M:%SZ', p.created_at) as created_at, p.view_count, p.is_notice, p.attachments, p.parent_id,
+             (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) as comment_count
+             FROM posts p ORDER BY p.is_notice DESC, COALESCE(p.parent_id, p.id) DESC, p.id ASC`;
+      params = [];
+    }
+    const posts = db.prepare(sql).all(...params);
+    res.json(posts);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/posts/:id', (req, res) => {
+  try {
+    const post = db.prepare('SELECT * FROM posts WHERE id = ?').get(req.params.id);
+    if (!post) return res.status(404).json({ success: false, message: '게시글을 찾을 수 없습니다.' });
+    db.prepare('UPDATE posts SET view_count = view_count + 1 WHERE id = ?').run(req.params.id);
+    post.view_count += 1;
+    res.json(post);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/posts', (req, res) => {
+  const { id, title, content, author, attachments, is_notice } = req.body;
+  try {
+    if (id) {
+      db.prepare('UPDATE posts SET title=?, content=?, attachments=?, is_notice=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+        .run(title, content, attachments || null, is_notice || 0, id);
+      res.json({ success: true, id });
+    } else {
+      const { parent_id } = req.body;
+      const result = db.prepare('INSERT INTO posts (title, content, author, attachments, is_notice, parent_id) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(title, content, author, attachments || null, is_notice || 0, parent_id || null);
+      res.json({ success: true, id: result.lastInsertRowid });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/posts/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM comments WHERE post_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM posts WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Comments (댓글/답글)
+app.get('/api/posts/:id/comments', (req, res) => {
+  try {
+    const comments = db.prepare("SELECT id, post_id, parent_id, content, author, STRFTIME('%Y-%m-%dT%H:%M:%SZ', created_at) as created_at, is_reply FROM comments WHERE post_id = ? ORDER BY created_at ASC").all(req.params.id);
+    res.json(comments);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/posts/:id/comments', (req, res) => {
+  const { content, author, parent_id } = req.body;
+  try {
+    const result = db.prepare('INSERT INTO comments (post_id, content, author, parent_id, is_reply) VALUES (?, ?, ?, ?, ?)')
+      .run(req.params.id, content, author, parent_id || null, parent_id ? 1 : 0);
+    res.json({ success: true, id: result.lastInsertRowid });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/comments/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM comments WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// File Upload (게시판 첨부파일)
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+const boardUpload = multer({ dest: uploadDir, limits: { fileSize: 50 * 1024 * 1024 } }); // 10MB -> 50MB 상향
+
+app.post('/api/upload', boardUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ success: false, message: '파일이 없습니다.' });
+
+  // Multer의 latin1 인코딩 문제를 UTF-8로 보정 (더욱 강력한 보정 로직)
+  let originalName = req.file.originalname;
+  try {
+    // 이미 한글이 포함되어 있다면 파일명이 정상적으로 온 것으로 판단
+    if (!/[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(originalName)) {
+      const decoded = Buffer.from(originalName, 'latin1').toString('utf8');
+      // 보정 후 한글이 생겼다면 보정된 이름을 사용
+      if (/[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(decoded)) {
+        originalName = decoded;
+      }
+    }
+  } catch (e) {
+    console.error("Filename decoding error:", e);
+  }
+
+  const ext = path.extname(originalName);
+  const newName = req.file.filename + ext;
+  fs.renameSync(req.file.path, path.join(uploadDir, newName));
+
+  res.json({
+    success: true,
+    url: `/uploads/${newName}`,
+    originalName: originalName,
+    size: req.file.size
+  });
+});
+
+// 파일 다운로드 (한글 파일명 보존을 위한 전용 API)
+app.get('/api/download', (req, res) => {
+  const { url, name } = req.query;
+  if (!url || !name) return res.status(400).send('잘못된 요청입니다.');
+
+  const fileName = path.basename(url);
+  const filePath = path.join(uploadDir, fileName);
+
+  if (!fs.existsSync(filePath)) return res.status(404).send('파일을 찾을 수 없습니다.');
+
+  // 브라우저에서 올바른 한글 파일명으로 다운로드되도록 헤더 설정
+  const encodedName = encodeURIComponent(name);
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedName}`);
+  res.sendFile(filePath);
+});
+
+// Attendance tracking (접속관리)
 app.post('/api/attendance/login', (req, res) => {
-  const { name, is_remote } = req.body;
+  const { name, login_lat, login_lng, location_matched } = req.body;
   const date = new Date().toISOString().split('T')[0];
   try {
     const info = db.prepare(`
-            INSERT INTO attendance (member_name, date, login_time, is_remote)
-            VALUES (?, ?, CURRENT_TIMESTAMP, ?)
-        `).run(name, date, is_remote ? 1 : 0);
+      INSERT INTO attendance (member_name, date, login_time, login_lat, login_lng, location_matched)
+      VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+    `).run(name, date, login_lat || null, login_lng || null, location_matched ? 1 : 0);
     res.json({ success: true, id: info.lastInsertRowid });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -166,15 +426,15 @@ app.post('/api/attendance/login', (req, res) => {
 });
 
 app.post('/api/attendance/logout', (req, res) => {
-  const { name } = req.body;
+  const { name, auto_logout } = req.body;
   const date = new Date().toISOString().split('T')[0];
   try {
-    db.prepare(`
-            UPDATE attendance 
-            SET logout_time = CURRENT_TIMESTAMP 
-            WHERE member_name = ? AND date = ? AND logout_time IS NULL
-        `).run(name, date);
-    res.json({ success: true });
+    const result = db.prepare(`
+      UPDATE attendance 
+      SET logout_time = CURRENT_TIMESTAMP, auto_logout = ?
+      WHERE member_name = ? AND date = ? AND logout_time IS NULL
+    `).run(auto_logout ? 1 : 0, name, date);
+    res.json({ success: true, updated: result.changes });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -183,7 +443,7 @@ app.post('/api/attendance/logout', (req, res) => {
 app.get('/api/attendance', (req, res) => {
   const { date } = req.query;
   try {
-    const logs = db.prepare('SELECT * FROM attendance WHERE date = ? ORDER BY login_time DESC').all(date);
+    const logs = db.prepare("SELECT id, member_name, date, STRFTIME('%Y-%m-%dT%H:%M:%SZ', login_time) as login_time, STRFTIME('%Y-%m-%dT%H:%M:%SZ', logout_time) as logout_time, login_lat, login_lng, logout_lat, logout_lng, location_matched, auto_logout FROM attendance WHERE date = ? ORDER BY login_time DESC").all(date);
     res.json(logs);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

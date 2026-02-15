@@ -16,5 +16,14 @@ export const MemberModel = {
         const result = await response.json();
         if (!response.ok) throw new Error(result.message || 'Failed to save member');
         return result;
+    },
+
+    async deleteMember(id) {
+        const response = await fetch(`${API_BASE_URL}/api/members/${id}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Failed to delete member');
+        return result;
     }
 };

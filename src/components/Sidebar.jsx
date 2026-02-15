@@ -10,17 +10,23 @@ const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword }) =
         { id: 'board', label: '소통게시판', icon: 'forum' },
     ];
 
+    const adminMenus = [
+        { id: 'members', label: '회원 및 현장 관리', icon: 'admin_panel_settings' },
+        { id: 'settings', label: '설정', icon: 'settings' },
+    ];
+
     // 성(Surname) 추출 (아이콘용)
     const surname = user?.name?.charAt(0) || 'U';
 
     return (
         <aside className="sidebar">
+            {/* 사용자 프로필 영역 (기존 유지) */}
             <div className="user-group">
                 <div className="user-info">
                     <div className="user-avatar">{surname}</div>
                     <div className="user-details">
-                        <span className="user-role">현장 근무자</span>
                         <span className="user-name">{user?.name}님</span>
+                        <span className="user-role">{user?.site_name1 || '소속 미지정'}</span>
                     </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
@@ -35,39 +41,36 @@ const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword }) =
                 </div>
             </div>
 
-            <div className="nav-menu">
+            {/* 일반 메뉴 영역 (텍스트형) */}
+            <nav className="nav-menu-text">
                 {menus.map((menu) => (
                     <button
                         key={menu.id}
-                        className={`nav-item ${activeTab === menu.id ? 'active' : ''}`}
+                        className={`nav-text-item ${activeTab === menu.id ? 'active' : ''}`}
                         onClick={() => onTabChange(menu.id)}
                     >
-                        <span className="material-icons menu-icon">{menu.icon}</span>
+                        <span className="material-icons nav-text-icon">{menu.icon}</span>
                         <span>{menu.label}</span>
                     </button>
                 ))}
+            </nav>
 
-                {user?.role === 'admin' && (
-                    <button
-                        className={`nav-item ${activeTab === 'members' ? 'active' : ''}`}
-                        onClick={() => onTabChange('members')}
-                        style={{ marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}
-                    >
-                        <span className="material-icons menu-icon">admin_panel_settings</span>
-                        <span>회원 및 현장 관리</span>
-                    </button>
-                )}
-            </div>
-
-            <div style={{ marginTop: 'auto', padding: '0.75rem' }}>
-                <button
-                    className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
-                    onClick={() => onTabChange('settings')}
-                >
-                    <span className="material-icons menu-icon">settings</span>
-                    <span>설정메뉴</span>
-                </button>
-            </div>
+            {/* 관리자 전용 메뉴 (하단 고정) */}
+            {user?.role === 'admin' && (
+                <div className="nav-admin-section">
+                    <div className="nav-admin-divider">관리자 전용</div>
+                    {adminMenus.map((menu) => (
+                        <button
+                            key={menu.id}
+                            className={`nav-text-item admin ${activeTab === menu.id ? 'active' : ''}`}
+                            onClick={() => onTabChange(menu.id)}
+                        >
+                            <span className="material-icons nav-text-icon">{menu.icon}</span>
+                            <span>{menu.label}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
         </aside>
     );
 };

@@ -17,30 +17,50 @@ export const AuthModel = {
     async discoveryLogin(name, password) {
         const remoteUser = await DriveSyncService.findRemoteUser(name, password);
         if (remoteUser) {
-            // Register local
-            await fetch(`${API_BASE_URL}/api/members`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(remoteUser)
-            });
+            try {
+                await fetch(`${API_BASE_URL}/api/members`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(remoteUser)
+                });
+            } catch (e) {
+                console.warn("Local registration failed, but proceeding with remote discovery", e);
+            }
             return remoteUser;
         }
         return null;
     },
 
-    async recordAttendance(name, isRemote) {
+    /**
+     * 출근 기록 (위치 정보 포함)
+     * @param {string} name - 사용자 이름
+     * @param {number|null} lat - 로그인 시 위도
+     * @param {number|null} lng - 로그인 시 경도
+     * @param {boolean} locationMatched - 등록 위치와 일치 여부
+     */
+    async recordAttendance(name, lat, lng, locationMatched) {
         await fetch(`${API_BASE_URL}/api/attendance/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, is_remote: isRemote })
+            body: JSON.stringify({
+                name,
+                login_lat: lat,
+                login_lng: lng,
+                location_matched: locationMatched
+            })
         });
     },
 
-    async recordLogout(name) {
+    /**
+     * 퇴근 기록
+     * @param {string} name - 사용자 이름
+     * @param {boolean} autoLogout - 자동 로그아웃 여부 (18시)
+     */
+    async recordLogout(name, autoLogout = false) {
         await fetch(`${API_BASE_URL}/api/attendance/logout`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name })
+            body: JSON.stringify({ name, auto_logout: autoLogout })
         });
     },
 

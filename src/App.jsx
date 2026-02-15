@@ -12,9 +12,10 @@ import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import StatusBar from './components/StatusBar';
 import Dashboard from './views/Dashboard';
+import BoardView from './views/BoardView';
 
 function App() {
-    const { user, isAuthenticated, login, logout, updatePassword } = useAuthViewModel();
+    const { user, isAuthenticated, login, logout } = useAuthViewModel();
     const [activeTab, setActiveTab] = useState('flow');
 
     if (!isAuthenticated) {
@@ -22,26 +23,25 @@ function App() {
     }
 
     const handleUpdatePassword = () => {
-        const newPass = prompt('새 비밀번호를 입력하세요:');
-        if (newPass) {
-            updatePassword(newPass);
-            alert('비밀번호가 변경되었습니다.');
-        }
+        setActiveTab('myinfo');
     };
 
     const renderContent = () => {
         switch (activeTab) {
-            case 'flow': return <FlowManagementView />;
-            case 'medicine': return <MedicineManagementView />;
-            case 'water': return <WaterQualityView />;
-            case 'facility': return <FacilityManagementView />;
-            case 'log': return <DailyLogView />;
+            case 'flow': return <FlowManagementView currentUser={user} />;
+            case 'medicine': return <MedicineManagementView currentUser={user} />;
+            case 'water': return <WaterQualityView currentUser={user} />;
+            case 'facility': return <FacilityManagementView currentUser={user} />;
+            case 'log': return <DailyLogView currentUser={user} />;
             case 'attendance':
-                return <AttendanceView />;
+                return <AttendanceView currentUser={user} />;
             case 'members':
-                return <MemberManagementView />;
+                return <MemberManagementView currentUser={user} />;
+            case 'myinfo':
+                return <MemberManagementView currentUser={user} passwordOnly={true} />;
             case 'dashboard':
-                return <Dashboard title="소통게시판" />;
+            case 'board':
+                return <BoardView currentUser={user} />;
             case 'settings': return <Dashboard title="설정메뉴" />;
             default: return <Dashboard title="유량관리" />;
         }
@@ -56,6 +56,7 @@ function App() {
             log: '일지작성',
             board: '소통게시판',
             members: '회원 및 현장 관리',
+            myinfo: '내 정보 수정',
             settings: '설정메뉴'
         };
         return labels[activeTab] || '유량관리';
