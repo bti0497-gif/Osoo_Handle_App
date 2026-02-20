@@ -1,22 +1,34 @@
 import React, { useState } from 'react';
-import { useAuthViewModel } from './viewmodels/AuthViewModel';
-import AttendanceView from './views/AttendanceView';
-import MemberManagementView from './views/MemberManagementView';
-import FlowManagementView from './views/FlowManagementView';
-import MedicineManagementView from './views/MedicineManagementView';
-import WaterQualityView from './views/WaterQualityView';
-import FacilityManagementView from './views/FacilityManagementView';
-import DailyLogView from './views/DailyLogView';
-import LoginView from './views/LoginView';
+import { TAB_LABELS, DEFAULT_TAB } from './core/constants';
+import { useAuthViewModel, LoginView } from './features/auth';
+import { AttendanceView } from './features/attendance';
+import { MemberManagementView } from './features/members';
+import { FlowManagementView } from './features/flow';
+import { MedicineManagementView } from './features/medicine';
+import { WaterQualityView } from './features/water';
+import { FacilityManagementView } from './features/facility';
+import { DailyLogView } from './features/dailylog';
+import { BoardView } from './features/board';
+import { SettingsView } from './features/settings';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import StatusBar from './components/StatusBar';
 import Dashboard from './views/Dashboard';
-import BoardView from './views/BoardView';
 
 function App() {
-    const { user, isAuthenticated, login, logout } = useAuthViewModel();
-    const [activeTab, setActiveTab] = useState('flow');
+    const { user, isAuthenticated, isLoading, login, logout } = useAuthViewModel();
+    const [activeTab, setActiveTab] = useState(DEFAULT_TAB);
+
+    if (isLoading) {
+        return (
+            <div className="login-screen">
+                <div style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+                    <div className="spinner" style={{ margin: '0 auto 1rem' }} />
+                    <p>세션 복원 중...</p>
+                </div>
+            </div>
+        );
+    }
 
     if (!isAuthenticated) {
         return <LoginView onLogin={login} />;
@@ -42,24 +54,9 @@ function App() {
             case 'dashboard':
             case 'board':
                 return <BoardView currentUser={user} />;
-            case 'settings': return <Dashboard title="설정메뉴" />;
+            case 'settings': return <SettingsView currentUser={user} />;
             default: return <Dashboard title="유량관리" />;
         }
-    };
-
-    const getTabLabel = () => {
-        const labels = {
-            flow: '유량관리',
-            medicine: '약품관리',
-            water: '수질관리',
-            facility: '시설관리',
-            log: '일지작성',
-            board: '소통게시판',
-            members: '회원 및 현장 관리',
-            myinfo: '내 정보 수정',
-            settings: '설정메뉴'
-        };
-        return labels[activeTab] || '유량관리';
     };
 
     return (
@@ -80,9 +77,9 @@ function App() {
                 </main>
             </div>
 
-            <StatusBar title={getTabLabel()} />
+            <StatusBar title={TAB_LABELS[activeTab] || TAB_LABELS[DEFAULT_TAB]} />
         </div>
     );
-};
+}
 
 export default App;
