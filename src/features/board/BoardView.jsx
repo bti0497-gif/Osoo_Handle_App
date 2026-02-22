@@ -2,6 +2,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { useBoardViewModel } from './useBoardViewModel';
+import { useDialog } from '../../components/common/DialogProvider';
 
 // ── 성능 최적화를 위한 댓글 입력 컴포넌트 분리 ──
 const CommentInput = ({ onSubmit, placeholder, initialValue = '', onCancel, buttonText = '등록' }) => {
@@ -51,13 +52,14 @@ const CommentInput = ({ onSubmit, placeholder, initialValue = '', onCancel, butt
 };
 
 const BoardView = ({ currentUser }) => {
+    const { showAlert, showConfirm } = useDialog();
     const {
         posts, allPostsCount, loading, form, updateForm,
         submitPost, deletePost, viewPost, editPost,
         selectedPost, comments, submitComment, deleteComment, uploadFile,
         viewMode, setViewMode, searchTerm, setSearchTerm,
         currentPage, setCurrentPage, totalPages, resetForm, loadPosts, replyToPost
-    } = useBoardViewModel(currentUser);
+    } = useBoardViewModel(currentUser, { showAlert, showConfirm });
 
     const [replyTo, setReplyTo] = useState(null);
     const fileInputRef = useRef(null);
@@ -81,10 +83,10 @@ const BoardView = ({ currentUser }) => {
         }
     }), []);
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!form.title.trim()) { alert('제목을 입력해주세요.'); return; }
-        if (!form.content.trim() || form.content === '<p><br></p>') { alert('내용을 입력해주세요.'); return; }
+        if (!form.title.trim()) { await showAlert('제목을 입력해주세요.'); return; }
+        if (!form.content.trim() || form.content === '<p><br></p>') { await showAlert('내용을 입력해주세요.'); return; }
         submitPost();
     };
 
@@ -95,7 +97,7 @@ const BoardView = ({ currentUser }) => {
         // 50MB 용량 체크
         const maxSize = 50 * 1024 * 1024;
         if (file.size > maxSize) {
-            alert('파일 용량이 너무 큽니다. 최대 50MB까지 업로드 가능합니다.');
+            await showAlert('파일 용량이 너무 큽니다. 최대 50MB까지 업로드 가능합니다.');
             e.target.value = '';
             return;
         }

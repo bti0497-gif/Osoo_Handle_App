@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TAB_LABELS, DEFAULT_TAB } from './core/constants';
-import { useAuthViewModel, LoginView } from './features/auth';
+import { useAuthViewModel, LoginView, SyncService } from './features/auth';
 import { AttendanceView } from './features/attendance';
 import { MemberManagementView } from './features/members';
 import { FlowManagementView } from './features/flow';
@@ -18,6 +18,14 @@ import Dashboard from './views/Dashboard';
 function App() {
     const { user, isAuthenticated, isLoading, login, logout } = useAuthViewModel();
     const [activeTab, setActiveTab] = useState(DEFAULT_TAB);
+
+    useEffect(() => {
+        // 앱이 시작되고 사용자가 로그인된 상태거나 초기 로딩이 끝났을 때 백그라운드 동기화를 1회 시도합니다.
+        // 인터넷이 연결되어 있으면 작동하고, 아니면 조용히 실패합니다.
+        if (!isLoading) {
+            SyncService.startBackgroundSync().catch(console.error);
+        }
+    }, [isLoading]);
 
     if (isLoading) {
         return (

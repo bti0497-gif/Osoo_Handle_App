@@ -8,7 +8,7 @@ const ALPHABET = (() => {
     return res;
 })();
 
-export const useSettingsViewModel = (currentUser) => {
+export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {}) => {
     const [activeTab, setActiveTab] = useState('basic');
     const [isLoading, setIsLoading] = useState(true);
     const [hasLoadedSettings, setHasLoadedSettings] = useState(false);
@@ -102,8 +102,15 @@ export const useSettingsViewModel = (currentUser) => {
                 if (data.configItems?.length > 0) {
                     const flows = data.configItems.filter(i => i.category === 'flow');
                     if (flows.length > 0) {
-                        setFlowItems(flows.map(i => ({ name: i.item_name, checked: !!i.is_active })));
-                        const restored = {}; flows.forEach(i => { if (i.excel_cell) restored[i.item_name] = i.excel_cell; });
+                        const baseFlows = flows.filter(i => !i.item_name.includes('_raw') && !i.item_name.includes('_flow'));
+                        setFlowItems(baseFlows.map(i => ({ name: i.item_name, checked: !!i.is_active })));
+                        const restored = {};
+                        flows.forEach(i => {
+                            // _raw, _flow 접미사가 있는 매핑 항목만 flowMapping에 복원
+                            if (i.excel_cell && (i.item_name.endsWith('_raw') || i.item_name.endsWith('_flow'))) {
+                                restored[i.item_name] = i.excel_cell;
+                            }
+                        });
                         if (Object.keys(restored).length > 0) setFlowMapping(restored);
                     }
                     const meds = data.configItems.filter(i => i.category === 'medicine');
@@ -174,7 +181,7 @@ export const useSettingsViewModel = (currentUser) => {
             }
         } catch (err) {
             console.error('항목 추가 실패:', err);
-            alert('항목 추가에 실패했습니다: ' + err.message);
+            showAlert?.('항목 추가에 실패했습니다: ' + err.message);
         }
     };
 
@@ -246,7 +253,7 @@ export const useSettingsViewModel = (currentUser) => {
     const handleApply = async () => {
         try {
             if (hasLoadedSettings) {
-                const confirmed = window.confirm("이미 기본 설정이 저장되어 있는 상태입니다. \n이 내용을 바탕으로 설정을 수정하시겠습니까?");
+                const confirmed = await showConfirm?.("이미 기본 설정이 저장되어 있는 상태입니다. \n이 내용을 바탕으로 설정을 수정하시겠습니까?");
                 if (!confirmed) return;
             }
             const configItems = [
@@ -263,7 +270,7 @@ export const useSettingsViewModel = (currentUser) => {
             }
 
             if (response.success) {
-                alert('설정이 성공적으로 저장되었습니다.');
+                showAlert?.('설정이 성공적으로 저장되었습니다.');
                 setTemplateFiles([]);
                 loadSettings();
             } else {
@@ -271,7 +278,7 @@ export const useSettingsViewModel = (currentUser) => {
             }
         } catch (err) {
             console.error('Settings Apply Error:', err);
-            alert('저장 중 오류가 발생했습니다: ' + err.message);
+            showAlert?.('저장 중 오류가 발생했습니다: ' + err.message);
         }
     };
 
@@ -292,7 +299,7 @@ export const useSettingsViewModel = (currentUser) => {
             }
         } catch (err) {
             setExcelStatus({ status: 'error', fileName: file.name, sheets: [] });
-            alert('엑셀 파일 처리 실패: ' + err.message);
+            showAlert?.('엑셀 파일 처리 실패: ' + err.message);
         } finally {
             setIsUploading(false);
         }

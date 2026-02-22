@@ -7,7 +7,7 @@ const router = express.Router();
 
 let importProgress = { current: 0, total: 0, status: 'idle', result: null };
 
-module.exports = function(db, baseDir) {
+module.exports = function (db, baseDir) {
   const reportsDir = path.join(baseDir, 'templates', 'reports');
   if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
 
@@ -114,32 +114,72 @@ module.exports = function(db, baseDir) {
     try {
       if (!hasStoredData(db)) throw new Error('엑셀 데이터가 아직 저장되지 않았습니다. 먼저 파일을 업로드하세요.');
 
-      db.prepare('UPDATE app_settings SET flow_sheet = ?, flow_start_row = ?, flow_end_row = ?, flow_date_col = ? WHERE id = 1').run(sheet, startRow, endRow, dateCol);
-      const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('flow', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
-      Object.entries(mapping).forEach(([name, col]) => upsertStmt.run(name, col));
+      console.log('[FlowMapping] Received mapping:', JSON.stringify(mapping, null, 2));
 
-      const insertReading = db.prepare('INSERT OR REPLACE INTO flow_readings (date, type, calculated_flow) VALUES (?, ?, ?)');
+      db.prepare('UPDATE app_settings SET flow_sheet = ?, flow_start_row = ?, flow_end_row = ?, flow_date_col = ? WHERE id = 1').run(sheet, startRow, endRow, dateCol);
+
+      // config_items에 _raw/_flow 접미사가 있는 매핑만 저장 (기본 항목 키는 별도 관리되므로 제외)
+      const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('flow', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
+      Object.entries(mapping).forEach(([name, col]) => {
+        if (name.endsWith('_raw') || name.endsWith('_flow')) {
+          console.log(`[FlowMapping] Saving config: ${name} -> ${col}`);
+          upsertStmt.run(name, col);
+        }
+      });
+
+      // 기존 flow_readings 전체 삭제 후 재임포트
+      db.prepare('DELETE FROM flow_readings').run();
+      console.log('[FlowMapping] Cleared all flow_readings for clean re-import');
+
+      const insertReading = db.prepare('INSERT INTO flow_readings (date, type, raw_value, calculated_flow) VALUES (?, ?, ?, ?) ON CONFLICT(date, type) DO UPDATE SET raw_value = COALESCE(excluded.raw_value, raw_value), calculated_flow = COALESCE(excluded.calculated_flow, calculated_flow)');
       const importedData = [];
 
+      // mapping에서 _raw/_flow 키만 파싱하여 유량계별 컬럼 매핑 구성
+      const flows = {};
+      Object.keys(mapping).forEach(key => {
+        if (!key.endsWith('_raw') && !key.endsWith('_flow')) return; // 기본 항목 키 무시
+        const lastUnderscore = key.lastIndexOf('_');
+        const name = key.substring(0, lastUnderscore);
+        const field = key.substring(lastUnderscore + 1); // 'raw' or 'flow'
+        if (!flows[name]) flows[name] = {};
+        flows[name][field] = mapping[key];
+      });
+
+      console.log('[FlowMapping] Parsed flow types:', JSON.stringify(flows, null, 2));
+
+      let debugRow = startRow; // 첫 행 디버그 출력용
       db.transaction(() => {
         for (let r = startRow; r <= endRow; r++) {
           const dateStr = getCellValue(db, sheet, r, dateCol);
           const formatted = formatDate(dateStr) || dateStr;
           if (!formatted) { importProgress.current++; continue; }
           const rowResults = { date: formatted };
-          Object.entries(mapping).forEach(([itemName, col]) => {
-            if (itemName === '날짜 (Date)') return;
-            const val = getCellValue(db, sheet, r, col);
-            const num = parseFloat(val);
-            if (!isNaN(num)) { const rounded = Math.round(num * 10) / 10; insertReading.run(formatted, itemName, rounded); rowResults[itemName] = rounded; }
+          Object.entries(flows).forEach(([itemName, cols]) => {
+            const rawCellVal = getCellValue(db, sheet, r, cols.raw || '');
+            const flowCellVal = getCellValue(db, sheet, r, cols.flow || '');
+            const rawR = parseFloat(rawCellVal || '');
+            const rawF = parseFloat(flowCellVal || '');
+            const rawValue = isNaN(rawR) ? null : Math.round(rawR * 10) / 10;
+            const calcFlow = isNaN(rawF) ? null : Math.round(rawF * 10) / 10;
+
+            if (r === debugRow) {
+              console.log(`[FlowMapping] Row ${r} (${formatted}): ${itemName} => raw col=${cols.raw}(${rawCellVal}→${rawValue}), flow col=${cols.flow}(${flowCellVal}→${calcFlow})`);
+            }
+
+            if (rawValue !== null || calcFlow !== null) {
+              insertReading.run(formatted, itemName, rawValue, calcFlow);
+              if (rawValue !== null) rowResults[`${itemName}_적산`] = rawValue;
+              if (calcFlow !== null) rowResults[`${itemName}_누계`] = calcFlow;
+            }
           });
-          importedData.push(rowResults);
+          if (Object.keys(rowResults).length > 1) importedData.push(rowResults);
           importProgress.current++;
         }
       })();
 
       importProgress.status = 'completed';
       importProgress.result = importedData;
+      console.log(`[FlowMapping] Import completed: ${importedData.length} rows`);
       res.json({ success: true, message: '유량 데이터 임포트 완료', count: importedData.length });
     } catch (e) {
       console.error('Flow mapping error:', e);

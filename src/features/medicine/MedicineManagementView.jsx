@@ -1,8 +1,10 @@
 import React from 'react';
 import { useMedicineViewModel } from './useMedicineViewModel';
 import PhotoUpload from '../../components/PhotoUpload';
+import { useDialog } from '../../components/common/DialogProvider';
 
 const MedicineManagementView = ({ currentUser }) => {
+    const { showAlert } = useDialog();
     const {
         date,
         setDate,
@@ -11,7 +13,7 @@ const MedicineManagementView = ({ currentUser }) => {
         form,
         updateForm,
         submitForm
-    } = useMedicineViewModel(undefined, currentUser);
+    } = useMedicineViewModel(currentUser, { showAlert });
 
     const medicineTypes = [
         { id: 'hypochlorite', label: '차아염소산나트륨', unit: 'kg' },

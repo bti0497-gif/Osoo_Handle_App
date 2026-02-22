@@ -1,7 +1,9 @@
 import React from 'react';
 import { useFacilityViewModel } from './useFacilityViewModel';
+import { useDialog } from '../../components/common/DialogProvider';
 
 const FacilityManagementView = ({ currentUser }) => {
+    const { showAlert } = useDialog();
     const {
         date,
         setDate,
@@ -10,7 +12,7 @@ const FacilityManagementView = ({ currentUser }) => {
         form,
         updateForm,
         submitForm
-    } = useFacilityViewModel(undefined, currentUser);
+    } = useFacilityViewModel(currentUser, { showAlert });
 
     const handleSubmit = (e) => {
         e.preventDefault();

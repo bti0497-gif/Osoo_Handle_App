@@ -46,6 +46,7 @@ app.use(require('./routes/settingsRoutes.cjs')(db, BASE_DIR));
 app.use(require('./routes/uploadRoutes.cjs')(BASE_DIR));
 app.use(require('./routes/locationRoutes.cjs')(BASE_DIR));
 app.use(require('./routes/excelRoutes.cjs')(db, BASE_DIR));
+app.use('/api/auth', require('./routes/authRoutes.cjs')(db));
 
 async function findFreePort(startPort, endPort) {
   for (let p = startPort; p <= endPort; p++) {
@@ -65,7 +66,7 @@ const API_PORT_MAX = API_PORT_MIN + 50;
 
 findFreePort(API_PORT_MIN, API_PORT_MAX).then((actualPort) => {
   const portFilePath = path.join(appDataPath, 'server.port');
-  try { fs.writeFileSync(portFilePath, String(actualPort), 'utf8'); } catch (_) {}
+  try { fs.writeFileSync(portFilePath, String(actualPort), 'utf8'); } catch (_) { }
 
   const server = app.listen(actualPort, '127.0.0.1', () => {
     console.log(`Local Bridge Server running at http://localhost:${actualPort}`);

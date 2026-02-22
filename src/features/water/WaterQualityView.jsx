@@ -1,7 +1,9 @@
 import React from 'react';
 import { useWaterQualityViewModel } from './useWaterQualityViewModel';
+import { useDialog } from '../../components/common/DialogProvider';
 
 const WaterQualityView = ({ currentUser }) => {
+    const { showAlert } = useDialog();
     const {
         date,
         setDate,
@@ -10,7 +12,7 @@ const WaterQualityView = ({ currentUser }) => {
         form,
         updateForm,
         submitForm
-    } = useWaterQualityViewModel(undefined, currentUser);
+    } = useWaterQualityViewModel(currentUser, { showAlert });
 
     const handleSubmit = (e) => {
         e.preventDefault();

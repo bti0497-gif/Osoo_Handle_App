@@ -89,6 +89,27 @@ db.exec(`
     max_row INTEGER NOT NULL DEFAULT 0,
     imported_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS members (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    role TEXT DEFAULT 'user',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS attendance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id TEXT NOT NULL,
+    member_name TEXT NOT NULL,
+    date DATE NOT NULL,
+    login_time DATETIME,
+    logout_time DATETIME,
+    login_lat REAL,
+    login_lng REAL,
+    logout_lat REAL,
+    logout_lng REAL,
+    location_matched BOOLEAN DEFAULT 0,
+    auto_logout BOOLEAN DEFAULT 0
+  );
 `);
 
 // --- Migrations ---

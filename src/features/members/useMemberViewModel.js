@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { MemberModel } from './MemberModel';
 import { apiClient } from '../../core/api';
 
-export const useMemberViewModel = () => {
+export const useMemberViewModel = ({ showAlert, showConfirm } = {}) => {
     const [members, setMembers] = useState([]);
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState('list');
@@ -54,16 +54,16 @@ export const useMemberViewModel = () => {
                     target_lng: data.longitude
                 });
             } else {
-                alert(data.message || '위치 정보를 가져올 수 없습니다.');
+                showAlert?.(data.message || '위치 정보를 가져올 수 없습니다.');
             }
         } catch (err) {
-            alert('위치 서비스 연결 실패.\n서버가 실행 중인지 확인해 주세요.');
+            showAlert?.('위치 서비스 연결 실패.\n서버가 실행 중인지 확인해 주세요.');
         }
     };
 
     const submitForm = async () => {
         if (form.password !== form.confirmPassword) {
-            alert("비밀번호가 일치하지 않습니다.");
+            showAlert?.("비밀번호가 일치하지 않습니다.");
             return { success: false };
         }
         try {
@@ -75,24 +75,24 @@ export const useMemberViewModel = () => {
 
             await MemberModel.saveMember(dataToSave);
 
-            alert("저장 완료");
+            showAlert?.("저장 완료");
             await loadMembers();
             resetForm();
             setViewMode('list');
             return { success: true };
         } catch (err) {
-            alert("저장 실패: " + err.message);
+            showAlert?.("저장 실패: " + err.message);
             return { success: false, error: err.message };
         }
     };
 
     const submitPasswordOnly = async () => {
         if (form.password !== form.confirmPassword) {
-            alert("비밀번호가 일치하지 않습니다.");
+            showAlert?.("비밀번호가 일치하지 않습니다.");
             return { success: false };
         }
         if (!form.id) {
-            alert('회원 정보를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
+            showAlert?.('회원 정보를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.');
             return { success: false };
         }
         try {
@@ -102,11 +102,11 @@ export const useMemberViewModel = () => {
                 site_name2: method || form.site_name2
             };
             await MemberModel.saveMember(dataToSave);
-            alert('비밀번호가 변경되었습니다.');
+            showAlert?.('비밀번호가 변경되었습니다.');
             await loadMembers();
             return { success: true };
         } catch (err) {
-            alert('비밀번호 변경 실패: ' + err.message);
+            showAlert?.('비밀번호 변경 실패: ' + err.message);
             return { success: false, error: err.message };
         }
     };

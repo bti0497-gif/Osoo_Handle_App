@@ -45,12 +45,12 @@ export const useWaterQualityViewModel = (initialDate, currentUser) => {
             const allRecords = await WaterQualityModel.fetchData(date);
             await DriveSyncService.syncDetailedDataToCloud(currentUser?.name, date, { waterQuality: allRecords });
 
-            alert("상태: 분석 데이터 저장 완료");
+            showAlert?.("상태: 분석 데이터 저장 완료");
             await loadData();
             setForm(prev => ({ ...prev, nh3_n: '', no3_n: '', po4_p: '', alkalinity: '' }));
             return { success: true };
         } catch (err) {
-            alert("오류: " + err.message);
+            showAlert?.("오류: " + err.message);
             return { success: false, error: err.message };
         }
     };

@@ -43,12 +43,12 @@ export const useMedicineViewModel = (initialDate, currentUser) => {
             const allLogs = await MedicineModel.fetchLogs(date);
             await DriveSyncService.syncDetailedDataToCloud(currentUser?.name, date, { medicines: allLogs });
 
-            alert("상태: 저장 및 재고 업데이트 완료");
+            showAlert?.("상태: 저장 및 재고 업데이트 완료");
             await loadLogs();
             setForm(prev => ({ ...prev, purchase_amount: '', usage_amount: '' }));
             return { success: true };
         } catch (err) {
-            alert("오류: " + err.message);
+            showAlert?.("오류: " + err.message);
             return { success: false, error: err.message };
         }
     };

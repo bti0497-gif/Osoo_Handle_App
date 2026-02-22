@@ -1,8 +1,10 @@
 import React from 'react';
 import { useSettingsViewModel } from './useSettingsViewModel';
+import { useDialog } from '../../components/common/DialogProvider';
 
 const SettingsView = ({ currentUser }) => {
-    const vm = useSettingsViewModel(currentUser);
+    const { showAlert, showConfirm } = useDialog();
+    const vm = useSettingsViewModel(currentUser, { showAlert, showConfirm });
     const {
         activeTab, setActiveTab, isLoading,
         siteInfo, setSiteInfo, handleSeriesChange,
@@ -33,9 +35,9 @@ const SettingsView = ({ currentUser }) => {
         return (
             <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
                 {/* 상단: 시트 및 행 범위 설정 */}
-                <div style={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: '1.5fr 1fr 1fr', 
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1.5fr 1fr 1fr',
                     gap: '1.5rem',
                     backgroundColor: '#f8fafc',
                     padding: '1.5rem',
@@ -44,9 +46,9 @@ const SettingsView = ({ currentUser }) => {
                 }}>
                     <div>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>대상 시트 선택</label>
-                        <select 
+                        <select
                             value={flowConfig.sheet}
-                            onChange={(e) => setFlowConfig({...flowConfig, sheet: e.target.value})}
+                            onChange={(e) => setFlowConfig({ ...flowConfig, sheet: e.target.value })}
                             disabled={isMetadataLoading}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700, opacity: isMetadataLoading ? 0.5 : 1 }}
                         >
@@ -60,22 +62,22 @@ const SettingsView = ({ currentUser }) => {
                     </div>
                     <div>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>데이터 시작 행</label>
-                        <input 
+                        <input
                             type="number"
                             value={flowConfig.startRow}
                             onChange={(e) => {
                                 const start = parseInt(e.target.value) || 1;
-                                setFlowConfig({...flowConfig, startRow: start, endRow: start + 30});
+                                setFlowConfig({ ...flowConfig, startRow: start, endRow: start + 30 });
                             }}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
                         />
                     </div>
                     <div>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>데이터 종료 행</label>
-                        <input 
+                        <input
                             type="number"
                             value={flowConfig.endRow}
-                            onChange={(e) => setFlowConfig({...flowConfig, endRow: parseInt(e.target.value) || 31})}
+                            onChange={(e) => setFlowConfig({ ...flowConfig, endRow: parseInt(e.target.value) || 31 })}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
                         />
                     </div>
@@ -84,11 +86,11 @@ const SettingsView = ({ currentUser }) => {
                 {/* 매칭 리스트 헤더 - 시트가 선택되었을 때만 표시 */}
                 {!flowConfig.sheet ? (
                     <div style={{ padding: '3rem 0', textAlign: 'center', backgroundColor: '#fcfcfc', border: '1.5px dashed #e2e8f0', borderRadius: '12px' }}>
-                         <span className="material-icons" style={{ fontSize: '32px', color: '#cbd5e1', marginBottom: '10px' }}>table_view</span>
-                         <p style={{ fontSize: '0.8125rem', color: '#94a3b8', fontWeight: 600 }}>매칭을 시작하려면 먼저 엑셀 시트를 선택해주세요.</p>
+                        <span className="material-icons" style={{ fontSize: '32px', color: '#cbd5e1', marginBottom: '10px' }}>table_view</span>
+                        <p style={{ fontSize: '0.8125rem', color: '#94a3b8', fontWeight: 600 }}>매칭을 시작하려면 먼저 엑셀 시트를 선택해주세요.</p>
                     </div>
                 ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', position: 'relative' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0', position: 'relative' }}>
                         {/* 프리뷰 로딩 오버레이 */}
                         {isPreviewLoading && (
                             <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(248,250,252,0.85)', borderRadius: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 5, gap: '10px' }}>
@@ -96,54 +98,87 @@ const SettingsView = ({ currentUser }) => {
                                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b' }}>시작행 데이터 불러오는 중...</span>
                             </div>
                         )}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', padding: '0 12px', borderBottom: '2px solid #1e293b', paddingBottom: '8px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '120px 50px 140px 1fr', padding: '0 12px', borderBottom: '2px solid #1e293b', paddingBottom: '8px', marginBottom: '4px', columnGap: '8px' }}>
                             <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b' }}>검침항목 이름</span>
+                            <span></span>
                             <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b' }}>엑셀 칼럼 선택</span>
                             <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b' }}>시작행 데이터 프리뷰</span>
                         </div>
 
                         {/* 매칭 리스트 본문 */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            {rows.map((row, idx) => (
-                                <div key={idx} style={{ 
-                                    display: 'grid', 
-                                    gridTemplateColumns: '1.2fr 1fr 1fr', 
-                                    padding: '12px', 
-                                    backgroundColor: idx % 2 === 0 ? '#fff' : '#f8fafc',
-                                    borderRadius: '8px',
-                                    alignItems: 'center',
-                                    border: '1px solid #f1f5f9'
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+                            {/* 날짜 행 */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '120px 50px 140px 1fr', padding: '8px 12px', backgroundColor: '#f0f9ff', borderRadius: '8px', alignItems: 'center', border: '1px solid #bae6fd', marginBottom: '8px', columnGap: '8px' }}>
+                                <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', textAlign: 'center' }}>날짜 (Date)</span>
+                                <span></span>
+                                <select
+                                    value={flowConfig.dateCol || 'A'}
+                                    onChange={(e) => setFlowConfig({ ...flowConfig, dateCol: e.target.value })}
+                                    style={{ width: '120px', height: '34px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700 }}
+                                >
+                                    <option value="">선택...</option>
+                                    {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
+                                </select>
+                                <span style={{
+                                    fontSize: '0.75rem', fontWeight: 700,
+                                    color: flowConfig.dateCol ? '#059669' : '#94a3b8',
+                                    backgroundColor: flowConfig.dateCol ? '#f0fdf4' : '#f1f5f9',
+                                    padding: '6px 10px', borderRadius: '6px', width: 'fit-content', minWidth: '100px', textAlign: 'center'
                                 }}>
-                                    <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155' }}>{row.name}</span>
-                                    <select 
-                                        value={row.isDate ? (flowConfig.dateCol || 'A') : (flowMapping[row.name] || '')}
-                                        onChange={(e) => {
-                                            if (row.isDate) {
-                                                setFlowConfig({...flowConfig, dateCol: e.target.value});
-                                            } else {
-                                                setFlowMapping({...flowMapping, [row.name]: e.target.value});
-                                            }
-                                        }}
-                                        style={{ width: '120px', height: '34px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700 }}
-                                    >
-                                        <option value="">선택...</option>
-                                        {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
-                                    </select>
-                                    <span style={{ 
-                                        fontSize: '0.75rem', 
-                                        fontWeight: 700, 
-                                        color: (row.isDate ? flowConfig.dateCol : flowMapping[row.name]) ? '#059669' : '#94a3b8',
-                                        backgroundColor: (row.isDate ? flowConfig.dateCol : flowMapping[row.name]) ? '#f0fdf4' : '#f1f5f9',
-                                        padding: '6px 10px',
-                                        borderRadius: '6px',
-                                        width: 'fit-content',
-                                        minWidth: '100px',
-                                        textAlign: 'center'
-                                    }}>
-                                        {(row.isDate ? sampleRowData[flowConfig.dateCol] : sampleRowData[flowMapping[row.name]]) || '-- No Data --'}
-                                    </span>
-                                </div>
-                            ))}
+                                    {(flowConfig.dateCol && sampleRowData[flowConfig.dateCol]) || '-- No Data --'}
+                                </span>
+                            </div>
+
+                            {/* 유량 그룹 */}
+                            {activeFlows.map((flow, flowIdx) => {
+                                const groupRows = [
+                                    { key: `${flow.name}_raw`, suffix: '적산', suffixColor: '#3b82f6' },
+                                    { key: `${flow.name}_flow`, suffix: '누계', suffixColor: '#f59e0b' }
+                                ];
+                                return (
+                                    <div key={flow.name} style={{ display: 'grid', gridTemplateColumns: '120px 50px 140px 1fr', columnGap: '8px', borderBottom: flowIdx < activeFlows.length - 1 ? '1px solid #e2e8f0' : 'none', paddingBottom: flowIdx < activeFlows.length - 1 ? '6px' : 0, marginBottom: flowIdx < activeFlows.length - 1 ? '6px' : 0, padding: '0 12px' }}>
+                                        <div style={{ gridColumn: '1 / 2', gridRow: `1 / ${groupRows.length + 1}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <span style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#1e293b' }}>{flow.name}</span>
+                                        </div>
+                                        {groupRows.map((row, rIdx) => {
+                                            const colKey = flowMapping[row.key] || '';
+                                            const hasCol = !!colKey;
+                                            return (
+                                                <React.Fragment key={row.key}>
+                                                    <div style={{ gridColumn: '2 / 3', gridRow: rIdx + 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px 0' }}>
+                                                        <span style={{ fontSize: '0.625rem', fontWeight: 800, color: 'white', backgroundColor: row.suffixColor, padding: '2px 8px', borderRadius: '4px', textAlign: 'center' }}>{row.suffix}</span>
+                                                    </div>
+                                                    <div style={{ gridColumn: '3 / 4', gridRow: rIdx + 1, display: 'flex', alignItems: 'center', padding: '5px 0' }}>
+                                                        <select value={colKey} onChange={(e) => {
+                                                            const selectedCol = e.target.value;
+                                                            const newMapping = { ...flowMapping, [row.key]: selectedCol };
+
+                                                            // 적산 선택 시 누계가 비어있거나 이미 값이 있어도 편의를 위해 덮어씌움 (사용자 요청: 자동으로 다음 열 매핑)
+                                                            if (row.key.endsWith('_raw') && selectedCol) {
+                                                                const flowKey = row.key.replace('_raw', '_flow');
+                                                                const nextColIdx = alphabet.indexOf(selectedCol);
+                                                                if (nextColIdx !== -1 && nextColIdx < alphabet.length - 1) {
+                                                                    newMapping[flowKey] = alphabet[nextColIdx + 1];
+                                                                }
+                                                            }
+                                                            setFlowMapping(newMapping);
+                                                        }}
+                                                            style={{ width: '120px', height: '34px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700 }}>
+                                                            <option value="">선택...</option>
+                                                            {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
+                                                        </select>
+                                                    </div>
+                                                    <div style={{ gridColumn: '4 / 5', gridRow: rIdx + 1, display: 'flex', alignItems: 'center', padding: '5px 0' }}>
+                                                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: hasCol ? '#059669' : '#94a3b8', backgroundColor: hasCol ? '#f0fdf4' : '#f1f5f9', padding: '6px 10px', borderRadius: '6px', minWidth: '100px', textAlign: 'center' }}>
+                                                            {(hasCol && sampleRowData[colKey]) || '-- No Data --'}
+                                                        </span>
+                                                    </div>
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                 )}
@@ -168,27 +203,28 @@ const SettingsView = ({ currentUser }) => {
                             저장된 데이타보기
                         </button>
                         <button
-                            onClick={() => {
-                                const isAllMapped = rows.every(r => r.isDate ? flowConfig.dateCol : flowMapping[r.name]);
+                            onClick={async () => {
+                                const isAllMapped = activeFlows.every(f => flowMapping[`${f.name}_raw`] && flowMapping[`${f.name}_flow`]) && flowConfig.dateCol;
                                 if (!isAllMapped) {
-                                    alert("모든 항목의 콤보박스 선택이 완료되어야 저장할 수 있습니다.");
+                                    await showAlert("모든 항목의 콤보박스 선택이 완료되어야 저장할 수 있습니다.");
                                     return;
                                 }
-                                if (window.confirm("기존 유량데이터를 데이터베이스에 저장하시겠습니까?")) {
+                                const confirmed = await showConfirm("기존 유량데이터를 데이터베이스에 저장하시겠습니까?\n(저장 시 기존 데이터가 덮어씌워 보완될 수 있습니다.)");
+                                if (confirmed) {
                                     handleSaveFlowMapping();
                                 }
                             }}
-                            disabled={!rows.every(r => r.isDate ? flowConfig.dateCol : flowMapping[r.name])}
+                            disabled={!(activeFlows.every(f => flowMapping[`${f.name}_raw`] && flowMapping[`${f.name}_flow`]) && flowConfig.dateCol)}
                             style={{
                                 width: '240px',
                                 height: '50px',
-                                backgroundColor: rows.every(r => r.isDate ? flowConfig.dateCol : flowMapping[r.name]) ? '#1e293b' : '#cbd5e1',
+                                backgroundColor: (activeFlows.every(f => flowMapping[`${f.name}_raw`] && flowMapping[`${f.name}_flow`]) && flowConfig.dateCol) ? '#1e293b' : '#cbd5e1',
                                 color: 'white',
                                 border: 'none',
                                 borderRadius: '12px',
                                 fontSize: '0.9375rem',
                                 fontWeight: 900,
-                                cursor: rows.every(r => r.isDate ? flowConfig.dateCol : flowMapping[r.name]) ? 'pointer' : 'not-allowed',
+                                cursor: (activeFlows.every(f => flowMapping[`${f.name}_raw`] && flowMapping[`${f.name}_flow`]) && flowConfig.dateCol) ? 'pointer' : 'not-allowed',
                                 transition: 'all 0.2s',
                                 display: 'flex',
                                 alignItems: 'center',
@@ -216,31 +252,31 @@ const SettingsView = ({ currentUser }) => {
                 position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
                 backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
             }}>
-                <div style={{ 
-                    backgroundColor: 'white', padding: '2rem', borderRadius: '16px', width: '300px', 
+                <div style={{
+                    backgroundColor: 'white', padding: '2rem', borderRadius: '16px', width: '300px',
                     boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', textAlign: 'center'
                 }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 900, marginBottom: '1rem' }}>
-                        {importProgress.status === 'completed' ? '저장 완료!' : 
-                         importProgress.status === 'error' ? '오류 발생' : '데이터 저장 중...'}
+                        {importProgress.status === 'completed' ? '저장 완료!' :
+                            importProgress.status === 'error' ? '오류 발생' : '데이터 저장 중...'}
                     </h3>
                     <div style={{ width: '100%', height: '8px', backgroundColor: '#e2e8f0', borderRadius: '4px', overflow: 'hidden', marginBottom: '10px' }}>
-                        <div style={{ 
-                            width: `${progressPercent}%`, height: '100%', backgroundColor: '#1e293b', 
-                            transition: 'width 0.3s ease-out' 
+                        <div style={{
+                            width: `${progressPercent}%`, height: '100%', backgroundColor: '#1e293b',
+                            transition: 'width 0.3s ease-out'
                         }} />
                     </div>
                     <p style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b' }}>
                         {importProgress.status === 'completed' ? `${importProgress.total}개의 행을 모두 저장했습니다.` :
-                         importProgress.status === 'error' ? importProgress.result :
-                         `총 ${importProgress.total}행 중 ${importProgress.current}행 처리 중 (${progressPercent}%)`}
+                            importProgress.status === 'error' ? importProgress.result :
+                                `총 ${importProgress.total}행 중 ${importProgress.current}행 처리 중 (${progressPercent}%)`}
                     </p>
                     {(importProgress.status === 'completed' || importProgress.status === 'error') && (
-                        <button 
+                        <button
                             onClick={() => setImportProgress(prev => ({ ...prev, isVisible: false }))}
-                            style={{ 
-                                marginTop: '1.5rem', width: '100%', height: '40px', backgroundColor: '#1e293b', 
-                                color: 'white', border: 'none', borderRadius: '8px', fontWeight: 900, cursor: 'pointer' 
+                            style={{
+                                marginTop: '1.5rem', width: '100%', height: '40px', backgroundColor: '#1e293b',
+                                color: 'white', border: 'none', borderRadius: '8px', fontWeight: 900, cursor: 'pointer'
                             }}
                         >
                             닫기
@@ -259,7 +295,7 @@ const SettingsView = ({ currentUser }) => {
                 position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
                 backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
             }}>
-                <div style={{ 
+                <div style={{
                     backgroundColor: 'white', padding: '1.5rem', borderRadius: '16px', width: '600px', maxHeight: '80vh',
                     display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)'
                 }}>
@@ -291,11 +327,11 @@ const SettingsView = ({ currentUser }) => {
                             </tbody>
                         </table>
                     </div>
-                    <button 
+                    <button
                         onClick={() => setShowDataModal(false)}
-                        style={{ 
-                            marginTop: '1rem', width: '100%', height: '40px', backgroundColor: '#1e293b', 
-                            color: 'white', border: 'none', borderRadius: '8px', fontWeight: 900, cursor: 'pointer' 
+                        style={{
+                            marginTop: '1rem', width: '100%', height: '40px', backgroundColor: '#1e293b',
+                            color: 'white', border: 'none', borderRadius: '8px', fontWeight: 900, cursor: 'pointer'
                         }}
                     >
                         확인 완료
@@ -333,15 +369,15 @@ const SettingsView = ({ currentUser }) => {
 
         return (
             <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-                <div style={{ 
+                <div style={{
                     display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: '1.5rem',
                     backgroundColor: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0'
                 }}>
                     <div>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>대상 시트 선택</label>
-                        <select 
+                        <select
                             value={medicineConfig.sheet}
-                            onChange={(e) => setMedicineConfig({...medicineConfig, sheet: e.target.value})}
+                            onChange={(e) => setMedicineConfig({ ...medicineConfig, sheet: e.target.value })}
                             disabled={isMetadataLoading}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700, opacity: isMetadataLoading ? 0.5 : 1 }}
                         >
@@ -356,14 +392,14 @@ const SettingsView = ({ currentUser }) => {
                     <div>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>데이터 시작 행</label>
                         <input type="number" value={medicineConfig.startRow}
-                            onChange={(e) => { const s = parseInt(e.target.value) || 1; setMedicineConfig({...medicineConfig, startRow: s, endRow: s + 30}); }}
+                            onChange={(e) => { const s = parseInt(e.target.value) || 1; setMedicineConfig({ ...medicineConfig, startRow: s, endRow: s + 30 }); }}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
                         />
                     </div>
                     <div>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>데이터 종료 행</label>
                         <input type="number" value={medicineConfig.endRow}
-                            onChange={(e) => setMedicineConfig({...medicineConfig, endRow: parseInt(e.target.value) || 31})}
+                            onChange={(e) => setMedicineConfig({ ...medicineConfig, endRow: parseInt(e.target.value) || 31 })}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
                         />
                     </div>
@@ -397,7 +433,7 @@ const SettingsView = ({ currentUser }) => {
                                     <div style={{ display: 'grid', gridTemplateColumns: '120px 50px 140px 1fr', padding: '8px 12px', backgroundColor: '#f0f9ff', borderRadius: '8px', alignItems: 'center', border: '1px solid #bae6fd', marginBottom: '8px', columnGap: '8px' }}>
                                         <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', textAlign: 'center' }}>날짜 (Date)</span>
                                         <span></span>
-                                        <select value={dateCol || 'A'} onChange={(e) => setMedicineConfig({...medicineConfig, dateCol: e.target.value})}
+                                        <select value={dateCol || 'A'} onChange={(e) => setMedicineConfig({ ...medicineConfig, dateCol: e.target.value })}
                                             style={{ width: '120px', height: '34px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700 }}>
                                             <option value="">선택...</option>
                                             {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
@@ -425,7 +461,7 @@ const SettingsView = ({ currentUser }) => {
                                                         <span style={{ fontSize: '0.625rem', fontWeight: 800, color: 'white', backgroundColor: row.suffixColor, padding: '2px 8px', borderRadius: '4px', textAlign: 'center' }}>{row.suffix}</span>
                                                     </div>
                                                     <div style={{ gridColumn: '3 / 4', gridRow: rIdx + 1, display: 'flex', alignItems: 'center', padding: '5px 0' }}>
-                                                        <select value={colKey} onChange={(e) => setMedicineMapping({...medicineMapping, [row.key]: e.target.value})}
+                                                        <select value={colKey} onChange={(e) => setMedicineMapping({ ...medicineMapping, [row.key]: e.target.value })}
                                                             style={{ width: '120px', height: '34px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700 }}>
                                                             <option value="">선택...</option>
                                                             {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
@@ -449,21 +485,29 @@ const SettingsView = ({ currentUser }) => {
                 {medicineConfig.sheet && (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem', gap: '0.75rem' }}>
                         <button onClick={() => setShowDataModal(true)} disabled={!importedData}
-                            style={{ width: '160px', height: '50px', backgroundColor: importedData ? '#f1f5f9' : '#f8fafc', color: importedData ? '#1e293b' : '#cbd5e1',
+                            style={{
+                                width: '160px', height: '50px', backgroundColor: importedData ? '#f1f5f9' : '#f8fafc', color: importedData ? '#1e293b' : '#cbd5e1',
                                 border: '1.5px solid #cbd5e1', borderRadius: '12px', fontSize: '0.9375rem', fontWeight: 900,
-                                cursor: importedData ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                cursor: importedData ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                            }}>
                             <span className="material-icons">visibility</span>저장된 데이타보기
                         </button>
                         <button
-                            onClick={() => {
-                                if (!allMapped) { alert("모든 약품 항목의 칼럼 선택이 완료되어야 저장할 수 있습니다."); return; }
-                                if (window.confirm("기존 약품 데이터를 데이터베이스에 저장하시겠습니까?")) handleSaveMedicineMapping();
+                            onClick={async () => {
+                                if (!allMapped) {
+                                    await showAlert("모든 약품 항목의 칼럼 선택이 완료되어야 저장할 수 있습니다.");
+                                    return;
+                                }
+                                const confirmed = await showConfirm("기존 약품 데이터를 데이터베이스에 저장하시겠습니까?");
+                                if (confirmed) handleSaveMedicineMapping();
                             }}
                             disabled={!allMapped}
-                            style={{ width: '240px', height: '50px', backgroundColor: allMapped ? '#1e293b' : '#cbd5e1', color: 'white',
+                            style={{
+                                width: '240px', height: '50px', backgroundColor: allMapped ? '#1e293b' : '#cbd5e1', color: 'white',
                                 border: 'none', borderRadius: '12px', fontSize: '0.9375rem', fontWeight: 900,
                                 cursor: allMapped ? 'pointer' : 'not-allowed', transition: 'all 0.2s',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                            }}>
                             <span className="material-icons">medication</span>약품 데이터 저장하기
                         </button>
                     </div>
@@ -489,9 +533,9 @@ const SettingsView = ({ currentUser }) => {
         return (
             <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
                 {/* 상단: 시트 및 행 범위 설정 */}
-                <div style={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: '1.5fr 1fr 1fr', 
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1.5fr 1fr 1fr',
                     gap: '1.5rem',
                     backgroundColor: '#f8fafc',
                     padding: '1.5rem',
@@ -500,9 +544,9 @@ const SettingsView = ({ currentUser }) => {
                 }}>
                     <div>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>대상 시트 선택</label>
-                        <select 
+                        <select
                             value={kitConfig.sheet}
-                            onChange={(e) => setKitConfig({...kitConfig, sheet: e.target.value})}
+                            onChange={(e) => setKitConfig({ ...kitConfig, sheet: e.target.value })}
                             disabled={isMetadataLoading}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700, opacity: isMetadataLoading ? 0.5 : 1 }}
                         >
@@ -512,22 +556,22 @@ const SettingsView = ({ currentUser }) => {
                     </div>
                     <div>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>데이터 시작 행</label>
-                        <input 
+                        <input
                             type="number"
                             value={kitConfig.startRow}
                             onChange={(e) => {
                                 const start = parseInt(e.target.value) || 1;
-                                setKitConfig({...kitConfig, startRow: start, endRow: start + 30});
+                                setKitConfig({ ...kitConfig, startRow: start, endRow: start + 30 });
                             }}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
                         />
                     </div>
                     <div>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>데이터 종료 행</label>
-                        <input 
+                        <input
                             type="number"
                             value={kitConfig.endRow}
-                            onChange={(e) => setKitConfig({...kitConfig, endRow: parseInt(e.target.value) || 31})}
+                            onChange={(e) => setKitConfig({ ...kitConfig, endRow: parseInt(e.target.value) || 31 })}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
                         />
                     </div>
@@ -535,8 +579,8 @@ const SettingsView = ({ currentUser }) => {
 
                 {!kitConfig.sheet ? (
                     <div style={{ padding: '3rem 0', textAlign: 'center', backgroundColor: '#fcfcfc', border: '1.5px dashed #e2e8f0', borderRadius: '12px' }}>
-                         <span className="material-icons" style={{ fontSize: '32px', color: '#cbd5e1', marginBottom: '10px' }}>science</span>
-                         <p style={{ fontSize: '0.8125rem', color: '#94a3b8', fontWeight: 600 }}>키트 설정을 시작하려면 먼저 엑셀 시트를 선택해주세요.</p>
+                        <span className="material-icons" style={{ fontSize: '32px', color: '#cbd5e1', marginBottom: '10px' }}>science</span>
+                        <p style={{ fontSize: '0.8125rem', color: '#94a3b8', fontWeight: 600 }}>키트 설정을 시작하려면 먼저 엑셀 시트를 선택해주세요.</p>
                     </div>
                 ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', position: 'relative' }}>
@@ -554,28 +598,28 @@ const SettingsView = ({ currentUser }) => {
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             {rows.map((row, idx) => (
-                                <div key={idx} style={{ 
-                                    display: 'grid', 
-                                    gridTemplateColumns: '1.2fr 1fr 1fr', 
-                                    padding: '12px', 
+                                <div key={idx} style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '1.2fr 1fr 1fr',
+                                    padding: '12px',
                                     backgroundColor: idx % 2 === 0 ? '#fff' : '#f8fafc',
                                     borderRadius: '8px',
                                     alignItems: 'center',
                                     border: '1px solid #f1f5f9'
                                 }}>
                                     <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155' }}>{row.name}</span>
-                                    <select 
+                                    <select
                                         value={row.isDate ? kitConfig.dateCol : kitMapping[row.name]}
                                         onChange={(e) => {
-                                            if (row.isDate) setKitConfig({...kitConfig, dateCol: e.target.value});
-                                            else setKitMapping({...kitMapping, [row.name]: e.target.value});
+                                            if (row.isDate) setKitConfig({ ...kitConfig, dateCol: e.target.value });
+                                            else setKitMapping({ ...kitMapping, [row.name]: e.target.value });
                                         }}
                                         style={{ width: '120px', height: '34px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700 }}
                                     >
                                         <option value="">선택...</option>
                                         {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
                                     </select>
-                                    <span style={{ 
+                                    <span style={{
                                         fontSize: '0.75rem', fontWeight: 700,
                                         color: (row.isDate ? kitConfig.dateCol : kitMapping[row.name]) ? '#059669' : '#94a3b8',
                                         backgroundColor: (row.isDate ? kitConfig.dateCol : kitMapping[row.name]) ? '#f0fdf4' : '#f1f5f9',
@@ -588,7 +632,7 @@ const SettingsView = ({ currentUser }) => {
                         </div>
                     </div>
                 )}
-                
+
                 {kitConfig.sheet && (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem', gap: '0.75rem' }}>
                         <button
@@ -607,14 +651,15 @@ const SettingsView = ({ currentUser }) => {
                             <span className="material-icons">visibility</span>
                             저장된 데이타보기
                         </button>
-                        <button 
-                            onClick={() => {
+                        <button
+                            onClick={async () => {
                                 const isAllMapped = rows.every(r => r.isDate ? kitConfig.dateCol : kitMapping[r.name]);
                                 if (!isAllMapped) {
-                                    alert("모든 항목의 콤보박스 선택이 완료되어야 저장할 수 있습니다.");
+                                    await showAlert("모든 항목의 콤보박스 선택이 완료되어야 저장할 수 있습니다.");
                                     return;
                                 }
-                                if (window.confirm("기존 분석 데이터를 데이터베이스에 저장하시겠습니까?")) {
+                                const confirmed = await showConfirm("기존 분석 데이터를 데이터베이스에 저장하시겠습니까?");
+                                if (confirmed) {
                                     handleSaveKitMapping();
                                 }
                             }}
@@ -640,27 +685,27 @@ const SettingsView = ({ currentUser }) => {
     // handleApply → moved to useSettingsViewModel
 
     const renderItemGrid = (items, type) => (
-        <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: '1fr 1fr', 
+        <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
             gap: '0.75rem 0.5rem',
             padding: '0.5rem 0'
         }}>
             {items.map((item, idx) => (
                 <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }} onClick={() => type !== 'water' && toggleItem(type, idx)}>
-                    <span 
-                        className="material-icons" 
-                        style={{ 
-                            fontSize: '18px', 
+                    <span
+                        className="material-icons"
+                        style={{
+                            fontSize: '18px',
                             color: item.checked ? '#1e293b' : '#cbd5e1',
                             transition: 'color 0.2s'
                         }}
                     >
                         {item.checked ? 'check_box' : 'check_box_outline_blank'}
                     </span>
-                    <span style={{ 
-                        fontSize: '0.75rem', 
-                        fontWeight: 700, 
+                    <span style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
                         color: item.checked ? '#334155' : '#94a3b8',
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
@@ -676,9 +721,9 @@ const SettingsView = ({ currentUser }) => {
     const renderBasicSettings = () => (
         <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
             {/* 상단 섹션: 2x2 Grid */}
-            <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: '1fr 1fr', 
+            <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
                 gap: '1.25rem',
                 backgroundColor: '#f8fafc',
                 padding: '1.5rem',
@@ -705,13 +750,13 @@ const SettingsView = ({ currentUser }) => {
                                         setSiteInfo({ ...siteInfo, [item.key]: e.target.value });
                                     }
                                 }}
-                                style={{ 
-                                    width: '100%', 
-                                    border: '1.5px solid #cbd5e1', 
-                                    height: '40px', 
-                                    padding: '0 12px', 
-                                    fontWeight: 700, 
-                                    color: '#1e293b', 
+                                style={{
+                                    width: '100%',
+                                    border: '1.5px solid #cbd5e1',
+                                    height: '40px',
+                                    padding: '0 12px',
+                                    fontWeight: 700,
+                                    color: '#1e293b',
                                     borderRadius: '8px',
                                     outline: 'none',
                                     boxSizing: 'border-box',
@@ -726,13 +771,13 @@ const SettingsView = ({ currentUser }) => {
                                 type="text"
                                 value={siteInfo[item.key]}
                                 onChange={(e) => setSiteInfo({ ...siteInfo, [item.key]: e.target.value })}
-                                style={{ 
-                                    width: '100%', 
-                                    border: '1.5px solid #cbd5e1', 
-                                    height: '40px', 
-                                    padding: '0 12px', 
-                                    fontWeight: 700, 
-                                    color: '#1e293b', 
+                                style={{
+                                    width: '100%',
+                                    border: '1.5px solid #cbd5e1',
+                                    height: '40px',
+                                    padding: '0 12px',
+                                    fontWeight: 700,
+                                    color: '#1e293b',
                                     borderRadius: '8px',
                                     outline: 'none',
                                     boxSizing: 'border-box',
@@ -752,13 +797,13 @@ const SettingsView = ({ currentUser }) => {
                     <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', paddingBottom: '0.6rem', borderBottom: '2px solid #1e293b', marginBottom: '0.75rem' }}>검침항목</h3>
                     {renderItemGrid(flowItems, 'flow')}
                     <div style={{ display: 'flex', gap: '0.4rem', marginTop: '1rem' }}>
-                        <input 
+                        <input
                             placeholder="항목 추가..."
                             value={newFlowItem}
                             onChange={(e) => setNewFlowItem(e.target.value)}
-                            style={{ flex: 1, border: '1px solid #cbd5e1', height: '34px', padding: '0 10px', borderRadius: '6px', fontSize: '0.75rem' }} 
+                            style={{ flex: 1, border: '1px solid #cbd5e1', height: '34px', padding: '0 10px', borderRadius: '6px', fontSize: '0.75rem' }}
                         />
-                        <button 
+                        <button
                             onClick={() => addItem('flow')}
                             style={{ width: '34px', height: '34px', backgroundColor: '#1e293b', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                         >
@@ -772,13 +817,13 @@ const SettingsView = ({ currentUser }) => {
                     <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', paddingBottom: '0.6rem', borderBottom: '2px solid #1e293b', marginBottom: '0.75rem' }}>약품항목</h3>
                     {renderItemGrid(medicineItems, 'medicine')}
                     <div style={{ display: 'flex', gap: '0.4rem', marginTop: '1rem' }}>
-                        <input 
+                        <input
                             placeholder="항목 추가..."
                             value={newMedicineItem}
                             onChange={(e) => setNewMedicineItem(e.target.value)}
-                            style={{ flex: 1, border: '1px solid #cbd5e1', height: '34px', padding: '0 10px', borderRadius: '6px', fontSize: '0.75rem' }} 
+                            style={{ flex: 1, border: '1px solid #cbd5e1', height: '34px', padding: '0 10px', borderRadius: '6px', fontSize: '0.75rem' }}
                         />
-                        <button 
+                        <button
                             onClick={() => addItem('medicine')}
                             style={{ width: '34px', height: '34px', backgroundColor: '#1e293b', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                         >
@@ -796,9 +841,9 @@ const SettingsView = ({ currentUser }) => {
             </div>
 
             {/* 하단 버튼 및 파일 관리 섹션 */}
-            <div style={{ 
-                marginTop: '0.5rem', 
-                paddingTop: '1.5rem', 
+            <div style={{
+                marginTop: '0.5rem',
+                paddingTop: '1.5rem',
                 borderTop: '1px solid #f1f5f9',
                 display: 'flex',
                 alignItems: 'flex-end',
@@ -806,7 +851,7 @@ const SettingsView = ({ currentUser }) => {
             }}>
                 {/* 왼쪽: 파일 선택 그룹 */}
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                    
+
                     {/* 엑셀 원본 파일 불러오기 */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -814,21 +859,21 @@ const SettingsView = ({ currentUser }) => {
                                 <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '4px', position: 'absolute', top: '-18px' }}>
                                     엑셀 원본 파일 불러오기
                                 </label>
-                                <input 
+                                <input
                                     readOnly
                                     value={excelFileName}
                                     placeholder="엑셀 원본 파일을 선택해주세요..."
-                                    style={{ 
-                                        width: '100%', 
-                                        height: '50px', 
-                                        border: `1.5px dashed ${excelStatus.status === 'ready' ? '#86efac' : excelStatus.status === 'not-found' ? '#fca5a5' : '#cbd5e1'}`, 
-                                        borderRadius: '12px', 
-                                        padding: '0 12px', 
-                                        fontSize: '0.8125rem', 
-                                        fontWeight: 700, 
+                                    style={{
+                                        width: '100%',
+                                        height: '50px',
+                                        border: `1.5px dashed ${excelStatus.status === 'ready' ? '#86efac' : excelStatus.status === 'not-found' ? '#fca5a5' : '#cbd5e1'}`,
+                                        borderRadius: '12px',
+                                        padding: '0 12px',
+                                        fontSize: '0.8125rem',
+                                        fontWeight: 700,
                                         backgroundColor: excelStatus.status === 'ready' ? '#f0fdf4' : excelStatus.status === 'not-found' ? '#fef2f2' : '#fcfcfc',
                                         color: '#475569'
-                                    }} 
+                                    }}
                                 />
                             </div>
                             <label style={{
@@ -847,15 +892,15 @@ const SettingsView = ({ currentUser }) => {
                                 gap: '6px',
                                 transition: 'all 0.1s'
                             }}
-                            onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e2e8f0'}
-                            onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                                onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e2e8f0'}
+                                onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f1f5f9'}
                             >
                                 <span className="material-icons" style={{ fontSize: '18px' }}>file_open</span>
                                 파일 선택
-                                <input 
-                                    type="file" 
+                                <input
+                                    type="file"
                                     accept=".xlsx, .xls, .xlsm"
-                                    style={{ display: 'none' }} 
+                                    style={{ display: 'none' }}
                                     onChange={(e) => handleExcelFileUpload(e.target.files[0])}
                                 />
                             </label>
@@ -902,25 +947,25 @@ const SettingsView = ({ currentUser }) => {
                             <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '4px', position: 'absolute', top: '-18px' }}>
                                 일지양식 불러오기 (한꺼번에 선택 가능)
                             </label>
-                            <input 
+                            <input
                                 readOnly
                                 value={templateFileNames}
                                 title={templateFileNames}
                                 placeholder="보고서 양식들을 선택해주세요 (Excel, HWPX)..."
-                                style={{ 
-                                    width: '100%', 
-                                    height: '50px', 
-                                    border: '1.5px dashed #cbd5e1', 
-                                    borderRadius: '12px', 
-                                    padding: '0 12px', 
-                                    fontSize: '0.8125rem', 
-                                    fontWeight: 700, 
+                                style={{
+                                    width: '100%',
+                                    height: '50px',
+                                    border: '1.5px dashed #cbd5e1',
+                                    borderRadius: '12px',
+                                    padding: '0 12px',
+                                    fontSize: '0.8125rem',
+                                    fontWeight: 700,
                                     backgroundColor: '#fcfcfc',
                                     color: '#475569',
                                     whiteSpace: 'nowrap',
                                     overflow: 'hidden',
                                     textOverflow: 'ellipsis'
-                                }} 
+                                }}
                             />
                         </div>
                         <label style={{
@@ -939,16 +984,16 @@ const SettingsView = ({ currentUser }) => {
                             gap: '6px',
                             transition: 'all 0.1s'
                         }}
-                        onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e2e8f0'}
-                        onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                            onMouseEnter={e => e.currentTarget.style.backgroundColor = '#e2e8f0'}
+                            onMouseLeave={e => e.currentTarget.style.backgroundColor = '#f1f5f9'}
                         >
                             <span className="material-icons" style={{ fontSize: '18px' }}>library_add</span>
                             양식 선택
-                            <input 
-                                type="file" 
+                            <input
+                                type="file"
                                 multiple
                                 accept=".xlsx, .xls, .xlsm, .hwpx"
-                                style={{ display: 'none' }} 
+                                style={{ display: 'none' }}
                                 onChange={(e) => handleTemplateFileChange(Array.from(e.target.files))}
                             />
                         </label>
@@ -996,8 +1041,8 @@ const SettingsView = ({ currentUser }) => {
             ) : (
                 <div className="dynamic-panel shadow-2xl border-slate-200" style={{ width: '820px', flexShrink: 0, height: 'auto', minHeight: 'fit-content' }}>
                     {/* 상단 탭 헤더 */}
-                    <div style={{ 
-                        display: 'flex', 
+                    <div style={{
+                        display: 'flex',
                         borderBottom: '2px solid #f1f5f9',
                         backgroundColor: '#fff',
                         flexShrink: 0,
@@ -1036,15 +1081,15 @@ const SettingsView = ({ currentUser }) => {
 
                     {/* 콘텐츠 영역 */}
                     <div style={{ flex: 1 }}>
-                        {activeTab === 'basic' ? renderBasicSettings() : 
-                         activeTab === 'flow' ? renderFlowSettings() :
-                         activeTab === 'medicine' ? renderMedicineSettings() :
-                         activeTab === 'kit' ? renderKitSettings() : (
-                            <div style={{ padding: '4rem 0', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1', gap: '1rem' }}>
-                                <span className="material-icons" style={{ fontSize: '48px' }}>construction</span>
-                                <span style={{ fontWeight: 700, fontSize: '1.125rem' }}>준비 중인 메뉴입니다.</span>
-                            </div>
-                        )}
+                        {activeTab === 'basic' ? renderBasicSettings() :
+                            activeTab === 'flow' ? renderFlowSettings() :
+                                activeTab === 'medicine' ? renderMedicineSettings() :
+                                    activeTab === 'kit' ? renderKitSettings() : (
+                                        <div style={{ padding: '4rem 0', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1', gap: '1rem' }}>
+                                            <span className="material-icons" style={{ fontSize: '48px' }}>construction</span>
+                                            <span style={{ fontWeight: 700, fontSize: '1.125rem' }}>준비 중인 메뉴입니다.</span>
+                                        </div>
+                                    )}
                     </div>
                     {renderImportProgress()}
                     {renderDataModal()}

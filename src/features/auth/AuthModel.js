@@ -1,18 +1,25 @@
-import { supabase } from '../../core/api';
+import { getApiBase } from '../../core/api/serverConfig';
 
 const SESSION_KEY = 'osoo_user_session';
 
 export const AuthModel = {
     async localLogin(name, password) {
-        const { data, error } = await supabase
-            .from('members')
-            .select('*')
-            .eq('name', name)
-            .eq('password', password)
-            .single();
-
-        if (error || !data) return null;
-        return data;
+        try {
+            const res = await fetch(`${getApiBase()}/api/auth/local-login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, password })
+            });
+            const data = await res.json();
+            if (!data.success) {
+                console.error("Login failed:", data.message);
+                return null;
+            }
+            return data.member;
+        } catch (e) {
+            console.error("Error during localLogin:", e);
+            return null;
+        }
     },
 
     async discoveryLogin(name, password) {
@@ -20,68 +27,57 @@ export const AuthModel = {
     },
 
     async findActiveSession(memberId) {
-        const dateKST = this._todayKST();
-
-        const { data, error } = await supabase
-            .from('attendance')
-            .select('*')
-            .eq('member_id', memberId)
-            .eq('date', dateKST)
-            .is('logout_time', null)
-            .maybeSingle();
-
-        if (error) {
-            console.error("Error finding active session:", error.message);
+        try {
+            const res = await fetch(`${getApiBase()}/api/auth/session`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ memberId })
+            });
+            const data = await res.json();
+            return data.success ? data.session : null;
+        } catch (e) {
+            console.error("Error finding active session:", e);
             return null;
         }
-        return data;
     },
 
     async recordAttendance(member, lat, lng, locationMatched) {
-        const dateKST = this._todayKST();
-
-        const activeSession = await this.findActiveSession(member.id);
-        if (activeSession) {
-            return activeSession;
+        try {
+            const res = await fetch(`${getApiBase()}/api/auth/attendance`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    memberId: member.id,
+                    memberName: member.name,
+                    lat,
+                    lng,
+                    locationMatched
+                })
+            });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error);
+            return data.session;
+        } catch (e) {
+            console.error("Error recording attendance:", e);
+            throw e;
         }
-
-        const { data, error } = await supabase
-            .from('attendance')
-            .insert([{
-                member_id: member.id,
-                member_name: member.name,
-                date: dateKST,
-                login_time: new Date().toISOString(),
-                login_lat: lat,
-                login_lng: lng,
-                location_matched: locationMatched
-            }])
-            .select()
-            .single();
-
-        if (error) {
-            console.error("Error recording attendance:", error.message);
-            throw new Error(error.message);
-        }
-        return data;
     },
 
     async recordLogout(member, autoLogout = false) {
-        const dateKST = this._todayKST();
-
-        const { error } = await supabase
-            .from('attendance')
-            .update({
-                logout_time: new Date().toISOString(),
-                auto_logout: autoLogout
-            })
-            .eq('member_id', member.id)
-            .eq('date', dateKST)
-            .is('logout_time', null);
-
-        if (error) {
-            console.error("Error recording logout:", error.message);
-            throw new Error(error.message);
+        try {
+            const res = await fetch(`${getApiBase()}/api/auth/logout`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    memberId: member.id,
+                    autoLogout
+                })
+            });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error);
+        } catch (e) {
+            console.error("Error recording logout:", e);
+            throw e;
         }
     },
 
@@ -108,7 +104,14 @@ export const AuthModel = {
             if (!raw) return null;
 
             const session = JSON.parse(raw);
-            if (session.loggedOut) return null;
+            const now = new Date();
+            const savedAt = new Date(session.savedAt);
+
+            // 새벽 4시 자동 로그아웃 로직 (옵션)
+            if (session.loggedOut || (now.getHours() >= 4 && now.getDate() !== savedAt.getDate())) {
+                this.clearSession();
+                return null;
+            }
 
             return session.user || null;
         } catch (e) {
@@ -123,9 +126,5 @@ export const AuthModel = {
         } catch (e) {
             console.warn("세션 삭제 실패:", e);
         }
-    },
-
-    _todayKST() {
-        return new Date(new Date().getTime() + (9 * 60 * 60 * 1000)).toISOString().split('T')[0];
     }
 };

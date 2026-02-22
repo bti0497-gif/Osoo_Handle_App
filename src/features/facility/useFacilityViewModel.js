@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { FacilityModel } from './FacilityModel';
 import { DriveSyncService } from '../../services/DriveSyncService';
 
-export const useFacilityViewModel = (initialDate, currentUser) => {
-    const [date, setDate] = useState(initialDate || new Date().toISOString().split('T')[0]);
+export const useFacilityViewModel = (currentUser, { showAlert } = {}) => {
+    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(false);
     const [form, setForm] = useState({
@@ -45,12 +45,12 @@ export const useFacilityViewModel = (initialDate, currentUser) => {
             const allFacilities = await FacilityModel.fetchLogs(date);
             await DriveSyncService.syncDetailedDataToCloud(currentUser?.name, date, { facilities: allFacilities });
 
-            alert("상태: 시설 일지 기록 완료");
+            showAlert?.("상태: 시설 일지 기록 완료");
             await loadLogs();
             setForm({ facility_name: '', content: '', company: '', price: '', notes: '' });
             return { success: true };
         } catch (err) {
-            alert("오류: " + err.message);
+            showAlert?.("오류: " + err.message);
             return { success: false, error: err.message };
         }
     };

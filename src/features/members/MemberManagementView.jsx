@@ -1,7 +1,9 @@
 import React, { useEffect } from 'react';
 import { useMemberViewModel } from './useMemberViewModel';
+import { useDialog } from '../../components/common/DialogProvider';
 
 const MemberManagementView = ({ currentUser, passwordOnly = false }) => {
+    const { showAlert, showConfirm } = useDialog();
     const {
         members,
         loading,
@@ -19,7 +21,7 @@ const MemberManagementView = ({ currentUser, passwordOnly = false }) => {
         totalPages,
         handleEdit,
         allMembersCount
-    } = useMemberViewModel();
+    } = useMemberViewModel({ showAlert, showConfirm });
 
     // passwordOnly 모드: 진입 시 자기 계정 편집 모드로 자동 전환
     useEffect(() => {
@@ -31,10 +33,10 @@ const MemberManagementView = ({ currentUser, passwordOnly = false }) => {
         }
     }, [passwordOnly, currentUser, members]);
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         if (form.password !== form.confirmPassword) {
-            alert("비밀번호가 일치하지 않습니다.");
+            await showAlert("비밀번호가 일치하지 않습니다.");
             return;
         }
         if (passwordOnly) {

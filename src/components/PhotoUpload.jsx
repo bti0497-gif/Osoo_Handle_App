@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { useDialog } from './common/DialogProvider';
 
 const PhotoUpload = ({ date, type, onUploadSuccess }) => {
+    const { showAlert } = useDialog();
     const [uploading, setUploading] = useState(false);
     const [preview, setPreview] = useState(null);
     const API_BASE_URL = 'http://localhost:8901';
@@ -30,10 +32,10 @@ const PhotoUpload = ({ date, type, onUploadSuccess }) => {
             if (result.success) {
                 onUploadSuccess(result.path);
             } else {
-                alert("업로드 실패: " + result.error);
+                showAlert?.("업로드 실패: " + result.error);
             }
         } catch (err) {
-            alert("서버 연결 실패: " + err.message);
+            showAlert?.("서버 연결 실패: " + err.message);
         } finally {
             setUploading(false);
         }

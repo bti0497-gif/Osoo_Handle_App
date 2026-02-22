@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { BoardModel } from './BoardModel';
 
-export const useBoardViewModel = (currentUser) => {
+export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) => {
     const [posts, setPosts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [viewMode, setViewMode] = useState('list');
@@ -32,12 +32,13 @@ export const useBoardViewModel = (currentUser) => {
             setLoading(true);
             const data = await BoardModel.fetchPosts(currentUser?.name);
             setPosts(data);
-        } catch (err) {
-            console.error('Failed to load posts:', err);
+        } catch (error) {
+            console.error('Failed to view post:', error);
+            showAlert?.('게시글을 불러올 수 없습니다.');
         } finally {
             setLoading(false);
         }
-    }, [currentUser?.name]);
+    }, [currentUser?.name, showAlert]);
 
     useEffect(() => { loadPosts(); }, [loadPosts]);
 
@@ -49,29 +50,34 @@ export const useBoardViewModel = (currentUser) => {
                 ...form,
                 author: currentUser?.name || '익명'
             };
-            await BoardModel.savePost(postPayload);
+            const res = await BoardModel.savePost(postPayload);
 
-            alert('저장 완료');
-            await loadPosts();
-            resetForm();
-            setViewMode('list');
-            return { success: true };
+            if (res.success) {
+                showAlert?.('저장 완료');
+                await loadPosts();
+                resetForm();
+                setViewMode('list');
+                return { success: true };
+            }
         } catch (err) {
-            alert('저장 실패: ' + err.message);
-            return { success: false };
+            console.error(err);
+            showAlert?.('저장 실패: ' + err.message);
         }
+        return { success: false };
     };
 
     const deletePost = async (id) => {
-        if (!confirm('게시글을 삭제하시겠습니까?')) return;
+        const confirmed = await showConfirm?.('게시글을 삭제하시겠습니까?');
+        if (!confirmed) return;
         try {
             await BoardModel.deletePost(id);
-            alert('삭제 완료');
+            showAlert?.('삭제 완료');
             await loadPosts();
             setViewMode('list');
             setSelectedPost(null);
         } catch (err) {
-            alert('삭제 실패: ' + err.message);
+            console.error(err);
+            showAlert?.('삭제 실패: ' + err.message);
         }
     };
 
@@ -82,7 +88,7 @@ export const useBoardViewModel = (currentUser) => {
             setViewMode('detail');
             loadComments(post.id);
         } catch (err) {
-            alert('게시글을 불러올 수 없습니다.');
+            showAlert?.('게시글을 불러올 수 없습니다.');
         }
     };
 
@@ -125,7 +131,8 @@ export const useBoardViewModel = (currentUser) => {
 
             await loadComments(postId);
         } catch (err) {
-            alert('댓글 저장 실패: ' + err.message);
+            console.error(err);
+            showAlert?.('댓글 저장 실패: ' + err.message);
         }
     };
 
@@ -134,7 +141,8 @@ export const useBoardViewModel = (currentUser) => {
             await BoardModel.deleteComment(commentId);
             await loadComments(postId);
         } catch (err) {
-            alert('댓글 삭제 실패: ' + err.message);
+            console.error(err);
+            showAlert?.('댓글 삭제 실패: ' + err.message);
         }
     };
 
@@ -143,7 +151,8 @@ export const useBoardViewModel = (currentUser) => {
         try {
             return await BoardModel.uploadFile(file);
         } catch (err) {
-            alert('파일 업로드 실패: ' + err.message);
+            console.error('File Upload Error:', err);
+            showAlert?.('파일 업로드 실패: ' + err.message);
             return null;
         }
     };
