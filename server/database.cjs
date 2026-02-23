@@ -108,11 +108,16 @@ db.exec(`
     logout_lat REAL,
     logout_lng REAL,
     location_matched BOOLEAN DEFAULT 0,
-    auto_logout BOOLEAN DEFAULT 0
+    auto_logout BOOLEAN DEFAULT 0,
+    is_synced BOOLEAN DEFAULT 0
   );
 `);
 
 // --- Migrations ---
+const attendanceCols = db.prepare("PRAGMA table_info(attendance)").all().map(c => c.name);
+if (!attendanceCols.includes('is_synced')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN is_synced BOOLEAN DEFAULT 0').run();
+}
 const waterCols = db.prepare("PRAGMA table_info(water_quality)").all().map(c => c.name);
 ['tn', 'tp', 'cod', 'ss'].forEach(col => {
   if (!waterCols.includes(col)) db.prepare(`ALTER TABLE water_quality ADD COLUMN ${col} REAL`).run();

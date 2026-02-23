@@ -20,12 +20,16 @@ function App() {
     const [activeTab, setActiveTab] = useState(DEFAULT_TAB);
 
     useEffect(() => {
-        // 앱이 시작되고 사용자가 로그인된 상태거나 초기 로딩이 끝났을 때 백그라운드 동기화를 1회 시도합니다.
-        // 인터넷이 연결되어 있으면 작동하고, 아니면 조용히 실패합니다.
+        // 로딩 완료 시 1회 시도
         if (!isLoading) {
             SyncService.startBackgroundSync().catch(console.error);
         }
     }, [isLoading]);
+
+    useEffect(() => {
+        // 온라인 이벤트 리스너 등록 (1회만)
+        SyncService.initAutoSync();
+    }, []);
 
     if (isLoading) {
         return (
@@ -59,11 +63,12 @@ function App() {
                 return <MemberManagementView currentUser={user} />;
             case 'myinfo':
                 return <MemberManagementView currentUser={user} passwordOnly={true} />;
-            case 'dashboard':
             case 'board':
                 return <BoardView currentUser={user} />;
+            case 'dashboard':
+                return <Dashboard title="통합 대시보드" />;
             case 'settings': return <SettingsView currentUser={user} />;
-            default: return <Dashboard title="유량관리" />;
+            default: return <Dashboard title="통합 대시보드" />;
         }
     };
 

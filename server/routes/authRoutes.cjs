@@ -91,7 +91,7 @@ module.exports = (db) => {
         try {
             db.prepare(`
         UPDATE attendance 
-        SET logout_time = ?, auto_logout = ? 
+        SET logout_time = ?, auto_logout = ?, is_synced = 0 
         WHERE member_id = ? AND date = ? AND logout_time IS NULL
       `).run(logoutTime, autoLogout ? 1 : 0, memberId, dateKST);
 
@@ -101,12 +101,25 @@ module.exports = (db) => {
         }
     });
 
-    // 6. 로컬에 저장된 미동기화 출결 기록 목록 반환 (온라인 동기화 용도 지정 전)
+    // 6. 로컬에 저장된 미동기화 출결 기록 목록 반환
     router.get('/unsynced-attendance', (req, res) => {
         try {
-            // 당분간 모든 로컬 출결을 반환하는 용도. (실제 동기화 플래그 등을 추가할 수 있음)
-            const logs = db.prepare('SELECT * FROM attendance ORDER BY login_time DESC').all();
+            const logs = db.prepare('SELECT * FROM attendance WHERE is_synced = 0 ORDER BY login_time ASC').all();
             res.json({ success: true, logs });
+        } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    // 7. 동기화 완료 마킹
+    router.post('/mark-attendance-synced', (req, res) => {
+        const { ids } = req.body; // Array of IDs
+        try {
+            if (ids && ids.length > 0) {
+                const placeholders = ids.map(() => '?').join(',');
+                db.prepare(`UPDATE attendance SET is_synced = 1 WHERE id IN (${placeholders})`).run(...ids);
+            }
+            res.json({ success: true });
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
         }

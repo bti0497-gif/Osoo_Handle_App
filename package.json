@@ -6,6 +6,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
+    "dev:all": "node run-all.cjs",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",

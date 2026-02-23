@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { MemberModel } from './MemberModel';
 import { apiClient } from '../../core/api';
+import { SyncService } from '../auth/SyncService';
 
 export const useMemberViewModel = ({ showAlert, showConfirm } = {}) => {
     const [members, setMembers] = useState([]);
@@ -74,6 +75,9 @@ export const useMemberViewModel = ({ showAlert, showConfirm } = {}) => {
             };
 
             await MemberModel.saveMember(dataToSave);
+
+            // Supabase 저장 직후 로컬 DB에도 동기화 진행
+            await SyncService.syncMembers().catch(console.error);
 
             showAlert?.("저장 완료");
             await loadMembers();

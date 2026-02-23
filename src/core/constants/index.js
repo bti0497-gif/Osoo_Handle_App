@@ -4,6 +4,7 @@
  */
 
 export const MENUS = [
+  { id: 'dashboard', label: '대시보드', icon: 'dashboard' },
   { id: 'flow', label: '유량관리', icon: 'water_damage' },
   { id: 'medicine', label: '약품관리', icon: 'science' },
   { id: 'water', label: '수질관리', icon: 'opacity' },
@@ -11,13 +12,13 @@ export const MENUS = [
   { id: 'log', label: '일지작성', icon: 'edit_note' },
   { id: 'board', label: '소통게시판', icon: 'forum' },
 ];
-
 export const ADMIN_MENUS = [
   { id: 'members', label: '회원 및 현장 관리', icon: 'admin_panel_settings' },
   { id: 'settings', label: '설정', icon: 'settings' },
 ];
 
 export const TAB_LABELS = {
+  dashboard: '대시보드',
   flow: '유량관리',
   medicine: '약품관리',
   water: '수질관리',
@@ -30,7 +31,7 @@ export const TAB_LABELS = {
   attendance: '출석관리',
 };
 
-export const DEFAULT_TAB = 'flow';
+export const DEFAULT_TAB = 'dashboard';
 
 export const ADMIN_ROLES = ['admin', 'group_admin'];
 
