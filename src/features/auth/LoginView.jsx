@@ -54,9 +54,11 @@ const LoginView = ({ onLogin }) => {
                     <div className="input-wrapper-new">
                         <span className="material-symbols-outlined input-icon-new">lock</span>
                         <input
-                            type="password"
+                            type="text"
+                            autoComplete="off"
                             className="form-input-new"
                             placeholder="비밀번호"
+                            style={{ WebkitTextSecurity: 'disc' }}
                             value={pass}
                             onChange={(e) => setPass(e.target.value)}
                             ref={passRef}

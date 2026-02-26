@@ -1,19 +1,19 @@
 import React, { useState } from 'react';
-import { useMedicineViewModel } from './useMedicineViewModel';
+import { useKitViewModel } from './useKitViewModel';
 import { useDialog } from '../../components/common/DialogProvider';
 import DataGrid from '../../components/common/DataGrid';
 
-const MedicineManagementView = ({ currentUser }) => {
+const KitManagementView = ({ currentUser }) => {
     const { showAlert } = useDialog();
     const {
-        history, loading, medicineTypes,
+        history, loading, kitTypes,
         updateAmount, submitBatch, refresh, pendingChanges
-    } = useMedicineViewModel(currentUser, { showAlert });
+    } = useKitViewModel(currentUser, { showAlert });
 
     const [selectedDate, setSelectedDate] = useState(null);
     const [isManualEditMode, setIsManualEditMode] = useState(false);
     const [doubleClickedDate, setDoubleClickedDate] = useState(null);
-    const [activeInput, setActiveInput] = useState(null); // { date, colId, type }
+    const [activeInput, setActiveInput] = useState(null);
     const [localValue, setLocalValue] = useState(null);
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -23,33 +23,19 @@ const MedicineManagementView = ({ currentUser }) => {
         return Number(v).toLocaleString();
     };
 
-    const cols = medicineTypes.map(type => {
-        let unit = 'kg';
-        if (type.includes('메탄올') || type.includes('소포제') || type.toLowerCase().includes(' l')) unit = 'L';
-        else if (type.toLowerCase().includes('응집제') || type.toLowerCase().includes('pac')) unit = 'kg';
+    const vibrantColors = ['#1e3a8a', '#047857', '#b45309', '#4338ca', '#57534e'];
 
-        return {
-            id: type,
-            label: type,
-            unit: unit
-        };
-    });
+    const gridCols = kitTypes.map((type, idx) => ({
+        id: type,
+        label: type,
+        subCols: [
+            { id: 'purchase', label: '구매', width: 52, headerStyle: { background: vibrantColors[idx % vibrantColors.length], color: '#fff' } },
+            { id: 'usage', label: '사용', width: 52, headerStyle: { background: '#fef2f2', color: '#991b1b' } },
+            { id: 'inventory', label: '재고', width: 52, headerStyle: { background: '#fef3c7', color: '#92400e' } }
+        ]
+    }));
 
     const hasPending = Object.keys(pendingChanges).length > 0;
-
-    const gridCols = cols.map((c, idx) => {
-        // 지정된 색상 배열
-        const vibrantColors = ['#1e3a8a', '#047857', '#b45309', '#4338ca', '#57534e'];
-
-        return {
-            id: c.id, label: `${c.label} (${c.unit})`,
-            subCols: [
-                { id: 'purchase', label: '입고', width: 44, headerStyle: { background: vibrantColors[idx % vibrantColors.length], color: '#fff' } },
-                { id: 'usage', label: '사용', width: 44, headerStyle: { background: '#fef2f2', color: '#991b1b' } },
-                { id: 'inventory', label: '재고', width: 52, headerStyle: { background: '#fef3c7', color: '#92400e' } }
-            ]
-        };
-    });
 
     const handleRowSelect = (row) => {
         if (isManualEditMode && selectedDate === row.date) return;
@@ -130,13 +116,14 @@ const MedicineManagementView = ({ currentUser }) => {
         const val = isPurchase ? d.purchase : (isUsage ? d.usage : d.inventory);
         const errorMsg = d.error;
 
+        // 재고는 편집모드가 아니면 읽기전용 표시
         if (isInventory && isReadOnly) {
             return (
                 <div style={{
                     width: '100%', height: '100%',
                     padding: '0 3px',
                     textAlign: 'right', fontWeight: 800, fontSize: 10.5,
-                    color: val != null && val < 50 ? '#dc2626' : '#475569',
+                    color: val != null && val < 5 ? '#dc2626' : '#475569',
                     background: isFuture ? '#fafafa' : 'transparent',
                     display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
                     borderLeft: '1px solid #e2e8f0'
@@ -146,8 +133,8 @@ const MedicineManagementView = ({ currentUser }) => {
             );
         }
 
-        const bgColor = isPurchase ? '#eff6ff' : '#fef2f2';
-        const activeBg = isPurchase ? '#dbeafe' : '#fee2e2';
+        const bgColor = isPurchase ? '#eff6ff' : (isUsage ? '#fef2f2' : '#fef3c7');
+        const activeBg = isPurchase ? '#dbeafe' : (isUsage ? '#fee2e2' : '#fef3c7');
 
         const displayVal = val != null ? Number(val).toLocaleString() : '';
 
@@ -208,7 +195,7 @@ const MedicineManagementView = ({ currentUser }) => {
         } else if (isFuture) {
             bg = '#fafafa';
         } else if (isHovered && !isEditingMode) {
-            bg = '#e2e8f0'; // Darkened contrast
+            bg = '#e2e8f0';
         }
 
         return {
@@ -240,8 +227,8 @@ const MedicineManagementView = ({ currentUser }) => {
         <div style={{ display: 'flex', height: '100%', gap: '16px', alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
                 <DataGrid
-                    title="약품 입고/사용/재고 관리"
-                    description="파란색/빨간색 셀을 클릭하여 입고량/사용량을 입력하면 재고가 자동 누적 계산됩니다."
+                    title="분석키트 구매/사용/재고 관리"
+                    description="구매량과 사용량을 입력하면 재고가 자동 누적 계산됩니다."
                     columns={gridCols}
                     data={history}
                     keyField="date"
@@ -267,4 +254,4 @@ const MedicineManagementView = ({ currentUser }) => {
     );
 };
 
-export default MedicineManagementView;
+export default KitManagementView;

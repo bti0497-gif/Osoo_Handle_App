@@ -6,6 +6,22 @@ const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword }) =
     // 성(Surname) 추출 (아이콘용)
     const surname = user?.name?.charAt(0) || 'U';
 
+    const [expandedMenus, setExpandedMenus] = React.useState(['log', 'water_group']);
+
+    const toggleMenu = (menuId) => {
+        setExpandedMenus(prev =>
+            prev.includes(menuId) ? prev.filter(id => id !== menuId) : [...prev, menuId]
+        );
+    };
+
+    const handleMenuClick = (menu) => {
+        if (menu.children) {
+            toggleMenu(menu.id);
+        } else {
+            onTabChange(menu.id);
+        }
+    };
+
     return (
         <aside className="sidebar">
             {/* 사용자 프로필 영역 (기존 유지) */}
@@ -32,14 +48,33 @@ const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword }) =
             {/* 일반 메뉴 영역 (텍스트형) */}
             <nav className="nav-menu-text">
                 {MENUS.map((menu) => (
-                    <button
-                        key={menu.id}
-                        className={`nav-text-item ${activeTab === menu.id ? 'active' : ''}`}
-                        onClick={() => onTabChange(menu.id)}
-                    >
-                        <span className="material-icons nav-text-icon">{menu.icon}</span>
-                        <span>{menu.label}</span>
-                    </button>
+                    <React.Fragment key={menu.id}>
+                        <button
+                            className={`nav-text-item ${activeTab === menu.id ? 'active' : ''}`}
+                            onClick={() => handleMenuClick(menu)}
+                        >
+                            <span className="material-icons nav-text-icon">{menu.icon}</span>
+                            <span>{menu.label}</span>
+                            {menu.children && (
+                                <span className={`material-icons nav-text-expand-icon ${expandedMenus.includes(menu.id) ? 'expanded' : ''}`}>
+                                    chevron_right
+                                </span>
+                            )}
+                        </button>
+                        {menu.children && expandedMenus.includes(menu.id) && (
+                            <div className="nav-submenu-container">
+                                {menu.children.map(sub => (
+                                    <button
+                                        key={sub.id}
+                                        className={`nav-submenu-item ${activeTab === sub.id ? 'active' : ''}`}
+                                        onClick={() => onTabChange(sub.id)}
+                                    >
+                                        {sub.label}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </React.Fragment>
                 ))}
             </nav>
 

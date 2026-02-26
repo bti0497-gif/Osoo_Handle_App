@@ -7,9 +7,29 @@ export const MENUS = [
   { id: 'dashboard', label: '대시보드', icon: 'dashboard' },
   { id: 'flow', label: '유량관리', icon: 'water_damage' },
   { id: 'medicine', label: '약품관리', icon: 'science' },
-  { id: 'water', label: '수질관리', icon: 'opacity' },
+  {
+    id: 'water_group',
+    label: '수질관리',
+    icon: 'opacity',
+    children: [
+      { id: 'water', label: '수질분석' },
+      { id: 'kit', label: '키트관리' }
+    ]
+  },
   { id: 'facility', label: '시설관리', icon: 'construction' },
-  { id: 'log', label: '일지작성', icon: 'edit_note' },
+  {
+    id: 'log',
+    label: '일지작성',
+    icon: 'edit_note',
+    children: [
+      { id: 'log_daily', label: '일일업무일지' },
+      { id: 'log_water', label: '수질분석일지' },
+      { id: 'log_med_mgmt', label: '약품관리대장' },
+      { id: 'log_med_in', label: '약품입고일지' },
+      { id: 'log_sludge_out', label: '슬러지반출관리대장' },
+      { id: 'log_sludge_photo', label: '슬러지사진대지' }
+    ]
+  },
   { id: 'board', label: '소통게시판', icon: 'forum' },
 ];
 export const ADMIN_MENUS = [
@@ -21,9 +41,16 @@ export const TAB_LABELS = {
   dashboard: '대시보드',
   flow: '유량관리',
   medicine: '약품관리',
-  water: '수질관리',
+  water: '수질분석',
+  kit: '분석키트관리',
   facility: '시설관리',
   log: '일지작성',
+  log_daily: '일일업무일지',
+  log_water: '수질분석일지',
+  log_med_mgmt: '약품관리대장',
+  log_med_in: '약품입고일지',
+  log_sludge_out: '슬러지반출관리대장',
+  log_sludge_photo: '슬러지사진대지',
   board: '소통게시판',
   members: '회원 및 현장 관리',
   myinfo: '내 정보 수정',

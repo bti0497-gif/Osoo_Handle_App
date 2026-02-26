@@ -41,6 +41,7 @@ app.get('/api/ping', (req, res) => res.json({ ok: true }));
 app.use(require('./routes/flowRoutes.cjs')(db));
 app.use(require('./routes/medicineRoutes.cjs')(db));
 app.use(require('./routes/waterQualityRoutes.cjs')(db));
+app.use(require('./routes/kitRoutes.cjs')(db));
 app.use(require('./routes/facilityRoutes.cjs')(db));
 app.use(require('./routes/settingsRoutes.cjs')(db, BASE_DIR));
 app.use(require('./routes/uploadRoutes.cjs')(BASE_DIR));

@@ -32,13 +32,12 @@ async function request(endpoint, options = {}) {
 
     const contentType = response.headers.get('content-type');
     if (!contentType || !contentType.includes('application/json')) {
-      if (!response.ok) {
-        throw new ApiError(
-          '서버 응답이 JSON이 아닙니다. 백엔드 서버가 실행 중인지 확인해 주세요.',
-          response.status
-        );
-      }
-      return response;
+      // JSON이 아닌 응답(404 HTML 등)이 오면 포트가 바뀌었을 가능성이 큼
+      await rediscoverServer();
+      throw new ApiError(
+        '서버 응답 형식이 올바르지 않습니다. 서버 재탐색을 시도했습니다. 잠시 후 다시 시도해 주세요.',
+        response.status
+      );
     }
 
     const data = await response.json();

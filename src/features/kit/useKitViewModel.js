@@ -1,22 +1,17 @@
 import { useState, useEffect } from 'react';
-import { MedicineModel } from './MedicineModel';
+import { KitModel } from './KitModel';
 import { SettingsModel } from '../settings/SettingsModel';
 import { DriveSyncService } from '../../services/DriveSyncService';
 
-export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
+export const useKitViewModel = (currentUser, { showAlert } = {}) => {
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(false);
     const [pendingChanges, setPendingChanges] = useState({});
-    const [medicineTypes, setMedicineTypes] = useState([]);
+    const [kitTypes, setKitTypes] = useState([]);
 
     useEffect(() => {
         loadLogs();
     }, []);
-
-    const correctData = (data) => {
-        if (!data) return { purchase: null, usage: null, inventory: null, error: null };
-        return { purchase: data.purchase, usage: data.usage, inventory: data.inventory, error: data.error };
-    };
 
     const calculateInventory = (histArr, startIndex, type) => {
         for (let i = startIndex; i < histArr.length; i++) {
@@ -37,21 +32,19 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
 
             await DriveSyncService.syncOperationalDataFromCloud(currentUser?.name, todayStr);
 
-            // 설정에서 활성화된 약품 항목 가져오기
+            // 설정에서 활성화된 키트 항목 가져오기
             const settingsData = await SettingsModel.getSettings();
             let dynamicTypes = [];
             if (settingsData?.success && settingsData.configItems) {
-                const meds = settingsData.configItems.filter(i => i.category === 'medicine' && i.is_active);
-                // 맵핑용 키 (ex: PAC_purchase) 필터링
-                const baseMeds = meds.filter(i => !i.item_name.endsWith('_purchase') && !i.item_name.endsWith('_usage') && !i.item_name.endsWith('_inventory'));
-                dynamicTypes = baseMeds.map(i => i.item_name);
+                const kits = settingsData.configItems.filter(i => i.category === 'kit' && i.is_active);
+                dynamicTypes = kits.map(i => i.item_name);
             }
             if (dynamicTypes.length === 0) {
-                dynamicTypes = ['차아염소산나트륨', 'PAC', '고분자응집제', '메탄올', '소포제']; // 기본값
+                dynamicTypes = ['T-N (총질소)', 'T-P (총인)', 'COD (화학적산소요구량)', 'SS (부유물질)'];
             }
-            setMedicineTypes(dynamicTypes);
+            setKitTypes(dynamicTypes);
 
-            const historyData = await MedicineModel.fetchHistory();
+            const historyData = await KitModel.fetchHistory();
             if (historyData.success) {
                 const histRaw = historyData.history;
 
@@ -62,8 +55,8 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
                         dynamicTypes.forEach(t => row[t] = { purchase: null, usage: null, inventory: null });
                         dateMap.set(r.date, row);
                     }
-                    if (dynamicTypes.includes(r.medicine_name)) {
-                        dateMap.get(r.date)[r.medicine_name] = {
+                    if (dynamicTypes.includes(r.kit_name)) {
+                        dateMap.get(r.date)[r.kit_name] = {
                             purchase: r.purchase_amount,
                             usage: r.usage_amount,
                             inventory: r.current_inventory
@@ -72,8 +65,6 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
                 });
 
                 const hist = Array.from(dateMap.values());
-
-                // 날짜 오름차순
                 hist.sort((a, b) => a.date.localeCompare(b.date));
 
                 // 전체 기간(첫 데이터 ~ 오늘)의 빈 날짜 채우기
@@ -114,10 +105,9 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
                     }
                 }
 
-                // 마지막으로 정렬
                 hist.sort((a, b) => a.date.localeCompare(b.date));
 
-                // For dates that lack inventory data, calculate it initially
+                // 재고 자동 계산
                 dynamicTypes.forEach(type => {
                     calculateInventory(hist, 0, type);
                 });
@@ -126,7 +116,7 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
                 setPendingChanges({});
             }
         } catch (err) {
-            console.error(err);
+            console.error('Kit data load failed:', err);
         } finally {
             setLoading(false);
         }
@@ -187,27 +177,25 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
         try {
             const items = [];
             for (const dt of changedDates) {
-                const rowChanges = pendingChanges[dt];
-                for (const [medicine_name, data] of Object.entries(rowChanges)) {
+                const changes = pendingChanges[dt];
+                for (const [type, data] of Object.entries(changes)) {
                     items.push({
+                        kit_name: type,
                         date: dt,
-                        medicine_name,
                         purchase_amount: data.purchase || 0,
                         usage_amount: data.usage || 0,
                         current_inventory: data.inventory || 0
                     });
                 }
             }
-
             if (items.length > 0) {
-                const res = await MedicineModel.bulkSave(items);
+                const res = await KitModel.bulkSave(items);
                 if (!res.success) throw new Error(res.error);
             }
-
             showAlert?.("데이터가 성공적으로 저장되었습니다.");
 
             const todayStr = new Date().toISOString().split('T')[0];
-            await DriveSyncService.syncDetailedDataToCloud(currentUser?.name, todayStr, { medicines: items });
+            await DriveSyncService.syncDetailedDataToCloud(currentUser?.name, todayStr, { kitData: items });
 
             await loadLogs();
         } catch (err) {
@@ -220,8 +208,7 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
     return {
         history,
         loading,
-        medicineTypes,
-        correctData,
+        kitTypes,
         updateAmount,
         submitBatch,
         refresh: loadLogs,

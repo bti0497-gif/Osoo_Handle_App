@@ -190,6 +190,7 @@ module.exports = function (db, baseDir) {
   });
 
   // ── 키트 매핑 저장 + DB에서 임포트 ──
+  // mapping 키 형식: "키트명_purchase", "키트명_usage", "키트명_inventory"
   router.post('/api/settings/save-kit-mapping', (req, res) => {
     const { config, mapping } = req.body;
     const { sheet, startRow, endRow, dateCol } = config;
@@ -199,7 +200,21 @@ module.exports = function (db, baseDir) {
 
       db.prepare('UPDATE app_settings SET kit_sheet = ?, kit_start_row = ?, kit_end_row = ?, kit_date_col = ? WHERE id = 1').run(sheet, startRow, endRow, dateCol);
 
-      const insertKit = db.prepare("INSERT INTO water_quality (date, location, tn, tp, cod, ss) VALUES (?, '기본', ?, ?, ?, ?) ON CONFLICT(date, location) DO UPDATE SET tn = COALESCE(excluded.tn, tn), tp = COALESCE(excluded.tp, tp), cod = COALESCE(excluded.cod, cod), ss = COALESCE(excluded.ss, ss)");
+      const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('kit', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
+      Object.entries(mapping).forEach(([key, col]) => upsertStmt.run(key, col));
+
+      // 키트명별 purchase/usage/inventory 열 그룹화
+      const kits = {};
+      Object.keys(mapping).forEach(key => {
+        const lastUnderscore = key.lastIndexOf('_');
+        if (lastUnderscore === -1) return;
+        const name = key.substring(0, lastUnderscore);
+        const field = key.substring(lastUnderscore + 1);
+        if (!kits[name]) kits[name] = {};
+        kits[name][field] = mapping[key];
+      });
+
+      const insertKit = db.prepare('INSERT INTO kit_logs (kit_name, date, purchase_amount, usage_amount, current_inventory) VALUES (?, ?, ?, ?, ?) ON CONFLICT(kit_name, date) DO UPDATE SET purchase_amount = excluded.purchase_amount, usage_amount = excluded.usage_amount, current_inventory = excluded.current_inventory');
       const importedData = [];
 
       db.transaction(() => {
@@ -207,10 +222,22 @@ module.exports = function (db, baseDir) {
           const dateStr = getCellValue(db, sheet, r, dateCol);
           const formatted = formatDate(dateStr) || dateStr;
           if (!formatted) { importProgress.current++; continue; }
-          const getVal = (mKey) => { const v = parseFloat(getCellValue(db, sheet, r, mapping[mKey] || '') || ''); return isNaN(v) ? 0 : Math.round(v * 10) / 10; };
-          const kitData = { tn: getVal('T-N (총질소)'), tp: getVal('T-P (총인)'), cod: getVal('COD (화학적산소요구량)'), ss: getVal('SS (부유물질)') };
-          insertKit.run(formatted, kitData.tn, kitData.tp, kitData.cod, kitData.ss);
-          importedData.push({ date: formatted, ...kitData });
+          const rowResults = { date: formatted };
+          Object.entries(kits).forEach(([kitName, cols]) => {
+            const rawP = parseFloat(getCellValue(db, sheet, r, cols.purchase || '') || '');
+            const rawU = parseFloat(getCellValue(db, sheet, r, cols.usage || '') || '');
+            const rawI = parseFloat(getCellValue(db, sheet, r, cols.inventory || '') || '');
+            const purchase = isNaN(rawP) ? 0 : Math.round(rawP * 10) / 10;
+            const usage = isNaN(rawU) ? 0 : Math.round(rawU * 10) / 10;
+            const inventory = isNaN(rawI) ? 0 : Math.round(rawI * 10) / 10;
+            if (purchase || usage || inventory) {
+              insertKit.run(kitName, formatted, purchase, usage, inventory);
+              rowResults[`${kitName}_구매`] = purchase;
+              rowResults[`${kitName}_사용`] = usage;
+              rowResults[`${kitName}_재고`] = inventory;
+            }
+          });
+          importedData.push(rowResults);
           importProgress.current++;
         }
       })();
@@ -282,6 +309,97 @@ module.exports = function (db, baseDir) {
       res.json({ success: true, message: '약품 데이터 임포트 완료', count: importedData.length });
     } catch (e) {
       console.error('Medicine mapping error:', e);
+      importProgress.status = 'error';
+      importProgress.result = e.message;
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // ── 수질 매핑 저장 + DB에서 임포트 ──
+  router.post('/api/settings/save-water-mapping', (req, res) => {
+    const { config, mapping } = req.body;
+    const { sheet, startRow, endRow, dateCol } = config;
+    importProgress = { current: 0, total: endRow - startRow + 1, status: 'processing', result: null };
+    try {
+      if (!hasStoredData(db)) throw new Error('엑셀 데이터가 아직 저장되지 않았습니다. 먼저 파일을 업로드하세요.');
+
+      db.prepare('UPDATE app_settings SET water_sheet = ?, water_start_row = ?, water_end_row = ?, water_date_col = ? WHERE id = 1').run(sheet, startRow, endRow, dateCol);
+
+      const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('water', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
+      Object.entries(mapping).forEach(([key, col]) => {
+        if (key !== 'date') {
+          upsertStmt.run(key, col);
+        }
+      });
+
+      // mapping: { "암모니아성질소_유량조정조": "C", ... }
+      const baseParams = { '암모니아성질소': 'nh3_n', '질산성질소': 'no3_n', '인산염인': 'po4_p', '알칼리도': 'alkalinity' };
+
+      // 그룹화 기준: location name
+      const locations = {};
+      Object.entries(mapping).forEach(([key, col]) => {
+        if (key === 'date') return;
+
+        const lastUnderscore = key.lastIndexOf('_');
+        if (lastUnderscore === -1) return;
+
+        const paramName = key.substring(0, lastUnderscore);
+        const locName = key.substring(lastUnderscore + 1);
+
+        if (baseParams[paramName]) {
+          if (!locations[locName]) locations[locName] = {};
+          locations[locName][baseParams[paramName]] = col;
+        }
+      });
+
+      const insertWater = db.prepare(`
+        INSERT INTO water_quality (date, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss) 
+        VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0) 
+        ON CONFLICT(date, location) DO UPDATE SET 
+          nh3_n = excluded.nh3_n, no3_n = excluded.no3_n, 
+          po4_p = excluded.po4_p, alkalinity = excluded.alkalinity
+      `);
+
+      const importedData = [];
+
+      db.transaction(() => {
+        for (let r = startRow; r <= endRow; r++) {
+          const dateStr = getCellValue(db, sheet, r, dateCol);
+          const formatted = formatDate(dateStr) || dateStr;
+          if (!formatted) { importProgress.current++; continue; }
+
+          const rowResults = { date: formatted };
+
+          // Default location if no locations are mapped (fallback to '기본')
+          if (Object.keys(locations).length === 0) {
+            insertWater.run(formatted, '기본', 0, 0, 0, 0);
+            importedData.push({ date: formatted, location: '기본' });
+          } else {
+            Object.entries(locations).forEach(([locName, cols]) => {
+              const vals = { nh3_n: 0, no3_n: 0, po4_p: 0, alkalinity: 0 };
+              ['nh3_n', 'no3_n', 'po4_p', 'alkalinity'].forEach(dbCol => {
+                const col = cols[dbCol];
+                if (col) {
+                  const v = parseFloat(getCellValue(db, sheet, r, col) || '');
+                  vals[dbCol] = isNaN(v) ? 0 : Math.round(v * 10) / 10;
+                }
+              });
+
+              insertWater.run(formatted, locName, vals.nh3_n, vals.no3_n, vals.po4_p, vals.alkalinity);
+
+              rowResults[`${locName}_nh3_n`] = vals.nh3_n;
+            });
+            importedData.push(rowResults);
+          }
+          importProgress.current++;
+        }
+      })();
+
+      importProgress.status = 'completed';
+      importProgress.result = importedData;
+      res.json({ success: true, message: '수질 데이터 임포트 완료', count: importedData.length });
+    } catch (e) {
+      console.error('Water mapping error:', e);
       importProgress.status = 'error';
       importProgress.result = e.message;
       res.status(500).json({ success: false, message: e.message });

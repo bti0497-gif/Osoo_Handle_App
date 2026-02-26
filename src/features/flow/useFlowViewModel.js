@@ -29,6 +29,26 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
             const historyData = await FlowModel.fetchHistory();
             if (historyData.success) {
                 const hist = historyData.history;
+                hist.sort((a, b) => a.date.localeCompare(b.date));
+
+                // 전체 기간(첫 데이터 ~ 오늘)의 빈 날짜 채우기
+                if (hist.length > 0) {
+                    const firstDateStr = hist[0].date > todayStr ? todayStr : hist[0].date;
+                    let currentDate = new Date(firstDateStr);
+                    const todayDate = new Date(todayStr);
+                    const existingDates = new Set(hist.map(h => h.date));
+
+                    while (currentDate < todayDate) {
+                        const ds = currentDate.toISOString().split('T')[0];
+                        if (!existingDates.has(ds)) {
+                            const emptyRow = { date: ds };
+                            flowTypes.forEach(t => { emptyRow[t] = { raw: null, diff: null }; });
+                            hist.push(emptyRow);
+                            existingDates.add(ds);
+                        }
+                        currentDate.setDate(currentDate.getDate() + 1);
+                    }
+                }
 
                 // 오늘이 없으면 추가
                 if (!hist.find(h => h.date === todayStr)) {
@@ -48,6 +68,9 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
                         hist.push(emptyRow);
                     }
                 }
+
+                // 빈 날짜들을 맨 뒤에 push했으므로 최종적으로 정렬
+                hist.sort((a, b) => a.date.localeCompare(b.date));
 
                 setHistory(hist);
                 setPendingChanges({});

@@ -50,15 +50,13 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
                 ...form,
                 author: currentUser?.name || '익명'
             };
-            const res = await BoardModel.savePost(postPayload);
+            await BoardModel.savePost(postPayload);
 
-            if (res.success) {
-                showAlert?.('저장 완료');
-                await loadPosts();
-                resetForm();
-                setViewMode('list');
-                return { success: true };
-            }
+            showAlert?.('저장 완료');
+            await loadPosts();
+            resetForm();
+            setViewMode('list');
+            return { success: true };
         } catch (err) {
             console.error(err);
             showAlert?.('저장 실패: ' + err.message);

@@ -165,3 +165,69 @@
 </footer>
 
 </body></html>
+
+#로그인디자인
+
+<!DOCTYPE html>
+<html lang="ko"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        "corporate-blue": "#0a58ca",
+                        "bg-neutral": "#f8f9fa",
+                    },
+                    fontFamily: {
+                        "sans": ["Inter", "Malgun Gothic", "sans-serif"]
+                    }
+                },
+            },
+        }
+    </script>
+<style type="text/tailwindcss">
+        body {
+            background-color: theme('colors.bg-neutral');
+        }
+        .login-card {
+            width: 350px;
+            min-height: 300px;
+        }
+    </style>
+<title>더죤환경기술(주) 오수처리 통합관리시스템 - 로그인</title>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="flex items-center justify-center min-h-screen p-4">
+<div class="login-card bg-white rounded-lg shadow-lg border border-slate-100 flex flex-col overflow-hidden">
+<div class="pt-8 pb-6 px-6 text-center">
+<h1 class="text-[17px] font-bold text-slate-800 leading-tight">
+                더죤환경기술(주)<br/>
+<span class="text-slate-600 font-semibold text-[15px]">오수처리 통합관리시스템</span>
+</h1>
+</div>
+<form action="#" class="px-6 pb-8 space-y-3" onsubmit="return false;">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[20px]">person</span>
+<input class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded text-sm focus:ring-2 focus:ring-corporate-blue/20 focus:border-corporate-blue outline-none transition-all placeholder:text-slate-400" placeholder="이름" type="text"/>
+</div>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[20px]">lock</span>
+<input class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded text-sm focus:ring-2 focus:ring-corporate-blue/20 focus:border-corporate-blue outline-none transition-all placeholder:text-slate-400" placeholder="비밀번호" type="password"/>
+</div>
+<button class="w-full bg-corporate-blue hover:bg-blue-700 text-white font-bold py-3 rounded mt-2 transition-colors flex items-center justify-center text-sm shadow-sm active:bg-blue-800" type="submit">
+                로그인
+            </button>
+</form>
+</div>
+
+</body></html>

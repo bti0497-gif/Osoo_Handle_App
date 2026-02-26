@@ -46,6 +46,15 @@ db.exec(`
     ss REAL,
     UNIQUE(date, location)
   );
+  CREATE TABLE IF NOT EXISTS kit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kit_name TEXT NOT NULL,
+    date DATE NOT NULL,
+    purchase_amount REAL,
+    usage_amount REAL,
+    current_inventory REAL,
+    UNIQUE(kit_name, date)
+  );
   CREATE TABLE IF NOT EXISTS facility_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date DATE NOT NULL,
@@ -152,8 +161,8 @@ if (db.prepare("SELECT count(*) as count FROM config_items WHERE category = 'kit
 if (db.prepare('SELECT count(*) as count FROM config_items').get().count === 0) {
   const stmt = db.prepare('INSERT INTO config_items (category, item_name, is_active, display_order) VALUES (?, ?, ?, ?)');
   ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '전력량계', '슬러지'].forEach((name, i) => stmt.run('flow', name, 1, i));
-  ['중탄산나트륨', '포도당', '팩(PAC)', '차염산나트륨', '알민산나트륨'].forEach((name, i) => {
-    stmt.run('medicine', name, ['중탄산나트륨', '포도당', '팩(PAC)'].includes(name) ? 1 : 0, i);
+  ['중탄산나트륨', '포도당', '팩(PAC)'].forEach((name, i) => {
+    stmt.run('medicine', name, 1, i);
   });
   ['암모니아성질소', '질산성질소', '인산염인', '알칼리도'].forEach((name, i) => stmt.run('water', name, 1, i));
 }

@@ -14,6 +14,24 @@ import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import StatusBar from './components/StatusBar';
 import Dashboard from './views/Dashboard';
+import { KitManagementView } from './features/kit';
+
+const PlaceholderView = ({ title }) => (
+    <div className="panel-container">
+        <div className="dynamic-panel shadow-2xl border-slate-200" style={{ width: '820px', flexShrink: 0 }}>
+            <div className="panel-header">
+                <h2 className="title">{title}</h2>
+                <p style={{ fontSize: '0.8125rem', color: '#64748b', marginTop: '0.25rem' }}>준비 중인 메뉴입니다.</p>
+            </div>
+            <div className="panel-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1' }}>
+                <div style={{ textAlign: 'center' }}>
+                    <span className="material-icons" style={{ fontSize: '48px', marginBottom: '1rem' }}>construction</span>
+                    <p style={{ fontWeight: 700 }}>이 기능은 현재 개발 중입니다.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+);
 
 function App() {
     const { user, isAuthenticated, isLoading, login, logout } = useAuthViewModel();
@@ -55,8 +73,15 @@ function App() {
             case 'flow': return <FlowManagementView currentUser={user} />;
             case 'medicine': return <MedicineManagementView currentUser={user} />;
             case 'water': return <WaterQualityView currentUser={user} />;
+            case 'kit': return <KitManagementView currentUser={user} />;
             case 'facility': return <FacilityManagementView currentUser={user} />;
             case 'log': return <DailyLogView currentUser={user} />;
+            case 'log_daily': return <PlaceholderView title="일일업무일지" />;
+            case 'log_water': return <PlaceholderView title="수질분석일지" />;
+            case 'log_med_mgmt': return <PlaceholderView title="약품관리대장" />;
+            case 'log_med_in': return <PlaceholderView title="약품입고일지" />;
+            case 'log_sludge_out': return <PlaceholderView title="슬러지반출관리대장" />;
+            case 'log_sludge_photo': return <PlaceholderView title="슬러지사진대지" />;
             case 'attendance':
                 return <AttendanceView currentUser={user} />;
             case 'members':

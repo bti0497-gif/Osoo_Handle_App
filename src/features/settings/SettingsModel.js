@@ -1,4 +1,4 @@
-import { apiClient } from '../../core/api';
+import { apiClient, supabase } from '../../core/api';
 
 export const SettingsModel = {
     async getSettings() {
@@ -24,6 +24,9 @@ export const SettingsModel = {
     async saveKitMapping(mappingData) {
         return apiClient.post('/api/settings/save-kit-mapping', mappingData);
     },
+    async saveWaterMapping(mappingData) {
+        return apiClient.post('/api/settings/save-water-mapping', mappingData);
+    },
 
     async saveMedicineMapping(mappingData) {
         return apiClient.post('/api/settings/save-medicine-mapping', mappingData);
@@ -43,5 +46,37 @@ export const SettingsModel = {
 
     async toggleConfigItem(category, name, isActive) {
         return apiClient.post('/api/settings/toggle-item', { category, name, isActive });
+    },
+
+    async syncSettingsToSupabase() {
+        try {
+            const { success, settings, configItems } = await this.getSettings();
+            if (!success) return { success: false, message: '로컬 설정을 가져오지 못했습니다.' };
+
+            if (settings) {
+                const { error: setErr } = await supabase
+                    .from('app_settings')
+                    .upsert({ ...settings, id: 1 });
+                if (setErr) console.error('Supabase app_settings error:', setErr);
+            }
+
+            if (configItems && configItems.length > 0) {
+                const { error: confErr } = await supabase
+                    .from('config_items')
+                    .upsert(configItems.map(item => ({
+                        category: item.category,
+                        item_name: item.item_name,
+                        is_active: item.is_active,
+                        display_order: item.display_order,
+                        excel_cell: item.excel_cell || null
+                    })), { onConflict: 'category,item_name' });
+                if (confErr) console.error('Supabase config_items error:', confErr);
+            }
+
+            return { success: true };
+        } catch (err) {
+            console.error('Settings Sync Error:', err);
+            return { success: false, message: err.message };
+        }
     }
 };

@@ -27,16 +27,25 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
     ]);
     const [medicineItems, setMedicineItems] = useState([
         { name: '중탄산나트륨', checked: true }, { name: '포도당', checked: true },
-        { name: '팩(PAC)', checked: true }, { name: '차염산나트륨', checked: false },
-        { name: '알민산나트륨', checked: false }
+        { name: '팩(PAC)', checked: true }
     ]);
     const [waterItems, setWaterItems] = useState([
         { name: '암모니아성질소', checked: true }, { name: '질산성질소', checked: true },
         { name: '인산염인', checked: true }, { name: '알칼리도', checked: true }
     ]);
+    const [kitItems, setKitItems] = useState([
+        { name: 'T-N (총질소)', checked: true }, { name: 'T-P (총인)', checked: true },
+        { name: 'COD (화학적산소요구량)', checked: true }, { name: 'SS (부유물질)', checked: true }
+    ]);
+    const [locationItems, setLocationItems] = useState([
+        { name: '유량조정조', checked: true }, { name: '무산소조', checked: true },
+        { name: '포기조', checked: true }, { name: '침전조', checked: true },
+        { name: '방류조', checked: true }
+    ]);
 
     const [newFlowItem, setNewFlowItem] = useState('');
     const [newMedicineItem, setNewMedicineItem] = useState('');
+    const [newLocationItem, setNewLocationItem] = useState('');
     const [excelFileName, setExcelFileName] = useState('');
     const [templateFileNames, setTemplateFileNames] = useState('');
     const [templateFiles, setTemplateFiles] = useState([]);
@@ -51,6 +60,11 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
 
     const [kitConfig, setKitConfig] = useState({ sheet: '', startRow: 1, endRow: 31, dateCol: 'A' });
     const [kitMapping, setKitMapping] = useState({});
+
+    const [waterConfig, setWaterConfig] = useState({ sheet: '', startRow: 1, endRow: 31, dateCol: 'A' });
+    const [waterMapping, setWaterMapping] = useState({});
+
+
 
     const [importProgress, setImportProgress] = useState({ current: 0, total: 0, status: 'idle', isVisible: false });
     const [importedData, setImportedData] = useState(null);
@@ -79,7 +93,9 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
             loadExcelPreview(medicineConfig.sheet, medicineConfig.startRow);
         else if (activeTab === 'kit' && kitConfig.sheet && kitConfig.startRow)
             loadExcelPreview(kitConfig.sheet, kitConfig.startRow);
-    }, [activeTab, flowConfig.sheet, flowConfig.startRow, medicineConfig.sheet, medicineConfig.startRow, kitConfig.sheet, kitConfig.startRow]);
+        else if (activeTab === 'water' && waterConfig.sheet && waterConfig.startRow)
+            loadExcelPreview(waterConfig.sheet, waterConfig.startRow);
+    }, [activeTab, flowConfig.sheet, flowConfig.startRow, medicineConfig.sheet, medicineConfig.startRow, kitConfig.sheet, kitConfig.startRow, waterConfig.sheet, waterConfig.startRow]);
 
     const loadSettings = async () => {
         try {
@@ -98,6 +114,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                 if (data.settings.flow_sheet) setFlowConfig({ sheet: data.settings.flow_sheet, startRow: data.settings.flow_start_row || 1, endRow: data.settings.flow_end_row || 31, dateCol: data.settings.flow_date_col || 'A' });
                 if (data.settings.med_sheet) setMedicineConfig({ sheet: data.settings.med_sheet, startRow: data.settings.med_start_row || 1, endRow: data.settings.med_end_row || 31, dateCol: data.settings.med_date_col || 'A' });
                 if (data.settings.kit_sheet) setKitConfig({ sheet: data.settings.kit_sheet, startRow: data.settings.kit_start_row || 1, endRow: data.settings.kit_end_row || 31, dateCol: data.settings.kit_date_col || 'A' });
+                if (data.settings.water_sheet) setWaterConfig({ sheet: data.settings.water_sheet, startRow: data.settings.water_start_row || 1, endRow: data.settings.water_end_row || 31, dateCol: data.settings.water_date_col || 'A' });
 
                 if (data.configItems?.length > 0) {
                     const flows = data.configItems.filter(i => i.category === 'flow');
@@ -115,16 +132,35 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                     }
                     const meds = data.configItems.filter(i => i.category === 'medicine');
                     if (meds.length > 0) {
-                        setMedicineItems(meds.map(i => ({ name: i.item_name, checked: !!i.is_active })));
-                        const restored = {}; meds.forEach(i => { if (i.excel_cell) restored[i.item_name] = i.excel_cell; });
+                        const baseMeds = meds.filter(i => !i.item_name.endsWith('_purchase') && !i.item_name.endsWith('_usage') && !i.item_name.endsWith('_inventory'));
+                        setMedicineItems(baseMeds.map(i => ({ name: i.item_name, checked: !!i.is_active })));
+                        const restored = {};
+                        meds.forEach(i => {
+                            if (i.excel_cell && (i.item_name.endsWith('_purchase') || i.item_name.endsWith('_usage') || i.item_name.endsWith('_inventory'))) {
+                                restored[i.item_name] = i.excel_cell;
+                            }
+                        });
                         if (Object.keys(restored).length > 0) setMedicineMapping(restored);
                     }
                     const water = data.configItems.filter(i => i.category === 'water');
-                    if (water.length > 0) setWaterItems(water.map(i => ({ name: i.item_name, checked: !!i.is_active })));
+                    if (water.length > 0) {
+                        setWaterItems(water.map(i => ({ name: i.item_name, checked: !!i.is_active })));
+                        const restored = {};
+                        water.forEach(i => { if (i.excel_cell) restored[i.item_name] = i.excel_cell; });
+                        if (Object.keys(restored).length > 0) setWaterMapping(restored);
+                    }
                     const kits = data.configItems.filter(i => i.category === 'kit');
                     if (kits.length > 0) {
-                        const restored = {}; kits.forEach(i => { if (i.excel_cell) restored[i.item_name] = i.excel_cell; });
+                        const baseKits = kits.filter(i => !i.item_name.includes('_raw') && !i.item_name.includes('_flow')); // Or just generic filter
+                        setKitItems(baseKits.filter(i => !!i.is_active || i.excel_cell === null).map(i => ({ name: i.item_name, checked: !!i.is_active })));
+
+                        const restored = {};
+                        kits.forEach(i => { if (i.excel_cell) restored[i.item_name] = i.excel_cell; });
                         if (Object.keys(restored).length > 0) setKitMapping(restored);
+                    }
+                    const locations = data.configItems.filter(i => i.category === 'location');
+                    if (locations.length > 0) {
+                        setLocationItems(locations.map(i => ({ name: i.item_name, checked: !!i.is_active })));
                     }
                 }
             }
@@ -178,6 +214,11 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                 await SettingsModel.addConfigItem('medicine', name);
                 setMedicineItems([...medicineItems, { name, checked: true }]);
                 setNewMedicineItem('');
+            } else if (type === 'location' && newLocationItem.trim()) {
+                const name = newLocationItem.trim();
+                await SettingsModel.addConfigItem('location', name);
+                setLocationItems([...locationItems, { name, checked: true }]);
+                setNewLocationItem('');
             }
         } catch (err) {
             console.error('항목 추가 실패:', err);
@@ -193,6 +234,12 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
             } else if (type === 'medicine') {
                 const n = [...medicineItems]; n[index].checked = !n[index].checked; setMedicineItems(n);
                 await SettingsModel.toggleConfigItem('medicine', n[index].name, n[index].checked);
+            } else if (type === 'kit') {
+                const n = [...kitItems]; n[index].checked = !n[index].checked; setKitItems(n);
+                await SettingsModel.toggleConfigItem('kit', n[index].name, n[index].checked);
+            } else if (type === 'location') {
+                const n = [...locationItems]; n[index].checked = !n[index].checked; setLocationItems(n);
+                await SettingsModel.toggleConfigItem('location', n[index].name, n[index].checked);
             }
         } catch (err) {
             console.error('항목 토글 실패:', err);
@@ -208,6 +255,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                 setImportedData(prog.result);
                 setImportProgress({ current: prog.total, total: prog.total, status: 'completed', isVisible: true });
                 loadSettings();
+                await SettingsModel.syncSettingsToSupabase();
             } else {
                 throw new Error(res.message);
             }
@@ -225,6 +273,25 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                 setImportedData(prog.result);
                 setImportProgress({ current: prog.total, total: prog.total, status: 'completed', isVisible: true });
                 loadSettings();
+                await SettingsModel.syncSettingsToSupabase();
+            } else {
+                throw new Error(res.message);
+            }
+        } catch (err) {
+            setImportProgress({ current: 0, total: 0, status: 'error', isVisible: true, result: err.message });
+        }
+    };
+
+    const handleSaveWaterMapping = async () => {
+        try {
+            setImportProgress({ current: 0, total: waterConfig.endRow - waterConfig.startRow + 1, status: 'processing', isVisible: true });
+            const res = await SettingsModel.saveWaterMapping({ config: waterConfig, mapping: waterMapping });
+            if (res.success) {
+                const prog = await SettingsModel.getImportProgress();
+                setImportedData(prog.result);
+                setImportProgress({ current: prog.total, total: prog.total, status: 'completed', isVisible: true });
+                loadSettings();
+                await SettingsModel.syncSettingsToSupabase();
             } else {
                 throw new Error(res.message);
             }
@@ -242,6 +309,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                 setImportedData(prog.result);
                 setImportProgress({ current: prog.total, total: prog.total, status: 'completed', isVisible: true });
                 loadSettings();
+                await SettingsModel.syncSettingsToSupabase();
             } else {
                 throw new Error(res.message);
             }
@@ -259,7 +327,9 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
             const configItems = [
                 ...flowItems.map(i => ({ ...i, category: 'flow' })),
                 ...medicineItems.map(i => ({ ...i, category: 'medicine' })),
-                ...waterItems.map(i => ({ ...i, category: 'water' }))
+                ...waterItems.map(i => ({ ...i, category: 'water' })),
+                ...kitItems.map(i => ({ ...i, category: 'kit' })),
+                ...locationItems.map(i => ({ ...i, category: 'location' }))
             ];
             const response = await SettingsModel.saveSettings({ settings: siteInfo, configItems });
 
@@ -270,9 +340,10 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
             }
 
             if (response.success) {
-                showAlert?.('설정이 성공적으로 저장되었습니다.');
+                showAlert?.('설정이 성공적으로 저장되었습니다. (서버 동기화 포함)');
                 setTemplateFiles([]);
                 loadSettings();
+                await SettingsModel.syncSettingsToSupabase();
             } else {
                 throw new Error(response.message || '알 수 없는 오류가 발생했습니다.');
             }
@@ -313,8 +384,8 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
     return {
         activeTab, setActiveTab, isLoading, hasLoadedSettings,
         siteInfo, setSiteInfo, handleSeriesChange,
-        flowItems, medicineItems, waterItems,
-        newFlowItem, setNewFlowItem, newMedicineItem, setNewMedicineItem,
+        flowItems, medicineItems, waterItems, kitItems, locationItems,
+        newFlowItem, setNewFlowItem, newMedicineItem, setNewMedicineItem, newLocationItem, setNewLocationItem,
         addItem, toggleItem,
         excelFileName, templateFileNames,
         templateFiles,
@@ -322,10 +393,11 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         flowConfig, setFlowConfig, flowMapping, setFlowMapping,
         medicineConfig, setMedicineConfig, medicineMapping, setMedicineMapping,
         kitConfig, setKitConfig, kitMapping, setKitMapping,
+        waterConfig, setWaterConfig, waterMapping, setWaterMapping,
         excelSheets, sampleRowData,
         excelStatus, isMetadataLoading, isPreviewLoading, isUploading,
         importProgress, setImportProgress, importedData, showDataModal, setShowDataModal,
-        handleSaveFlowMapping, handleSaveMedicineMapping, handleSaveKitMapping,
+        handleSaveFlowMapping, handleSaveMedicineMapping, handleSaveKitMapping, handleSaveWaterMapping,
         handleApply,
         alphabet: ALPHABET,
     };

@@ -8,18 +8,19 @@ const SettingsView = ({ currentUser }) => {
     const {
         activeTab, setActiveTab, isLoading,
         siteInfo, setSiteInfo, handleSeriesChange,
-        flowItems, medicineItems, waterItems,
-        newFlowItem, setNewFlowItem, newMedicineItem, setNewMedicineItem,
+        flowItems, medicineItems, waterItems, kitItems, locationItems,
+        newFlowItem, setNewFlowItem, newMedicineItem, setNewMedicineItem, newLocationItem, setNewLocationItem,
         addItem, toggleItem,
         excelFileName, templateFileNames,
         handleExcelFileUpload, handleTemplateFileChange,
         flowConfig, setFlowConfig, flowMapping, setFlowMapping,
         medicineConfig, setMedicineConfig, medicineMapping, setMedicineMapping,
         kitConfig, setKitConfig, kitMapping, setKitMapping,
+        waterConfig, setWaterConfig, waterMapping, setWaterMapping,
         excelSheets, sampleRowData,
         excelStatus, isMetadataLoading, isPreviewLoading, isUploading,
         importProgress, setImportProgress, importedData, showDataModal, setShowDataModal,
-        handleSaveFlowMapping, handleSaveMedicineMapping, handleSaveKitMapping,
+        handleSaveFlowMapping, handleSaveMedicineMapping, handleSaveKitMapping, handleSaveWaterMapping,
         handleApply,
         alphabet,
     } = vm;
@@ -67,7 +68,11 @@ const SettingsView = ({ currentUser }) => {
                             value={flowConfig.startRow}
                             onChange={(e) => {
                                 const start = parseInt(e.target.value) || 1;
-                                setFlowConfig({ ...flowConfig, startRow: start, endRow: start + 30 });
+                                const end = start + 30;
+                                setFlowConfig({ ...flowConfig, startRow: start, endRow: end });
+                                setMedicineConfig(prev => ({ ...prev, startRow: start, endRow: end }));
+                                setKitConfig(prev => ({ ...prev, startRow: start, endRow: end }));
+                                setWaterConfig(prev => ({ ...prev, startRow: start, endRow: end }));
                             }}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
                         />
@@ -77,7 +82,13 @@ const SettingsView = ({ currentUser }) => {
                         <input
                             type="number"
                             value={flowConfig.endRow}
-                            onChange={(e) => setFlowConfig({ ...flowConfig, endRow: parseInt(e.target.value) || 31 })}
+                            onChange={(e) => {
+                                const end = parseInt(e.target.value) || 31;
+                                setFlowConfig({ ...flowConfig, endRow: end });
+                                setMedicineConfig(prev => ({ ...prev, endRow: end }));
+                                setKitConfig(prev => ({ ...prev, endRow: end }));
+                                setWaterConfig(prev => ({ ...prev, endRow: end }));
+                            }}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
                         />
                     </div>
@@ -517,30 +528,34 @@ const SettingsView = ({ currentUser }) => {
     };
 
     const renderKitSettings = () => {
-        // 분석키트는 수질 분석과는 별개로 TN, TP, COD 등을 관리할 수 있도록 기본 항목을 상정합니다.
-        const kitItems = [
-            { name: 'T-N (총질소)' },
-            { name: 'T-P (총인)' },
-            { name: 'COD (화학적산소요구량)' },
-            { name: 'SS (부유물질)' }
-        ];
+        const activeKits = kitItems.filter(i => i.checked);
+        const SUFFIXES = ['purchase', 'usage', 'inventory'];
+        const SUFFIX_LABELS = { purchase: '구매', usage: '사용', inventory: '재고' };
+        const SUFFIX_COLORS = { purchase: '#3b82f6', usage: '#f59e0b', inventory: '#8b5cf6' };
 
         const rows = [
-            { name: '날짜 (Date)', isDate: true },
-            ...kitItems.map(item => ({ name: item.name, isDate: false }))
+            { key: '__date__', label: '날짜 (Date)', isDate: true },
+            ...activeKits.flatMap(k => SUFFIXES.map(s => ({
+                key: `${k.name}_${s}`,
+                label: `${k.name}`,
+                suffix: SUFFIX_LABELS[s],
+                suffixColor: SUFFIX_COLORS[s],
+                kitName: k.name,
+                isDate: false,
+                isFirstOfGroup: s === 'purchase'
+            })))
         ];
+
+        const allMapped = rows.every(r => {
+            if (r.isDate) return !!kitConfig.dateCol;
+            return !!kitMapping[r.key];
+        });
 
         return (
             <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-                {/* 상단: 시트 및 행 범위 설정 */}
                 <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1.5fr 1fr 1fr',
-                    gap: '1.5rem',
-                    backgroundColor: '#f8fafc',
-                    padding: '1.5rem',
-                    borderRadius: '12px',
-                    border: '1px solid #e2e8f0'
+                    display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: '1.5rem',
+                    backgroundColor: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0'
                 }}>
                     <div>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>대상 시트 선택</label>
@@ -556,21 +571,14 @@ const SettingsView = ({ currentUser }) => {
                     </div>
                     <div>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>데이터 시작 행</label>
-                        <input
-                            type="number"
-                            value={kitConfig.startRow}
-                            onChange={(e) => {
-                                const start = parseInt(e.target.value) || 1;
-                                setKitConfig({ ...kitConfig, startRow: start, endRow: start + 30 });
-                            }}
+                        <input type="number" value={kitConfig.startRow}
+                            onChange={(e) => { const s = parseInt(e.target.value) || 1; setKitConfig({ ...kitConfig, startRow: s, endRow: s + 30 }); }}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
                         />
                     </div>
                     <div>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>데이터 종료 행</label>
-                        <input
-                            type="number"
-                            value={kitConfig.endRow}
+                        <input type="number" value={kitConfig.endRow}
                             onChange={(e) => setKitConfig({ ...kitConfig, endRow: parseInt(e.target.value) || 31 })}
                             style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
                         />
@@ -583,104 +591,282 @@ const SettingsView = ({ currentUser }) => {
                         <p style={{ fontSize: '0.8125rem', color: '#94a3b8', fontWeight: 600 }}>키트 설정을 시작하려면 먼저 엑셀 시트를 선택해주세요.</p>
                     </div>
                 ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', position: 'relative' }}>
-                        {/* 프리뷰 로딩 오버레이 */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0', position: 'relative' }}>
                         {isPreviewLoading && (
                             <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(248,250,252,0.85)', borderRadius: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 5, gap: '10px' }}>
                                 <div style={{ width: '28px', height: '28px', border: '3px solid #e2e8f0', borderTopColor: '#1e293b', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
                                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b' }}>시작행 데이터 불러오는 중...</span>
                             </div>
                         )}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', padding: '0 12px', borderBottom: '2px solid #1e293b', paddingBottom: '8px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '120px 50px 140px 1fr', padding: '0 12px', borderBottom: '2px solid #1e293b', paddingBottom: '8px', marginBottom: '4px', columnGap: '8px' }}>
                             <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b' }}>키트 항목</span>
-                            <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b' }}>엑셀 칼럼 선택</span>
-                            <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b' }}>시작행 데이터 프리뷰</span>
+                            <span></span>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b' }}>엑셀칼럼 선택</span>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b' }}>프리뷰</span>
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            {rows.map((row, idx) => (
-                                <div key={idx} style={{
-                                    display: 'grid',
-                                    gridTemplateColumns: '1.2fr 1fr 1fr',
-                                    padding: '12px',
-                                    backgroundColor: idx % 2 === 0 ? '#fff' : '#f8fafc',
-                                    borderRadius: '8px',
-                                    alignItems: 'center',
-                                    border: '1px solid #f1f5f9'
-                                }}>
-                                    <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155' }}>{row.name}</span>
-                                    <select
-                                        value={row.isDate ? kitConfig.dateCol : kitMapping[row.name]}
-                                        onChange={(e) => {
-                                            if (row.isDate) setKitConfig({ ...kitConfig, dateCol: e.target.value });
-                                            else setKitMapping({ ...kitMapping, [row.name]: e.target.value });
-                                        }}
-                                        style={{ width: '120px', height: '34px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700 }}
-                                    >
-                                        <option value="">선택...</option>
-                                        {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
-                                    </select>
-                                    <span style={{
-                                        fontSize: '0.75rem', fontWeight: 700,
-                                        color: (row.isDate ? kitConfig.dateCol : kitMapping[row.name]) ? '#059669' : '#94a3b8',
-                                        backgroundColor: (row.isDate ? kitConfig.dateCol : kitMapping[row.name]) ? '#f0fdf4' : '#f1f5f9',
-                                        padding: '6px 10px', borderRadius: '6px', minWidth: '100px', textAlign: 'center'
-                                    }}>
-                                        {(row.isDate ? sampleRowData[kitConfig.dateCol] : sampleRowData[kitMapping[row.name]]) || '-- No Data --'}
-                                    </span>
-                                </div>
-                            ))}
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+                            {/* 날짜 행 */}
+                            {(() => {
+                                const dateCol = kitConfig.dateCol;
+                                return (
+                                    <div style={{ display: 'grid', gridTemplateColumns: '120px 50px 140px 1fr', padding: '8px 12px', backgroundColor: '#f0f9ff', borderRadius: '8px', alignItems: 'center', border: '1px solid #bae6fd', marginBottom: '8px', columnGap: '8px' }}>
+                                        <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155', textAlign: 'center' }}>날짜 (Date)</span>
+                                        <span></span>
+                                        <select value={dateCol || 'A'} onChange={(e) => setKitConfig({ ...kitConfig, dateCol: e.target.value })}
+                                            style={{ width: '120px', height: '34px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700 }}>
+                                            <option value="">선택...</option>
+                                            {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
+                                        </select>
+                                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: dateCol ? '#059669' : '#94a3b8', backgroundColor: dateCol ? '#f0fdf4' : '#f1f5f9', padding: '6px 10px', borderRadius: '6px', width: 'fit-content', minWidth: '100px', textAlign: 'center' }}>
+                                            {(dateCol && sampleRowData[dateCol]) || '-- No Data --'}
+                                        </span>
+                                    </div>
+                                );
+                            })()}
+                            {/* 키트 그룹 */}
+                            {activeKits.map((kit, kitIdx) => {
+                                const groupRows = rows.filter(r => !r.isDate && r.kitName === kit.name);
+                                return (
+                                    <div key={kit.name} style={{ display: 'grid', gridTemplateColumns: '120px 50px 140px 1fr', columnGap: '8px', borderBottom: kitIdx < activeKits.length - 1 ? '1px solid #e2e8f0' : 'none', paddingBottom: kitIdx < activeKits.length - 1 ? '6px' : 0, marginBottom: kitIdx < activeKits.length - 1 ? '6px' : 0, padding: '0 12px' }}>
+                                        <div style={{ gridColumn: '1 / 2', gridRow: `1 / ${groupRows.length + 1}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <span style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#1e293b' }}>{kit.name}</span>
+                                        </div>
+                                        {groupRows.map((row, rIdx) => {
+                                            const colKey = kitMapping[row.key] || '';
+                                            const hasCol = !!colKey;
+                                            return (
+                                                <React.Fragment key={row.key}>
+                                                    <div style={{ gridColumn: '2 / 3', gridRow: rIdx + 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px 0' }}>
+                                                        <span style={{ fontSize: '0.625rem', fontWeight: 800, color: 'white', backgroundColor: row.suffixColor, padding: '2px 8px', borderRadius: '4px', textAlign: 'center' }}>{row.suffix}</span>
+                                                    </div>
+                                                    <div style={{ gridColumn: '3 / 4', gridRow: rIdx + 1, display: 'flex', alignItems: 'center', padding: '5px 0' }}>
+                                                        <select value={colKey} onChange={(e) => setKitMapping({ ...kitMapping, [row.key]: e.target.value })}
+                                                            style={{ width: '120px', height: '34px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700 }}>
+                                                            <option value="">선택...</option>
+                                                            {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
+                                                        </select>
+                                                    </div>
+                                                    <div style={{ gridColumn: '4 / 5', gridRow: rIdx + 1, display: 'flex', alignItems: 'center', padding: '5px 0' }}>
+                                                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: hasCol ? '#059669' : '#94a3b8', backgroundColor: hasCol ? '#f0fdf4' : '#f1f5f9', padding: '6px 10px', borderRadius: '6px', minWidth: '100px', textAlign: 'center' }}>
+                                                            {(hasCol && sampleRowData[colKey]) || '-- No Data --'}
+                                                        </span>
+                                                    </div>
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                 )}
 
                 {kitConfig.sheet && (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem', gap: '0.75rem' }}>
-                        <button
-                            onClick={() => setShowDataModal(true)}
-                            disabled={!importedData}
+                        <button onClick={() => setShowDataModal(true)} disabled={!importedData}
                             style={{
-                                width: '160px', height: '50px',
-                                backgroundColor: importedData ? '#f1f5f9' : '#f8fafc',
-                                color: importedData ? '#1e293b' : '#cbd5e1',
-                                border: '1.5px solid #cbd5e1', borderRadius: '12px',
-                                fontSize: '0.9375rem', fontWeight: 900,
-                                cursor: importedData ? 'pointer' : 'not-allowed',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
-                            }}
-                        >
-                            <span className="material-icons">visibility</span>
-                            저장된 데이타보기
+                                width: '160px', height: '50px', backgroundColor: importedData ? '#f1f5f9' : '#f8fafc', color: importedData ? '#1e293b' : '#cbd5e1',
+                                border: '1.5px solid #cbd5e1', borderRadius: '12px', fontSize: '0.9375rem', fontWeight: 900,
+                                cursor: importedData ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                            }}>
+                            <span className="material-icons">visibility</span>저장된 데이타보기
                         </button>
                         <button
                             onClick={async () => {
-                                const isAllMapped = rows.every(r => r.isDate ? kitConfig.dateCol : kitMapping[r.name]);
-                                if (!isAllMapped) {
-                                    await showAlert("모든 항목의 콤보박스 선택이 완료되어야 저장할 수 있습니다.");
+                                if (!allMapped) {
+                                    await showAlert("모든 키트 항목의 칼럼 선택이 완료되어야 저장할 수 있습니다.");
                                     return;
                                 }
-                                const confirmed = await showConfirm("기존 분석 데이터를 데이터베이스에 저장하시겠습니까?");
-                                if (confirmed) {
-                                    handleSaveKitMapping();
-                                }
+                                const confirmed = await showConfirm("기존 키트 데이터를 데이터베이스에 저장하시겠습니까?");
+                                if (confirmed) handleSaveKitMapping();
                             }}
-                            disabled={!rows.every(r => r.isDate ? kitConfig.dateCol : kitMapping[r.name])}
+                            disabled={!allMapped}
                             style={{
-                                width: '240px', height: '50px',
-                                backgroundColor: rows.every(r => r.isDate ? kitConfig.dateCol : kitMapping[r.name]) ? '#1e293b' : '#cbd5e1',
-                                color: 'white', border: 'none', borderRadius: '12px', fontSize: '0.9375rem', fontWeight: 900,
-                                cursor: rows.every(r => r.isDate ? kitConfig.dateCol : kitMapping[r.name]) ? 'pointer' : 'not-allowed',
-                                transition: 'all 0.2s',
+                                width: '240px', height: '50px', backgroundColor: allMapped ? '#1e293b' : '#cbd5e1', color: 'white',
+                                border: 'none', borderRadius: '12px', fontSize: '0.9375rem', fontWeight: 900,
+                                cursor: allMapped ? 'pointer' : 'not-allowed', transition: 'all 0.2s',
                                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
-                            }}
-                        >
-                            <span className="material-icons">science</span>
-                            키트 데이터 저장하기
+                            }}>
+                            <span className="material-icons">science</span>키트 데이터 저장하기
                         </button>
                     </div>
                 )}
             </div>
         );
     };
+
+    const renderWaterSettings = () => {
+        const activeLocations = locationItems.filter(i => i.checked);
+        const waterBaseParams = [
+            { id: 'nh3_n', name: '암모니아성질소' },
+            { id: 'no3_n', name: '질산성질소' },
+            { id: 'po4_p', name: '인산염인' },
+            { id: 'alkalinity', name: '알칼리도' }
+        ];
+
+        // PO4-P special rule locations
+        const po4pLocations = ['유량조정조', '포기조', '방류조'];
+
+        // Determine which mapping keys are required
+        let requiredKeys = [];
+        waterBaseParams.forEach(param => {
+            activeLocations.forEach(loc => {
+                if (param.id === 'po4_p' && !po4pLocations.includes(loc.name)) return;
+                // For MBR, '침전조' is already filtered out of activeLocations in SettingsView if handled correctly, but we ensure it here too via basicSettings logic
+                requiredKeys.push(`${param.name}_${loc.name}`);
+            });
+        });
+
+        const isAllMapped = !!waterConfig.dateCol && requiredKeys.every(k => !!waterMapping[k]);
+
+        return (
+            <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+                <div style={{
+                    display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: '1.5rem',
+                    backgroundColor: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0'
+                }}>
+                    <div>
+                        <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>대상 시트 선택</label>
+                        <select
+                            value={waterConfig.sheet}
+                            onChange={(e) => setWaterConfig({ ...waterConfig, sheet: e.target.value })}
+                            disabled={isMetadataLoading}
+                            style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700, opacity: isMetadataLoading ? 0.5 : 1 }}
+                        >
+                            <option value="">{isMetadataLoading ? '시트 목록 불러오는 중...' : '시트를 선택하세요...'}</option>
+                            {excelSheets.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>시작 행</label>
+                        <input
+                            type="number"
+                            value={waterConfig.startRow}
+                            onChange={(e) => {
+                                const start = parseInt(e.target.value) || 1;
+                                setWaterConfig({ ...waterConfig, startRow: start, endRow: start + 30 });
+                            }}
+                            style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
+                        />
+                    </div>
+                    <div>
+                        <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>종료 행</label>
+                        <input
+                            type="number"
+                            value={waterConfig.endRow}
+                            onChange={(e) => setWaterConfig({ ...waterConfig, endRow: parseInt(e.target.value) || 31 })}
+                            style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
+                        />
+                    </div>
+                </div>
+
+                {!waterConfig.sheet ? (
+                    <div style={{ padding: '3rem 0', textAlign: 'center', backgroundColor: '#fcfcfc', border: '1.5px dashed #e2e8f0', borderRadius: '12px' }}>
+                        <span className="material-icons" style={{ fontSize: '32px', color: '#cbd5e1', marginBottom: '10px' }}>water_drop</span>
+                        <p style={{ fontSize: '0.8125rem', color: '#94a3b8', fontWeight: 600 }}>수질 설정을 시작하려면 먼저 엑셀 시트를 선택해주세요.</p>
+                    </div>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', position: 'relative' }}>
+                        {isPreviewLoading && (
+                            <div style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(248,250,252,0.85)', borderRadius: '12px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 5, gap: '10px' }}>
+                                <div style={{ width: '28px', height: '28px', border: '3px solid #e2e8f0', borderTopColor: '#1e293b', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+                                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b' }}>데이터 불러오는 중...</span>
+                            </div>
+                        )}
+                        <div style={{ display: 'grid', gridTemplateColumns: '120px 100px 140px 1fr', padding: '0 12px', borderBottom: '2px solid #1e293b', paddingBottom: '8px' }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b' }}>수질 항목</span>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', textAlign: 'center' }}>분석 장소</span>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b' }}>엑셀 칼럼 선택</span>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b' }}>데이터 프리뷰</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+                            {/* 날짜 행 */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '120px 100px 140px 1fr', padding: '8px 12px', backgroundColor: '#f0f9ff', borderRadius: '8px', alignItems: 'center', border: '1px solid #bae6fd', marginBottom: '8px', columnGap: '8px' }}>
+                                <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155' }}>날짜 (Date)</span>
+                                <span></span>
+                                <select value={waterConfig.dateCol || 'A'} onChange={(e) => setWaterConfig({ ...waterConfig, dateCol: e.target.value })}
+                                    style={{ width: '120px', height: '34px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700 }}>
+                                    <option value="">선택...</option>
+                                    {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
+                                </select>
+                                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: waterConfig.dateCol ? '#059669' : '#94a3b8', backgroundColor: waterConfig.dateCol ? '#f0fdf4' : '#f1f5f9', padding: '6px 10px', borderRadius: '6px', width: 'fit-content', minWidth: '100px', textAlign: 'center' }}>
+                                    {(waterConfig.dateCol && sampleRowData[waterConfig.dateCol]) || '-- No Data --'}
+                                </span>
+                            </div>
+
+                            {/* Base Parameters (Location specific) */}
+                            {waterBaseParams.map((param, pIdx) => {
+                                const paramLocations = activeLocations.filter(loc => {
+                                    if (param.id === 'po4_p') return po4pLocations.includes(loc.name);
+                                    return true;
+                                });
+
+                                return (
+                                    <div key={param.id} style={{ display: 'grid', gridTemplateColumns: '120px 100px 140px 1fr', columnGap: '8px', borderBottom: pIdx < waterBaseParams.length - 1 ? '1px solid #e2e8f0' : 'none', paddingBottom: pIdx < waterBaseParams.length - 1 ? '6px' : 0, marginBottom: pIdx < waterBaseParams.length - 1 ? '6px' : 0, padding: '0 12px' }}>
+                                        <div style={{ gridColumn: '1 / 2', gridRow: `1 / ${paramLocations.length + 1}`, display: 'flex', alignItems: 'center' }}>
+                                            <span style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#1e293b' }}>{param.name}</span>
+                                        </div>
+                                        {paramLocations.map((loc, lIdx) => {
+                                            const mapKey = `${param.name}_${loc.name}`;
+                                            const colKey = waterMapping[mapKey] || '';
+                                            const hasCol = !!colKey;
+                                            return (
+                                                <React.Fragment key={mapKey}>
+                                                    <div style={{ gridColumn: '2 / 3', gridRow: lIdx + 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px 0' }}>
+                                                        <span style={{ fontSize: '0.625rem', fontWeight: 800, color: '#64748b', backgroundColor: '#f1f5f9', padding: '2px 8px', borderRadius: '4px', textAlign: 'center', border: '1px solid #e2e8f0' }}>{loc.name}</span>
+                                                    </div>
+                                                    <div style={{ gridColumn: '3 / 4', gridRow: lIdx + 1, display: 'flex', alignItems: 'center', padding: '5px 0' }}>
+                                                        <select value={colKey} onChange={(e) => setWaterMapping({ ...waterMapping, [mapKey]: e.target.value })}
+                                                            style={{ width: '120px', height: '34px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700 }}>
+                                                            <option value="">선택...</option>
+                                                            {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
+                                                        </select>
+                                                    </div>
+                                                    <div style={{ gridColumn: '4 / 5', gridRow: lIdx + 1, display: 'flex', alignItems: 'center', padding: '5px 0' }}>
+                                                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: hasCol ? '#059669' : '#94a3b8', backgroundColor: hasCol ? '#f0fdf4' : '#f1f5f9', padding: '6px 10px', borderRadius: '6px', minWidth: '100px', textAlign: 'center' }}>
+                                                            {(hasCol && sampleRowData[colKey]) || '-- No Data --'}
+                                                        </span>
+                                                    </div>
+                                                </React.Fragment>
+                                            );
+                                        })}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                {waterConfig.sheet && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                        <button
+                            onClick={async () => {
+                                if (!isAllMapped) {
+                                    await showAlert("모든 항목의 콤보박스 선택이 완료되어야 저장할 수 있습니다.");
+                                    return;
+                                }
+                                const confirmed = await showConfirm("수질 분석 데이터를 저장하시겠습니까?");
+                                if (confirmed) handleSaveWaterMapping();
+                            }}
+                            disabled={!isAllMapped}
+                            style={{
+                                width: '240px', height: '50px',
+                                backgroundColor: isAllMapped ? '#1e293b' : '#cbd5e1',
+                                color: 'white', border: 'none', borderRadius: '12px', fontSize: '0.9375rem', fontWeight: 900,
+                                cursor: isAllMapped ? 'pointer' : 'not-allowed',
+                                transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                            }}
+                        >
+                            <span className="material-icons">water_drop</span>
+                            수질 데이터 저장하기
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
 
     // handleApply → moved to useSettingsViewModel
 
@@ -790,8 +976,8 @@ const SettingsView = ({ currentUser }) => {
                 ))}
             </div>
 
-            {/* 중간 섹션: 3 Columns */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '2rem' }}>
+            {/* 중간 섹션: 4 Columns */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '1.25rem' }}>
                 {/* Column 1: 검침항목 */}
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                     <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', paddingBottom: '0.6rem', borderBottom: '2px solid #1e293b', marginBottom: '0.75rem' }}>검침항목</h3>
@@ -832,11 +1018,24 @@ const SettingsView = ({ currentUser }) => {
                     </div>
                 </div>
 
-                {/* Column 3: 수질항목 */}
+                {/* Column 3: 분석장소 */}
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', paddingBottom: '0.6rem', borderBottom: '2px solid #1e293b', marginBottom: '0.75rem' }}>수질항목</h3>
-                    {renderItemGrid(waterItems, 'water')}
-                    <p style={{ marginTop: '0.75rem', fontSize: '0.625rem', color: '#94a3b8', fontWeight: 600, lineHeight: 1.4 }}>* 수질은 관리 양식에 맞춰 고정되어 관리됩니다.</p>
+                    <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', paddingBottom: '0.6rem', borderBottom: '2px solid #1e293b', marginBottom: '0.75rem' }}>분석장소</h3>
+                    {renderItemGrid(locationItems.filter(item => !(siteInfo.method === 'MBR' && item.name === '침전조')), 'location')}
+                    <div style={{ display: 'flex', gap: '0.4rem', marginTop: '1rem' }}>
+                        <input
+                            placeholder="장소 추가..."
+                            value={newLocationItem}
+                            onChange={(e) => setNewLocationItem(e.target.value)}
+                            style={{ flex: 1, border: '1px solid #cbd5e1', height: '34px', padding: '0 10px', borderRadius: '6px', fontSize: '0.75rem' }}
+                        />
+                        <button
+                            onClick={() => addItem('location')}
+                            style={{ width: '34px', height: '34px', backgroundColor: '#1e293b', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                            <span className="material-icons" style={{ fontSize: '18px' }}>add</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -1084,12 +1283,8 @@ const SettingsView = ({ currentUser }) => {
                         {activeTab === 'basic' ? renderBasicSettings() :
                             activeTab === 'flow' ? renderFlowSettings() :
                                 activeTab === 'medicine' ? renderMedicineSettings() :
-                                    activeTab === 'kit' ? renderKitSettings() : (
-                                        <div style={{ padding: '4rem 0', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1', gap: '1rem' }}>
-                                            <span className="material-icons" style={{ fontSize: '48px' }}>construction</span>
-                                            <span style={{ fontWeight: 700, fontSize: '1.125rem' }}>준비 중인 메뉴입니다.</span>
-                                        </div>
-                                    )}
+                                    activeTab === 'water' ? renderWaterSettings() :
+                                        activeTab === 'kit' ? renderKitSettings() : null}
                     </div>
                     {renderImportProgress()}
                     {renderDataModal()}
