@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useWaterQualityViewModel } from './useWaterQualityViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogProvider';
-import DataGrid from '../../components/common/DataGrid';
+import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
 
 const WaterQualityView = ({ currentUser }) => {
     const { showAlert } = useDialog();
@@ -41,6 +41,10 @@ const WaterQualityView = ({ currentUser }) => {
     ];
 
     const hasPending = Object.keys(pendingChanges).length > 0;
+
+    const totalSubColsCount = (activeLocations.length * 3) + activeLocations.filter(loc => po4pLocations.includes(loc.name)).length;
+    // 동적 너비 계산 (최소 714px 유지, 서브컬럼당 45px + 헤더 84px)
+    const calculatedWidth = Math.max(714, 84 + totalSubColsCount * 45);
 
     const gridCols = cols.map(c => {
         const subCols = activeLocations
@@ -120,6 +124,36 @@ const WaterQualityView = ({ currentUser }) => {
         setSelectedDate(null);
     };
 
+    const getRowStyle = (row, isSelected, isHovered) => {
+        const isToday = row.date === todayStr;
+        const isFuture = row.isFuture;
+        const isEditingMode = isManualEditMode;
+
+        let bg = 'transparent';
+        let opacity = 1;
+
+        if (isEditingMode && !isSelected) {
+            bg = '#f8fafc';
+            opacity = 0.5;
+        } else if (isSelected) {
+            bg = '#fef3c7';
+        } else if (isToday) {
+            bg = '#eff6ff';
+        } else if (isFuture) {
+            bg = '#fafafa';
+        } else if (isHovered && !isEditingMode) {
+            bg = '#e2e8f0';
+        }
+
+        return {
+            background: bg !== 'transparent' ? bg : undefined,
+            opacity,
+            pointerEvents: (isEditingMode && !isSelected) ? 'none' : 'auto',
+            cursor: (isEditingMode && !isSelected) ? 'default' : (isFuture ? 'default' : 'pointer'),
+            ...(isSelected ? { outline: '2px solid #f59e0b', outlineOffset: -2, zIndex: 6 } : isToday ? { outline: '2px solid #3b82f6', outlineOffset: -2, zIndex: 5 } : {})
+        };
+    };
+
     const renderCell = (row, colGroup, subCol) => {
         const colId = subCol.id;
         const val = row[colId];
@@ -189,35 +223,6 @@ const WaterQualityView = ({ currentUser }) => {
         );
     };
 
-    const getRowStyle = (row, isSelected, isHovered) => {
-        const isToday = row.date === todayStr;
-        const isFuture = row.isFuture;
-        const isEditingMode = isManualEditMode;
-
-        let bg = '#fff';
-        let opacity = 1;
-
-        if (isEditingMode && !isSelected) {
-            bg = '#f8fafc';
-            opacity = 0.5;
-        } else if (isSelected) {
-            bg = '#fef3c7';
-        } else if (isToday) {
-            bg = '#eff6ff';
-        } else if (isFuture) {
-            bg = '#fafafa';
-        } else if (isHovered && !isEditingMode) {
-            bg = '#e2e8f0'; // Darkened contrast
-        }
-
-        return {
-            background: bg,
-            opacity,
-            pointerEvents: (isEditingMode && !isSelected) ? 'none' : 'auto',
-            cursor: (isEditingMode && !isSelected) ? 'default' : (isFuture ? 'default' : 'pointer'),
-            ...(isSelected ? { outline: '2px solid #f59e0b', outlineOffset: -2, zIndex: 6 } : isToday ? { outline: '2px solid #3b82f6', outlineOffset: -2, zIndex: 5 } : {})
-        };
-    };
 
     const renderRowHeader = (row) => {
         const isToday = row.date === todayStr;
@@ -236,30 +241,68 @@ const WaterQualityView = ({ currentUser }) => {
     };
 
     return (
-        <DataGrid
-            title="수질 분석 데이터 등록"
-            description="노란색 셀을 클릭하여 분석 수치를 입력하세요. (과거 데이터를 수정하려면 해당 행을 클릭하세요)"
-            columns={gridCols}
-            data={history}
-            keyField="date"
-            scrollToKey={todayStr}
-            width={910}
+        <div style={{
+            display: 'flex', flexDirection: 'column',
+            height: '100%', width: calculatedWidth,
+            backgroundColor: '#FFFFFF',
+            borderRight: '1px solid #e2e8f0',
+        }}>
+            <AdvancedDataGrid
+                title="수질 분석 데이터 등록"
+                description="노란색 셀을 클릭하여 분석 수치를 입력하세요. (과거 데이터를 수정하려면 해당 행을 클릭하세요)"
+                columns={gridCols}
+                data={history}
+                keyField="date"
+                scrollToKey={todayStr}
+                width={calculatedWidth}
+                height={400}
 
-            selectedRowKey={selectedDate}
-            onRowSelect={handleRowSelect}
-            onRowDoubleClick={handleRowDoubleClick}
-            getRowStyle={getRowStyle}
+                showBottomBar={false}
+                selectionMode="row"
+                enableEditing={false}
+                contextMenu={false}
+                rowHeaderWidth={84}
+                rowHeaderLabel="날짜"
 
-            renderRowHeader={renderRowHeader}
-            renderCell={renderCell}
+                onRowSelect={handleRowSelect}
+                onCellDoubleClick={(row) => handleRowDoubleClick(row)}
+                getRowStyle={getRowStyle}
+                renderRowHeader={(row) => renderRowHeader(row)}
+                renderCell={renderCell}
 
-            onSave={handleSave}
-            onRefresh={refresh}
-            saveLabel={isManualEditMode ? "수정사항 저장" : "데이터 저장"}
-            hasPending={hasPending || isManualEditMode}
-            loading={loading}
-            extraActions={extraActions}
-        />
+                onRefresh={refresh}
+            />
+
+            {/* 가운데 여유 공간 */}
+            <div style={{ flex: 1 }} />
+
+            {/* 하단 바 */}
+            <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '8px 16px', borderTop: '1px solid #e2e8f0', background: '#f8fafc', flexShrink: 0
+            }}>
+                <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>
+                    총 {history.length}행
+                </span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                    {extraActions}
+                    <button
+                        onClick={handleSave}
+                        disabled={!(hasPending || isManualEditMode) || loading}
+                        style={{
+                            padding: '5px 14px', borderRadius: 6, border: 'none',
+                            fontWeight: 800, fontSize: 11, cursor: (hasPending || isManualEditMode) ? 'pointer' : 'default',
+                            background: (hasPending || isManualEditMode) ? '#1e293b' : '#e2e8f0',
+                            color: (hasPending || isManualEditMode) ? '#fff' : '#94a3b8',
+                            display: 'flex', alignItems: 'center', gap: 4
+                        }}
+                    >
+                        <span className="material-icons" style={{ fontSize: 14 }}>{(hasPending || isManualEditMode) ? 'save_alt' : 'check'}</span>
+                        {loading ? '저장 중...' : (isManualEditMode || hasPending ? (isManualEditMode ? "수정사항 저장" : "데이터 저장") : '변경사항 없음')}
+                    </button>
+                </div>
+            </div>
+        </div>
     );
 };
 

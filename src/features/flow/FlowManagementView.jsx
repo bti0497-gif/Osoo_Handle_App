@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useFlowViewModel } from './useFlowViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogProvider';
-import DataGrid from '../../components/common/DataGrid';
+import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
 
 const FlowManagementView = ({ currentUser }) => {
     const { showAlert } = useDialog();
@@ -17,8 +17,22 @@ const FlowManagementView = ({ currentUser }) => {
     const [doubleClickedDate, setDoubleClickedDate] = useState(null);
     const [activeInput, setActiveInput] = useState(null); // { date, colId, type }
     const [localValue, setLocalValue] = useState(null);
+    const [isElecReverse, setIsElecReverse] = useState(() => localStorage.getItem('flowElecReverse') === 'true');
 
     const todayStr = new Date().toISOString().split('T')[0];
+
+    // ESC 키로 수동 편집 모드 종료
+    useEffect(() => {
+        const handleEsc = (e) => {
+            if (e.key === 'Escape' && (isManualEditMode || doubleClickedDate)) {
+                setIsManualEditMode(false);
+                setDoubleClickedDate(null);
+                setSelectedDate(null);
+            }
+        };
+        window.addEventListener('keydown', handleEsc);
+        return () => window.removeEventListener('keydown', handleEsc);
+    }, [isManualEditMode, doubleClickedDate]);
 
     const activeFlows = flowItems.filter(i => i.checked);
     const hasPending = Object.keys(pendingChanges).length > 0;
@@ -38,9 +52,11 @@ const FlowManagementView = ({ currentUser }) => {
         return {
             id: c.name,
             label: c.name.replace('계', ''),
+            headerBgColor: baseColors[c.name] || '#1e3a8a',
+            headerTextColor: '#fff',
             subCols: [
-                { id: 'raw', label: c.name === '슬러지' ? '반출량' : '적산', width: 68, headerStyle: { background: baseColors[c.name] || '#1e3a8a', color: '#fff' } },
-                { id: 'diff', label: '누계', width: 52, headerStyle: { background: '#fff', color: '#1e40af' } }
+                { id: `${c.name}_raw`, label: c.name === '슬러지' ? '반출량' : '적산', width: 68, headerBgColor: baseColors[c.name] || '#1e3a8a', headerTextColor: '#fff' },
+                { id: `${c.name}_diff`, label: '누계', width: 52, headerBgColor: '#fff', headerTextColor: '#1e40af' }
             ]
         };
     });
@@ -50,7 +66,7 @@ const FlowManagementView = ({ currentUser }) => {
 
     const handleRowSelect = (row) => {
         if (isManualEditMode && selectedDate === row.date) return;
-        setSelectedDate(row.date === selectedDate ? null : row.date);
+        setSelectedDate(row.date);
     };
 
     const handleRowDoubleClick = (row) => {
@@ -63,6 +79,11 @@ const FlowManagementView = ({ currentUser }) => {
 
     const extraActions = (
         <>
+            {/* 전력량 누계 계산 체크박스 */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: '#64748b', cursor: 'pointer', userSelect: 'none' }}>
+                <input type="checkbox" checked={isElecReverse} onChange={e => { setIsElecReverse(e.target.checked); localStorage.setItem('flowElecReverse', e.target.checked); }} style={{ accentColor: '#0e7490' }} />
+                전력량 누계 계산
+            </label>
             {selectedDate && !isManualEditMode && (
                 <button
                     onClick={() => setIsManualEditMode(true)}
@@ -105,28 +126,100 @@ const FlowManagementView = ({ currentUser }) => {
         setSelectedDate(null);
     };
 
-    const renderCell = (row, colGroup, subCol) => {
-        const c = colGroup;
-        const d = row[c.id]?.isUserInput
-            ? { reading: row[c.id].raw, flow: row[c.id].diff, error: row[c.id].error }
-            : correctData(row[c.id]);
+    const renderCell = (row, col, val) => {
+        const flowName = col.parentId;
+        if (!flowName) return val;
+        const subType = col.id.endsWith('_raw') ? 'raw' : 'diff';
 
-        const changed = pendingChanges[row.date]?.[c.id];
+        // 수동 편집 모드에서 선택된 행이 아니면 비활성화
+        const isLockedOut = isManualEditMode && selectedDate !== row.date;
+        if (isLockedOut) {
+            const ld = row[flowName]?.isUserInput
+                ? { reading: row[flowName].raw, flow: row[flowName].diff }
+                : correctData(row[flowName]);
+            const lockVal = subType === 'raw'
+                ? (ld.reading != null ? Number(ld.reading).toLocaleString() : '-')
+                : (ld.flow != null ? Number(ld.flow).toLocaleString() : '-');
+            return (
+                <div style={{ position: 'absolute', inset: 0, padding: '0 4px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', opacity: 0.4, pointerEvents: 'none', background: '#f8fafc' }}>
+                    <span style={{ fontSize: subType === 'raw' ? 11 : 10.5, color: '#94a3b8' }}>{lockVal}</span>
+                </div>
+            );
+        }
+
+        const d = row[flowName]?.isUserInput
+            ? { reading: row[flowName].raw, flow: row[flowName].diff, error: row[flowName].error }
+            : correctData(row[flowName]);
+
+        const changed = pendingChanges[row.date]?.[flowName];
         const isSelected = selectedDate === row.date;
         const isToday = row.date === todayStr;
         const isFuture = row.isFuture;
         const isManual = isSelected && isManualEditMode;
         const isCellDoubleClicked = doubleClickedDate === row.date;
+        // 전력량 역계산 모드: 누계를 입력하면 적산 자동계산
+        const isElecRev = isElecReverse && flowName === '전력량계' && isToday;
 
         const isReadOnly = (isFuture || row.date !== todayStr) && !isManual && !isCellDoubleClicked;
 
-        const isRawActive = activeInput?.date === row.date && activeInput?.colId === c.id && activeInput?.type === 'raw';
-        const isDiffActive = activeInput?.date === row.date && activeInput?.colId === c.id && activeInput?.type === 'diff';
+        const isRawActive = activeInput?.date === row.date && activeInput?.colId === flowName && activeInput?.type === 'raw';
+        const isDiffActive = activeInput?.date === row.date && activeInput?.colId === flowName && activeInput?.type === 'diff';
 
-        if (subCol.id === 'raw') {
+        // 전력량 역계산: raw 셀은 자동계산, diff 셀은 편집 가능
+        if (isElecRev && subType === 'raw') {
             const displayVal = d.reading != null ? Number(d.reading).toLocaleString() : '';
             return (
-                <div style={{ width: '100%', height: '100%', padding: '0 4px', background: d.error ? '#fee2e2' : (isManual || isCellDoubleClicked || isToday ? '#fef08a' : (isFuture ? '#f5f5f5' : 'transparent')), display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box' }} title={d.error || ''}>
+                <div style={{ position: 'absolute', inset: 0, padding: '0 4px', background: '#e0f2fe', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box', pointerEvents: 'none' }} title="누계값으로 자동 계산">
+                    <span style={{ fontWeight: 700, fontSize: 11, color: '#0369a1' }}>{displayVal || '-'}</span>
+                </div>
+            );
+        }
+        if (isElecRev && subType === 'diff') {
+            const displayVal = d.flow != null ? Number(d.flow).toLocaleString() : '';
+            return (
+                <div style={{ position: 'absolute', inset: 0, padding: '0 4px', background: '#fef08a', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box', pointerEvents: 'none' }}>
+                    <input
+                        type="text"
+                        style={{
+                            width: '100%', height: '100%', outline: 'none', border: 'none',
+                            textAlign: 'right', fontWeight: 700, fontSize: 11,
+                            color: changed ? '#1d4ed8' : '#1e293b',
+                            background: 'transparent',
+                            boxSizing: 'border-box',
+                            pointerEvents: 'auto'
+                        }}
+                        value={isDiffActive ? localValue : displayVal}
+                        placeholder="사용량 입력"
+                        onChange={e => { const v = e.target.value.replace(/,/g, ''); if (v === '' || /^-?\d*\.?\d*$/.test(v)) setLocalValue(v); }}
+                        onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
+                        onFocus={() => {
+                            setActiveInput({ date: row.date, colId: flowName, type: 'diff' });
+                            setLocalValue(d.flow != null ? String(d.flow) : '');
+                        }}
+                        onBlur={() => {
+                            if (isDiffActive && localValue !== null && localValue !== '') {
+                                // 적산 = 어제 적산 + 오늘 누계(사용량)
+                                const todayIdx = history.findIndex(h => h.date === row.date);
+                                const prevRow = todayIdx > 0 ? history[todayIdx - 1] : null;
+                                const prevData = prevRow ? (prevRow[flowName]?.isUserInput ? { reading: prevRow[flowName].raw } : correctData(prevRow[flowName])) : null;
+                                const prevReading = prevData?.reading ?? 0;
+                                const newReading = Number(prevReading) + Number(localValue);
+                                // 누계(사용량)와 적산을 각각 직접 저장 (자동계산 우회)
+                                updateManualReading(row.date, flowName, 'diff', localValue);
+                                updateManualReading(row.date, flowName, 'raw', String(newReading));
+                            }
+                            setActiveInput(null);
+                            setLocalValue(null);
+                        }}
+                    />
+                </div>
+            );
+        }
+
+        if (subType === 'raw') {
+            const displayVal = d.reading != null ? Number(d.reading).toLocaleString() : '';
+            return (
+                <div style={{ position: 'absolute', inset: 0, padding: '0 4px', background: d.error ? '#fee2e2' : (isManual || isCellDoubleClicked || isToday ? '#fef08a' : (isFuture ? '#f5f5f5' : 'transparent')), display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box', pointerEvents: 'none' }} title={d.error || ''}>
                     {isReadOnly ? (
                         <span style={{ fontWeight: 700, fontSize: 11, color: d.error ? '#dc2626' : (changed ? '#1d4ed8' : '#1e293b') }}>
                             {displayVal || '-'}
@@ -140,19 +233,21 @@ const FlowManagementView = ({ currentUser }) => {
                                 color: d.error ? '#dc2626' : (changed ? '#1d4ed8' : '#1e293b'),
                                 background: 'transparent',
                                 border: d.error ? '2px inset #ef4444' : 'none',
-                                boxSizing: 'border-box'
+                                boxSizing: 'border-box',
+                                pointerEvents: 'auto'
                             }}
                             value={isRawActive ? localValue : displayVal}
                             placeholder="-"
-                            onChange={e => setLocalValue(e.target.value.replace(/,/g, ''))}
+                            onChange={e => { const v = e.target.value.replace(/,/g, ''); if (v === '' || /^-?\d*\.?\d*$/.test(v)) setLocalValue(v); }}
+                            onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
                             onFocus={() => {
-                                setActiveInput({ date: row.date, colId: c.id, type: 'raw' });
+                                setActiveInput({ date: row.date, colId: flowName, type: 'raw' });
                                 setLocalValue(d.reading != null ? String(d.reading) : '');
                             }}
                             onBlur={() => {
                                 if (isRawActive && localValue !== null) {
-                                    if (isManual || isCellDoubleClicked) updateManualReading(row.date, c.id, 'raw', localValue);
-                                    else updateReading(row.date, c.id, localValue);
+                                    if (isManual || isCellDoubleClicked) updateManualReading(row.date, flowName, 'raw', localValue);
+                                    else updateReading(row.date, flowName, localValue);
                                 }
                                 setActiveInput(null);
                                 setLocalValue(null);
@@ -165,12 +260,13 @@ const FlowManagementView = ({ currentUser }) => {
             const displayVal = d.flow != null ? Number(d.flow).toLocaleString() : '';
             return (
                 <div style={{
-                    width: '100%', height: '100%',
+                    position: 'absolute', inset: 0,
                     padding: isManual || isCellDoubleClicked ? '0 4px' : '0 3px',
                     textAlign: 'right', fontWeight: 600, fontSize: 10.5,
                     color: d.flow != null ? '#475569' : '#d1d5db',
                     background: isManual || isCellDoubleClicked ? '#fef08a' : (isFuture ? '#fafafa' : 'transparent'),
-                    display: 'flex', alignItems: 'center', justifyContent: 'flex-end'
+                    display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                    pointerEvents: 'none'
                 }}>
                     {isManual || isCellDoubleClicked ? (
                         <input
@@ -180,17 +276,19 @@ const FlowManagementView = ({ currentUser }) => {
                                 textAlign: 'right', fontWeight: 700, fontSize: 10.5,
                                 color: changed ? '#1d4ed8' : '#1e293b',
                                 background: 'transparent',
-                                boxSizing: 'border-box'
+                                boxSizing: 'border-box',
+                                pointerEvents: 'auto'
                             }}
                             value={isDiffActive ? localValue : displayVal}
                             placeholder="-"
-                            onChange={e => setLocalValue(e.target.value.replace(/,/g, ''))}
+                            onChange={e => { const v = e.target.value.replace(/,/g, ''); if (v === '' || /^-?\d*\.?\d*$/.test(v)) setLocalValue(v); }}
+                            onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
                             onFocus={() => {
-                                setActiveInput({ date: row.date, colId: c.id, type: 'diff' });
+                                setActiveInput({ date: row.date, colId: flowName, type: 'diff' });
                                 setLocalValue(d.flow != null ? String(d.flow) : '');
                             }}
                             onBlur={() => {
-                                if (isDiffActive && localValue !== null) updateManualReading(row.date, c.id, 'diff', localValue);
+                                if (isDiffActive && localValue !== null) updateManualReading(row.date, flowName, 'diff', localValue);
                                 setActiveInput(null);
                                 setLocalValue(null);
                             }}
@@ -206,7 +304,7 @@ const FlowManagementView = ({ currentUser }) => {
         const isFuture = row.isFuture;
         const isEditingMode = isManualEditMode;
 
-        let bg = '#fff';
+        let bg = 'transparent';
         let opacity = 1;
 
         if (isEditingMode && !isSelected) {
@@ -219,11 +317,11 @@ const FlowManagementView = ({ currentUser }) => {
         } else if (isFuture) {
             bg = '#fafafa';
         } else if (isHovered && !isEditingMode) {
-            bg = '#e2e8f0'; // Darkened from #f1f5f9 for better contrast
+            bg = '#e2e8f0';
         }
 
         return {
-            background: bg,
+            background: bg !== 'transparent' ? bg : undefined,
             opacity,
             pointerEvents: (isEditingMode && !isSelected) ? 'none' : 'auto',
             cursor: (isEditingMode && !isSelected) ? 'default' : (isFuture ? 'default' : 'pointer'),
@@ -248,30 +346,66 @@ const FlowManagementView = ({ currentUser }) => {
     };
 
     return (
-        <DataGrid
-            title="유량 검침값 등록"
-            description="노란색 셀에 검침(적산) 수치를 입력하면 누계가 자동 계산됩니다."
-            columns={gridCols}
-            data={history}
-            keyField="date"
-            scrollToKey={todayStr}
-            width={calculatedWidth}
+        <div style={{
+            display: 'flex', flexDirection: 'column',
+            height: '100%', width: calculatedWidth,
+            backgroundColor: '#FFFFFF',
+            borderRight: '1px solid #e2e8f0', // 오른쪽 경계선만 추가
+        }}>
+            <AdvancedDataGrid
+                title="유량 검침값 등록"
+                description="노란색 셀에 검침(적산) 수치를 입력하면 누계가 자동 계산됩니다."
+                columns={gridCols}
+                data={history}
+                keyField="date"
+                scrollToKey={todayStr}
+                width={calculatedWidth}
+                height={400}
+                rowHeaderWidth={84}
+                rowHeaderLabel="날짜"
+                showBottomBar={false}
+                selectionMode="row"
+                enableEditing={false}
+                contextMenu={false}
+                onRowSelect={handleRowSelect}
+                onCellDoubleClick={(row) => handleRowDoubleClick(row)}
+                getRowStyle={getRowStyle}
+                renderRowHeader={(item) => renderRowHeader(item)}
+                renderCell={renderCell}
+                onRefresh={refresh}
+            />
 
-            selectedRowKey={selectedDate}
-            onRowSelect={handleRowSelect}
-            onRowDoubleClick={handleRowDoubleClick}
-            getRowStyle={getRowStyle}
+            {/* 가운데 여유 공간 (판넬 내부) */}
+            <div style={{ flex: 1 }} />
 
-            renderRowHeader={renderRowHeader}
-            renderCell={renderCell}
-
-            onSave={handleSave}
-            onRefresh={refresh}
-            saveLabel={isManualEditMode ? "수정사항 저장" : "변경사항 저장"}
-            hasPending={hasPending || isManualEditMode}
-            loading={loading}
-            extraActions={extraActions}
-        />
+            {/* 하단 버튼 바 (판넬 내부 하단) */}
+            <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '12px 20px', borderTop: '1px solid #e2e8f0', flexShrink: 0,
+                backgroundColor: '#FAFAFA'
+            }}>
+                <span style={{ fontSize: 12, color: '#94A3B8', fontWeight: 500 }}>{history.length} records</span>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    {extraActions}
+                    <button
+                        onClick={handleSave}
+                        disabled={!(hasPending || isManualEditMode) || loading}
+                        style={{
+                            padding: '8px 16px', border: 'none', borderRadius: '4px',
+                            fontWeight: 600, fontSize: 13, fontFamily: "'Space Grotesk', sans-serif",
+                            cursor: (hasPending || isManualEditMode) ? 'pointer' : 'not-allowed',
+                            background: (hasPending || isManualEditMode) ? '#0D0D0D' : '#E8E8E8',
+                            color: (hasPending || isManualEditMode) ? '#FFFFFF' : '#A0A0A0',
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            transition: 'all 0.15s ease'
+                        }}
+                    >
+                        <span className="material-icons" style={{ fontSize: 16 }}>{(hasPending || isManualEditMode) ? 'save' : 'check'}</span>
+                        {loading ? '저장 중...' : (hasPending || isManualEditMode) ? (isManualEditMode ? '수정사항 저장' : '변경사항 저장') : '저장됨'}
+                    </button>
+                </div>
+            </div>
+        </div>
     );
 };
 

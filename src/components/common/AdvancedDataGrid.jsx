@@ -24,10 +24,11 @@ const AdvancedDataGrid = ({
     // ---- Dimension Props ----
     width = '100%',
     height = 600,
-    rowHeight = 36,
-    headerRowHeight = 40,
+    rowHeight = 30,
+    headerRowHeight = 32,
     defaultColumnWidth = 100,
     rowHeaderWidth = 50,
+    rowHeaderLabel = '#',
     fontSize = 13,
     headerFontSize = 13,
 
@@ -48,11 +49,11 @@ const AdvancedDataGrid = ({
     gridLineWidth = 1,
     rowBgColor = '#FFFFFF',
     altRowBgColor = '#FAFAFA',
-    selectedCellBorderColor = '#E42313',
-    selectedCellBorderWidth = 2,
-    hoverRowBgColor = 'rgba(13, 13, 13, 0.02)',
+    selectedCellBorderColor = '#3b82f6',
+    selectedCellBorderWidth = 1,
+    hoverRowBgColor = '#e2e8f0',
     readOnlyCellBgColor = '#FAFAFA',
-    columnHighlightBgColor = 'rgba(228, 35, 19, 0.03)',
+    columnHighlightBgColor = 'rgba(59, 130, 246, 0.12)',
     cellAlign = 'left', // 'left' | 'center' | 'right'
 
     // ---- Selection & Editing Props ----
@@ -79,6 +80,7 @@ const AdvancedDataGrid = ({
     onSort,
     onSave,
     onRefresh,
+    onCellDoubleClick,
     saveLabel = 'Save',
     hasPending = false,
     loading = false,
@@ -87,6 +89,10 @@ const AdvancedDataGrid = ({
     // ---- Overrides ----
     renderRowHeader,
     renderCell,
+    getRowStyle,
+
+    // ---- Navigation ----
+    scrollToKey = null,
 
     // ---- Theme ----
     theme = 'swiss', // 'swiss' | 'excel' | 'notion'
@@ -118,30 +124,41 @@ const AdvancedDataGrid = ({
         }
     }, []);
 
-    // ---- Flatten columns to leaf columns ----
+    // ---- Flatten columns to leaf columns & handle frozen ----
     const leafColumns = useMemo(() => {
         const leaves = [];
+        let currentLeft = showRowHeader ? rowHeaderWidth : 0;
         const safeColumns = Array.isArray(columns) ? columns : [];
+
         safeColumns.forEach(c => {
+            const isGroupFrozen = c.frozen || false;
             if (c.subCols && c.subCols.length > 0) {
                 c.subCols.forEach((sc, idx) => {
+                    const scWidth = columnWidths[sc.id] || sc.width || defaultColumnWidth;
                     leaves.push({
                         ...sc,
                         parentId: c.id,
+                        frozen: isGroupFrozen || sc.frozen,
+                        stickyLeft: (isGroupFrozen || sc.frozen) ? currentLeft : null,
                         inheritedBorderLeft: sc.borderLeft || (idx === 0 ? c.borderLeft : null),
                         inheritedBorderRight: sc.borderRight || (idx === c.subCols.length - 1 ? c.borderRight : null)
                     });
+                    if (isGroupFrozen || sc.frozen) currentLeft += scWidth;
                 });
             } else {
+                const cWidth = columnWidths[c.id] || c.width || defaultColumnWidth;
                 leaves.push({
                     ...c,
+                    frozen: isGroupFrozen,
+                    stickyLeft: isGroupFrozen ? currentLeft : null,
                     inheritedBorderLeft: c.borderLeft,
                     inheritedBorderRight: c.borderRight
                 });
+                if (isGroupFrozen) currentLeft += cWidth;
             }
         });
         return leaves;
-    }, [columns]);
+    }, [columns, showRowHeader, rowHeaderWidth, columnWidths, defaultColumnWidth]);
 
     const safeData = useMemo(() => {
         let d = Array.isArray(data) ? data : [];
@@ -189,6 +206,17 @@ const AdvancedDataGrid = ({
         return sliced;
     }, [safeData, startIndex, endIndex]);
 
+    // ---- Scroll to key on mount ----
+    useEffect(() => {
+        if (scrollToKey && bodyScrollRef.current && safeData.length > 0) {
+            const index = safeData.findIndex(d => d[keyField] === scrollToKey);
+            if (index >= 0) {
+                const scrollPos = Math.max(0, index * rowHeight - viewportHeight / 2 + rowHeight);
+                bodyScrollRef.current.scrollTop = scrollPos;
+            }
+        }
+    }, [scrollToKey, safeData.length]);
+
     // ---- Click outside commit ----
     const editingCellRef = useRef(editingCell);
     editingCellRef.current = editingCell;
@@ -222,6 +250,10 @@ const AdvancedDataGrid = ({
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (!selectedCell) return;
+
+            // 커스텀 input/textarea에 포커스가 있으면 그리드 키보드 핸들링 건너뛰기
+            const tag = document.activeElement?.tagName?.toLowerCase();
+            if (tag === 'input' || tag === 'textarea') return;
 
             // If editing, only handle edit keys
             if (editingCell) {
@@ -324,8 +356,8 @@ const AdvancedDataGrid = ({
                             const cInfo = leafColumns[currentColIndex];
                             if (canEditCell(rInfo, cInfo)) {
                                 startEditing(selectedCell.rowKey, selectedCell.colId, e.key, true);
+                                e.preventDefault();
                             }
-                            e.preventDefault();
                         }
                         return;
                 }
@@ -411,6 +443,7 @@ const AdvancedDataGrid = ({
 
     // ---- Editing ----
     const handleCellDoubleClick = (row, col) => {
+        if (onCellDoubleClick) onCellDoubleClick(row, col);
         if (!canEditCell(row, col)) return;
         const value = getCellValue(row, col);
         startEditing(row[keyField], col.id, value, false);
@@ -580,6 +613,7 @@ const AdvancedDataGrid = ({
 
         if (selectedCell.type === 'cell' || !selectedCell.type) {
             targeted = selectedCell.rowKey === rowKey && selectedCell.colId === colId;
+            highlighted = selectedCell.rowKey === rowKey || selectedCell.colId === colId;
         } else if (selectedCell.type === 'col') {
             highlighted = selectedCell.colId === colId;
         } else if (selectedCell.type === 'group_col') {
@@ -622,7 +656,7 @@ const AdvancedDataGrid = ({
                     {/* Corner */}
                     {showRowHeader && (
                         <div style={{ width: rowHeaderWidth, flexShrink: 0, position: 'sticky', left: 0, zIndex: 12, backgroundColor: headerBgColor, borderRight: `${gridLineWidth}px solid ${gridLineColor}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>
-                            <span style={{ color: '#B0B0B0', fontSize: 12, fontFamily: 'Inter, sans-serif' }}>#</span>
+                            <span style={{ color: '#B0B0B0', fontSize: 12, fontFamily: 'Inter, sans-serif' }}>{rowHeaderLabel}</span>
                         </div>
                     )}
 
@@ -635,12 +669,18 @@ const AdvancedDataGrid = ({
                                 ? c.subCols.reduce((sum, sc) => sum + getColWidth(sc), 0)
                                 : getColWidth(c);
                             const active = isHeaderActive(c);
-                            const bg = active ? activeHeaderBgColor : (c.headerBgColor || headerBgColor);
-                            const textC = active ? activeHeaderTextColor : (c.headerTextColor || headerTextColor);
+                            const bg = active ? activeHeaderBgColor : (c.headerStyle?.background || c.headerStyle?.backgroundColor || c.headerBgColor || headerBgColor);
+                            const textC = active ? activeHeaderTextColor : (c.headerStyle?.color || c.headerTextColor || headerTextColor);
                             const topH = (hasSubCols && !colHasSubCols) ? headerRowHeight * 2 : (hasSubCols ? headerRowHeight : headerRowHeight * 2);
 
+                            // Sticky support for main header
+                            const firstLeaf = colHasSubCols ? c.subCols[0] : c;
+                            const leafInLeaves = leafColumns.find(l => l.id === (colHasSubCols ? c.subCols[0].id : c.id));
+                            const isSticky = leafInLeaves?.frozen;
+                            const stickyStyle = isSticky ? { position: 'sticky', left: leafInLeaves.stickyLeft, zIndex: 11 } : {};
+
                             return (
-                                <div key={c.id} style={{ display: 'flex', flexDirection: 'column', width: groupWidth, borderRight: c.borderRight ? c.borderRight : (!isLastGroup && showVerticalLines ? `${gridLineWidth}px solid ${gridLineColor}` : 'none'), borderLeft: c.borderLeft || 'none', boxSizing: 'border-box' }}>
+                                <div key={c.id} style={{ display: 'flex', flexDirection: 'column', width: groupWidth, borderRight: c.borderRight ? c.borderRight : (!isLastGroup && showVerticalLines ? `${gridLineWidth}px solid ${gridLineColor}` : 'none'), borderLeft: c.borderLeft || 'none', boxSizing: 'border-box', ...stickyStyle }}>
                                     {/* Top Header */}
                                     <div
                                         onClick={() => handleColumnHeaderClick(c.id, true)}
@@ -661,14 +701,18 @@ const AdvancedDataGrid = ({
                                             {c.subCols.map((sc, i) => {
                                                 const isLastSub = i === c.subCols.length - 1;
                                                 const subActive = isSubHeaderActive(sc.id, c.id);
-                                                const subBg = subActive ? activeHeaderBgColor : (sc.headerBgColor || c.headerBgColor || headerBgColor);
-                                                const subTextC = subActive ? activeHeaderTextColor : (sc.headerTextColor || c.headerTextColor || headerTextColor);
+                                                const subBg = subActive ? activeHeaderBgColor : (sc.headerStyle?.background || sc.headerStyle?.backgroundColor || sc.headerBgColor || c.headerStyle?.background || c.headerStyle?.backgroundColor || c.headerBgColor || headerBgColor);
+                                                const subTextC = subActive ? activeHeaderTextColor : (sc.headerStyle?.color || sc.headerTextColor || c.headerStyle?.color || c.headerTextColor || headerTextColor);
                                                 const scWidth = getColWidth(sc);
+
+                                                // Sticky support for sub-headers
+                                                const subLeaf = leafColumns.find(l => l.id === sc.id);
+                                                const subStickyStyle = subLeaf?.frozen ? { position: 'sticky', left: subLeaf.stickyLeft, zIndex: 11 } : {};
 
                                                 return (
                                                     <div key={sc.id}
                                                         onClick={() => { handleColumnHeaderClick(sc.id, false); if (sortable) handleSortClick(sc.id); }}
-                                                        style={{ width: scWidth, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, fontSize: Math.max(10, headerFontSize - 1), fontWeight: 500, fontFamily: "'Inter', sans-serif", color: subTextC, backgroundColor: subBg, borderRight: sc.borderRight || (isLastSub && c.borderRight ? c.borderRight : (!isLastSub && showVerticalLines ? `${gridLineWidth}px solid ${gridLineColor}` : 'none')), borderLeft: sc.borderLeft || (i === 0 && c.borderLeft ? c.borderLeft : 'none'), boxSizing: 'border-box', transition: 'background-color 0.15s ease', cursor: 'pointer', userSelect: 'none', position: 'relative' }}
+                                                        style={{ width: scWidth, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, fontSize: Math.max(10, headerFontSize - 1), fontWeight: 500, fontFamily: "'Inter', sans-serif", color: subTextC, backgroundColor: subBg, borderRight: sc.borderRight || (isLastSub && c.borderRight ? c.borderRight : (!isLastSub && showVerticalLines ? `${gridLineWidth}px solid ${gridLineColor}` : 'none')), borderLeft: sc.borderLeft || (i === 0 && c.borderLeft ? c.borderLeft : 'none'), boxSizing: 'border-box', transition: 'background-color 0.15s ease', cursor: 'pointer', userSelect: 'none', position: 'relative', ...subStickyStyle }}
                                                     >
                                                         {sc.label}
                                                         {sortable && sortState.colId === sc.id && (
@@ -705,14 +749,14 @@ const AdvancedDataGrid = ({
     };
 
     return (
-        <div ref={gridContainerRef} style={{ width, height, display: 'flex', flexDirection: 'column', backgroundColor: '#FFFFFF', border: `1px solid ${gridLineColor}`, overflow: 'hidden', fontFamily: "'Inter', sans-serif", position: 'relative' }}>
+        <div ref={gridContainerRef} style={{ width, height, flexShrink: 0, flexGrow: 0, display: 'flex', flexDirection: 'column', backgroundColor: '#FFFFFF', border: `1px solid ${gridLineColor}`, overflow: 'hidden', fontFamily: "'Inter', sans-serif", position: 'relative' }}>
 
             {/* ---- Toolbar ---- */}
             {(title || description || onRefresh) && (
                 <div style={{ padding: '14px 20px', borderBottom: `1px solid ${gridLineColor}`, flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        {title && <h2 style={{ fontSize: 18, fontWeight: 600, color: '#0D0D0D', margin: 0, fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '-0.3px' }}>{title}</h2>}
-                        {description && <span style={{ fontSize: 13, color: '#7A7A7A', fontFamily: "'Inter', sans-serif" }}>{description}</span>}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                        {title && <h2 style={{ fontSize: 18, fontWeight: 600, color: '#0D0D0D', margin: 0, fontFamily: "'Space Grotesk', sans-serif", letterSpacing: '-0.3px', whiteSpace: 'nowrap', flexShrink: 0 }}>{title}</h2>}
+                        {description && <span style={{ fontSize: 12, color: '#7A7A7A', fontFamily: "'Inter', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{description}</span>}
                     </div>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         {onRefresh && (
@@ -735,8 +779,11 @@ const AdvancedDataGrid = ({
                         const isAltRow = index % 2 !== 0;
                         const defaultRowBg = isAltRow ? altRowBgColor : rowBgColor;
                         const isHovered = hoveredRowKey === rowKey;
-                        const rowBg = isRowSelected ? columnHighlightBgColor : (isHovered ? hoverRowBgColor : defaultRowBg);
+                        const defaultHoverRowBg = isRowSelected ? columnHighlightBgColor : (isHovered ? hoverRowBgColor : defaultRowBg);
                         const isRowHighlight = selectedCell && (selectedCell.type === 'row' ? selectedCell.rowKey === rowKey : selectedCell.rowKey === rowKey);
+
+                        const customRowStyle = getRowStyle ? getRowStyle(item, isRowSelected, isHovered) : {};
+                        const rowBg = customRowStyle.background || defaultHoverRowBg;
 
                         return (
                             <div key={rowKey}
@@ -746,6 +793,7 @@ const AdvancedDataGrid = ({
                                     position: 'absolute', top: index * rowHeight, left: 0,
                                     width: totalGridWidth, height: rowHeight,
                                     display: 'flex', boxSizing: 'border-box', backgroundColor: rowBg,
+                                    ...customRowStyle
                                 }}
                             >
                                 {/* Row Header */}
@@ -785,7 +833,7 @@ const AdvancedDataGrid = ({
                                                 onContextMenu={(e) => handleContextMenu(e, item, col)}
                                                 style={{
                                                     width: colWidth, flexShrink: 0,
-                                                    display: 'flex', alignItems: 'center', padding: '0 12px',
+                                                    display: 'flex', alignItems: 'center', padding: renderCell ? 0 : '0 12px',
                                                     justifyContent: (col.align || cellAlign) === 'center' ? 'center' : (col.align || cellAlign) === 'right' ? 'flex-end' : 'flex-start',
                                                     position: 'relative', boxSizing: 'border-box',
                                                     cursor: cellEditable ? 'cell' : 'default',
@@ -795,6 +843,7 @@ const AdvancedDataGrid = ({
                                                     borderLeft: col.inheritedBorderLeft || 'none',
                                                     ...focusRingStyle,
                                                     transition: 'background-color 0.1s ease',
+                                                    ...(col.frozen ? { position: 'sticky', left: col.stickyLeft, zIndex: 3, backgroundColor: isHighlightBg ? columnHighlightBgColor : (baseBg === 'transparent' ? rowBg : baseBg) } : {})
                                                 }}
                                             >
                                                 {isEditMode ? (

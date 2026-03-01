@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useMedicineViewModel } from './useMedicineViewModel';
 import { useDialog } from '../../components/common/DialogProvider';
-import DataGrid from '../../components/common/DataGrid';
+import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
 
 const MedicineManagementView = ({ currentUser }) => {
     const { showAlert } = useDialog();
@@ -37,16 +37,20 @@ const MedicineManagementView = ({ currentUser }) => {
 
     const hasPending = Object.keys(pendingChanges).length > 0;
 
+    // 동적 너비 계산 (최소 714px 유지, 약품당 140px + 헤더 84px)
+    const calculatedWidth = Math.max(714, 84 + medicineTypes.length * 140);
+
     const gridCols = cols.map((c, idx) => {
         // 지정된 색상 배열
         const vibrantColors = ['#1e3a8a', '#047857', '#b45309', '#4338ca', '#57534e'];
 
         return {
             id: c.id, label: `${c.label} (${c.unit})`,
+            headerStyle: { background: vibrantColors[idx % vibrantColors.length], color: '#fff' },
             subCols: [
-                { id: 'purchase', label: '입고', width: 44, headerStyle: { background: vibrantColors[idx % vibrantColors.length], color: '#fff' } },
-                { id: 'usage', label: '사용', width: 44, headerStyle: { background: '#fef2f2', color: '#991b1b' } },
-                { id: 'inventory', label: '재고', width: 52, headerStyle: { background: '#fef3c7', color: '#92400e' } }
+                { id: `purchase_${c.id}`, type: 'purchase', label: '입고', width: 44, headerStyle: { background: vibrantColors[idx % vibrantColors.length], color: '#fff' } },
+                { id: `usage_${c.id}`, type: 'usage', label: '사용', width: 44, headerStyle: { background: '#fef2f2', color: '#991b1b' } },
+                { id: `inventory_${c.id}`, type: 'inventory', label: '재고', width: 52, headerStyle: { background: '#fef3c7', color: '#92400e' } }
             ]
         };
     });
@@ -108,6 +112,36 @@ const MedicineManagementView = ({ currentUser }) => {
         setSelectedDate(null);
     };
 
+    const getRowStyle = (row, isSelected, isHovered) => {
+        const isToday = row.date === todayStr;
+        const isFuture = row.isFuture;
+        const isEditingMode = isManualEditMode;
+
+        let bg = 'transparent';
+        let opacity = 1;
+
+        if (isEditingMode && !isSelected) {
+            bg = '#f8fafc';
+            opacity = 0.5;
+        } else if (isSelected) {
+            bg = '#fef3c7';
+        } else if (isToday) {
+            bg = '#eff6ff';
+        } else if (isFuture) {
+            bg = '#fafafa';
+        } else if (isHovered && !isEditingMode) {
+            bg = '#e2e8f0';
+        }
+
+        return {
+            background: bg !== 'transparent' ? bg : undefined,
+            opacity,
+            pointerEvents: (isEditingMode && !isSelected) ? 'none' : 'auto',
+            cursor: (isEditingMode && !isSelected) ? 'default' : (isFuture ? 'default' : 'pointer'),
+            ...(isSelected ? { outline: '2px solid #f59e0b', outlineOffset: -2, zIndex: 6 } : isToday ? { outline: '2px solid #3b82f6', outlineOffset: -2, zIndex: 5 } : {})
+        };
+    };
+
     const renderCell = (row, colGroup, subCol) => {
         const c = colGroup;
         const d = row[c.id] || { purchase: null, usage: null, inventory: null, error: null };
@@ -121,11 +155,11 @@ const MedicineManagementView = ({ currentUser }) => {
         const isCellDoubleClicked = doubleClickedDate === row.date;
         const isReadOnly = (isFuture || (row.date !== todayStr)) && !isManual && !isCellDoubleClicked;
 
-        const isActive = activeInput?.date === row.date && activeInput?.colId === c.id && activeInput?.type === subCol.id;
+        const isActive = activeInput?.date === row.date && activeInput?.colId === c.id && activeInput?.type === subCol.type;
 
-        const isInventory = subCol.id === 'inventory';
-        const isPurchase = subCol.id === 'purchase';
-        const isUsage = subCol.id === 'usage';
+        const isInventory = subCol.type === 'inventory';
+        const isPurchase = subCol.type === 'purchase';
+        const isUsage = subCol.type === 'usage';
 
         const val = isPurchase ? d.purchase : (isUsage ? d.usage : d.inventory);
         const errorMsg = d.error;
@@ -173,12 +207,12 @@ const MedicineManagementView = ({ currentUser }) => {
                         onChange={e => setLocalValue(e.target.value.replace(/,/g, ''))}
                         onFocus={() => {
                             if (isReadOnly) return;
-                            setActiveInput({ date: row.date, colId: c.id, type: subCol.id });
+                            setActiveInput({ date: row.date, colId: c.id, type: subCol.type });
                             setLocalValue(val != null ? String(val) : '');
                         }}
                         onBlur={() => {
                             if (isActive && localValue !== null) {
-                                updateAmount(row.date, c.id, subCol.id, localValue);
+                                updateAmount(row.date, c.id, subCol.type, localValue);
                             }
                             setActiveInput(null);
                             setLocalValue(null);
@@ -190,35 +224,6 @@ const MedicineManagementView = ({ currentUser }) => {
         );
     };
 
-    const getRowStyle = (row, isSelected, isHovered) => {
-        const isToday = row.date === todayStr;
-        const isFuture = row.isFuture;
-        const isEditingMode = isManualEditMode;
-
-        let bg = '#fff';
-        let opacity = 1;
-
-        if (isEditingMode && !isSelected) {
-            bg = '#f8fafc';
-            opacity = 0.5;
-        } else if (isSelected) {
-            bg = '#fef3c7';
-        } else if (isToday) {
-            bg = '#eff6ff';
-        } else if (isFuture) {
-            bg = '#fafafa';
-        } else if (isHovered && !isEditingMode) {
-            bg = '#e2e8f0'; // Darkened contrast
-        }
-
-        return {
-            background: bg,
-            opacity,
-            pointerEvents: (isEditingMode && !isSelected) ? 'none' : 'auto',
-            cursor: (isEditingMode && !isSelected) ? 'default' : (isFuture ? 'default' : 'pointer'),
-            ...(isSelected ? { outline: '2px solid #64748b', outlineOffset: -2, zIndex: 6 } : isToday ? { outline: '2px solid #3b82f6', outlineOffset: -2, zIndex: 5 } : {})
-        };
-    };
 
     const renderRowHeader = (row) => {
         const isToday = row.date === todayStr;
@@ -237,31 +242,66 @@ const MedicineManagementView = ({ currentUser }) => {
     };
 
     return (
-        <div style={{ display: 'flex', height: '100%', gap: '16px', alignItems: 'flex-start' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <DataGrid
-                    title="약품 입고/사용/재고 관리"
-                    description="파란색/빨간색 셀을 클릭하여 입고량/사용량을 입력하면 재고가 자동 누적 계산됩니다."
-                    columns={gridCols}
-                    data={history}
-                    keyField="date"
-                    scrollToKey={todayStr}
+        <div style={{
+            display: 'flex', flexDirection: 'column',
+            height: '100%', width: calculatedWidth,
+            backgroundColor: '#FFFFFF',
+            borderRight: '1px solid #e2e8f0',
+        }}>
+            <AdvancedDataGrid
+                title="약품 입고/사용/재고 관리"
+                description="파란색/빨간색 셀을 클릭하여 입고량/사용량을 입력하면 재고가 자동 누적 계산됩니다."
+                columns={gridCols}
+                data={history}
+                keyField="date"
+                scrollToKey={todayStr}
+                width={calculatedWidth}
+                height={400}
 
-                    selectedRowKey={selectedDate}
-                    onRowSelect={handleRowSelect}
-                    onRowDoubleClick={handleRowDoubleClick}
-                    getRowStyle={getRowStyle}
+                showBottomBar={false}
+                selectionMode="row"
+                enableEditing={false}
+                contextMenu={false}
+                rowHeaderWidth={84}
+                rowHeaderLabel="날짜"
 
-                    renderRowHeader={renderRowHeader}
-                    renderCell={renderCell}
+                onRowSelect={handleRowSelect}
+                onCellDoubleClick={(row) => handleRowDoubleClick(row)}
+                getRowStyle={getRowStyle}
+                renderRowHeader={(row) => renderRowHeader(row)}
+                renderCell={renderCell}
 
-                    onSave={handleSave}
-                    onRefresh={refresh}
-                    saveLabel={isManualEditMode ? "수정사항 저장" : "재고 기록 저장"}
-                    hasPending={hasPending || isManualEditMode}
-                    loading={loading}
-                    extraActions={extraActions}
-                />
+                onRefresh={refresh}
+            />
+
+            {/* 가운데 여유 공간 */}
+            <div style={{ flex: 1 }} />
+
+            {/* 하단 바 */}
+            <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '8px 16px', borderTop: '1px solid #e2e8f0', background: '#f8fafc', flexShrink: 0
+            }}>
+                <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>
+                    총 {history.length}행
+                </span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                    {extraActions}
+                    <button
+                        onClick={handleSave}
+                        disabled={!(hasPending || isManualEditMode) || loading}
+                        style={{
+                            padding: '5px 14px', borderRadius: 6, border: 'none',
+                            fontWeight: 800, fontSize: 11, cursor: (hasPending || isManualEditMode) ? 'pointer' : 'default',
+                            background: (hasPending || isManualEditMode) ? '#1e293b' : '#e2e8f0',
+                            color: (hasPending || isManualEditMode) ? '#fff' : '#94a3b8',
+                            display: 'flex', alignItems: 'center', gap: 4
+                        }}
+                    >
+                        <span className="material-icons" style={{ fontSize: 14 }}>{(hasPending || isManualEditMode) ? 'save_alt' : 'check'}</span>
+                        {loading ? '저장 중...' : (isManualEditMode || hasPending ? (isManualEditMode ? "수정사항 저장" : "재고 기록 저장") : '변경사항 없음')}
+                    </button>
+                </div>
             </div>
         </div>
     );
