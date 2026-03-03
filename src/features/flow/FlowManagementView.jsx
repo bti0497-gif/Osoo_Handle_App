@@ -14,25 +14,26 @@ const FlowManagementView = ({ currentUser }) => {
 
     const [selectedDate, setSelectedDate] = useState(null);
     const [isManualEditMode, setIsManualEditMode] = useState(false);
-    const [doubleClickedDate, setDoubleClickedDate] = useState(null);
+    const [doubleClickedCell, setDoubleClickedCell] = useState(null); // { date, colId }
     const [activeInput, setActiveInput] = useState(null); // { date, colId, type }
     const [localValue, setLocalValue] = useState(null);
     const [isElecReverse, setIsElecReverse] = useState(() => localStorage.getItem('flowElecReverse') === 'true');
+    const [todaySaved, setTodaySaved] = useState(false); // 오늘 날짜 저장 완료 여부
 
     const todayStr = new Date().toISOString().split('T')[0];
 
     // ESC 키로 수동 편집 모드 종료
     useEffect(() => {
         const handleEsc = (e) => {
-            if (e.key === 'Escape' && (isManualEditMode || doubleClickedDate)) {
+            if (e.key === 'Escape' && (isManualEditMode || doubleClickedCell)) {
                 setIsManualEditMode(false);
-                setDoubleClickedDate(null);
+                setDoubleClickedCell(null);
                 setSelectedDate(null);
             }
         };
         window.addEventListener('keydown', handleEsc);
         return () => window.removeEventListener('keydown', handleEsc);
-    }, [isManualEditMode, doubleClickedDate]);
+    }, [isManualEditMode, doubleClickedCell]);
 
     const activeFlows = flowItems.filter(i => i.checked);
     const hasPending = Object.keys(pendingChanges).length > 0;
@@ -69,12 +70,13 @@ const FlowManagementView = ({ currentUser }) => {
         setSelectedDate(row.date);
     };
 
-    const handleRowDoubleClick = (row) => {
-        if (row.date !== todayStr && !row.isFuture) {
-            setDoubleClickedDate(row.date);
-            setSelectedDate(row.date);
-            setIsManualEditMode(true);
-        }
+    const handleCellDoubleClick = (row, col) => {
+        if (row.isFuture) return;
+        // 오늘 날짜이고 아직 저장 전이면 이미 편집 가능하므로 더블클릭 불필요
+        if (row.date === todayStr && !todaySaved) return;
+        // 과거 날짜 또는 저장 후 오늘 날짜: 해당 셀만 편집 가능
+        setDoubleClickedCell({ date: row.date, colId: col?.id || null });
+        setSelectedDate(row.date);
     };
 
     const extraActions = (
@@ -104,7 +106,7 @@ const FlowManagementView = ({ currentUser }) => {
                 <button
                     onClick={() => {
                         setIsManualEditMode(false);
-                        setDoubleClickedDate(null);
+                        setDoubleClickedCell(null);
                         setSelectedDate(null);
                     }}
                     style={{
@@ -122,8 +124,9 @@ const FlowManagementView = ({ currentUser }) => {
     const handleSave = async () => {
         await submitBatch();
         setIsManualEditMode(false);
-        setDoubleClickedDate(null);
+        setDoubleClickedCell(null);
         setSelectedDate(null);
+        setTodaySaved(true); // 저장 후 오늘 날짜도 읽기전용
     };
 
     const renderCell = (row, col, val) => {
@@ -156,11 +159,12 @@ const FlowManagementView = ({ currentUser }) => {
         const isToday = row.date === todayStr;
         const isFuture = row.isFuture;
         const isManual = isSelected && isManualEditMode;
-        const isCellDoubleClicked = doubleClickedDate === row.date;
-        // 전력량 역계산 모드: 누계를 입력하면 적산 자동계산
-        const isElecRev = isElecReverse && flowName === '전력량계' && isToday;
+        // 더블클릭은 해당 셀만 편집 가능 (셀 단위 체크)
+        const isCellDoubleClicked = doubleClickedCell?.date === row.date && doubleClickedCell?.colId === col.id;
+        // 전력량 역계산 모드: 누계를 입력하면 적산 자동계산 (오늘 날짜이고 저장 전에만)
+        const isElecRev = isElecReverse && flowName === '전력량계' && isToday && !todaySaved;
 
-        const isReadOnly = (isFuture || row.date !== todayStr) && !isManual && !isCellDoubleClicked;
+        const isReadOnly = (isFuture || row.date !== todayStr || todaySaved) && !isManual && !isCellDoubleClicked;
 
         const isRawActive = activeInput?.date === row.date && activeInput?.colId === flowName && activeInput?.type === 'raw';
         const isDiffActive = activeInput?.date === row.date && activeInput?.colId === flowName && activeInput?.type === 'diff';
@@ -219,7 +223,7 @@ const FlowManagementView = ({ currentUser }) => {
         if (subType === 'raw') {
             const displayVal = d.reading != null ? Number(d.reading).toLocaleString() : '';
             return (
-                <div style={{ position: 'absolute', inset: 0, padding: '0 4px', background: d.error ? '#fee2e2' : (isManual || isCellDoubleClicked || isToday ? '#fef08a' : (isFuture ? '#f5f5f5' : 'transparent')), display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box', pointerEvents: 'none' }} title={d.error || ''}>
+                <div style={{ position: 'absolute', inset: 0, padding: '0 4px', background: d.error ? '#fee2e2' : ((!isReadOnly && (isManual || isCellDoubleClicked || (isToday && !todaySaved))) ? '#fef08a' : (isFuture ? '#f5f5f5' : 'transparent')), display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box', pointerEvents: 'none' }} title={d.error || ''}>
                     {isReadOnly ? (
                         <span style={{ fontWeight: 700, fontSize: 11, color: d.error ? '#dc2626' : (changed ? '#1d4ed8' : '#1e293b') }}>
                             {displayVal || '-'}
@@ -251,6 +255,11 @@ const FlowManagementView = ({ currentUser }) => {
                                 }
                                 setActiveInput(null);
                                 setLocalValue(null);
+                                // 더블클릭 셀 편집 후 blur 시 자동 저장 및 수동모드 해제
+                                if (isCellDoubleClicked) {
+                                    setDoubleClickedCell(null);
+                                    submitBatch();
+                                }
                             }}
                         />
                     )}
@@ -291,6 +300,11 @@ const FlowManagementView = ({ currentUser }) => {
                                 if (isDiffActive && localValue !== null) updateManualReading(row.date, flowName, 'diff', localValue);
                                 setActiveInput(null);
                                 setLocalValue(null);
+                                // 더블클릭 셀 편집 후 blur 시 자동 저장 및 수동모드 해제
+                                if (isCellDoubleClicked) {
+                                    setDoubleClickedCell(null);
+                                    submitBatch();
+                                }
                             }}
                         />
                     ) : (displayVal || '-')}
@@ -325,7 +339,6 @@ const FlowManagementView = ({ currentUser }) => {
             opacity,
             pointerEvents: (isEditingMode && !isSelected) ? 'none' : 'auto',
             cursor: (isEditingMode && !isSelected) ? 'default' : (isFuture ? 'default' : 'pointer'),
-            ...(isSelected ? { outline: '2px solid #f59e0b', outlineOffset: -2, zIndex: 6 } : isToday ? { outline: '2px solid #3b82f6', outlineOffset: -2, zIndex: 5 } : {})
         };
     };
 
@@ -368,7 +381,7 @@ const FlowManagementView = ({ currentUser }) => {
                 enableEditing={false}
                 contextMenu={false}
                 onRowSelect={handleRowSelect}
-                onCellDoubleClick={(row) => handleRowDoubleClick(row)}
+                onCellDoubleClick={(row, col) => handleCellDoubleClick(row, col)}
                 getRowStyle={getRowStyle}
                 renderRowHeader={(item) => renderRowHeader(item)}
                 renderCell={renderCell}

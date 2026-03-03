@@ -124,7 +124,6 @@ const KitManagementView = ({ currentUser }) => {
             opacity,
             pointerEvents: (isEditingMode && !isSelected) ? 'none' : 'auto',
             cursor: (isEditingMode && !isSelected) ? 'default' : (isFuture ? 'default' : 'pointer'),
-            ...(isSelected ? { outline: '2px solid #f59e0b', outlineOffset: -2, zIndex: 6 } : isToday ? { outline: '2px solid #3b82f6', outlineOffset: -2, zIndex: 5 } : {})
         };
     };
 

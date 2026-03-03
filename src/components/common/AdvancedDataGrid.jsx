@@ -40,20 +40,13 @@ const AdvancedDataGrid = ({
     showBottomBar = true,
     showStatusBar = true,
 
-    // ---- Styling & Color Props (Swiss Clean defaults) ----
+    // ---- Styling & Color Props (커스터마이즈 가능: 헤더색, 그리드색) ----
     headerBgColor = '#FAFAFA',
     headerTextColor = '#0D0D0D',
-    activeHeaderBgColor = '#E8E8E8',
-    activeHeaderTextColor = '#0D0D0D',
     gridLineColor = '#E8E8E8',
     gridLineWidth = 1,
     rowBgColor = '#FFFFFF',
     altRowBgColor = '#FAFAFA',
-    selectedCellBorderColor = '#3b82f6',
-    selectedCellBorderWidth = 1,
-    hoverRowBgColor = '#e2e8f0',
-    readOnlyCellBgColor = '#FAFAFA',
-    columnHighlightBgColor = 'rgba(59, 130, 246, 0.12)',
     cellAlign = 'left', // 'left' | 'center' | 'right'
 
     // ---- Selection & Editing Props ----
@@ -97,6 +90,19 @@ const AdvancedDataGrid = ({
     // ---- Theme ----
     theme = 'swiss', // 'swiss' | 'excel' | 'notion'
 }) => {
+    // ========================================================================
+    // 🔒 Excel UX 고정 상수 — 외부에서 변경 불가
+    // 셀 선택 테두리, 하이라이트, 호버, 읽기전용 배경 등 Excel 사용자 경험의
+    // 핵심 설정값입니다. 다른 메뉴에서 이 컴포넌트를 사용할 때도 동일하게 적용됩니다.
+    // ========================================================================
+    const selectedCellBorderColor = '#3b82f6';
+    const selectedCellBorderWidth = 1;
+    const hoverRowBgColor = '#e2e8f0';
+    const readOnlyCellBgColor = '#FAFAFA';
+    const columnHighlightBgColor = 'rgba(59, 130, 246, 0.12)';
+    const activeHeaderBgColor = '#E8E8E8';
+    const activeHeaderTextColor = '#0D0D0D';
+
     // ---- State ----
     const [scrollTop, setScrollTop] = useState(0);
     const [scrollLeft, setScrollLeft] = useState(0);
@@ -815,6 +821,7 @@ const AdvancedDataGrid = ({
                                         const { targeted: isCellTargeted, highlighted: isHighlightBg } = isCellInSelection(rowKey, col.id);
                                         const isEditMode = editingCell?.rowKey === rowKey && editingCell?.colId === col.id;
 
+                                        // 정확히 선택된 셀만 미세한 테두리, 하이라이트 셀은 배경색만
                                         const focusRingStyle = isCellTargeted ? {
                                             boxShadow: `inset 0 0 0 ${selectedCellBorderWidth}px ${selectedCellBorderColor}`,
                                             zIndex: 2,
@@ -861,8 +868,8 @@ const AdvancedDataGrid = ({
                                                         }}
                                                     />
                                                 ) : (
-                                                    <div style={{ width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize, fontFamily: "'Inter', sans-serif", color: isCellTargeted ? '#E42313' : '#0D0D0D', fontWeight: isCellTargeted ? 600 : 400, textAlign: col.align || cellAlign || 'left' }}>
-                                                        {renderCell ? renderCell(item, col, val) : val}
+                                                    <div style={{ width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize, fontFamily: "'Inter', sans-serif", color: '#0D0D0D', fontWeight: 400, textAlign: col.align || cellAlign || 'left' }}>
+                                                        {renderCell ? renderCell(item, col, val, isCellTargeted) : val}
                                                     </div>
                                                 )}
                                             </div>
