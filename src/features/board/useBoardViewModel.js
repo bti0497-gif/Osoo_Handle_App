@@ -27,11 +27,84 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
         setViewMode('form');
     };
 
+    const sortThreadedPosts = (data) => {
+        const notices = data.filter(p => p.is_notice === 1).map(p => ({ ...p, depth: 0 }));
+        const regulars = data.filter(p => p.is_notice !== 1);
+
+        const postMap = {};
+        regulars.forEach(p => { postMap[p.id] = p; });
+
+        // Root ID와 현재 게시글의 깊이(Depth)를 함께 찾는 함수
+        const getThreadInfo = (post) => {
+            let current = post;
+            let depth = 0;
+            let visited = new Set();
+            while (current.parent_id && postMap[current.parent_id] && !visited.has(current.parent_id)) {
+                visited.add(current.id);
+                current = postMap[current.parent_id];
+                depth++;
+            }
+            return { rootId: current.id, depth };
+        };
+
+        const threads = {};
+        regulars.forEach(p => {
+            const { rootId, depth } = getThreadInfo(p);
+            p.depth = depth; // 게시글 데이터에 깊이 주입
+            if (!threads[rootId]) threads[rootId] = { items: [] };
+            threads[rootId].items.push(p);
+        });
+
+        const threadList = Object.keys(threads).map(rootId => {
+            const thread = threads[rootId];
+            const lastActivity = thread.items.reduce((max, curr) => {
+                const currTime = new Date(curr.created_at).getTime();
+                return currTime > max ? currTime : max;
+            }, 0);
+            return { rootId, items: thread.items, lastActivity };
+        });
+
+        threadList.sort((a, b) => b.lastActivity - a.lastActivity);
+
+        const sortedRegulars = [];
+        threadList.forEach(t => {
+            // 스레드 내 정렬: 단순히 일직선이 아니라 트리 구조 유지가 필요하지만,
+            // 게시판 목록 특성상 '부모 우선 + 생성일순'으로 평탄화하되
+            // depth를 통해 위계를 표현함.
+            const sortedItems = t.items.sort((a, b) => {
+                const timeA = new Date(a.created_at).getTime();
+                const timeB = new Date(b.created_at).getTime();
+                // 같은 깊이면 시간순, 다른 깊이면 부모(depth가 낮은 것)가 우선
+                if (a.depth !== b.depth) {
+                    // 하지만 실제로는 부모 바로 다음에 본인의 답글들이 와야 함 (재귀적 정렬 필요)
+                    return 0; // 아래에서 재귀적으로 처리하기 위해 일단 0 반환
+                }
+                return timeA - timeB;
+            });
+
+            // 재귀적 평탄화 함수
+            const flatten = (parentId = null) => {
+                const children = t.items.filter(item => (item.parent_id === parentId || (!parentId && !item.parent_id && !sortedRegulars.includes(item))));
+                children.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                children.forEach(child => {
+                    if (!sortedRegulars.includes(child)) {
+                        sortedRegulars.push(child);
+                        flatten(child.id);
+                    }
+                });
+            };
+            flatten();
+        });
+
+        return [...notices, ...sortedRegulars];
+    };
+
     const loadPosts = useCallback(async () => {
         try {
             setLoading(true);
             const data = await BoardModel.fetchPosts(currentUser?.name);
-            setPosts(data);
+            const sortedData = sortThreadedPosts(data);
+            setPosts(sortedData);
         } catch (error) {
             console.error('Failed to view post:', error);
             showAlert?.('게시글을 불러올 수 없습니다.');

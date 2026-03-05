@@ -155,7 +155,38 @@ if (!settingsExists) {
 
 if (db.prepare("SELECT count(*) as count FROM config_items WHERE category = 'kit'").get().count === 0) {
   const kitStmt = db.prepare('INSERT INTO config_items (category, item_name, is_active, display_order) VALUES (?, ?, ?, ?)');
-  ['T-N (총질소)', 'T-P (총인)', 'COD (화학적산소요구량)', 'SS (부유물질)'].forEach((name, i) => kitStmt.run('kit', name, 1, i));
+  ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '인산염인(PO4-P)', '알칼리도(ALK)'].forEach((name, i) => kitStmt.run('kit', name, 1, i));
+}
+
+// --- Kit name migration: 이전 이름 → 올바른 이름 ---
+const kitNameMap = {
+  'T-N (총질소)': '암모니아성질소(NH3-N)',
+  '총질소(T-N)': '암모니아성질소(NH3-N)',
+  '총질소': '암모니아성질소(NH3-N)',
+  'T-P (총인)': '질산성질소(NO3-N)',
+  '총인(T-P)': '질산성질소(NO3-N)',
+  '총인': '질산성질소(NO3-N)',
+  'COD (화학적산소요구량)': '인산염인(PO4-P)',
+  'COD': '인산염인(PO4-P)',
+  'SS (부유물질)': '알칼리도(ALK)',
+  'SS': '알칼리도(ALK)'
+};
+
+const existingKits = db.prepare("SELECT item_name FROM config_items WHERE category = 'kit'").all();
+existingKits.forEach(item => {
+  for (const [oldBase, newBase] of Object.entries(kitNameMap)) {
+    if (item.item_name === oldBase) {
+      db.prepare("UPDATE config_items SET item_name = ? WHERE category = 'kit' AND item_name = ?").run(newBase, oldBase);
+    } else if (item.item_name.startsWith(oldBase + '_')) {
+      const suffix = item.item_name.substring(oldBase.length);
+      const newName = newBase + suffix;
+      db.prepare("UPDATE config_items SET item_name = ? WHERE category = 'kit' AND item_name = ?").run(newName, item.item_name);
+    }
+  }
+});
+
+for (const [oldBase, newBase] of Object.entries(kitNameMap)) {
+  db.prepare('UPDATE kit_logs SET kit_name = ? WHERE kit_name = ?').run(newBase, oldBase);
 }
 
 if (db.prepare('SELECT count(*) as count FROM config_items').get().count === 0) {

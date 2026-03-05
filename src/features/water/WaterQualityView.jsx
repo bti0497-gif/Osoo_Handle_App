@@ -14,7 +14,7 @@ const WaterQualityView = ({ currentUser }) => {
 
     const [selectedDate, setSelectedDate] = useState(null);
     const [isManualEditMode, setIsManualEditMode] = useState(false);
-    const [doubleClickedDate, setDoubleClickedDate] = useState(null);
+    const [doubleClickedCell, setDoubleClickedCell] = useState(null); // { date, colId }
     const [activeInput, setActiveInput] = useState(null);
     const [localValue, setLocalValue] = useState(null);
 
@@ -43,8 +43,8 @@ const WaterQualityView = ({ currentUser }) => {
     const hasPending = Object.keys(pendingChanges).length > 0;
 
     const totalSubColsCount = (activeLocations.length * 3) + activeLocations.filter(loc => po4pLocations.includes(loc.name)).length;
-    // 동적 너비 계산 (최소 714px 유지, 서브컬럼당 45px + 헤더 84px)
-    const calculatedWidth = Math.max(714, 84 + totalSubColsCount * 45);
+    // 동적 너비 계산 (최소 714px 유지, 서브컬럼당 45px + 헤더 84px + 버퍼 40px)
+    const calculatedWidth = Math.max(714, 84 + totalSubColsCount * 45 + 40);
 
     const gridCols = cols.map(c => {
         const subCols = activeLocations
@@ -72,11 +72,10 @@ const WaterQualityView = ({ currentUser }) => {
         setSelectedDate(row.date === selectedDate ? null : row.date);
     };
 
-    const handleRowDoubleClick = (row) => {
+    const handleCellDoubleClick = (row, col) => {
         if (row.date !== todayStr && !row.isFuture) {
-            setDoubleClickedDate(row.date);
+            setDoubleClickedCell({ date: row.date, colId: col.id });
             setSelectedDate(row.date);
-            setIsManualEditMode(true);
         }
     };
 
@@ -102,7 +101,7 @@ const WaterQualityView = ({ currentUser }) => {
                 <button
                     onClick={() => {
                         setIsManualEditMode(false);
-                        setDoubleClickedDate(null);
+                        setDoubleClickedCell(null);
                         setSelectedDate(null);
                     }}
                     style={{
@@ -120,7 +119,7 @@ const WaterQualityView = ({ currentUser }) => {
     const handleSave = async () => {
         await submitBatch();
         setIsManualEditMode(false);
-        setDoubleClickedDate(null);
+        setDoubleClickedCell(null);
         setSelectedDate(null);
     };
 
@@ -164,7 +163,7 @@ const WaterQualityView = ({ currentUser }) => {
         const isFuture = row.isFuture;
 
         const isManual = isSelected && isManualEditMode;
-        const isCellDoubleClicked = doubleClickedDate === row.date;
+        const isCellDoubleClicked = doubleClickedCell?.date === row.date && doubleClickedCell?.colId === colId;
         const isReadOnly = (isFuture || (row.date !== todayStr)) && !isManual && !isCellDoubleClicked;
 
         const isRawActive = activeInput?.date === row.date && activeInput?.colId === colId;
@@ -173,7 +172,18 @@ const WaterQualityView = ({ currentUser }) => {
         const displayVal = val != null ? Number(val).toFixed(1) : '';
 
         return (
-            <div style={{ width: '100%', height: '100%', padding: '0 4px', background: errorMsg ? '#fee2e2' : (isSelected || isToday ? '#fef08a' : (isFuture ? '#f5f5f5' : 'transparent')), display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box' }} title={errorMsg || ''}>
+            <div style={{
+                position: 'absolute',
+                inset: 0,
+                padding: '0 4px',
+                background: errorMsg ? '#fee2e2' : ((!isReadOnly && (isSelected || isToday)) ? '#fef08a' : (isFuture ? '#f5f5f5' : 'transparent')),
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                boxSizing: 'border-box',
+                pointerEvents: isFuture ? 'none' : 'auto',
+                opacity: isFuture ? 0.6 : 1
+            }} title={errorMsg || ''}>
                 {isReadOnly ? (
                     <span style={{ fontWeight: 700, fontSize: 11, color: errorMsg ? '#dc2626' : (changed ? '#1d4ed8' : '#1e293b') }}>
                         {displayVal || '-'}
@@ -264,7 +274,7 @@ const WaterQualityView = ({ currentUser }) => {
                 rowHeaderLabel="날짜"
 
                 onRowSelect={handleRowSelect}
-                onCellDoubleClick={(row) => handleRowDoubleClick(row)}
+                onCellDoubleClick={(row, col) => handleCellDoubleClick(row, col)}
                 getRowStyle={getRowStyle}
                 renderRowHeader={(row) => renderRowHeader(row)}
                 renderCell={renderCell}

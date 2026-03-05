@@ -36,11 +36,12 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
             const settingsData = await SettingsModel.getSettings();
             let dynamicTypes = [];
             if (settingsData?.success && settingsData.configItems) {
-                const kits = settingsData.configItems.filter(i => i.category === 'kit' && i.is_active);
+                const kits = settingsData.configItems.filter(i => i.category === 'kit' && i.is_active
+                    && !i.item_name.endsWith('_purchase') && !i.item_name.endsWith('_usage') && !i.item_name.endsWith('_inventory'));
                 dynamicTypes = kits.map(i => i.item_name);
             }
             if (dynamicTypes.length === 0) {
-                dynamicTypes = ['T-N (총질소)', 'T-P (총인)', 'COD (화학적산소요구량)', 'SS (부유물질)'];
+                dynamicTypes = ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '인산염인(PO4-P)', '알칼리도(ALK)'];
             }
             setKitTypes(dynamicTypes);
 

@@ -231,7 +231,7 @@ const BoardView = ({ currentUser }) => {
                                                 </span>
                                                 <div style={{
                                                     flex: 1, display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden',
-                                                    paddingLeft: p.parent_id ? '1.5rem' : '8px'
+                                                    paddingLeft: p.depth > 0 ? `${p.depth * 1.25}rem` : '8px'
                                                 }}>
                                                     {p.is_notice ? (
                                                         <span style={{ fontSize: '0.5625rem', fontWeight: 900, color: '#d97706', backgroundColor: '#fef3c7', padding: '1px 5px', borderRadius: '3px', flexShrink: 0 }}>공지</span>

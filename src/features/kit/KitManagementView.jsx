@@ -12,7 +12,7 @@ const KitManagementView = ({ currentUser }) => {
 
     const [selectedDate, setSelectedDate] = useState(null);
     const [isManualEditMode, setIsManualEditMode] = useState(false);
-    const [doubleClickedDate, setDoubleClickedDate] = useState(null);
+    const [doubleClickedCell, setDoubleClickedCell] = useState(null); // { date, colId }
     const [activeInput, setActiveInput] = useState(null);
     const [localValue, setLocalValue] = useState(null);
 
@@ -25,8 +25,8 @@ const KitManagementView = ({ currentUser }) => {
 
     const vibrantColors = ['#1e3a8a', '#047857', '#b45309', '#4338ca', '#57534e'];
 
-    // 동적 너비 계산 (최소 714px 유지, 키트당 156px + 헤더 84px)
-    const calculatedWidth = Math.max(714, 84 + kitTypes.length * 156);
+    // 동적 너비 계산 (최소 714px 유지, 키트당 156px + 헤더 84px + 버퍼 40px)
+    const calculatedWidth = Math.max(714, 84 + kitTypes.length * 156 + 40);
 
     const gridCols = kitTypes.map((type, idx) => ({
         id: type,
@@ -46,11 +46,10 @@ const KitManagementView = ({ currentUser }) => {
         setSelectedDate(row.date === selectedDate ? null : row.date);
     };
 
-    const handleRowDoubleClick = (row) => {
+    const handleCellDoubleClick = (row, col) => {
         if (row.date !== todayStr && !row.isFuture) {
-            setDoubleClickedDate(row.date);
+            setDoubleClickedCell({ date: row.date, colId: col.id });
             setSelectedDate(row.date);
-            setIsManualEditMode(true);
         }
     };
 
@@ -76,7 +75,7 @@ const KitManagementView = ({ currentUser }) => {
                 <button
                     onClick={() => {
                         setIsManualEditMode(false);
-                        setDoubleClickedDate(null);
+                        setDoubleClickedCell(null);
                         setSelectedDate(null);
                     }}
                     style={{
@@ -94,7 +93,7 @@ const KitManagementView = ({ currentUser }) => {
     const handleSave = async () => {
         await submitBatch();
         setIsManualEditMode(false);
-        setDoubleClickedDate(null);
+        setDoubleClickedCell(null);
         setSelectedDate(null);
     };
 
@@ -127,52 +126,69 @@ const KitManagementView = ({ currentUser }) => {
         };
     };
 
-    const renderCell = (row, colGroup, subCol) => {
-        const c = colGroup;
-        const d = row[c.id] || { purchase: null, usage: null, inventory: null, error: null };
+    const renderCell = (row, col, val, isCellTargeted) => {
+        // col is a leaf column from AdvancedDataGrid: { id, type, parentId, ... }
+        const kitName = col.parentId; // 키트명 (parent group id)
+        if (!kitName) return val;
 
-        const changed = pendingChanges[row.date]?.[c.id] !== undefined;
+        const subType = col.type; // 'purchase' | 'usage' | 'inventory'
+        const d = row[kitName] || { purchase: null, usage: null, inventory: null, error: null };
+
+        const changed = pendingChanges[row.date]?.[kitName] !== undefined;
         const isSelected = selectedDate === row.date;
         const isToday = row.date === todayStr;
         const isFuture = row.isFuture;
 
         const isManual = isSelected && isManualEditMode;
-        const isCellDoubleClicked = doubleClickedDate === row.date;
+        const isCellDoubleClicked = doubleClickedCell?.date === row.date && doubleClickedCell?.colId === col.id;
         const isReadOnly = (isFuture || (row.date !== todayStr)) && !isManual && !isCellDoubleClicked;
 
-        const isActive = activeInput?.date === row.date && activeInput?.colId === c.id && activeInput?.type === subCol.type;
+        const isActive = activeInput?.date === row.date && activeInput?.colId === kitName && activeInput?.type === subType;
 
-        const isInventory = subCol.type === 'inventory';
-        const isPurchase = subCol.type === 'purchase';
-        const isUsage = subCol.type === 'usage';
+        const isInventory = subType === 'inventory';
+        const isPurchase = subType === 'purchase';
+        const isUsage = subType === 'usage';
 
-        const val = isPurchase ? d.purchase : (isUsage ? d.usage : d.inventory);
+        const cellVal = isPurchase ? d.purchase : (isUsage ? d.usage : d.inventory);
         const errorMsg = d.error;
 
-        // 재고는 편집모드가 아니면 읽기전용 표시
-        if (isInventory && isReadOnly) {
+        // 재고: 수동수정 모드에서만 편집 가능, 더블클릭이나 일반 모드에서는 읽기전용
+        if (isInventory && !isManual) {
             return (
                 <div style={{
-                    width: '100%', height: '100%',
+                    position: 'absolute', inset: 0,
                     padding: '0 3px',
                     textAlign: 'right', fontWeight: 800, fontSize: 10.5,
-                    color: val != null && val < 5 ? '#dc2626' : '#475569',
+                    color: cellVal != null && cellVal < 5 ? '#dc2626' : '#475569',
                     background: isFuture ? '#fafafa' : 'transparent',
                     display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-                    borderLeft: '1px solid #e2e8f0'
+                    boxSizing: 'border-box',
+                    borderLeft: '1px solid #e2e8f0',
+                    pointerEvents: isFuture ? 'none' : 'auto',
+                    opacity: isFuture ? 0.6 : 1
                 }}>
-                    {fmt(val) || '-'}
+                    {fmt(cellVal) || '-'}
                 </div>
             );
         }
 
-        const bgColor = isPurchase ? '#eff6ff' : (isUsage ? '#fef2f2' : '#fef3c7');
-        const activeBg = isPurchase ? '#dbeafe' : (isUsage ? '#fee2e2' : '#fef3c7');
+        const displayVal = cellVal != null ? Number(cellVal).toLocaleString() : '';
 
-        const displayVal = val != null ? Number(val).toLocaleString() : '';
+        // 편집 가능할 때만 노란색
+        const cellBg = errorMsg ? '#fee2e2'
+            : (!isReadOnly && (isManual || isCellDoubleClicked || isToday)) ? '#fef08a'
+                : (isFuture ? '#f5f5f5' : 'transparent');
 
         return (
-            <div style={{ width: '100%', height: '100%', padding: '0 4px', background: errorMsg ? '#fee2e2' : ((isManual || isCellDoubleClicked || isToday) ? activeBg : (isFuture ? '#f5f5f5' : 'transparent')), display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box' }} title={errorMsg || ''}>
+            <div style={{
+                position: 'absolute', inset: 0,
+                padding: '0 4px',
+                background: cellBg,
+                display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                boxSizing: 'border-box',
+                pointerEvents: isFuture ? 'none' : 'auto',
+                opacity: isFuture ? 0.6 : 1
+            }} title={errorMsg || ''}>
                 {isReadOnly ? (
                     <span style={{ fontWeight: 700, fontSize: 11, color: errorMsg ? '#dc2626' : (changed ? '#1d4ed8' : '#1e293b') }}>
                         {displayVal || '-'}
@@ -186,19 +202,20 @@ const KitManagementView = ({ currentUser }) => {
                             color: errorMsg ? '#dc2626' : (changed && !isReadOnly ? '#1d4ed8' : '#1e293b'),
                             background: 'transparent',
                             border: errorMsg ? '2px inset #ef4444' : 'none',
-                            boxSizing: 'border-box'
+                            boxSizing: 'border-box',
+                            pointerEvents: 'auto'
                         }}
                         value={isActive ? localValue : displayVal}
                         placeholder="-"
                         onChange={e => setLocalValue(e.target.value.replace(/,/g, ''))}
                         onFocus={() => {
                             if (isReadOnly) return;
-                            setActiveInput({ date: row.date, colId: c.id, type: subCol.type });
-                            setLocalValue(val != null ? String(val) : '');
+                            setActiveInput({ date: row.date, colId: kitName, type: subType });
+                            setLocalValue(cellVal != null ? String(cellVal) : '');
                         }}
                         onBlur={() => {
                             if (isActive && localValue !== null) {
-                                updateAmount(row.date, c.id, subCol.type, localValue);
+                                updateAmount(row.date, kitName, subType, localValue);
                             }
                             setActiveInput(null);
                             setLocalValue(null);
@@ -252,7 +269,7 @@ const KitManagementView = ({ currentUser }) => {
                 rowHeaderLabel="날짜"
 
                 onRowSelect={handleRowSelect}
-                onCellDoubleClick={(row) => handleRowDoubleClick(row)}
+                onCellDoubleClick={(row, col) => handleCellDoubleClick(row, col)}
                 getRowStyle={getRowStyle}
                 renderRowHeader={(row) => renderRowHeader(row)}
                 renderCell={renderCell}

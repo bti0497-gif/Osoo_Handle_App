@@ -12,7 +12,7 @@ const MedicineManagementView = ({ currentUser }) => {
 
     const [selectedDate, setSelectedDate] = useState(null);
     const [isManualEditMode, setIsManualEditMode] = useState(false);
-    const [doubleClickedDate, setDoubleClickedDate] = useState(null);
+    const [doubleClickedCell, setDoubleClickedCell] = useState(null); // { date, colId }
     const [activeInput, setActiveInput] = useState(null); // { date, colId, type }
     const [localValue, setLocalValue] = useState(null);
 
@@ -37,8 +37,8 @@ const MedicineManagementView = ({ currentUser }) => {
 
     const hasPending = Object.keys(pendingChanges).length > 0;
 
-    // 동적 너비 계산 (최소 714px 유지, 약품당 140px + 헤더 84px)
-    const calculatedWidth = Math.max(714, 84 + medicineTypes.length * 140);
+    // 동적 너비 계산 (최소 714px 유지, 약품당 140px + 헤더 84px + 버퍼 40px)
+    const calculatedWidth = Math.max(714, 84 + medicineTypes.length * 140 + 40);
 
     const gridCols = cols.map((c, idx) => {
         // 지정된 색상 배열
@@ -60,11 +60,11 @@ const MedicineManagementView = ({ currentUser }) => {
         setSelectedDate(row.date === selectedDate ? null : row.date);
     };
 
-    const handleRowDoubleClick = (row) => {
+    const handleCellDoubleClick = (row, col) => {
         if (row.date !== todayStr && !row.isFuture) {
-            setDoubleClickedDate(row.date);
+            setDoubleClickedCell({ date: row.date, colId: col.id });
             setSelectedDate(row.date);
-            setIsManualEditMode(true);
+            // 더블클릭은 특정 셀만 편집하므로 isManualEditMode는 건드리지 않음
         }
     };
 
@@ -90,7 +90,7 @@ const MedicineManagementView = ({ currentUser }) => {
                 <button
                     onClick={() => {
                         setIsManualEditMode(false);
-                        setDoubleClickedDate(null);
+                        setDoubleClickedCell(null);
                         setSelectedDate(null);
                     }}
                     style={{
@@ -108,7 +108,7 @@ const MedicineManagementView = ({ currentUser }) => {
     const handleSave = async () => {
         await submitBatch();
         setIsManualEditMode(false);
-        setDoubleClickedDate(null);
+        setDoubleClickedCell(null);
         setSelectedDate(null);
     };
 
@@ -141,51 +141,71 @@ const MedicineManagementView = ({ currentUser }) => {
         };
     };
 
-    const renderCell = (row, colGroup, subCol) => {
-        const c = colGroup;
-        const d = row[c.id] || { purchase: null, usage: null, inventory: null, error: null };
+    const renderCell = (row, col, val, isCellTargeted) => {
+        // col is a leaf column from AdvancedDataGrid: { id, type, parentId, ... }
+        const medicineName = col.parentId; // 약품명 (parent group id)
+        if (!medicineName) return val;
 
-        const changed = pendingChanges[row.date]?.[c.id] !== undefined;
+        const subType = col.type; // 'purchase' | 'usage' | 'inventory'
+        const d = row[medicineName] || { purchase: null, usage: null, inventory: null, error: null };
+
+        const changed = pendingChanges[row.date]?.[medicineName] !== undefined;
         const isSelected = selectedDate === row.date;
         const isToday = row.date === todayStr;
         const isFuture = row.isFuture;
 
         const isManual = isSelected && isManualEditMode;
-        const isCellDoubleClicked = doubleClickedDate === row.date;
+        const isCellDoubleClicked = doubleClickedCell?.date === row.date && doubleClickedCell?.colId === col.id;
         const isReadOnly = (isFuture || (row.date !== todayStr)) && !isManual && !isCellDoubleClicked;
 
-        const isActive = activeInput?.date === row.date && activeInput?.colId === c.id && activeInput?.type === subCol.type;
+        const isActive = activeInput?.date === row.date && activeInput?.colId === medicineName && activeInput?.type === subType;
 
-        const isInventory = subCol.type === 'inventory';
-        const isPurchase = subCol.type === 'purchase';
-        const isUsage = subCol.type === 'usage';
+        const isInventory = subType === 'inventory';
+        const isPurchase = subType === 'purchase';
+        const isUsage = subType === 'usage';
 
-        const val = isPurchase ? d.purchase : (isUsage ? d.usage : d.inventory);
+        const cellVal = isPurchase ? d.purchase : (isUsage ? d.usage : d.inventory);
         const errorMsg = d.error;
 
-        if (isInventory && isReadOnly) {
+        // 재고: 수동수정 모드에서만 편집 가능, 더블클릭이나 일반 모드에서는 읽기전용
+        if (isInventory && !isManual) {
             return (
                 <div style={{
-                    width: '100%', height: '100%',
+                    position: 'absolute', inset: 0,
                     padding: '0 3px',
                     textAlign: 'right', fontWeight: 800, fontSize: 10.5,
-                    color: val != null && val < 50 ? '#dc2626' : '#475569',
+                    color: cellVal != null && cellVal < 50 ? '#dc2626' : '#475569',
                     background: isFuture ? '#fafafa' : 'transparent',
                     display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-                    borderLeft: '1px solid #e2e8f0'
+                    boxSizing: 'border-box',
+                    borderLeft: '1px solid #e2e8f0',
+                    pointerEvents: isFuture ? 'none' : 'auto',
+                    opacity: isFuture ? 0.6 : 1
                 }}>
-                    {fmt(val) || '-'}
+                    {fmt(cellVal) || '-'}
                 </div>
             );
         }
 
-        const bgColor = isPurchase ? '#eff6ff' : '#fef2f2';
+        // 입고/사용 셀
         const activeBg = isPurchase ? '#dbeafe' : '#fee2e2';
+        const displayVal = cellVal != null ? Number(cellVal).toLocaleString() : '';
 
-        const displayVal = val != null ? Number(val).toLocaleString() : '';
+        // 편집 가능 여부에 따라 노란색 배경 적용
+        const cellBg = errorMsg ? '#fee2e2'
+            : (!isReadOnly && (isManual || isCellDoubleClicked || isToday)) ? '#fef08a'
+                : (isFuture ? '#f5f5f5' : 'transparent');
 
         return (
-            <div style={{ width: '100%', height: '100%', padding: '0 4px', background: errorMsg ? '#fee2e2' : ((isManual || isCellDoubleClicked || isToday) ? activeBg : (isFuture ? '#f5f5f5' : 'transparent')), display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box' }} title={errorMsg || ''}>
+            <div style={{
+                position: 'absolute', inset: 0,
+                padding: '0 4px',
+                background: cellBg,
+                display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                boxSizing: 'border-box',
+                pointerEvents: isFuture ? 'none' : 'auto',
+                opacity: isFuture ? 0.6 : 1
+            }} title={errorMsg || ''}>
                 {isReadOnly ? (
                     <span style={{ fontWeight: 700, fontSize: 11, color: errorMsg ? '#dc2626' : (changed ? '#1d4ed8' : '#1e293b') }}>
                         {displayVal || '-'}
@@ -199,19 +219,20 @@ const MedicineManagementView = ({ currentUser }) => {
                             color: errorMsg ? '#dc2626' : (changed && !isReadOnly ? '#1d4ed8' : '#1e293b'),
                             background: 'transparent',
                             border: errorMsg ? '2px inset #ef4444' : 'none',
-                            boxSizing: 'border-box'
+                            boxSizing: 'border-box',
+                            pointerEvents: 'auto'
                         }}
                         value={isActive ? localValue : displayVal}
                         placeholder="-"
                         onChange={e => setLocalValue(e.target.value.replace(/,/g, ''))}
                         onFocus={() => {
                             if (isReadOnly) return;
-                            setActiveInput({ date: row.date, colId: c.id, type: subCol.type });
-                            setLocalValue(val != null ? String(val) : '');
+                            setActiveInput({ date: row.date, colId: medicineName, type: subType });
+                            setLocalValue(cellVal != null ? String(cellVal) : '');
                         }}
                         onBlur={() => {
                             if (isActive && localValue !== null) {
-                                updateAmount(row.date, c.id, subCol.type, localValue);
+                                updateAmount(row.date, medicineName, subType, localValue);
                             }
                             setActiveInput(null);
                             setLocalValue(null);
@@ -265,7 +286,7 @@ const MedicineManagementView = ({ currentUser }) => {
                 rowHeaderLabel="날짜"
 
                 onRowSelect={handleRowSelect}
-                onCellDoubleClick={(row) => handleRowDoubleClick(row)}
+                onCellDoubleClick={(row, col) => handleCellDoubleClick(row, col)}
                 getRowStyle={getRowStyle}
                 renderRowHeader={(row) => renderRowHeader(row)}
                 renderCell={renderCell}

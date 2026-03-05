@@ -34,8 +34,8 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         { name: '인산염인', checked: true }, { name: '알칼리도', checked: true }
     ]);
     const [kitItems, setKitItems] = useState([
-        { name: 'T-N (총질소)', checked: true }, { name: 'T-P (총인)', checked: true },
-        { name: 'COD (화학적산소요구량)', checked: true }, { name: 'SS (부유물질)', checked: true }
+        { name: '암모니아성질소(NH3-N)', checked: true }, { name: '질산성질소(NO3-N)', checked: true },
+        { name: '인산염인(PO4-P)', checked: true }, { name: '알칼리도(ALK)', checked: true }
     ]);
     const [locationItems, setLocationItems] = useState([
         { name: '유량조정조', checked: true }, { name: '무산소조', checked: true },
@@ -151,11 +151,15 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                     }
                     const kits = data.configItems.filter(i => i.category === 'kit');
                     if (kits.length > 0) {
-                        const baseKits = kits.filter(i => !i.item_name.includes('_raw') && !i.item_name.includes('_flow')); // Or just generic filter
-                        setKitItems(baseKits.filter(i => !!i.is_active || i.excel_cell === null).map(i => ({ name: i.item_name, checked: !!i.is_active })));
+                        const baseKits = kits.filter(i => !i.item_name.endsWith('_purchase') && !i.item_name.endsWith('_usage') && !i.item_name.endsWith('_inventory'));
+                        setKitItems(baseKits.map(i => ({ name: i.item_name, checked: !!i.is_active })));
 
                         const restored = {};
-                        kits.forEach(i => { if (i.excel_cell) restored[i.item_name] = i.excel_cell; });
+                        kits.forEach(i => {
+                            if (i.excel_cell && (i.item_name.endsWith('_purchase') || i.item_name.endsWith('_usage') || i.item_name.endsWith('_inventory'))) {
+                                restored[i.item_name] = i.excel_cell;
+                            }
+                        });
                         if (Object.keys(restored).length > 0) setKitMapping(restored);
                     }
                     const locations = data.configItems.filter(i => i.category === 'location');
