@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { SettingsModel } from './SettingsModel';
 
+const DEFAULT_ROAD_WEB_URL = 'https://nwpo.ex.co.kr:5002//security/login.do';
+const DEFAULT_WATER_ANALYSIS_URL = 'https://eco.qntech.co.kr';
+
 const ALPHABET = (() => {
     const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
     const res = [...letters];
@@ -64,6 +67,26 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
     const [waterConfig, setWaterConfig] = useState({ sheet: '', startRow: 1, endRow: 31, dateCol: 'A' });
     const [waterMapping, setWaterMapping] = useState({});
 
+    const [webAppCredentials, setWebAppCredentials] = useState({
+        roadWeb: { serviceUrl: DEFAULT_ROAD_WEB_URL, userId: '', password: '' },
+        waterAnalysisApp: { serviceUrl: DEFAULT_WATER_ANALYSIS_URL, userId: '', password: '' }
+    });
+
+    const [qntechImportSettings, setQntechImportSettings] = useState({
+        photoRoot: '사진관리/수질분석',
+        sampleMappings: []
+    });
+
+    const [passwordVisibility, setPasswordVisibility] = useState({
+        roadWeb: false,
+        waterAnalysisApp: false
+    });
+
+    const [urlEditability, setUrlEditability] = useState({
+        roadWeb: false,
+        waterAnalysisApp: false
+    });
+
 
 
     const [importProgress, setImportProgress] = useState({ current: 0, total: 0, status: 'idle', isVisible: false });
@@ -77,7 +100,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
     useEffect(() => { loadSettings(); }, []);
 
     useEffect(() => {
-        if (activeTab === 'flow' || activeTab === 'medicine' || activeTab === 'kit') {
+        if (activeTab === 'flow' || activeTab === 'medicine' || activeTab === 'kit' || activeTab === 'water') {
             if (excelStatus.status === 'ready') {
                 setExcelSheets(excelStatus.sheets);
             } else if (excelStatus.status !== 'loading') {
@@ -116,6 +139,41 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                 if (data.settings.kit_sheet) setKitConfig({ sheet: data.settings.kit_sheet, startRow: data.settings.kit_start_row || 1, endRow: data.settings.kit_end_row || 31, dateCol: data.settings.kit_date_col || 'A' });
                 if (data.settings.water_sheet) setWaterConfig({ sheet: data.settings.water_sheet, startRow: data.settings.water_start_row || 1, endRow: data.settings.water_end_row || 31, dateCol: data.settings.water_date_col || 'A' });
 
+                if (Array.isArray(data.credentials) && data.credentials.length > 0) {
+                    const credentialMap = data.credentials.reduce((acc, item) => {
+                        acc[item.service_key] = item;
+                        return acc;
+                    }, {});
+
+                    setWebAppCredentials({
+                        roadWeb: {
+                            serviceUrl: credentialMap.road_web?.service_url || DEFAULT_ROAD_WEB_URL,
+                            userId: credentialMap.road_web?.user_id || '',
+                            password: credentialMap.road_web?.password || ''
+                        },
+                        waterAnalysisApp: {
+                            serviceUrl: credentialMap.water_analysis_app?.service_url || DEFAULT_WATER_ANALYSIS_URL,
+                            userId: credentialMap.water_analysis_app?.user_id || '',
+                            password: credentialMap.water_analysis_app?.password || ''
+                        }
+                    });
+                }
+
+                let restoredQntechMappings = [];
+                if (data.settings.qntech_sample_mappings) {
+                    try {
+                        const parsed = JSON.parse(data.settings.qntech_sample_mappings);
+                        restoredQntechMappings = Array.isArray(parsed) ? parsed : [];
+                    } catch (error) {
+                        restoredQntechMappings = [];
+                    }
+                }
+
+                setQntechImportSettings({
+                    photoRoot: data.settings.qntech_photo_root || '사진관리/수질분석',
+                    sampleMappings: restoredQntechMappings
+                });
+
                 if (data.configItems?.length > 0) {
                     const flows = data.configItems.filter(i => i.category === 'flow');
                     if (flows.length > 0) {
@@ -144,10 +202,21 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                     }
                     const water = data.configItems.filter(i => i.category === 'water');
                     if (water.length > 0) {
-                        setWaterItems(water.map(i => ({ name: i.item_name, checked: !!i.is_active })));
-                        const restored = {};
-                        water.forEach(i => { if (i.excel_cell) restored[i.item_name] = i.excel_cell; });
-                        if (Object.keys(restored).length > 0) setWaterMapping(restored);
+                        // water 카테고리는 이제 순수 파라미터명만 포함되지만, 안전을 위해 필터링 유지
+                        const baseWater = water.filter(i => !i.item_name.includes('_'));
+                        setWaterItems(baseWater.map(i => ({ name: i.item_name, checked: !!i.is_active })));
+                    }
+
+                    // 매핑 정보 복원: 'water_mapping' 카테고리와 'water' 카테고리의 레거시 매핑 데이터 병합
+                    const waterMappings = data.configItems.filter(i => i.category === 'water_mapping');
+                    const legacyWaterMappings = data.configItems.filter(i => i.category === 'water' && i.item_name.includes('_'));
+
+                    const restoredWaterMapping = {};
+                    legacyWaterMappings.forEach(i => { if (i.excel_cell) restoredWaterMapping[i.item_name] = i.excel_cell; });
+                    waterMappings.forEach(i => { if (i.excel_cell) restoredWaterMapping[i.item_name] = i.excel_cell; });
+
+                    if (Object.keys(restoredWaterMapping).length > 0) {
+                        setWaterMapping(restoredWaterMapping);
                     }
                     const kits = data.configItems.filter(i => i.category === 'kit');
                     if (kits.length > 0) {
@@ -357,6 +426,114 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         }
     };
 
+    const updateWebAppCredentialField = (section, field, value) => {
+        setWebAppCredentials(prev => ({
+            ...prev,
+            [section]: {
+                ...prev[section],
+                [field]: value
+            }
+        }));
+    };
+
+    const togglePasswordVisibility = (section) => {
+        setPasswordVisibility(prev => ({
+            ...prev,
+            [section]: !prev[section]
+        }));
+    };
+
+    const toggleUrlEditability = (section) => {
+        setUrlEditability(prev => ({
+            ...prev,
+            [section]: !prev[section]
+        }));
+    };
+
+    const handleSaveWebAppCredentials = async (section) => {
+        const serviceKey = section === 'roadWeb' ? 'road_web' : 'water_analysis_app';
+        const target = webAppCredentials[section];
+
+        try {
+            const response = await SettingsModel.saveWebAppCredentials({
+                serviceKey,
+                serviceUrl: target.serviceUrl || '',
+                userId: target.userId,
+                password: target.password
+            });
+
+            if (!response?.success) {
+                throw new Error(response?.message || '저장에 실패했습니다.');
+            }
+
+            setUrlEditability(prev => ({
+                ...prev,
+                [section]: false
+            }));
+            showAlert?.('웹/앱 설정이 저장되었습니다.');
+            loadSettings();
+        } catch (err) {
+            console.error('Web/App settings save error:', err);
+            showAlert?.('웹/앱 설정 저장 중 오류가 발생했습니다: ' + err.message);
+        }
+    };
+
+    const updateQntechImportSettingField = (field, value) => {
+        setQntechImportSettings(prev => ({
+            ...prev,
+            [field]: value
+        }));
+    };
+
+    const updateQntechSampleMapping = (index, field, value) => {
+        setQntechImportSettings(prev => ({
+            ...prev,
+            sampleMappings: prev.sampleMappings.map((item, itemIndex) => (
+                itemIndex === index ? { ...item, [field]: value } : item
+            ))
+        }));
+    };
+
+    const addQntechSampleMapping = () => {
+        setQntechImportSettings(prev => ({
+            ...prev,
+            sampleMappings: [...prev.sampleMappings, { sourceName: '', targetLocation: '' }]
+        }));
+    };
+
+    const removeQntechSampleMapping = (index) => {
+        setQntechImportSettings(prev => ({
+            ...prev,
+            sampleMappings: prev.sampleMappings.filter((_, itemIndex) => itemIndex !== index)
+        }));
+    };
+
+    const handleSaveQntechImportSettings = async () => {
+        try {
+            const cleanedMappings = qntechImportSettings.sampleMappings
+                .map((item) => ({
+                    sourceName: String(item?.sourceName || '').trim(),
+                    targetLocation: String(item?.targetLocation || '').trim()
+                }))
+                .filter((item) => item.sourceName && item.targetLocation);
+
+            const response = await SettingsModel.saveQntechImportSettings({
+                photoRoot: qntechImportSettings.photoRoot || '사진관리/수질분석',
+                sampleMappings: cleanedMappings
+            });
+
+            if (!response?.success) {
+                throw new Error(response?.message || '저장에 실패했습니다.');
+            }
+
+            showAlert?.('QnTECH 불러오기 설정이 저장되었습니다.');
+            loadSettings();
+        } catch (err) {
+            console.error('QnTECH import settings save error:', err);
+            showAlert?.('QnTECH 불러오기 설정 저장 중 오류가 발생했습니다: ' + err.message);
+        }
+    };
+
     const handleExcelFileUpload = async (file) => {
         if (!file) return;
         setIsUploading(true);
@@ -398,10 +575,16 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         medicineConfig, setMedicineConfig, medicineMapping, setMedicineMapping,
         kitConfig, setKitConfig, kitMapping, setKitMapping,
         waterConfig, setWaterConfig, waterMapping, setWaterMapping,
+        webAppCredentials, setWebAppCredentials,
+        qntechImportSettings, setQntechImportSettings,
+        passwordVisibility,
+        urlEditability,
         excelSheets, sampleRowData,
         excelStatus, isMetadataLoading, isPreviewLoading, isUploading,
         importProgress, setImportProgress, importedData, showDataModal, setShowDataModal,
         handleSaveFlowMapping, handleSaveMedicineMapping, handleSaveKitMapping, handleSaveWaterMapping,
+        updateWebAppCredentialField, togglePasswordVisibility, toggleUrlEditability, handleSaveWebAppCredentials,
+        updateQntechImportSettingField, updateQntechSampleMapping, addQntechSampleMapping, removeQntechSampleMapping, handleSaveQntechImportSettings,
         handleApply,
         alphabet: ALPHABET,
     };

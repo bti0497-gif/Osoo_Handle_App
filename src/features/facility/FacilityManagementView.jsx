@@ -37,6 +37,13 @@ const FacilityManagementView = ({ currentUser }) => {
     const [enableClipboard, setEnableClipboard] = useState(true);
     const [contextMenuEnabled, setContextMenuEnabled] = useState(true);
     const [showStatusBar, setShowStatusBar] = useState(true);
+    const [highlightSelectionRow, setHighlightSelectionRow] = useState(true);
+    const [highlightSelectionColumn, setHighlightSelectionColumn] = useState(true);
+    const [startEditOnDoubleClick, setStartEditOnDoubleClick] = useState(true);
+    const [startEditOnEnter, setStartEditOnEnter] = useState(true);
+    const [startEditOnTyping, setStartEditOnTyping] = useState(true);
+    const [typingEditMode, setTypingEditMode] = useState('overwrite');
+    const [enterKeyBehavior, setEnterKeyBehavior] = useState('moveDown');
     const [cellAlign, setCellAlign] = useState('center');
 
     // ---- Generate Water Quality Schema ----
@@ -124,6 +131,13 @@ const FacilityManagementView = ({ currentUser }) => {
                         enableClipboard={enableClipboard}
                         contextMenu={contextMenuEnabled}
                         showStatusBar={showStatusBar}
+                        highlightSelectionRow={highlightSelectionRow}
+                        highlightSelectionColumn={highlightSelectionColumn}
+                        startEditOnDoubleClick={startEditOnDoubleClick}
+                        startEditOnEnter={startEditOnEnter}
+                        startEditOnTyping={startEditOnTyping}
+                        typingEditMode={typingEditMode}
+                        enterKeyBehavior={enterKeyBehavior}
                         cellAlign={cellAlign}
 
                         onCellChange={handleCellChange}
@@ -150,6 +164,13 @@ const FacilityManagementView = ({ currentUser }) => {
                             <CheckRow label="클립보드 (Ctrl+C/V)" checked={enableClipboard} onChange={setEnableClipboard} />
                             <CheckRow label="우클릭 메뉴" checked={contextMenuEnabled} onChange={setContextMenuEnabled} />
                             <CheckRow label="상태바 (SUM/AVG)" checked={showStatusBar} onChange={setShowStatusBar} />
+                            <CheckRow label="행 하이라이트" checked={highlightSelectionRow} onChange={setHighlightSelectionRow} />
+                            <CheckRow label="열 하이라이트" checked={highlightSelectionColumn} onChange={setHighlightSelectionColumn} />
+                            <CheckRow label="더블클릭 편집" checked={startEditOnDoubleClick} onChange={setStartEditOnDoubleClick} />
+                            <CheckRow label="Enter 편집 시작" checked={startEditOnEnter} onChange={setStartEditOnEnter} />
+                            <CheckRow label="타이핑 편집 시작" checked={startEditOnTyping} onChange={setStartEditOnTyping} />
+                            <SelectRow label="타이핑 모드" value={typingEditMode} onChange={setTypingEditMode} options={[{ v: 'overwrite', l: '덮어쓰기' }, { v: 'append', l: '이어쓰기' }]} />
+                            <SelectRow label="Enter 동작" value={enterKeyBehavior} onChange={setEnterKeyBehavior} options={[{ v: 'moveDown', l: '아래로 이동' }, { v: 'stay', l: '현재 셀 유지' }]} />
                         </ControlSection>
 
                         <hr style={{ border: 'none', borderTop: '1px solid #E8E8E8', margin: 0 }} />

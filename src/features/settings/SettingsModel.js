@@ -9,6 +9,14 @@ export const SettingsModel = {
         return apiClient.post('/api/settings', settingsData);
     },
 
+    async saveWebAppCredentials(payload) {
+        return apiClient.post('/api/settings/web-app-credentials', payload);
+    },
+
+    async saveQntechImportSettings(payload) {
+        return apiClient.post('/api/settings/qntech-import-settings', payload);
+    },
+
     async uploadFiles(formData) {
         return apiClient.upload('/api/settings/upload', formData);
     },

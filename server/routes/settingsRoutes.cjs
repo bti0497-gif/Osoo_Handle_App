@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { parseAndStoreExcel, getStoredSheets, getStoredRow, getCellValue, hasStoredData, formatDate } = require('../services/excelService.cjs');
+const { normalizeBaseUrl } = require('../services/qntechAuthService.cjs');
 const router = express.Router();
 
 let importProgress = { current: 0, total: 0, status: 'idle', result: null };
@@ -25,7 +26,8 @@ module.exports = function (db, baseDir) {
     try {
       const settings = db.prepare('SELECT * FROM app_settings WHERE id = 1').get();
       const configItems = db.prepare('SELECT * FROM config_items ORDER BY category, display_order').all();
-      res.json({ success: true, settings, configItems });
+      const credentials = db.prepare('SELECT service_key, service_name, service_url, user_id, password, updated_at FROM web_app_credentials ORDER BY id').all();
+      res.json({ success: true, settings, configItems, credentials });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
@@ -45,6 +47,47 @@ module.exports = function (db, baseDir) {
       updateTransaction(settings, configItems);
       res.json({ success: true, message: 'Settings saved successfully' });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  });
+
+  router.post('/api/settings/web-app-credentials', (req, res) => {
+    const { serviceKey, serviceUrl, userId, password } = req.body || {};
+    if (!serviceKey) {
+      return res.status(400).json({ success: false, message: 'serviceKey가 필요합니다.' });
+    }
+
+    try {
+      const normalizedServiceUrl = serviceKey === 'water_analysis_app'
+        ? normalizeBaseUrl(serviceUrl || '')
+        : (serviceUrl || '');
+
+      const result = db.prepare('UPDATE web_app_credentials SET service_url = ?, user_id = ?, password = ?, updated_at = CURRENT_TIMESTAMP WHERE service_key = ?').run(normalizedServiceUrl, userId || '', password || '', serviceKey);
+      if (result.changes === 0) {
+        return res.status(404).json({ success: false, message: '대상 설정을 찾을 수 없습니다.' });
+      }
+
+      const credential = db.prepare('SELECT service_key, service_name, service_url, user_id, password, updated_at FROM web_app_credentials WHERE service_key = ?').get(serviceKey);
+      res.json({ success: true, credential, message: '웹/앱 설정이 저장되었습니다.' });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  router.post('/api/settings/qntech-import-settings', (req, res) => {
+    const { photoRoot, sampleMappings } = req.body || {};
+
+    try {
+      const serializedMappings = JSON.stringify(Array.isArray(sampleMappings) ? sampleMappings : []);
+      db.prepare(`
+        UPDATE app_settings
+        SET qntech_photo_root = ?, qntech_sample_mappings = ?
+        WHERE id = 1
+      `).run(photoRoot || '사진관리/수질분석', serializedMappings);
+
+      const settings = db.prepare('SELECT qntech_photo_root, qntech_sample_mappings FROM app_settings WHERE id = 1').get();
+      res.json({ success: true, settings, message: 'QnTECH 불러오기 설정이 저장되었습니다.' });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
   });
 
   // ── 설정 항목 즉시 추가 ──
@@ -325,7 +368,8 @@ module.exports = function (db, baseDir) {
 
       db.prepare('UPDATE app_settings SET water_sheet = ?, water_start_row = ?, water_end_row = ?, water_date_col = ? WHERE id = 1').run(sheet, startRow, endRow, dateCol);
 
-      const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('water', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
+      // 매핑 정보는 'water_mapping' 카테고리에 저장하여 기본 항목('water')과 분리
+      const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('water_mapping', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
       Object.entries(mapping).forEach(([key, col]) => {
         if (key !== 'date') {
           upsertStmt.run(key, col);
@@ -354,7 +398,7 @@ module.exports = function (db, baseDir) {
 
       const insertWater = db.prepare(`
         INSERT INTO water_quality (date, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss) 
-        VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 0) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
         ON CONFLICT(date, location) DO UPDATE SET 
           nh3_n = excluded.nh3_n, no3_n = excluded.no3_n, 
           po4_p = excluded.po4_p, alkalinity = excluded.alkalinity
@@ -372,20 +416,21 @@ module.exports = function (db, baseDir) {
 
           // Default location if no locations are mapped (fallback to '기본')
           if (Object.keys(locations).length === 0) {
-            insertWater.run(formatted, '기본', 0, 0, 0, 0);
+            insertWater.run(formatted, '기본', null, null, null, null, null, null, null, null);
             importedData.push({ date: formatted, location: '기본' });
           } else {
             Object.entries(locations).forEach(([locName, cols]) => {
-              const vals = { nh3_n: 0, no3_n: 0, po4_p: 0, alkalinity: 0 };
+              const vals = { nh3_n: null, no3_n: null, po4_p: null, alkalinity: null };
               ['nh3_n', 'no3_n', 'po4_p', 'alkalinity'].forEach(dbCol => {
                 const col = cols[dbCol];
                 if (col) {
                   const v = parseFloat(getCellValue(db, sheet, r, col) || '');
-                  vals[dbCol] = isNaN(v) ? 0 : Math.round(v * 10) / 10;
+                  vals[dbCol] = isNaN(v) ? null : Math.round(v * 10) / 10;
                 }
               });
 
-              insertWater.run(formatted, locName, vals.nh3_n, vals.no3_n, vals.po4_p, vals.alkalinity);
+              // tn, tp, cod, ss는 키트 분석 항목이 아니므로 null로 저장
+              insertWater.run(formatted, locName, vals.nh3_n, vals.no3_n, vals.po4_p, vals.alkalinity, null, null, null, null);
 
               rowResults[`${locName}_nh3_n`] = vals.nh3_n;
             });

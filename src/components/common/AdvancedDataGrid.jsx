@@ -43,10 +43,17 @@ const AdvancedDataGrid = ({
     // ---- Styling & Color Props (커스터마이즈 가능: 헤더색, 그리드색) ----
     headerBgColor = '#FAFAFA',
     headerTextColor = '#0D0D0D',
+    activeHeaderBgColor = '#E8E8E8',
+    activeHeaderTextColor = '#0D0D0D',
     gridLineColor = '#E8E8E8',
     gridLineWidth = 1,
     rowBgColor = '#FFFFFF',
     altRowBgColor = '#FAFAFA',
+    hoverRowBgColor = '#e2e8f0',
+    readOnlyCellBgColor = '#FAFAFA',
+    columnHighlightBgColor = 'rgba(59, 130, 246, 0.12)',
+    selectedCellBorderColor = '#3b82f6',
+    selectedCellBorderWidth = 1,
     cellAlign = 'left', // 'left' | 'center' | 'right'
 
     // ---- Selection & Editing Props ----
@@ -57,6 +64,15 @@ const AdvancedDataGrid = ({
     tabNavigation = true,
     enableClipboard = true,
     rangeSelection = false,
+    highlightSelectionRow = true,
+    highlightSelectionColumn = true,
+    startEditOnDoubleClick = true,
+    startEditOnEnter = true,
+    startEditOnTyping = true,
+    typingEditMode = 'overwrite', // 'overwrite' | 'append'
+    commitOnBlur = true,
+    enterKeyBehavior = 'moveDown', // 'moveDown' | 'stay'
+    selectTextOnEditStart = false,
 
     // ---- Column Features ----
     resizableColumns = true,
@@ -82,6 +98,8 @@ const AdvancedDataGrid = ({
     // ---- Overrides ----
     renderRowHeader,
     renderCell,
+    renderCellDisplay,
+    renderCellEditor,
     getRowStyle,
 
     // ---- Navigation ----
@@ -90,19 +108,6 @@ const AdvancedDataGrid = ({
     // ---- Theme ----
     theme = 'swiss', // 'swiss' | 'excel' | 'notion'
 }) => {
-    // ========================================================================
-    // 🔒 Excel UX 고정 상수 — 외부에서 변경 불가
-    // 셀 선택 테두리, 하이라이트, 호버, 읽기전용 배경 등 Excel 사용자 경험의
-    // 핵심 설정값입니다. 다른 메뉴에서 이 컴포넌트를 사용할 때도 동일하게 적용됩니다.
-    // ========================================================================
-    const selectedCellBorderColor = '#3b82f6';
-    const selectedCellBorderWidth = 1;
-    const hoverRowBgColor = '#e2e8f0';
-    const readOnlyCellBgColor = '#FAFAFA';
-    const columnHighlightBgColor = 'rgba(59, 130, 246, 0.12)';
-    const activeHeaderBgColor = '#E8E8E8';
-    const activeHeaderTextColor = '#0D0D0D';
-
     // ---- State ----
     const [scrollTop, setScrollTop] = useState(0);
     const [scrollLeft, setScrollLeft] = useState(0);
@@ -113,6 +118,9 @@ const AdvancedDataGrid = ({
     const [sortState, setSortState] = useState({ colId: null, direction: null });
     const [ctxMenu, setCtxMenu] = useState(null);
     const [rangeEnd, setRangeEnd] = useState(null); // For shift-click range
+
+    const resolvedTypingEditMode = typingEditMode === 'append' ? 'append' : 'overwrite';
+    const displayRenderer = renderCell || renderCellDisplay;
 
     // Refs
     const bodyScrollRef = useRef(null);
@@ -134,6 +142,7 @@ const AdvancedDataGrid = ({
     const leafColumns = useMemo(() => {
         const leaves = [];
         let currentLeft = showRowHeader ? rowHeaderWidth : 0;
+        let leafIndex = 0;
         const safeColumns = Array.isArray(columns) ? columns : [];
 
         safeColumns.forEach(c => {
@@ -141,30 +150,36 @@ const AdvancedDataGrid = ({
             if (c.subCols && c.subCols.length > 0) {
                 c.subCols.forEach((sc, idx) => {
                     const scWidth = columnWidths[sc.id] || sc.width || defaultColumnWidth;
+                    const freezeByCount = leafIndex < frozenColumns;
+                    const isLeafFrozen = isGroupFrozen || sc.frozen || freezeByCount;
                     leaves.push({
                         ...sc,
                         parentId: c.id,
-                        frozen: isGroupFrozen || sc.frozen,
-                        stickyLeft: (isGroupFrozen || sc.frozen) ? currentLeft : null,
+                        frozen: isLeafFrozen,
+                        stickyLeft: isLeafFrozen ? currentLeft : null,
                         inheritedBorderLeft: sc.borderLeft || (idx === 0 ? c.borderLeft : null),
                         inheritedBorderRight: sc.borderRight || (idx === c.subCols.length - 1 ? c.borderRight : null)
                     });
-                    if (isGroupFrozen || sc.frozen) currentLeft += scWidth;
+                    if (isLeafFrozen) currentLeft += scWidth;
+                    leafIndex += 1;
                 });
             } else {
                 const cWidth = columnWidths[c.id] || c.width || defaultColumnWidth;
+                const freezeByCount = leafIndex < frozenColumns;
+                const isLeafFrozen = isGroupFrozen || freezeByCount;
                 leaves.push({
                     ...c,
-                    frozen: isGroupFrozen,
-                    stickyLeft: isGroupFrozen ? currentLeft : null,
+                    frozen: isLeafFrozen,
+                    stickyLeft: isLeafFrozen ? currentLeft : null,
                     inheritedBorderLeft: c.borderLeft,
                     inheritedBorderRight: c.borderRight
                 });
-                if (isGroupFrozen) currentLeft += cWidth;
+                if (isLeafFrozen) currentLeft += cWidth;
+                leafIndex += 1;
             }
         });
         return leaves;
-    }, [columns, showRowHeader, rowHeaderWidth, columnWidths, defaultColumnWidth]);
+    }, [columns, showRowHeader, rowHeaderWidth, columnWidths, defaultColumnWidth, frozenColumns]);
 
     const safeData = useMemo(() => {
         let d = Array.isArray(data) ? data : [];
@@ -230,8 +245,24 @@ const AdvancedDataGrid = ({
     ctxMenuRef.current = ctxMenu;
 
     useEffect(() => {
+        if (!editingCell || !editInputRef.current) return;
+
+        const frameId = window.requestAnimationFrame(() => {
+            if (!editInputRef.current) return;
+            if (editingCell.selectAll) {
+                editInputRef.current.select();
+            } else {
+                const textLength = String(editingCell.tempValue ?? '').length;
+                editInputRef.current.setSelectionRange(textLength, textLength);
+            }
+        });
+
+        return () => window.cancelAnimationFrame(frameId);
+    }, [editingCell]);
+
+    useEffect(() => {
         const handleClickOutside = (e) => {
-            if (editingCellRef.current && editInputRef.current && !editInputRef.current.contains(e.target)) {
+            if (commitOnBlur && editingCellRef.current && editInputRef.current && !editInputRef.current.contains(e.target)) {
                 commitEdit();
             }
             if (ctxMenuRef.current && gridContainerRef.current && !gridContainerRef.current.contains(e.target)) {
@@ -313,7 +344,7 @@ const AdvancedDataGrid = ({
                     case 'Enter':
                         const rowInfo = safeData[currentObjIndex];
                         const colInfo = leafColumns[currentColIndex];
-                        if (canEditCell(rowInfo, colInfo)) {
+                        if (startEditOnEnter && canEditCell(rowInfo, colInfo)) {
                             const val = getCellValue(rowInfo, colInfo);
                             startEditing(selectedCell.rowKey, selectedCell.colId, val, false);
                         }
@@ -357,11 +388,15 @@ const AdvancedDataGrid = ({
                         }
                         return;
                     default:
-                        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                        if (startEditOnTyping && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
                             const rInfo = safeData[currentObjIndex];
                             const cInfo = leafColumns[currentColIndex];
                             if (canEditCell(rInfo, cInfo)) {
-                                startEditing(selectedCell.rowKey, selectedCell.colId, e.key, true);
+                                const currentValue = getCellValue(rInfo, cInfo);
+                                const nextValue = resolvedTypingEditMode === 'append'
+                                    ? `${currentValue ?? ''}${e.key}`
+                                    : e.key;
+                                startEditing(selectedCell.rowKey, selectedCell.colId, nextValue, resolvedTypingEditMode === 'overwrite');
                                 e.preventDefault();
                             }
                         }
@@ -450,13 +485,18 @@ const AdvancedDataGrid = ({
     // ---- Editing ----
     const handleCellDoubleClick = (row, col) => {
         if (onCellDoubleClick) onCellDoubleClick(row, col);
-        if (!canEditCell(row, col)) return;
+        if (!startEditOnDoubleClick || !canEditCell(row, col)) return;
         const value = getCellValue(row, col);
         startEditing(row[keyField], col.id, value, false);
     };
 
     const startEditing = (rowKey, colId, initialValue, isOverwrite) => {
-        setEditingCell({ rowKey, colId, tempValue: initialValue || '' });
+        setEditingCell({
+            rowKey,
+            colId,
+            tempValue: initialValue ?? '',
+            selectAll: isOverwrite || selectTextOnEditStart,
+        });
     };
 
     const commitEdit = () => {
@@ -475,8 +515,7 @@ const AdvancedDataGrid = ({
     const handleEditKeyDown = (e) => {
         if (e.key === 'Enter') {
             commitEdit();
-            // Move down like Excel
-            if (selectedCell && selectedCell.type === 'cell') {
+            if (enterKeyBehavior === 'moveDown' && selectedCell && selectedCell.type === 'cell') {
                 const idx = safeData.findIndex(d => d[keyField] === selectedCell.rowKey);
                 if (idx < safeData.length - 1) {
                     const nextRow = safeData[idx + 1];
@@ -616,17 +655,24 @@ const AdvancedDataGrid = ({
 
         let targeted = false;
         let highlighted = false;
+        let rowHighlighted = false;
+        let columnHighlighted = false;
 
         if (selectedCell.type === 'cell' || !selectedCell.type) {
             targeted = selectedCell.rowKey === rowKey && selectedCell.colId === colId;
-            highlighted = selectedCell.rowKey === rowKey || selectedCell.colId === colId;
+            rowHighlighted = highlightSelectionRow && selectedCell.rowKey === rowKey;
+            columnHighlighted = highlightSelectionColumn && selectedCell.colId === colId;
+            highlighted = rowHighlighted || columnHighlighted;
         } else if (selectedCell.type === 'col') {
-            highlighted = selectedCell.colId === colId;
+            columnHighlighted = selectedCell.colId === colId;
+            highlighted = columnHighlighted;
         } else if (selectedCell.type === 'group_col') {
             const col = leafColumns.find(c => c.id === colId);
-            highlighted = col && (col.parentId === selectedCell.colId || col.id === selectedCell.colId);
+            columnHighlighted = col && (col.parentId === selectedCell.colId || col.id === selectedCell.colId);
+            highlighted = columnHighlighted;
         } else if (selectedCell.type === 'row') {
-            highlighted = selectedCell.rowKey === rowKey;
+            rowHighlighted = selectedCell.rowKey === rowKey;
+            highlighted = rowHighlighted;
         }
 
         return { targeted, highlighted };
@@ -636,14 +682,14 @@ const AdvancedDataGrid = ({
         if (!selectedCell) return false;
         if (selectedCell.type === 'group_col' && colDef.id === selectedCell.colId) return true;
         if (selectedCell.type === 'col' && colDef.subCols && colDef.subCols.some(sc => sc.id === selectedCell.colId)) return true;
-        if ((selectedCell.type === 'cell' || !selectedCell.type) && (colDef.id === selectedCell.colId || (colDef.subCols && colDef.subCols.some(sc => sc.id === selectedCell.colId)))) return true;
+        if (highlightSelectionColumn && (selectedCell.type === 'cell' || !selectedCell.type) && (colDef.id === selectedCell.colId || (colDef.subCols && colDef.subCols.some(sc => sc.id === selectedCell.colId)))) return true;
         return false;
     };
 
     const isSubHeaderActive = (scId, parentId) => {
         if (!selectedCell) return false;
         if (selectedCell.type === 'col' && scId === selectedCell.colId) return true;
-        if ((selectedCell.type === 'cell' || !selectedCell.type) && scId === selectedCell.colId) return true;
+        if (highlightSelectionColumn && (selectedCell.type === 'cell' || !selectedCell.type) && scId === selectedCell.colId) return true;
         if (selectedCell.type === 'group_col' && parentId === selectedCell.colId) return true;
         return false;
     };
@@ -786,7 +832,9 @@ const AdvancedDataGrid = ({
                         const defaultRowBg = isAltRow ? altRowBgColor : rowBgColor;
                         const isHovered = hoveredRowKey === rowKey;
                         const defaultHoverRowBg = isRowSelected ? columnHighlightBgColor : (isHovered ? hoverRowBgColor : defaultRowBg);
-                        const isRowHighlight = selectedCell && (selectedCell.type === 'row' ? selectedCell.rowKey === rowKey : selectedCell.rowKey === rowKey);
+                        const isRowHighlight = selectedCell && (selectedCell.type === 'row'
+                            ? selectedCell.rowKey === rowKey
+                            : (highlightSelectionRow && selectedCell.rowKey === rowKey));
 
                         const customRowStyle = getRowStyle ? getRowStyle(item, isRowSelected, isHovered) : {};
                         const rowBg = customRowStyle.background || defaultHoverRowBg;
@@ -840,7 +888,7 @@ const AdvancedDataGrid = ({
                                                 onContextMenu={(e) => handleContextMenu(e, item, col)}
                                                 style={{
                                                     width: colWidth, flexShrink: 0,
-                                                    display: 'flex', alignItems: 'center', padding: renderCell ? 0 : '0 12px',
+                                                    display: 'flex', alignItems: 'center', padding: displayRenderer ? 0 : '0 12px',
                                                     justifyContent: (col.align || cellAlign) === 'center' ? 'center' : (col.align || cellAlign) === 'right' ? 'flex-end' : 'flex-start',
                                                     position: 'relative', boxSizing: 'border-box',
                                                     cursor: cellEditable ? 'cell' : 'default',
@@ -854,22 +902,33 @@ const AdvancedDataGrid = ({
                                                 }}
                                             >
                                                 {isEditMode ? (
-                                                    <input
-                                                        ref={editInputRef}
-                                                        autoFocus
-                                                        value={editingCell.tempValue}
-                                                        onChange={(e) => setEditingCell({ ...editingCell, tempValue: e.target.value })}
-                                                        onKeyDown={handleEditKeyDown}
-                                                        style={{
-                                                            width: '100%', height: '100%', border: 'none', background: 'transparent',
-                                                            outline: 'none', fontSize, fontFamily: "'Inter', sans-serif", color: '#0D0D0D',
-                                                            padding: 0, margin: 0,
-                                                            textAlign: col.align || cellAlign || 'left'
-                                                        }}
-                                                    />
+                                                    renderCellEditor ? renderCellEditor(item, col, val, {
+                                                        value: editingCell.tempValue,
+                                                        onChange: (nextValue) => setEditingCell({ ...editingCell, tempValue: nextValue }),
+                                                        onCommit: commitEdit,
+                                                        onCancel: () => setEditingCell(null),
+                                                        onKeyDown: handleEditKeyDown,
+                                                        inputRef: editInputRef,
+                                                        autoFocus: true,
+                                                        textAlign: col.align || cellAlign || 'left',
+                                                    }) : (
+                                                        <input
+                                                            ref={editInputRef}
+                                                            autoFocus
+                                                            value={editingCell.tempValue}
+                                                            onChange={(e) => setEditingCell({ ...editingCell, tempValue: e.target.value })}
+                                                            onKeyDown={handleEditKeyDown}
+                                                            style={{
+                                                                width: '100%', height: '100%', border: 'none', background: 'transparent',
+                                                                outline: 'none', fontSize, fontFamily: "'Inter', sans-serif", color: '#0D0D0D',
+                                                                padding: 0, margin: 0,
+                                                                textAlign: col.align || cellAlign || 'left'
+                                                            }}
+                                                        />
+                                                    )
                                                 ) : (
                                                     <div style={{ width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize, fontFamily: "'Inter', sans-serif", color: '#0D0D0D', fontWeight: 400, textAlign: col.align || cellAlign || 'left' }}>
-                                                        {renderCell ? renderCell(item, col, val, isCellTargeted) : val}
+                                                        {displayRenderer ? displayRenderer(item, col, val, isCellTargeted) : val}
                                                     </div>
                                                 )}
                                             </div>

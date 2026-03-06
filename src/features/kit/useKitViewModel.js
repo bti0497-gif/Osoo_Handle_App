@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { KitModel } from './KitModel';
 import { SettingsModel } from '../settings/SettingsModel';
 import { DriveSyncService } from '../../services/DriveSyncService';
@@ -8,6 +8,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
     const [loading, setLoading] = useState(false);
     const [pendingChanges, setPendingChanges] = useState({});
     const [kitTypes, setKitTypes] = useState([]);
+    const pendingChangesRef = useRef({});
 
     useEffect(() => {
         loadLogs();
@@ -115,6 +116,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
 
                 setHistory(hist);
                 setPendingChanges({});
+                pendingChangesRef.current = {};
             }
         } catch (err) {
             console.error('Kit data load failed:', err);
@@ -160,6 +162,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
                     }
                     nextP[dDate][type].inventory = newHist[i][type].inventory;
                 }
+                pendingChangesRef.current = nextP;
                 return nextP;
             });
 
@@ -167,10 +170,14 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
         });
     };
 
-    const submitBatch = async () => {
-        const changedDates = Object.keys(pendingChanges);
+    const submitBatch = async (options = {}) => {
+        const { targetDates = null, silent = false } = options;
+        const sourcePendingChanges = pendingChangesRef.current;
+        const changedDates = Array.isArray(targetDates)
+            ? targetDates.filter(date => sourcePendingChanges[date])
+            : Object.keys(sourcePendingChanges);
         if (changedDates.length === 0) {
-            showAlert?.("변경 사항이 없습니다.");
+            if (!silent) showAlert?.("변경 사항이 없습니다.");
             return;
         }
 
@@ -178,7 +185,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
         try {
             const items = [];
             for (const dt of changedDates) {
-                const changes = pendingChanges[dt];
+                const changes = sourcePendingChanges[dt];
                 for (const [type, data] of Object.entries(changes)) {
                     items.push({
                         kit_name: type,
@@ -193,14 +200,14 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
                 const res = await KitModel.bulkSave(items);
                 if (!res.success) throw new Error(res.error);
             }
-            showAlert?.("데이터가 성공적으로 저장되었습니다.");
+            if (!silent) showAlert?.("데이터가 성공적으로 저장되었습니다.");
 
             const todayStr = new Date().toISOString().split('T')[0];
             await DriveSyncService.syncDetailedDataToCloud(currentUser?.name, todayStr, { kitData: items });
 
             await loadLogs();
         } catch (err) {
-            showAlert?.("저장 실패: " + err.message);
+            if (!silent) showAlert?.("저장 실패: " + err.message);
         } finally {
             setLoading(false);
         }

@@ -1,15 +1,44 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useWaterQualityViewModel } from './useWaterQualityViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogProvider';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
 
+const formatLocalDate = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const formatImportProgressDate = (dateString) => {
+    if (!dateString) return '';
+    const [year, month, day] = String(dateString).split('-');
+    if (!year || !month || !day) return dateString;
+    return `${Number(month)}월 ${Number(day)}일`;
+};
+
+const normalizeDisplayWaterValue = (value) => {
+    if (value === null || value === undefined || value === '') return '';
+    if (typeof value === 'number' && Number.isNaN(value)) return '초과';
+
+    const normalized = String(value).trim();
+    if (['-1', '-1.0', '-1.00', 'NaN', 'nan'].includes(normalized)) {
+        return '초과';
+    }
+
+    return normalized;
+};
+
 const WaterQualityView = ({ currentUser }) => {
-    const { showAlert } = useDialog();
+    const { showAlert, showConfirm } = useDialog();
     const { locationItems, config } = useSettingsViewModel();
     const {
         history, loading,
-        updateReading, submitBatch, refresh, pendingChanges
+        updateReading, submitBatch, refresh, pendingChanges,
+        isImportingFromQntech, isImportingRangeFromQntech,
+        lastImportSummary, lastRangeImportSummary, rangeImportProgress,
+        handleImportFromQntech, handleImportRangeFromQntech
     } = useWaterQualityViewModel(currentUser, { showAlert });
 
     const [selectedDate, setSelectedDate] = useState(null);
@@ -17,8 +46,42 @@ const WaterQualityView = ({ currentUser }) => {
     const [doubleClickedCell, setDoubleClickedCell] = useState(null); // { date, colId }
     const [activeInput, setActiveInput] = useState(null);
     const [localValue, setLocalValue] = useState(null);
+    const [todaySaved, setTodaySaved] = useState(false);
+    const [rangeStartDate, setRangeStartDate] = useState(formatLocalDate(new Date()));
+    const [rangeEndDate, setRangeEndDate] = useState(formatLocalDate(new Date()));
+    const closeModeAfterBlurRef = useRef(false);
 
     const todayStr = new Date().toISOString().split('T')[0];
+
+    const closeEditMode = () => {
+        setIsManualEditMode(false);
+        setDoubleClickedCell(null);
+        setSelectedDate(null);
+    };
+
+    useEffect(() => {
+        const handleEsc = (e) => {
+            if (e.key !== 'Escape') return;
+
+            const activeElement = document.activeElement;
+            const isEditableElement = activeElement && ['INPUT', 'TEXTAREA'].includes(activeElement.tagName);
+
+            if (isEditableElement && activeInput) {
+                closeModeAfterBlurRef.current = true;
+                activeElement.blur();
+                return;
+            }
+
+            if (isManualEditMode || doubleClickedCell) {
+                closeEditMode();
+            }
+        };
+
+        window.addEventListener('keydown', handleEsc);
+        return () => window.removeEventListener('keydown', handleEsc);
+    }, [activeInput, isManualEditMode, doubleClickedCell]);
+
+    const scrollKey = todayStr;
 
     const activeLocations = locationItems.filter(i => i.checked);
     const po4pLocations = ['유량조정조', '포기조', '방류조'];
@@ -68,12 +131,19 @@ const WaterQualityView = ({ currentUser }) => {
     });
 
     const handleRowSelect = (row) => {
+        if (row.isFuture) return; // 미래 날짜 선택 차단
         if (isManualEditMode && selectedDate === row.date) return;
-        setSelectedDate(row.date === selectedDate ? null : row.date);
+        const nextSelectedDate = row.date === selectedDate ? null : row.date;
+        setSelectedDate(nextSelectedDate);
+
+        if (nextSelectedDate) {
+            setRangeStartDate(nextSelectedDate);
+            setRangeEndDate(nextSelectedDate);
+        }
     };
 
     const handleCellDoubleClick = (row, col) => {
-        if (row.date !== todayStr && !row.isFuture) {
+        if ((row.date !== todayStr || todaySaved) && !row.isFuture) {
             setDoubleClickedCell({ date: row.date, colId: col.id });
             setSelectedDate(row.date);
         }
@@ -99,11 +169,7 @@ const WaterQualityView = ({ currentUser }) => {
             )}
             {isManualEditMode && (
                 <button
-                    onClick={() => {
-                        setIsManualEditMode(false);
-                        setDoubleClickedCell(null);
-                        setSelectedDate(null);
-                    }}
+                    onClick={closeEditMode}
                     style={{
                         padding: '5px 14px', borderRadius: 6, border: '1px solid #e2e8f0',
                         fontWeight: 800, fontSize: 11, cursor: 'pointer',
@@ -118,10 +184,50 @@ const WaterQualityView = ({ currentUser }) => {
 
     const handleSave = async () => {
         await submitBatch();
-        setIsManualEditMode(false);
-        setDoubleClickedCell(null);
-        setSelectedDate(null);
+        setTodaySaved(true);
+        closeEditMode();
     };
+
+    const handleQntechImportClick = async () => {
+        if (!rangeStartDate || !rangeEndDate) {
+            showAlert?.('가져올 날짜를 선택하세요.');
+            return;
+        }
+
+        if (rangeStartDate > rangeEndDate) {
+            showAlert?.('앞의 날짜는 뒤의 날짜보다 클 수 없습니다.');
+            return;
+        }
+
+        if (rangeStartDate > todayStr || rangeEndDate > todayStr) {
+            showAlert?.('오늘날짜보다 미래의 날짜는 불러올 수 없습니다.');
+            return;
+        }
+
+        if (rangeStartDate === rangeEndDate) {
+            await handleImportFromQntech(rangeStartDate);
+            return;
+        }
+
+        const confirmed = await showConfirm?.('기간 불러오기는 즉시 저장됩니다. 기존 값이 있는 날짜는 값은 유지하고 사진만 저장합니다. 계속하시겠습니까?');
+        if (!confirmed) return;
+        await handleImportRangeFromQntech(rangeStartDate, rangeEndDate);
+    };
+
+    const rangeImportStatusText = isImportingRangeFromQntech
+        ? (() => {
+            const dateLabel = formatImportProgressDate(rangeImportProgress.currentDate);
+            const countLabel = rangeImportProgress.totalDates > 0
+                ? `(${rangeImportProgress.completedDates}/${rangeImportProgress.totalDates})`
+                : '';
+
+            if (dateLabel) {
+                return `${dateLabel} 데이터 불러오는 중... ${countLabel}`.trim();
+            }
+
+            return rangeImportProgress.message || '기간 데이터를 불러오는 중...';
+        })()
+        : '';
 
     const getRowStyle = (row, isSelected, isHovered) => {
         const isToday = row.date === todayStr;
@@ -147,13 +253,15 @@ const WaterQualityView = ({ currentUser }) => {
         return {
             background: bg !== 'transparent' ? bg : undefined,
             opacity,
-            pointerEvents: (isEditingMode && !isSelected) ? 'none' : 'auto',
-            cursor: (isEditingMode && !isSelected) ? 'default' : (isFuture ? 'default' : 'pointer'),
+            pointerEvents: (isFuture || (isEditingMode && !isSelected)) ? 'none' : 'auto',
+            cursor: (isFuture || (isEditingMode && !isSelected)) ? 'default' : 'pointer',
         };
     };
 
-    const renderCell = (row, colGroup, subCol) => {
-        const colId = subCol.id;
+    const renderCell = (row, col) => {
+        const colId = col?.id;
+        if (!colId) return null;
+
         const val = row[colId];
         const errorMsg = row[`${colId}_error`];
 
@@ -164,12 +272,11 @@ const WaterQualityView = ({ currentUser }) => {
 
         const isManual = isSelected && isManualEditMode;
         const isCellDoubleClicked = doubleClickedCell?.date === row.date && doubleClickedCell?.colId === colId;
-        const isReadOnly = (isFuture || (row.date !== todayStr)) && !isManual && !isCellDoubleClicked;
+        const isReadOnly = (isFuture || row.date !== todayStr || todaySaved) && !isManual && !isCellDoubleClicked;
 
         const isRawActive = activeInput?.date === row.date && activeInput?.colId === colId;
 
-        // format to 1 decimal place for display
-        const displayVal = val != null ? Number(val).toFixed(1) : '';
+        const displayVal = normalizeDisplayWaterValue(val);
 
         return (
             <div style={{
@@ -191,6 +298,7 @@ const WaterQualityView = ({ currentUser }) => {
                 ) : (
                     <input
                         type="text"
+                        autoFocus={isCellDoubleClicked}
                         style={{
                             width: '100%', height: '100%', outline: 'none',
                             textAlign: 'right', fontWeight: 700, fontSize: 11,
@@ -202,18 +310,24 @@ const WaterQualityView = ({ currentUser }) => {
                         value={isRawActive ? localValue : displayVal}
                         placeholder="-"
                         onChange={e => {
-                            let val = e.target.value.replace(/,/g, '');
-                            // allow only one decimal point
-                            const parts = val.split('.');
-                            if (parts.length > 2) val = parts[0] + '.' + parts.slice(1).join('');
-                            setLocalValue(val);
+                            setLocalValue(e.target.value);
                         }}
-                        onFocus={() => {
+                        onKeyDown={e => {
+                            if (e.key === 'Enter') e.currentTarget.blur();
+                            if (e.key === 'Escape') {
+                                closeModeAfterBlurRef.current = true;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                e.currentTarget.blur();
+                            }
+                        }}
+                        onFocus={e => {
                             if (isReadOnly) return;
                             setActiveInput({ date: row.date, colId: colId });
-                            setLocalValue(val != null ? String(val) : '');
+                            setLocalValue(normalizeDisplayWaterValue(val));
+                            if (!isCellDoubleClicked) e.target.select();
                         }}
-                        onBlur={() => {
+                        onBlur={async () => {
                             if (isRawActive && localValue !== null) {
                                 // Extract parameter and location from colId (e.g. nh3_n_유량조정조)
                                 const lastUnderscore = colId.lastIndexOf('_');
@@ -224,6 +338,15 @@ const WaterQualityView = ({ currentUser }) => {
                             }
                             setActiveInput(null);
                             setLocalValue(null);
+                            if (isCellDoubleClicked) {
+                                setDoubleClickedCell(null);
+                                await submitBatch({ targetDates: [row.date], silent: true });
+                            }
+                            if (closeModeAfterBlurRef.current) {
+                                closeModeAfterBlurRef.current = false;
+                                await submitBatch({ targetDates: [row.date], silent: true });
+                                closeEditMode();
+                            }
                         }}
                         disabled={isReadOnly}
                     />
@@ -262,7 +385,7 @@ const WaterQualityView = ({ currentUser }) => {
                 columns={gridCols}
                 data={history}
                 keyField="date"
-                scrollToKey={todayStr}
+                scrollToKey={scrollKey}
                 width={calculatedWidth}
                 height={400}
 
@@ -282,8 +405,133 @@ const WaterQualityView = ({ currentUser }) => {
                 onRefresh={refresh}
             />
 
-            {/* 가운데 여유 공간 */}
-            <div style={{ flex: 1 }} />
+            {/* 그리드 아래 가져오기 전용 영역 */}
+            <div style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'flex-end',
+                gap: 0,
+                minHeight: 0
+            }}>
+                <div style={{
+                    padding: '12px 16px',
+                    background: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'flex-end',
+                    gap: 8,
+                    flexWrap: 'wrap'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <input
+                            type="date"
+                            value={rangeStartDate}
+                            onChange={(e) => setRangeStartDate(e.target.value)}
+                            style={{
+                                height: 30,
+                                borderRadius: 6,
+                                border: '1px solid #cbd5e1',
+                                padding: '0 10px',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: '#334155'
+                            }}
+                        />
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>~</span>
+                        <input
+                            type="date"
+                            value={rangeEndDate}
+                            onChange={(e) => setRangeEndDate(e.target.value)}
+                            style={{
+                                height: 30,
+                                borderRadius: 6,
+                                border: '1px solid #cbd5e1',
+                                padding: '0 10px',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: '#334155'
+                            }}
+                        />
+                        <button
+                            onClick={handleQntechImportClick}
+                            disabled={(isImportingFromQntech || isImportingRangeFromQntech) || !rangeStartDate || !rangeEndDate}
+                            style={{
+                                padding: '5px 14px', borderRadius: 6, border: '1px solid #cbd5e1',
+                                fontWeight: 800, fontSize: 11,
+                                cursor: (isImportingFromQntech || isImportingRangeFromQntech) ? 'wait' : 'pointer',
+                                background: '#f8fafc', color: '#0f172a',
+                                display: 'flex', alignItems: 'center', gap: 4,
+                                opacity: (isImportingFromQntech || isImportingRangeFromQntech) ? 0.7 : 1
+                            }}
+                        >
+                            <span className="material-icons" style={{ fontSize: 14 }}>cloud_download</span>
+                            {(isImportingFromQntech || isImportingRangeFromQntech) ? '가져오는 중...' : 'QnTECH 가져오기'}
+                        </button>
+                    </div>
+                    {isImportingRangeFromQntech && (
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '7px 10px',
+                            borderRadius: 8,
+                            background: '#eff6ff',
+                            color: '#1d4ed8',
+                            fontSize: 11,
+                            fontWeight: 800
+                        }}>
+                            <span className="material-icons" style={{ fontSize: 14 }}>hourglass_top</span>
+                            <span>{rangeImportStatusText}</span>
+                        </div>
+                    )}
+                </div>
+                {lastImportSummary && (
+                <div style={{
+                    padding: '8px 16px',
+                    borderTop: '1px solid #e2e8f0',
+                    background: '#ffffff',
+                    fontSize: 11,
+                    color: '#475569',
+                    display: 'flex',
+                    gap: 12,
+                    flexWrap: 'wrap'
+                }}>
+                    <span style={{ fontWeight: 800, color: '#0f172a' }}>
+                        불러온 현장: {lastImportSummary.siteName || '-'}
+                    </span>
+                    <span>값 {lastImportSummary.importedRowCount}건</span>
+                    <span>사진 {lastImportSummary.savedPhotoCount}건</span>
+                    <span>사진폴더: {lastImportSummary.photoDirectory}</span>
+                    {lastImportSummary.unmatchedSamples?.length > 0 && (
+                        <span style={{ color: '#b45309' }}>
+                            미매핑 샘플: {lastImportSummary.unmatchedSamples.join(', ')}
+                        </span>
+                    )}
+                </div>
+                )}
+                {lastRangeImportSummary && (
+                <div style={{
+                    padding: '8px 16px',
+                    borderTop: '1px solid #e2e8f0',
+                    background: '#ffffff',
+                    fontSize: 11,
+                    color: '#475569',
+                    display: 'flex',
+                    gap: 12,
+                    flexWrap: 'wrap'
+                }}>
+                    <span style={{ fontWeight: 800, color: '#0f172a' }}>
+                        기간 저장: {lastRangeImportSummary.startDate} ~ {lastRangeImportSummary.endDate}
+                    </span>
+                    <span>처리일수 {lastRangeImportSummary.processedDates}일</span>
+                    <span>값 저장 {lastRangeImportSummary.insertedRowCount}건</span>
+                    <span>사진 저장 {lastRangeImportSummary.savedPhotoCount}건</span>
+                    <span>기존값 유지 날짜 {lastRangeImportSummary.existingValueDateCount}일</span>
+                    <span>사진루트: {lastRangeImportSummary.photoRoot}</span>
+                </div>
+                )}
+            </div>
 
             {/* 하단 바 */}
             <div style={{
@@ -293,7 +541,7 @@ const WaterQualityView = ({ currentUser }) => {
                 <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>
                     총 {history.length}행
                 </span>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                     {extraActions}
                     <button
                         onClick={handleSave}

@@ -120,11 +120,11 @@ function App() {
 | `gridLineWidth` | `number` | `1` | 그리드선 굵기 (px) |
 | `rowBgColor` | `string` | `'#FFFFFF'` | 짝수 행 배경색 |
 | `altRowBgColor` | `string` | `'#FAFAFA'` | 홀수 행 배경색 (줄무늬) |
-| `selectedCellBorderColor` | `string` | `'#E42313'` | 선택 셀 테두리 색 |
-| `selectedCellBorderWidth` | `number` | `2` | 선택 셀 테두리 굵기 (px) |
-| `hoverRowBgColor` | `string` | `'rgba(13,13,13,0.02)'` | 마우스 호버 행 배경색 |
+| `selectedCellBorderColor` | `string` | `'#3b82f6'` | 선택 셀 테두리 색 |
+| `selectedCellBorderWidth` | `number` | `1` | 선택 셀 테두리 굵기 (px) |
+| `hoverRowBgColor` | `string` | `'#e2e8f0'` | 마우스 호버 행 배경색 |
 | `readOnlyCellBgColor` | `string` | `'#FAFAFA'` | 읽기전용 셀 배경색 |
-| `columnHighlightBgColor` | `string` | `'rgba(228,35,19,0.03)'` | 칼럼 선택 시 하이라이트 |
+| `columnHighlightBgColor` | `string` | `'rgba(59, 130, 246, 0.12)'` | 선택 축 하이라이트 배경색 |
 | `cellAlign` | `string` | `'left'` | 셀 텍스트 정렬: `'left'` \| `'center'` \| `'right'` |
 
 ### Selection & Editing (선택/편집)
@@ -138,6 +138,15 @@ function App() {
 | `tabNavigation` | `boolean` | `true` | Tab/Shift+Tab 네비게이션 |
 | `enableClipboard` | `boolean` | `true` | Ctrl+C/V 클립보드 기능 |
 | `rangeSelection` | `boolean` | `false` | Shift+Click 범위 선택 |
+| `highlightSelectionRow` | `boolean` | `true` | 활성 셀 기준 같은 행 하이라이트 여부 |
+| `highlightSelectionColumn` | `boolean` | `true` | 활성 셀 기준 같은 열 하이라이트 여부 |
+| `startEditOnDoubleClick` | `boolean` | `true` | 더블클릭 시 편집 시작 여부 |
+| `startEditOnEnter` | `boolean` | `true` | Enter 입력 시 편집 시작 여부 |
+| `startEditOnTyping` | `boolean` | `true` | 문자 타이핑으로 편집 시작 여부 |
+| `typingEditMode` | `string` | `'overwrite'` | 타이핑 편집 시작 모드: `'overwrite'` \| `'append'` |
+| `commitOnBlur` | `boolean` | `true` | 외부 클릭 시 편집값 확정 여부 |
+| `enterKeyBehavior` | `string` | `'moveDown'` | 편집 중 Enter 후 동작: `'moveDown'` \| `'stay'` |
+| `selectTextOnEditStart` | `boolean` | `false` | 편집 시작 시 기존 텍스트 전체 선택 여부 |
 
 ### Column Features (칼럼 기능)
 
@@ -174,6 +183,8 @@ function App() {
 |------|------|------|
 | `renderRowHeader` | `(index, row) => ReactNode` | 행 헤더 커스텀 렌더링 |
 | `renderCell` | `(row, col, value) => ReactNode` | 셀 커스텀 렌더링 |
+| `renderCellDisplay` | `(row, col, value, isSelected) => ReactNode` | 표시 전용 셀 렌더러 |
+| `renderCellEditor` | `(row, col, value, editorApi) => ReactNode` | 편집 중 셀 에디터 렌더러 |
 
 ### Theme (테마)
 
@@ -248,6 +259,16 @@ const columns = [
 | 동작 | 설명 |
 |------|------|
 | **셀 클릭** | 셀 선택 (파란 포커스 링) |
+| **더블클릭** | `startEditOnDoubleClick`가 켜져 있으면 기존 값을 유지한 채 편집 시작 |
+| **문자 타이핑** | `startEditOnTyping`이 켜져 있으면 편집 시작, `typingEditMode`에 따라 덮어쓰기/이어쓰기 |
+
+---
+
+## 🔧 Customization Strategy
+
+- 공통 그리드를 엑셀형 기본 UX로 사용하려면 `enableEditing`, `startEditOnTyping`, `startEditOnDoubleClick`, `highlightSelectionRow`, `highlightSelectionColumn` 기본값을 그대로 사용합니다.
+- 실제 업무 화면처럼 편집 흐름을 직접 제어하려면 `enableEditing={false}`와 `renderCell` 조합으로 공통 편집 엔진을 끄고, 필요한 셀만 별도 입력 컴포넌트로 렌더링하면 됩니다.
+- 표시와 편집을 분리하고 싶다면 `renderCellDisplay`와 `renderCellEditor`를 사용합니다. 기존 `renderCell`이 있으면 하위 호환을 위해 `renderCell`이 우선 적용됩니다.
 | **셀 더블클릭** | 편집 모드 진입 |
 | **헤더 클릭** | 해당 칼럼 전체 선택 + 정렬 토글 |
 | **그룹 헤더 클릭** | 하위 칼럼 전체 선택 |

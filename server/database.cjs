@@ -2,6 +2,9 @@ const sqlite3 = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
+const DEFAULT_ROAD_WEB_URL = 'https://nwpo.ex.co.kr:5002//security/login.do';
+const DEFAULT_WATER_ANALYSIS_URL = 'https://eco.qntech.co.kr';
+
 const appDataPath = path.join(process.env.APPDATA, 'Osoo_Handle_App');
 if (!fs.existsSync(appDataPath)) {
   fs.mkdirSync(appDataPath, { recursive: true });
@@ -36,14 +39,14 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date DATE NOT NULL,
     location TEXT,
-    nh3_n REAL,
-    no3_n REAL,
-    po4_p REAL,
-    alkalinity REAL,
-    tn REAL,
-    tp REAL,
-    cod REAL,
-    ss REAL,
+    nh3_n TEXT,
+    no3_n TEXT,
+    po4_p TEXT,
+    alkalinity TEXT,
+    tn TEXT,
+    tp TEXT,
+    cod TEXT,
+    ss TEXT,
     UNIQUE(date, location)
   );
   CREATE TABLE IF NOT EXISTS kit_logs (
@@ -74,7 +77,18 @@ db.exec(`
     flow_sheet TEXT, flow_start_row INTEGER, flow_end_row INTEGER, flow_date_col TEXT,
     med_sheet TEXT, med_start_row INTEGER, med_end_row INTEGER, med_date_col TEXT,
     water_sheet TEXT, water_start_row INTEGER, water_end_row INTEGER, water_date_col TEXT,
-    kit_sheet TEXT, kit_start_row INTEGER, kit_end_row INTEGER, kit_date_col TEXT
+    kit_sheet TEXT, kit_start_row INTEGER, kit_end_row INTEGER, kit_date_col TEXT,
+    qntech_photo_root TEXT,
+    qntech_sample_mappings TEXT
+  );
+  CREATE TABLE IF NOT EXISTS web_app_credentials (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    service_key TEXT NOT NULL UNIQUE,
+    service_name TEXT NOT NULL,
+    service_url TEXT,
+    user_id TEXT,
+    password TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
   CREATE TABLE IF NOT EXISTS config_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,12 +138,91 @@ db.exec(`
 
 // --- Migrations ---
 const attendanceCols = db.prepare("PRAGMA table_info(attendance)").all().map(c => c.name);
+if (!attendanceCols.includes('member_id')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN member_id TEXT').run();
+}
+if (!attendanceCols.includes('member_name')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN member_name TEXT').run();
+}
+if (!attendanceCols.includes('login_lat')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN login_lat REAL').run();
+}
+if (!attendanceCols.includes('login_lng')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN login_lng REAL').run();
+}
+if (!attendanceCols.includes('logout_lat')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN logout_lat REAL').run();
+}
+if (!attendanceCols.includes('logout_lng')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN logout_lng REAL').run();
+}
+if (!attendanceCols.includes('location_matched')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN location_matched BOOLEAN DEFAULT 0').run();
+}
+if (!attendanceCols.includes('auto_logout')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN auto_logout BOOLEAN DEFAULT 0').run();
+}
 if (!attendanceCols.includes('is_synced')) {
   db.prepare('ALTER TABLE attendance ADD COLUMN is_synced BOOLEAN DEFAULT 0').run();
 }
 const waterCols = db.prepare("PRAGMA table_info(water_quality)").all().map(c => c.name);
 ['tn', 'tp', 'cod', 'ss'].forEach(col => {
-  if (!waterCols.includes(col)) db.prepare(`ALTER TABLE water_quality ADD COLUMN ${col} REAL`).run();
+  if (!waterCols.includes(col)) db.prepare(`ALTER TABLE water_quality ADD COLUMN ${col} TEXT`).run();
+});
+
+const waterColumnInfo = db.prepare("PRAGMA table_info(water_quality)").all();
+const requiredWaterTextColumns = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity', 'tn', 'tp', 'cod', 'ss'];
+const shouldRebuildWaterQuality = requiredWaterTextColumns.some((column) => {
+  const info = waterColumnInfo.find((item) => item.name === column);
+  return info && String(info.type || '').toUpperCase() !== 'TEXT';
+});
+
+if (shouldRebuildWaterQuality) {
+  db.transaction(() => {
+    db.prepare('ALTER TABLE water_quality RENAME TO water_quality_old').run();
+    db.exec(`
+      CREATE TABLE water_quality (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date DATE NOT NULL,
+        location TEXT,
+        nh3_n TEXT,
+        no3_n TEXT,
+        po4_p TEXT,
+        alkalinity TEXT,
+        tn TEXT,
+        tp TEXT,
+        cod TEXT,
+        ss TEXT,
+        UNIQUE(date, location)
+      );
+    `);
+    db.prepare(`
+      INSERT INTO water_quality (id, date, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss)
+      SELECT
+        id,
+        date,
+        location,
+        CAST(nh3_n AS TEXT),
+        CAST(no3_n AS TEXT),
+        CAST(po4_p AS TEXT),
+        CAST(alkalinity AS TEXT),
+        CAST(tn AS TEXT),
+        CAST(tp AS TEXT),
+        CAST(cod AS TEXT),
+        CAST(ss AS TEXT)
+      FROM water_quality_old
+    `).run();
+    db.prepare('DROP TABLE water_quality_old').run();
+  })();
+}
+
+// QnTECH sentinel migration: -1 계열은 실제 화면 의미상 '초과'로 저장
+['nh3_n', 'no3_n', 'po4_p', 'alkalinity', 'tn', 'tp', 'cod', 'ss'].forEach((column) => {
+  db.prepare(`
+    UPDATE water_quality
+    SET ${column} = '초과'
+    WHERE ${column} IN ('-1', '-1.0', '-1.00')
+  `).run();
 });
 
 const settingsCols = db.prepare("PRAGMA table_info(app_settings)").all().map(c => c.name);
@@ -137,13 +230,19 @@ const settingsCols = db.prepare("PRAGMA table_info(app_settings)").all().map(c =
   'flow_sheet', 'flow_start_row', 'flow_end_row', 'flow_date_col',
   'med_sheet', 'med_start_row', 'med_end_row', 'med_date_col',
   'water_sheet', 'water_start_row', 'water_end_row', 'water_date_col',
-  'kit_sheet', 'kit_start_row', 'kit_end_row', 'kit_date_col'
+  'kit_sheet', 'kit_start_row', 'kit_end_row', 'kit_date_col',
+  'qntech_photo_root', 'qntech_sample_mappings'
 ].forEach(col => {
   if (!settingsCols.includes(col)) {
     const type = col.includes('row') ? 'INTEGER' : 'TEXT';
     db.prepare(`ALTER TABLE app_settings ADD COLUMN ${col} ${type}`).run();
   }
 });
+
+const webAppCredentialCols = db.prepare("PRAGMA table_info(web_app_credentials)").all().map(c => c.name);
+if (!webAppCredentialCols.includes('service_url')) {
+  db.prepare('ALTER TABLE web_app_credentials ADD COLUMN service_url TEXT').run();
+}
 
 // --- Seeds ---
 db.prepare("INSERT OR IGNORE INTO app_settings (id, site_name) VALUES (1, '새 현장')").run();
@@ -152,6 +251,27 @@ const settingsExists = db.prepare('SELECT id FROM app_settings WHERE id = 1').ge
 if (!settingsExists) {
   db.prepare(`INSERT INTO app_settings (id, site_name, manager_name, method, series) VALUES (1, '오수처리장', '관리자', 'A2O', '1계열')`).run();
 }
+
+db.prepare(`
+  UPDATE app_settings
+  SET qntech_photo_root = COALESCE(NULLIF(qntech_photo_root, ''), '사진관리/수질분석'),
+      qntech_sample_mappings = COALESCE(NULLIF(qntech_sample_mappings, ''), '[]')
+  WHERE id = 1
+`).run();
+
+db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('road_web', '도로공사 웹페이지 설정', ?, '', '')").run(DEFAULT_ROAD_WEB_URL);
+db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('water_analysis_app', '수질분석 앱 설정', ?, '', '')").run(DEFAULT_WATER_ANALYSIS_URL);
+
+db.prepare(`
+  UPDATE web_app_credentials
+  SET service_url = CASE service_key
+    WHEN 'road_web' THEN ?
+    WHEN 'water_analysis_app' THEN ?
+    ELSE service_url
+  END
+  WHERE service_key IN ('road_web', 'water_analysis_app')
+    AND (service_url IS NULL OR TRIM(service_url) = '')
+`).run(DEFAULT_ROAD_WEB_URL, DEFAULT_WATER_ANALYSIS_URL);
 
 if (db.prepare("SELECT count(*) as count FROM config_items WHERE category = 'kit'").get().count === 0) {
   const kitStmt = db.prepare('INSERT INTO config_items (category, item_name, is_active, display_order) VALUES (?, ?, ?, ?)');
@@ -187,6 +307,20 @@ existingKits.forEach(item => {
 
 for (const [oldBase, newBase] of Object.entries(kitNameMap)) {
   db.prepare('UPDATE kit_logs SET kit_name = ? WHERE kit_name = ?').run(newBase, oldBase);
+}
+
+// --- Water Quality Mapping Migration: water (legacy) -> water_mapping ---
+const legacyWaterItems = db.prepare("SELECT * FROM config_items WHERE category = 'water' AND item_name LIKE '%\_%' ESCAPE '\\'").all();
+if (legacyWaterItems.length > 0) {
+  const moveStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('water_mapping', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
+  const deleteStmt = db.prepare("DELETE FROM config_items WHERE category = 'water' AND item_name = ?");
+  db.transaction(() => {
+    legacyWaterItems.forEach(item => {
+      moveStmt.run(item.item_name, item.excel_cell);
+      deleteStmt.run(item.item_name);
+    });
+  })();
+  console.log(`Migrated ${legacyWaterItems.length} water mapping items to water_mapping category.`);
 }
 
 if (db.prepare('SELECT count(*) as count FROM config_items').get().count === 0) {

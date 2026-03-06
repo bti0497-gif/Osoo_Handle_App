@@ -17,10 +17,13 @@ const SettingsView = ({ currentUser }) => {
         medicineConfig, setMedicineConfig, medicineMapping, setMedicineMapping,
         kitConfig, setKitConfig, kitMapping, setKitMapping,
         waterConfig, setWaterConfig, waterMapping, setWaterMapping,
+        webAppCredentials, qntechImportSettings, passwordVisibility, urlEditability,
         excelSheets, sampleRowData,
         excelStatus, isMetadataLoading, isPreviewLoading, isUploading,
         importProgress, setImportProgress, importedData, showDataModal, setShowDataModal,
         handleSaveFlowMapping, handleSaveMedicineMapping, handleSaveKitMapping, handleSaveWaterMapping,
+        updateWebAppCredentialField, togglePasswordVisibility, toggleUrlEditability, handleSaveWebAppCredentials,
+        updateQntechImportSettingField, updateQntechSampleMapping, addQntechSampleMapping, removeQntechSampleMapping, handleSaveQntechImportSettings,
         handleApply,
         alphabet,
     } = vm;
@@ -904,6 +907,329 @@ const SettingsView = ({ currentUser }) => {
         </div>
     );
 
+    const renderCredentialSection = (sectionKey, title, description) => {
+        const credential = webAppCredentials[sectionKey];
+        const isPasswordVisible = passwordVisibility[sectionKey];
+        const isUrlEditable = urlEditability[sectionKey];
+        const showUrlField = sectionKey === 'roadWeb' || sectionKey === 'waterAnalysisApp';
+
+        return (
+            <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1.25rem',
+                backgroundColor: '#f8fafc',
+                padding: '1.5rem',
+                borderRadius: '14px',
+                border: '1px solid #e2e8f0'
+            }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 900, color: '#1e293b' }}>{title}</h3>
+                    <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>{description}</span>
+                </div>
+
+                {showUrlField && (
+                    <div>
+                        <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>URL</label>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 42px', gap: '8px', alignItems: 'center' }}>
+                            <input
+                                type="text"
+                                value={credential.serviceUrl || ''}
+                                onChange={(e) => updateWebAppCredentialField(sectionKey, 'serviceUrl', e.target.value)}
+                                placeholder="https://..."
+                                readOnly={!isUrlEditable}
+                                style={{
+                                    width: '100%',
+                                    height: '42px',
+                                    border: `1.5px solid ${isUrlEditable ? '#94a3b8' : '#cbd5e1'}`,
+                                    borderRadius: '8px',
+                                    padding: '0 12px',
+                                    fontSize: '0.8125rem',
+                                    fontWeight: 700,
+                                    color: '#1e293b',
+                                    boxSizing: 'border-box',
+                                    backgroundColor: isUrlEditable ? 'white' : '#f8fafc'
+                                }}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => toggleUrlEditability(sectionKey)}
+                                style={{
+                                    width: '42px',
+                                    height: '42px',
+                                    border: `1.5px solid ${isUrlEditable ? '#1e293b' : '#cbd5e1'}`,
+                                    borderRadius: '8px',
+                                    backgroundColor: isUrlEditable ? '#e2e8f0' : 'white',
+                                    color: '#1e293b',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer'
+                                }}
+                                aria-label={isUrlEditable ? 'URL 수정 잠금' : 'URL 수정 허용'}
+                                title={isUrlEditable ? 'URL 수정 잠금' : 'URL 수정 허용'}
+                            >
+                                <span className="material-icons" style={{ fontSize: '18px' }}>edit</span>
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <div>
+                        <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>아이디</label>
+                        <input
+                            type="text"
+                            value={credential.userId}
+                            onChange={(e) => updateWebAppCredentialField(sectionKey, 'userId', e.target.value)}
+                            style={{
+                                width: '100%',
+                                height: '42px',
+                                border: '1.5px solid #cbd5e1',
+                                borderRadius: '8px',
+                                padding: '0 12px',
+                                fontSize: '0.8125rem',
+                                fontWeight: 700,
+                                color: '#1e293b',
+                                boxSizing: 'border-box',
+                                backgroundColor: 'white'
+                            }}
+                        />
+                    </div>
+                    <div>
+                        <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>비밀번호</label>
+                        <div style={{ position: 'relative' }}>
+                            <input
+                                type={isPasswordVisible ? 'text' : 'password'}
+                                value={credential.password}
+                                onChange={(e) => updateWebAppCredentialField(sectionKey, 'password', e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    height: '42px',
+                                    border: '1.5px solid #cbd5e1',
+                                    borderRadius: '8px',
+                                    padding: '0 42px 0 12px',
+                                    fontSize: '0.8125rem',
+                                    fontWeight: 700,
+                                    color: '#1e293b',
+                                    boxSizing: 'border-box',
+                                    backgroundColor: 'white'
+                                }}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => togglePasswordVisibility(sectionKey)}
+                                style={{
+                                    position: 'absolute',
+                                    top: '50%',
+                                    right: '10px',
+                                    transform: 'translateY(-50%)',
+                                    border: 'none',
+                                    background: 'none',
+                                    padding: 0,
+                                    width: '24px',
+                                    height: '24px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    color: '#64748b'
+                                }}
+                                aria-label={isPasswordVisible ? '비밀번호 숨기기' : '비밀번호 표시'}
+                            >
+                                <span className="material-icons" style={{ fontSize: '20px' }}>
+                                    {isPasswordVisible ? 'visibility_off' : 'visibility'}
+                                </span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                        onClick={() => handleSaveWebAppCredentials(sectionKey)}
+                        style={{
+                            minWidth: '132px',
+                            height: '42px',
+                            border: 'none',
+                            borderRadius: '10px',
+                            backgroundColor: '#1e293b',
+                            color: 'white',
+                            fontSize: '0.8125rem',
+                            fontWeight: 900,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '6px'
+                        }}
+                    >
+                        <span className="material-icons" style={{ fontSize: '18px' }}>save</span>
+                        저장하기
+                    </button>
+                </div>
+            </div>
+        );
+    };
+
+    const renderWebAppSettings = () => (
+        <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            {renderCredentialSection('roadWeb', '도로공사 웹페이지 설정', '도로공사 웹페이지 로그인 계정을 저장합니다.')}
+            {renderCredentialSection('waterAnalysisApp', '수질분석 앱 설정', '수질분석 앱 로그인 계정을 저장합니다.')}
+            <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1rem',
+                backgroundColor: '#f8fafc',
+                padding: '1.5rem',
+                borderRadius: '14px',
+                border: '1px solid #e2e8f0'
+            }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 900, color: '#1e293b' }}>QnTECH 불러오기 설정</h3>
+                    <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>사진 저장 루트와 외부 샘플명 매핑을 지정합니다. 범위 불러오기에서도 같은 규칙을 사용합니다.</span>
+                </div>
+
+                <div>
+                    <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>사진 저장 루트</label>
+                    <input
+                        type="text"
+                        value={qntechImportSettings.photoRoot || ''}
+                        onChange={(e) => updateQntechImportSettingField('photoRoot', e.target.value)}
+                        placeholder="사진관리/수질분석 또는 D:/Photos/QnTECH"
+                        style={{
+                            width: '100%',
+                            height: '42px',
+                            border: '1.5px solid #cbd5e1',
+                            borderRadius: '8px',
+                            padding: '0 12px',
+                            fontSize: '0.8125rem',
+                            fontWeight: 700,
+                            color: '#1e293b',
+                            boxSizing: 'border-box',
+                            backgroundColor: 'white'
+                        }}
+                    />
+                    <div style={{ marginTop: '6px', fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>
+                        상대경로면 프로그램 폴더 기준, 절대경로면 해당 경로 그대로 사용합니다.
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#475569', fontWeight: 800 }}>QnTECH 샘플명 매핑</div>
+                    <button
+                        type="button"
+                        onClick={addQntechSampleMapping}
+                        style={{
+                            border: '1px solid #cbd5e1',
+                            background: 'white',
+                            color: '#0f172a',
+                            borderRadius: '8px',
+                            height: '34px',
+                            padding: '0 12px',
+                            fontSize: '0.75rem',
+                            fontWeight: 800,
+                            cursor: 'pointer'
+                        }}
+                    >
+                        매핑 추가
+                    </button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {qntechImportSettings.sampleMappings.length === 0 ? (
+                        <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600, padding: '8px 0' }}>
+                            추가 매핑이 없으면 기본 이름 규칙과 순서 기반 매핑을 사용합니다.
+                        </div>
+                    ) : qntechImportSettings.sampleMappings.map((mapping, index) => (
+                        <div key={`qntech-mapping-${index}`} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr auto', gap: '10px', alignItems: 'center' }}>
+                            <input
+                                type="text"
+                                value={mapping.sourceName || ''}
+                                onChange={(e) => updateQntechSampleMapping(index, 'sourceName', e.target.value)}
+                                placeholder="예: 막여과수조"
+                                style={{
+                                    width: '100%',
+                                    height: '40px',
+                                    border: '1.5px solid #cbd5e1',
+                                    borderRadius: '8px',
+                                    padding: '0 12px',
+                                    fontSize: '0.8125rem',
+                                    fontWeight: 700,
+                                    color: '#1e293b',
+                                    boxSizing: 'border-box',
+                                    backgroundColor: 'white'
+                                }}
+                            />
+                            <select
+                                value={mapping.targetLocation || ''}
+                                onChange={(e) => updateQntechSampleMapping(index, 'targetLocation', e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    height: '40px',
+                                    border: '1.5px solid #cbd5e1',
+                                    borderRadius: '8px',
+                                    padding: '0 12px',
+                                    fontSize: '0.8125rem',
+                                    fontWeight: 700,
+                                    color: '#1e293b',
+                                    boxSizing: 'border-box',
+                                    backgroundColor: 'white'
+                                }}
+                            >
+                                <option value="">대상 위치 선택</option>
+                                {locationItems.filter((item) => item.checked).map((item) => (
+                                    <option key={item.name} value={item.name}>{item.name}</option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                onClick={() => removeQntechSampleMapping(index)}
+                                style={{
+                                    border: '1px solid #fecaca',
+                                    background: '#fff1f2',
+                                    color: '#be123c',
+                                    borderRadius: '8px',
+                                    height: '40px',
+                                    minWidth: '72px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 800,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                삭제
+                            </button>
+                        </div>
+                    ))}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                        onClick={handleSaveQntechImportSettings}
+                        style={{
+                            minWidth: '160px',
+                            height: '42px',
+                            border: 'none',
+                            borderRadius: '10px',
+                            backgroundColor: '#1e293b',
+                            color: 'white',
+                            fontSize: '0.8125rem',
+                            fontWeight: 900,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '6px'
+                        }}
+                    >
+                        <span className="material-icons" style={{ fontSize: '18px' }}>save</span>
+                        불러오기 설정 저장
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+
     const renderBasicSettings = () => (
         <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
             {/* 상단 섹션: 2x2 Grid */}
@@ -1255,7 +1581,8 @@ const SettingsView = ({ currentUser }) => {
                             { id: 'flow', label: '유량설정' },
                             { id: 'medicine', label: '약품설정' },
                             { id: 'water', label: '수질설정' },
-                            { id: 'kit', label: '키트설정' }
+                            { id: 'kit', label: '키트설정' },
+                            { id: 'webapp', label: '웹/앱설정' }
                         ].map((tab) => (
                             <button
                                 key={tab.id}
@@ -1284,7 +1611,8 @@ const SettingsView = ({ currentUser }) => {
                             activeTab === 'flow' ? renderFlowSettings() :
                                 activeTab === 'medicine' ? renderMedicineSettings() :
                                     activeTab === 'water' ? renderWaterSettings() :
-                                        activeTab === 'kit' ? renderKitSettings() : null}
+                                        activeTab === 'kit' ? renderKitSettings() :
+                                            activeTab === 'webapp' ? renderWebAppSettings() : null}
                     </div>
                     {renderImportProgress()}
                     {renderDataModal()}

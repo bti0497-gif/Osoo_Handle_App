@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FlowModel } from './FlowModel';
 import { DriveSyncService } from '../../services/DriveSyncService';
 
@@ -6,6 +6,7 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(false);
     const [pendingChanges, setPendingChanges] = useState({});
+    const pendingChangesRef = useRef({});
 
     useEffect(() => {
         loadReadings();
@@ -74,6 +75,7 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
 
                 setHistory(hist);
                 setPendingChanges({});
+                pendingChangesRef.current = {};
             }
         } catch (err) {
             console.error(err);
@@ -122,10 +124,14 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
             };
 
             // pending 기록
-            setPendingChanges(p => ({
-                ...p,
-                [rowDate]: { ...p[rowDate], [type]: { raw: numRaw, diff: flow, error: errorMsg } }
-            }));
+            setPendingChanges(p => {
+                const nextPending = {
+                    ...p,
+                    [rowDate]: { ...p[rowDate], [type]: { raw: numRaw, diff: flow, error: errorMsg } }
+                };
+                pendingChangesRef.current = nextPending;
+                return nextPending;
+            });
 
             return newHist;
         });
@@ -153,13 +159,15 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
             setPendingChanges(p => {
                 const rowChanges = p[rowDate] || {};
                 const typeChanges = rowChanges[type] || { raw: currentCell.raw, diff: currentCell.diff };
-                return {
+                const nextPending = {
                     ...p,
                     [rowDate]: {
                         ...rowChanges,
                         [type]: { ...typeChanges, [field]: numVal, isManual: true }
                     }
                 };
+                pendingChangesRef.current = nextPending;
+                return nextPending;
             });
 
             return newHist;
@@ -167,10 +175,14 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
     };
 
     // 일괄 저장
-    const submitBatch = async () => {
-        const changedDates = Object.keys(pendingChanges);
+    const submitBatch = async (options = {}) => {
+        const { targetDates = null, silent = false } = options;
+        const sourcePendingChanges = pendingChangesRef.current;
+        const changedDates = Array.isArray(targetDates)
+            ? targetDates.filter(date => sourcePendingChanges[date])
+            : Object.keys(sourcePendingChanges);
         if (changedDates.length === 0) {
-            showAlert?.("변경 사항이 없습니다.");
+            if (!silent) showAlert?.("변경 사항이 없습니다.");
             return;
         }
 
@@ -178,7 +190,7 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
         try {
             for (const dt of changedDates) {
                 const items = [];
-                const changes = pendingChanges[dt];
+                const changes = sourcePendingChanges[dt];
                 for (const [type, data] of Object.entries(changes)) {
                     if (type === 'date' || type === 'isFuture') continue;
                     items.push({
@@ -194,10 +206,10 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
                     if (!res.success) throw new Error(res.error);
                 }
             }
-            showAlert?.("데이터가 성공적으로 저장되었습니다.");
+            if (!silent) showAlert?.("데이터가 성공적으로 저장되었습니다.");
             await loadReadings();
         } catch (err) {
-            showAlert?.("저장 실패: " + err.message);
+            if (!silent) showAlert?.("저장 실패: " + err.message);
         } finally {
             setLoading(false);
         }

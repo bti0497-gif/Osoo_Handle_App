@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useMedicineViewModel } from './useMedicineViewModel';
 import { useDialog } from '../../components/common/DialogProvider';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
@@ -15,8 +15,38 @@ const MedicineManagementView = ({ currentUser }) => {
     const [doubleClickedCell, setDoubleClickedCell] = useState(null); // { date, colId }
     const [activeInput, setActiveInput] = useState(null); // { date, colId, type }
     const [localValue, setLocalValue] = useState(null);
+    const [todaySaved, setTodaySaved] = useState(false);
+    const closeModeAfterBlurRef = useRef(false);
 
     const todayStr = new Date().toISOString().split('T')[0];
+
+    const closeEditMode = () => {
+        setIsManualEditMode(false);
+        setDoubleClickedCell(null);
+        setSelectedDate(null);
+    };
+
+    useEffect(() => {
+        const handleEsc = (e) => {
+            if (e.key !== 'Escape') return;
+
+            const activeElement = document.activeElement;
+            const isEditableElement = activeElement && ['INPUT', 'TEXTAREA'].includes(activeElement.tagName);
+
+            if (isEditableElement && activeInput) {
+                closeModeAfterBlurRef.current = true;
+                activeElement.blur();
+                return;
+            }
+
+            if (isManualEditMode || doubleClickedCell) {
+                closeEditMode();
+            }
+        };
+
+        window.addEventListener('keydown', handleEsc);
+        return () => window.removeEventListener('keydown', handleEsc);
+    }, [activeInput, isManualEditMode, doubleClickedCell]);
 
     const fmt = (v) => {
         if (v === undefined || v === null || v === '' || isNaN(v)) return '';
@@ -56,12 +86,16 @@ const MedicineManagementView = ({ currentUser }) => {
     });
 
     const handleRowSelect = (row) => {
+        const isFutureRow = row.isFuture || row.date > todayStr;
+        if (isFutureRow) return; // 미래 날짜 선택 차단
         if (isManualEditMode && selectedDate === row.date) return;
         setSelectedDate(row.date === selectedDate ? null : row.date);
     };
 
     const handleCellDoubleClick = (row, col) => {
-        if (row.date !== todayStr && !row.isFuture) {
+        const isFutureRow = row.isFuture || row.date > todayStr;
+        if (isFutureRow) return; // 미래 날짜 더블클릭 차단
+        if (row.date !== todayStr || todaySaved) {
             setDoubleClickedCell({ date: row.date, colId: col.id });
             setSelectedDate(row.date);
             // 더블클릭은 특정 셀만 편집하므로 isManualEditMode는 건드리지 않음
@@ -88,11 +122,7 @@ const MedicineManagementView = ({ currentUser }) => {
             )}
             {isManualEditMode && (
                 <button
-                    onClick={() => {
-                        setIsManualEditMode(false);
-                        setDoubleClickedCell(null);
-                        setSelectedDate(null);
-                    }}
+                    onClick={closeEditMode}
                     style={{
                         padding: '5px 14px', borderRadius: 6, border: '1px solid #e2e8f0',
                         fontWeight: 800, fontSize: 11, cursor: 'pointer',
@@ -107,14 +137,13 @@ const MedicineManagementView = ({ currentUser }) => {
 
     const handleSave = async () => {
         await submitBatch();
-        setIsManualEditMode(false);
-        setDoubleClickedCell(null);
-        setSelectedDate(null);
+        setTodaySaved(true);
+        closeEditMode();
     };
 
     const getRowStyle = (row, isSelected, isHovered) => {
         const isToday = row.date === todayStr;
-        const isFuture = row.isFuture;
+        const isFuture = row.isFuture || row.date > todayStr;
         const isEditingMode = isManualEditMode;
 
         let bg = 'transparent';
@@ -136,8 +165,9 @@ const MedicineManagementView = ({ currentUser }) => {
         return {
             background: bg !== 'transparent' ? bg : undefined,
             opacity,
-            pointerEvents: (isEditingMode && !isSelected) ? 'none' : 'auto',
-            cursor: (isEditingMode && !isSelected) ? 'default' : (isFuture ? 'default' : 'pointer'),
+            pointerEvents: (isFuture || (isEditingMode && !isSelected)) ? 'none' : 'auto',
+            cursor: (isFuture || (isEditingMode && !isSelected)) ? 'default' : 'pointer',
+            userSelect: isFuture ? 'none' : 'auto'
         };
     };
 
@@ -152,11 +182,11 @@ const MedicineManagementView = ({ currentUser }) => {
         const changed = pendingChanges[row.date]?.[medicineName] !== undefined;
         const isSelected = selectedDate === row.date;
         const isToday = row.date === todayStr;
-        const isFuture = row.isFuture;
+        const isFuture = row.isFuture || row.date > todayStr;
 
         const isManual = isSelected && isManualEditMode;
         const isCellDoubleClicked = doubleClickedCell?.date === row.date && doubleClickedCell?.colId === col.id;
-        const isReadOnly = (isFuture || (row.date !== todayStr)) && !isManual && !isCellDoubleClicked;
+        const isReadOnly = (isFuture || row.date !== todayStr || todaySaved) && !isManual && !isCellDoubleClicked;
 
         const isActive = activeInput?.date === row.date && activeInput?.colId === medicineName && activeInput?.type === subType;
 
@@ -213,6 +243,7 @@ const MedicineManagementView = ({ currentUser }) => {
                 ) : (
                     <input
                         type="text"
+                        autoFocus={isCellDoubleClicked}
                         style={{
                             width: '100%', height: '100%', outline: 'none',
                             textAlign: 'right', fontWeight: 700, fontSize: 11,
@@ -220,22 +251,41 @@ const MedicineManagementView = ({ currentUser }) => {
                             background: 'transparent',
                             border: errorMsg ? '2px inset #ef4444' : 'none',
                             boxSizing: 'border-box',
-                            pointerEvents: 'auto'
+                            pointerEvents: isReadOnly ? 'none' : 'auto'
                         }}
                         value={isActive ? localValue : displayVal}
                         placeholder="-"
                         onChange={e => setLocalValue(e.target.value.replace(/,/g, ''))}
-                        onFocus={() => {
+                        onKeyDown={e => {
+                            if (e.key === 'Enter') e.currentTarget.blur();
+                            if (e.key === 'Escape') {
+                                closeModeAfterBlurRef.current = true;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                e.currentTarget.blur();
+                            }
+                        }}
+                        onFocus={e => {
                             if (isReadOnly) return;
                             setActiveInput({ date: row.date, colId: medicineName, type: subType });
                             setLocalValue(cellVal != null ? String(cellVal) : '');
+                            if (!isCellDoubleClicked) e.target.select();
                         }}
-                        onBlur={() => {
+                        onBlur={async () => {
                             if (isActive && localValue !== null) {
                                 updateAmount(row.date, medicineName, subType, localValue);
                             }
                             setActiveInput(null);
                             setLocalValue(null);
+                            if (isCellDoubleClicked) {
+                                setDoubleClickedCell(null);
+                                await submitBatch({ targetDates: history.filter(item => item.date >= row.date).map(item => item.date), silent: true });
+                            }
+                            if (closeModeAfterBlurRef.current) {
+                                closeModeAfterBlurRef.current = false;
+                                await submitBatch({ targetDates: history.filter(item => item.date >= row.date).map(item => item.date), silent: true });
+                                closeEditMode();
+                            }
                         }}
                         disabled={isReadOnly}
                     />
@@ -247,7 +297,7 @@ const MedicineManagementView = ({ currentUser }) => {
 
     const renderRowHeader = (row) => {
         const isToday = row.date === todayStr;
-        const isFuture = row.isFuture;
+        const isFuture = row.isFuture || row.date > todayStr;
         const isSelected = selectedDate === row.date;
         return (
             <div style={{
@@ -255,6 +305,8 @@ const MedicineManagementView = ({ currentUser }) => {
                 fontWeight: isToday ? 900 : 800, fontSize: 10.5,
                 color: isToday ? '#1d4ed8' : isFuture ? '#a0aec0' : '#475569',
                 background: isSelected ? '#e2e8f0' : isToday ? '#dbeafe' : '#f8fafc',
+                pointerEvents: isFuture ? 'none' : 'auto',
+                cursor: isFuture ? 'default' : 'pointer'
             }}>
                 {row.date}
             </div>

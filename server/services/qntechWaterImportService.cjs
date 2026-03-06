@@ -1,0 +1,276 @@
+const { createAuthenticatedClient } = require('./qntechAuthService.cjs');
+const { PROJECTS_QUERY, getActiveLocations, getConfiguredSampleMappings, mapProjectsToWaterRows } = require('./qntechWaterValueImportService.cjs');
+const { saveProjectPhotos } = require('./qntechWaterPhotoImportService.cjs');
+
+const RANGE_IMPORT_DELAY_MS = 250;
+
+function normalizeDateInput(date) {
+  const normalized = String(date || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    throw new Error('날짜 형식은 YYYY-MM-DD 이어야 합니다.');
+  }
+  return normalized;
+}
+
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchProjectsForDate(db, date) {
+  const normalizedDate = normalizeDateInput(date);
+  const client = await createAuthenticatedClient(db);
+  return fetchProjectsForDateWithClient(client, normalizedDate);
+}
+
+function enumerateDates(startDate, endDate) {
+  const start = new Date(`${normalizeDateInput(startDate)}T00:00:00`);
+  const end = new Date(`${normalizeDateInput(endDate)}T00:00:00`);
+  if (start > end) {
+    throw new Error('시작일은 종료일보다 늦을 수 없습니다.');
+  }
+
+  const dates = [];
+  const current = new Date(start);
+  while (current <= end) {
+    dates.push(formatLocalDate(current));
+    current.setDate(current.getDate() + 1);
+  }
+
+  return dates;
+}
+
+function persistWaterRows(db, importedRows) {
+  if (!Array.isArray(importedRows) || importedRows.length === 0) {
+    return 0;
+  }
+
+  const stmt = db.prepare(`
+    INSERT INTO water_quality (date, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(date, location) DO UPDATE SET
+      nh3_n = COALESCE(excluded.nh3_n, nh3_n),
+      no3_n = COALESCE(excluded.no3_n, no3_n),
+      po4_p = COALESCE(excluded.po4_p, po4_p),
+      alkalinity = COALESCE(excluded.alkalinity, alkalinity),
+      tn = COALESCE(excluded.tn, tn),
+      tp = COALESCE(excluded.tp, tp),
+      cod = COALESCE(excluded.cod, cod),
+      ss = COALESCE(excluded.ss, ss)
+  `);
+
+  const runInsert = db.transaction((rows) => {
+    rows.forEach((item) => {
+      stmt.run(
+        item.date,
+        item.location || '유입수',
+        item.nh3_n ?? null,
+        item.no3_n ?? null,
+        item.po4_p ?? null,
+        item.alkalinity ?? null,
+        item.tn ?? null,
+        item.tp ?? null,
+        item.cod ?? null,
+        item.ss ?? null
+      );
+    });
+  });
+
+  runInsert(importedRows);
+  return importedRows.length;
+}
+
+async function fetchProjectsForDateWithClient(client, normalizedDate) {
+  const sites = client.me?.sites || [];
+  if (!sites.length) {
+    throw new Error('QnTECH에서 접근 가능한 현장을 찾지 못했습니다.');
+  }
+
+  const site = sites[0];
+  const projectResult = await client.graphqlRequest(PROJECTS_QUERY, {
+    data: { siteId: Number(site.id), regDt: normalizedDate }
+  }, '/');
+
+  return {
+    date: normalizedDate,
+    client,
+    site,
+    projects: projectResult?.selectProjectListByRegDt || []
+  };
+}
+
+async function importQntechWaterValues(db, date) {
+  const context = await fetchProjectsForDate(db, date);
+  const activeLocations = getActiveLocations(db);
+  const configuredSampleMappings = getConfiguredSampleMappings(db);
+  const mapped = mapProjectsToWaterRows(context.projects, activeLocations, configuredSampleMappings);
+
+  return {
+    date: context.date,
+    site: { id: context.site.id, name: context.site.name },
+    projectCount: context.projects.length,
+    importedRows: mapped.importedRows,
+    unmatchedSamples: mapped.unmatchedSamples
+  };
+}
+
+async function importQntechWaterPhotos(db, baseDir, date) {
+  const context = await fetchProjectsForDate(db, date);
+  const photoSetting = db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
+  const photoResult = await saveProjectPhotos({
+    baseUrl: context.client.baseUrl,
+    cookieJar: context.client.cookieJar,
+    projects: context.projects,
+    date: context.date,
+    baseDir,
+    configuredPhotoRoot: photoSetting?.qntech_photo_root
+  });
+
+  return {
+    date: context.date,
+    site: { id: context.site.id, name: context.site.name },
+    projectCount: context.projects.length,
+    ...photoResult
+  };
+}
+
+async function importQntechWaterAll(db, baseDir, date) {
+  const context = await fetchProjectsForDate(db, date);
+  const activeLocations = getActiveLocations(db);
+  const configuredSampleMappings = getConfiguredSampleMappings(db);
+  const photoSetting = db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
+  const mapped = mapProjectsToWaterRows(context.projects, activeLocations, configuredSampleMappings);
+  const photoResult = await saveProjectPhotos({
+    baseUrl: context.client.baseUrl,
+    cookieJar: context.client.cookieJar,
+    projects: context.projects,
+    date: context.date,
+    baseDir,
+    configuredPhotoRoot: photoSetting?.qntech_photo_root
+  });
+
+  return {
+    success: true,
+    date: context.date,
+    site: { id: context.site.id, name: context.site.name },
+    projectCount: context.projects.length,
+    importedRows: mapped.importedRows,
+    unmatchedSamples: mapped.unmatchedSamples,
+    identifiedPhotos: photoResult.identifiedPhotos,
+    savedPhotos: photoResult.savedPhotos,
+    photoRoot: photoResult.photoRoot,
+    photoDirectory: photoResult.photoDirectory,
+    summary: {
+      importedRowCount: mapped.importedRows.length,
+      savedPhotoCount: photoResult.savedPhotos.length
+    }
+  };
+}
+
+async function importQntechWaterRange(db, baseDir, startDate, endDate, options = {}) {
+  const { onProgress } = options;
+  const dates = enumerateDates(startDate, endDate);
+  const client = await createAuthenticatedClient(db);
+  const activeLocations = getActiveLocations(db);
+  const configuredSampleMappings = getConfiguredSampleMappings(db);
+  const photoSetting = db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
+  const existingDateStmt = db.prepare('SELECT 1 FROM water_quality WHERE date = ? LIMIT 1');
+
+  const summaryRows = [];
+  let totalSavedPhotos = 0;
+  let totalInsertedRows = 0;
+  let photoRoot = null;
+
+  onProgress?.({
+    status: 'processing',
+    totalDates: dates.length,
+    completedDates: 0,
+    currentDate: null,
+    message: `총 ${dates.length}일 데이터를 준비하는 중...`
+  });
+
+  for (const [index, date] of dates.entries()) {
+    if (index > 0 && RANGE_IMPORT_DELAY_MS > 0) {
+      await sleep(RANGE_IMPORT_DELAY_MS);
+    }
+
+    onProgress?.({
+      status: 'processing',
+      totalDates: dates.length,
+      completedDates: index,
+      currentDate: date,
+      message: `${date} 데이터를 불러오는 중...`
+    });
+
+    const context = await fetchProjectsForDateWithClient(client, date);
+    const mapped = mapProjectsToWaterRows(context.projects, activeLocations, configuredSampleMappings);
+    const hasExistingValues = !!existingDateStmt.get(date);
+
+    let insertedRowCount = 0;
+    if (!hasExistingValues && mapped.importedRows.length > 0) {
+      insertedRowCount = persistWaterRows(db, mapped.importedRows);
+    }
+
+    const photoResult = await saveProjectPhotos({
+      baseUrl: context.client.baseUrl,
+      cookieJar: context.client.cookieJar,
+      projects: context.projects,
+      date: context.date,
+      baseDir,
+      configuredPhotoRoot: photoSetting?.qntech_photo_root
+    });
+
+    photoRoot = photoResult.photoRoot;
+    totalSavedPhotos += photoResult.savedPhotos.length;
+    totalInsertedRows += insertedRowCount;
+
+    summaryRows.push({
+      date,
+      siteName: context.site?.name || '',
+      existingValues: hasExistingValues,
+      projectCount: context.projects.length,
+      insertedRowCount,
+      savedPhotoCount: photoResult.savedPhotos.length,
+      photoDirectory: photoResult.photoDirectory,
+      unmatchedSamples: mapped.unmatchedSamples
+    });
+
+    onProgress?.({
+      status: 'processing',
+      totalDates: dates.length,
+      completedDates: index + 1,
+      currentDate: date,
+      message: `${date} 데이터 처리를 완료했습니다.`
+    });
+  }
+
+  return {
+    success: true,
+    startDate: dates[0],
+    endDate: dates[dates.length - 1],
+    processedDates: dates.length,
+    insertedDates: summaryRows.filter((item) => item.insertedRowCount > 0).map((item) => item.date),
+    existingValueDates: summaryRows.filter((item) => item.existingValues).map((item) => item.date),
+    summaryRows,
+    photoRoot,
+    summary: {
+      insertedRowCount: totalInsertedRows,
+      savedPhotoCount: totalSavedPhotos,
+      existingValueDateCount: summaryRows.filter((item) => item.existingValues).length
+    }
+  };
+}
+
+module.exports = {
+  importQntechWaterValues,
+  importQntechWaterPhotos,
+  importQntechWaterAll,
+  importQntechWaterRange,
+  fetchProjectsForDate
+};
