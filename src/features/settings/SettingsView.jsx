@@ -1476,7 +1476,7 @@ const SettingsView = ({ currentUser }) => {
                                 readOnly
                                 value={templateFileNames}
                                 title={templateFileNames}
-                                placeholder="보고서 양식들을 선택해주세요 (Excel, HWPX)..."
+                                placeholder="선택한 양식은 앱 로컬 템플릿 폴더로 복사됩니다."
                                 style={{
                                     width: '100%',
                                     height: '50px',
@@ -1519,7 +1519,10 @@ const SettingsView = ({ currentUser }) => {
                                 multiple
                                 accept=".xlsx, .xls, .xlsm, .hwpx"
                                 style={{ display: 'none' }}
-                                onChange={(e) => handleTemplateFileChange(Array.from(e.target.files))}
+                                onChange={(e) => {
+                                    handleTemplateFileChange(Array.from(e.target.files));
+                                    e.target.value = '';
+                                }}
                             />
                         </label>
                     </div>

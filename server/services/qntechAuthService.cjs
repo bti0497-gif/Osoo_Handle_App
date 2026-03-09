@@ -3,6 +3,8 @@ const path = require('path');
 const https = require('https');
 
 const DEFAULT_BASE_URL = 'https://eco.qntech.co.kr';
+const SESSION_REVALIDATE_MS = 5 * 60 * 1000;
+const SESSION_MAX_IDLE_MS = 30 * 60 * 1000;
 
 const LOGIN_MUTATION = `mutation Login($userId: String!, $password: String!) {
   signIn(data: { userId: $userId, password: $password }) {
@@ -28,6 +30,9 @@ const ME_QUERY = `query Me {
     }
   }
 }`;
+
+let cachedSession = null;
+let authenticationPromise = null;
 
 function normalizeBaseUrl(value) {
   const trimmed = String(value || '').trim();
@@ -59,8 +64,37 @@ function createCookieJar() {
     },
     toHeader() {
       return Array.from(jar.entries()).map(([key, value]) => `${key}=${value}`).join('; ');
+    },
+    isEmpty() {
+      return jar.size === 0;
     }
   };
+}
+
+function buildCredentialFingerprint(credential) {
+  return [credential.baseUrl, credential.userId, credential.password].join('|');
+}
+
+function isCachedSessionUsable(fingerprint) {
+  if (!cachedSession || cachedSession.fingerprint !== fingerprint) return false;
+  if (!cachedSession.cookieJar || cachedSession.cookieJar.isEmpty()) return false;
+  return (Date.now() - cachedSession.lastUsedAt) < SESSION_MAX_IDLE_MS;
+}
+
+function shouldRevalidateSession() {
+  if (!cachedSession) return true;
+  return (Date.now() - cachedSession.lastValidatedAt) >= SESSION_REVALIDATE_MS;
+}
+
+function markSessionTouched(sessionState) {
+  sessionState.lastUsedAt = Date.now();
+}
+
+function invalidateQntechSessionCache(reason = '') {
+  if (reason) {
+    console.log(`[QnTECH] 세션 캐시 무효화: ${reason}`);
+  }
+  cachedSession = null;
 }
 
 function httpRequest(urlString, { method = 'GET', headers = {}, body } = {}) {
@@ -156,8 +190,7 @@ function getStoredCredential(db) {
   };
 }
 
-async function createAuthenticatedClient(db) {
-  const credential = getStoredCredential(db);
+async function authenticateWithCredential(credential, fingerprint) {
   const cookieJar = createCookieJar();
   await seedSession(credential.baseUrl, cookieJar);
 
@@ -177,16 +210,105 @@ async function createAuthenticatedClient(db) {
     throw new Error('QnTECH 사용자 정보를 가져오지 못했습니다.');
   }
 
-  return {
+  const now = Date.now();
+  cachedSession = {
+    fingerprint,
     baseUrl: credential.baseUrl,
     cookieJar,
     me: meResult.me,
-    graphqlRequest: (query, variables, referer) => graphqlRequest(credential.baseUrl, cookieJar, query, variables, referer)
+    authenticatedAt: now,
+    lastValidatedAt: now,
+    lastUsedAt: now
+  };
+
+  return cachedSession;
+}
+
+async function refreshAuthenticatedSession(credential, fingerprint) {
+  if (!authenticationPromise) {
+    authenticationPromise = authenticateWithCredential(credential, fingerprint)
+      .finally(() => {
+        authenticationPromise = null;
+      });
+  }
+
+  return authenticationPromise;
+}
+
+async function ensureAuthenticatedSession(db, options = {}) {
+  const { forceRefresh = false } = options;
+  const credential = getStoredCredential(db);
+  const fingerprint = buildCredentialFingerprint(credential);
+
+  if (!forceRefresh && isCachedSessionUsable(fingerprint)) {
+    if (!shouldRevalidateSession()) {
+      markSessionTouched(cachedSession);
+      return { credential, session: cachedSession };
+    }
+
+    try {
+      const meResult = await graphqlRequest(credential.baseUrl, cachedSession.cookieJar, ME_QUERY, {}, '/');
+      if (!meResult?.me) {
+        throw new Error('QnTECH 사용자 정보를 가져오지 못했습니다.');
+      }
+
+      cachedSession.me = meResult.me;
+      cachedSession.lastValidatedAt = Date.now();
+      markSessionTouched(cachedSession);
+      return { credential, session: cachedSession };
+    } catch (_) {
+      invalidateQntechSessionCache('cached session validation failed');
+    }
+  }
+
+  const session = await refreshAuthenticatedSession(credential, fingerprint);
+  return { credential, session };
+}
+
+function isAuthenticationError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return [
+    'status=401',
+    'status=403',
+    'unauthorized',
+    'forbidden',
+    '로그인',
+    '인증',
+    'session',
+    'csrf'
+  ].some((token) => message.includes(token));
+}
+
+async function createAuthenticatedClient(db) {
+  const { credential, session } = await ensureAuthenticatedSession(db);
+
+  return {
+    baseUrl: credential.baseUrl,
+    cookieJar: session.cookieJar,
+    me: session.me,
+    graphqlRequest: async (query, variables, referer) => {
+      const active = await ensureAuthenticatedSession(db);
+      try {
+        const result = await graphqlRequest(active.credential.baseUrl, active.session.cookieJar, query, variables, referer);
+        markSessionTouched(active.session);
+        return result;
+      } catch (error) {
+        if (!isAuthenticationError(error)) {
+          throw error;
+        }
+
+        const refreshed = await ensureAuthenticatedSession(db, { forceRefresh: true });
+        const result = await graphqlRequest(refreshed.credential.baseUrl, refreshed.session.cookieJar, query, variables, referer);
+        markSessionTouched(refreshed.session);
+        return result;
+      }
+    }
   };
 }
 
 module.exports = {
   createAuthenticatedClient,
   httpRequest,
-  normalizeBaseUrl
+  normalizeBaseUrl,
+  invalidateQntechSessionCache
 };

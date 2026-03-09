@@ -75,9 +75,9 @@ function App() {
             case 'water': return <WaterQualityView currentUser={user} />;
             case 'kit': return <KitManagementView currentUser={user} />;
             case 'facility': return <FacilityManagementView currentUser={user} />;
-            case 'log': return <DailyLogView currentUser={user} />;
+            case 'log': return <PlaceholderView title="일지작성" />;
             case 'log_daily': return <PlaceholderView title="일일업무일지" />;
-            case 'log_water': return <PlaceholderView title="수질분석일지" />;
+            case 'log_water': return <DailyLogView currentUser={user} templateName="수질분석일지" title="수질분석일지" />;
             case 'log_med_mgmt': return <PlaceholderView title="약품관리대장" />;
             case 'log_med_in': return <PlaceholderView title="약품입고일지" />;
             case 'log_sludge_out': return <PlaceholderView title="슬러지반출관리대장" />;

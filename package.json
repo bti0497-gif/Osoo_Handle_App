@@ -17,6 +17,7 @@
     "electron:publish": "npm run build && electron-builder --config electron-builder.config.js --publish always"
   },
   "dependencies": {
+    "@google-cloud/bigquery": "^8.1.1",
     "@heroicons/react": "^2.2.0",
     "@supabase/supabase-js": "^2.97.0",
     "better-sqlite3": "^12.6.2",
@@ -26,6 +27,8 @@
     "express": "^5.2.1",
     "googleapis": "^171.4.0",
     "multer": "^2.0.2",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^5.5.207",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-quill-new": "^3.8.3",

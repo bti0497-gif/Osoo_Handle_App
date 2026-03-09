@@ -24,6 +24,11 @@ db.exec(`
     is_reset BOOLEAN DEFAULT 0,
     is_manual BOOLEAN DEFAULT 0,
     sludge_export REAL,
+    site_name TEXT,
+    author TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+    is_synced INTEGER DEFAULT 0,
     UNIQUE(date, type)
   );
   CREATE TABLE IF NOT EXISTS medicine_logs (
@@ -33,11 +38,21 @@ db.exec(`
     purchase_amount REAL,
     usage_amount REAL,
     current_inventory REAL,
+    site_name TEXT,
+    author TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+    is_synced INTEGER DEFAULT 0,
     UNIQUE(medicine_name, date)
   );
   CREATE TABLE IF NOT EXISTS water_quality (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date DATE NOT NULL,
+    measurement_group TEXT NOT NULL DEFAULT '',
+    measurement_order INTEGER DEFAULT 1,
+    source_type TEXT DEFAULT 'manual',
+    source_label TEXT,
+    qntech_project_id TEXT,
     location TEXT,
     nh3_n TEXT,
     no3_n TEXT,
@@ -47,7 +62,12 @@ db.exec(`
     tp TEXT,
     cod TEXT,
     ss TEXT,
-    UNIQUE(date, location)
+    site_name TEXT,
+    author TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+    is_synced INTEGER DEFAULT 0,
+    UNIQUE(date, measurement_group, location)
   );
   CREATE TABLE IF NOT EXISTS kit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,6 +76,11 @@ db.exec(`
     purchase_amount REAL,
     usage_amount REAL,
     current_inventory REAL,
+    site_name TEXT,
+    author TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+    is_synced INTEGER DEFAULT 0,
     UNIQUE(kit_name, date)
   );
   CREATE TABLE IF NOT EXISTS facility_logs (
@@ -65,7 +90,12 @@ db.exec(`
     content TEXT,
     company TEXT,
     price INTEGER,
-    notes TEXT
+    notes TEXT,
+    site_name TEXT,
+    author TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+    is_synced INTEGER DEFAULT 0
   );
   CREATE TABLE IF NOT EXISTS app_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -172,18 +202,33 @@ const waterCols = db.prepare("PRAGMA table_info(water_quality)").all().map(c => 
 
 const waterColumnInfo = db.prepare("PRAGMA table_info(water_quality)").all();
 const requiredWaterTextColumns = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity', 'tn', 'tp', 'cod', 'ss'];
+const requiredWaterIdentityColumns = ['measurement_group', 'measurement_order', 'source_type', 'source_label', 'qntech_project_id'];
+const legacyWaterColumns = new Set(waterColumnInfo.map((item) => item.name));
 const shouldRebuildWaterQuality = requiredWaterTextColumns.some((column) => {
   const info = waterColumnInfo.find((item) => item.name === column);
   return info && String(info.type || '').toUpperCase() !== 'TEXT';
-});
+}) || requiredWaterIdentityColumns.some((column) => !waterColumnInfo.some((item) => item.name === column));
 
 if (shouldRebuildWaterQuality) {
   db.transaction(() => {
+    const legacySelect = {
+      site_name: legacyWaterColumns.has('site_name') ? 'site_name' : 'NULL',
+      author: legacyWaterColumns.has('author') ? 'author' : 'NULL',
+      created_at: legacyWaterColumns.has('created_at') ? 'created_at' : "datetime('now', 'localtime')",
+      last_modified: legacyWaterColumns.has('last_modified') ? 'last_modified' : "datetime('now', 'localtime')",
+      is_synced: legacyWaterColumns.has('is_synced') ? 'COALESCE(is_synced, 0)' : '0'
+    };
+
     db.prepare('ALTER TABLE water_quality RENAME TO water_quality_old').run();
     db.exec(`
       CREATE TABLE water_quality (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date DATE NOT NULL,
+        measurement_group TEXT NOT NULL DEFAULT '',
+        measurement_order INTEGER DEFAULT 1,
+        source_type TEXT DEFAULT 'manual',
+        source_label TEXT,
+        qntech_project_id TEXT,
         location TEXT,
         nh3_n TEXT,
         no3_n TEXT,
@@ -193,14 +238,28 @@ if (shouldRebuildWaterQuality) {
         tp TEXT,
         cod TEXT,
         ss TEXT,
-        UNIQUE(date, location)
+        site_name TEXT,
+        author TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+        is_synced INTEGER DEFAULT 0,
+        UNIQUE(date, measurement_group, location)
       );
     `);
     db.prepare(`
-      INSERT INTO water_quality (id, date, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss)
+      INSERT INTO water_quality (
+        id, date, measurement_group, measurement_order, source_type, source_label, qntech_project_id,
+        location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss,
+        site_name, author, created_at, last_modified, is_synced
+      )
       SELECT
         id,
         date,
+        'legacy:' || date,
+        1,
+        'legacy',
+        NULL,
+        NULL,
         location,
         CAST(nh3_n AS TEXT),
         CAST(no3_n AS TEXT),
@@ -209,7 +268,12 @@ if (shouldRebuildWaterQuality) {
         CAST(tn AS TEXT),
         CAST(tp AS TEXT),
         CAST(cod AS TEXT),
-        CAST(ss AS TEXT)
+        CAST(ss AS TEXT),
+        ${legacySelect.site_name},
+        ${legacySelect.author},
+        ${legacySelect.created_at},
+        ${legacySelect.last_modified},
+        ${legacySelect.is_synced}
       FROM water_quality_old
     `).run();
     db.prepare('DROP TABLE water_quality_old').run();
@@ -330,6 +394,63 @@ if (db.prepare('SELECT count(*) as count FROM config_items').get().count === 0) 
     stmt.run('medicine', name, 1, i);
   });
   ['암모니아성질소', '질산성질소', '인산염인', '알칼리도'].forEach((name, i) => stmt.run('water', name, 1, i));
+}
+
+// --- Sync Columns Migration (BigQuery Synchronization) ---
+// 동기화 대상 테이블 목록
+const syncTables = ['flow_readings', 'medicine_logs', 'water_quality', 'kit_logs', 'facility_logs'];
+const syncDefaults = db.prepare('SELECT site_name, manager_name FROM app_settings WHERE id = 1').get() || {};
+const defaultSiteName = syncDefaults.site_name || 'Unknown Site';
+const defaultAuthor = syncDefaults.manager_name || 'Unknown Author';
+
+syncTables.forEach(tableName => {
+  const cols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
+
+  if (!cols.includes('site_name')) {
+    console.log(`Adding 'site_name' column to ${tableName}`);
+    db.prepare(`ALTER TABLE ${tableName} ADD COLUMN site_name TEXT`).run();
+  }
+
+  if (!cols.includes('author')) {
+    console.log(`Adding 'author' column to ${tableName}`);
+    db.prepare(`ALTER TABLE ${tableName} ADD COLUMN author TEXT`).run();
+  }
+  
+  if (!cols.includes('is_synced')) {
+    console.log(`Adding 'is_synced' column to ${tableName}`);
+    db.prepare(`ALTER TABLE ${tableName} ADD COLUMN is_synced INTEGER DEFAULT 0`).run();
+    // 기존 데이터는 모두 미동기화(0) 상태로 초기화하여 최초 동기화 유도
+    db.prepare(`UPDATE ${tableName} SET is_synced = 0`).run();
+  }
+  
+  if (!cols.includes('last_modified')) {
+    console.log(`Adding 'last_modified' column to ${tableName}`);
+    db.prepare(`ALTER TABLE ${tableName} ADD COLUMN last_modified TEXT`).run();
+    // 기존 데이터의 수정 시각을 현재 시간으로 초기화
+    db.prepare(`UPDATE ${tableName} SET last_modified = datetime('now', 'localtime') WHERE last_modified IS NULL`).run();
+  }
+
+  if (!cols.includes('created_at')) {
+    console.log(`Adding 'created_at' column to ${tableName}`);
+    db.prepare(`ALTER TABLE ${tableName} ADD COLUMN created_at TEXT`).run();
+  }
+
+  db.prepare(`
+    UPDATE ${tableName}
+    SET
+      site_name = COALESCE(NULLIF(site_name, ''), ?),
+      author = COALESCE(NULLIF(author, ''), ?),
+      is_synced = COALESCE(is_synced, 0),
+      last_modified = COALESCE(last_modified, datetime('now', 'localtime')),
+      created_at = COALESCE(created_at, last_modified, datetime('now', 'localtime'))
+  `).run(defaultSiteName, defaultAuthor);
+});
+
+// attendance 테이블은 이미 is_synced가 있으므로 last_modified만 확인
+const attendanceSyncCols = db.prepare("PRAGMA table_info(attendance)").all().map(c => c.name);
+if (!attendanceSyncCols.includes('last_modified')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN last_modified TEXT').run();
+  db.prepare("UPDATE attendance SET last_modified = datetime('now', 'localtime') WHERE last_modified IS NULL").run();
 }
 
 console.log('Database migration check complete.');

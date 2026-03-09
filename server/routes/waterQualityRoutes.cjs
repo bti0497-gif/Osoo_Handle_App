@@ -1,6 +1,32 @@
 const express = require('express');
 const { importQntechWaterValues, importQntechWaterPhotos, importQntechWaterAll, importQntechWaterRange } = require('../services/qntechWaterImportService.cjs');
+const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const router = express.Router();
+
+function normalizeMeasurementGroup(item = {}) {
+  const date = String(item.date || '').trim().slice(0, 10);
+  const rawGroup = String(item.measurement_group || '').trim();
+  if (rawGroup) return rawGroup;
+
+  const projectId = String(item.qntech_project_id || '').trim();
+  if (projectId) return `qntech:${projectId}`;
+
+  return `manual:${date}`;
+}
+
+function normalizeMeasurementOrder(item = {}) {
+  const numeric = Number(item.measurement_order);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return Math.floor(numeric);
+  }
+  return 1;
+}
+
+function normalizeSourceType(item = {}) {
+  const sourceType = String(item.source_type || '').trim();
+  if (sourceType) return sourceType;
+  return item.qntech_project_id ? 'qntech' : 'manual';
+}
 
 module.exports = function (db, baseDir) {
   let rangeImportProgress = {
@@ -13,13 +39,13 @@ module.exports = function (db, baseDir) {
 
   router.get('/api/water-quality', (req, res) => {
     const { date } = req.query;
-    const logs = db.prepare('SELECT * FROM water_quality WHERE date = ?').all(date);
+    const logs = db.prepare('SELECT * FROM water_quality WHERE date = ? ORDER BY measurement_order ASC, created_at ASC, id ASC, location ASC').all(date);
     res.json(logs);
   });
 
   router.get('/api/water-quality/history', (req, res) => {
     try {
-      const allRecords = db.prepare('SELECT * FROM water_quality ORDER BY date ASC').all();
+      const allRecords = db.prepare('SELECT * FROM water_quality ORDER BY date ASC, measurement_order ASC, created_at ASC, id ASC, location ASC').all();
       res.json({ success: true, history: allRecords });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message, error: err.message });
@@ -33,10 +59,18 @@ module.exports = function (db, baseDir) {
   router.post('/api/water-quality/bulk', (req, res) => {
     const { items } = req.body;
     try {
+      const metadata = getCurrentRecordMetadata(db);
       const stmt = db.prepare(`
-        INSERT INTO water_quality (date, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(date, location) DO UPDATE SET
+        INSERT INTO water_quality (
+          date, measurement_group, measurement_order, source_type, source_label, qntech_project_id,
+          location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss,
+          site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(date, measurement_group, location) DO UPDATE SET
+          measurement_order = excluded.measurement_order,
+          source_type = excluded.source_type,
+          source_label = excluded.source_label,
+          qntech_project_id = excluded.qntech_project_id,
           nh3_n = COALESCE(excluded.nh3_n, nh3_n),
           no3_n = COALESCE(excluded.no3_n, no3_n),
           po4_p = COALESCE(excluded.po4_p, po4_p),
@@ -44,13 +78,23 @@ module.exports = function (db, baseDir) {
           tn = COALESCE(excluded.tn, tn),
           tp = COALESCE(excluded.tp, tp),
           cod = COALESCE(excluded.cod, cod),
-          ss = COALESCE(excluded.ss, ss)
+          ss = COALESCE(excluded.ss, ss),
+          site_name = excluded.site_name,
+          author = excluded.author,
+          last_modified = excluded.last_modified,
+          is_synced = excluded.is_synced
       `);
 
       const insertMany = db.transaction((rows) => {
         for (const item of rows) {
+          const measurementGroup = normalizeMeasurementGroup(item);
           stmt.run(
             item.date,
+            measurementGroup,
+            normalizeMeasurementOrder(item),
+            normalizeSourceType(item),
+            item.source_label ?? null,
+            item.qntech_project_id ?? null,
             item.location || '유입수',
             item.nh3_n ?? null,
             item.no3_n ?? null,
@@ -59,7 +103,12 @@ module.exports = function (db, baseDir) {
             item.tn ?? null,
             item.tp ?? null,
             item.cod ?? null,
-            item.ss ?? null
+            item.ss ?? null,
+            metadata.siteName,
+            metadata.author,
+            metadata.createdAt,
+            metadata.lastModified,
+            metadata.isSynced
           );
         }
       });
@@ -143,10 +192,19 @@ module.exports = function (db, baseDir) {
   router.post('/api/water-quality', (req, res) => {
     const { date, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss } = req.body;
     try {
+      const metadata = getCurrentRecordMetadata(db);
+      const measurementGroup = normalizeMeasurementGroup(req.body);
       const info = db.prepare(`
-        INSERT INTO water_quality (date, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(date, location) DO UPDATE SET
+        INSERT INTO water_quality (
+          date, measurement_group, measurement_order, source_type, source_label, qntech_project_id,
+          location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss,
+          site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(date, measurement_group, location) DO UPDATE SET
+          measurement_order = excluded.measurement_order,
+          source_type = excluded.source_type,
+          source_label = excluded.source_label,
+          qntech_project_id = excluded.qntech_project_id,
           nh3_n = COALESCE(excluded.nh3_n, nh3_n),
           no3_n = COALESCE(excluded.no3_n, no3_n),
           po4_p = COALESCE(excluded.po4_p, po4_p),
@@ -154,9 +212,18 @@ module.exports = function (db, baseDir) {
           tn = COALESCE(excluded.tn, tn),
           tp = COALESCE(excluded.tp, tp),
           cod = COALESCE(excluded.cod, cod),
-          ss = COALESCE(excluded.ss, ss)
+          ss = COALESCE(excluded.ss, ss),
+          site_name = excluded.site_name,
+          author = excluded.author,
+          last_modified = excluded.last_modified,
+          is_synced = excluded.is_synced
       `).run(
         date,
+        measurementGroup,
+        normalizeMeasurementOrder(req.body),
+        normalizeSourceType(req.body),
+        req.body.source_label ?? null,
+        req.body.qntech_project_id ?? null,
         location || '유입수',
         nh3_n ?? null,
         no3_n ?? null,
@@ -165,7 +232,12 @@ module.exports = function (db, baseDir) {
         tn ?? null,
         tp ?? null,
         cod ?? null,
-        ss ?? null
+        ss ?? null,
+        metadata.siteName,
+        metadata.author,
+        metadata.createdAt,
+        metadata.lastModified,
+        metadata.isSynced
       );
       res.json({ success: true, id: info.lastInsertRowid });
     } catch (err) {

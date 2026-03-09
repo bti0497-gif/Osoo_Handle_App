@@ -2,18 +2,22 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const { parseAndStoreExcel, getStoredSheets, getStoredRow, getCellValue, hasStoredData, formatDate } = require('../services/excelService.cjs');
-const { normalizeBaseUrl } = require('../services/qntechAuthService.cjs');
+const { normalizeBaseUrl, invalidateQntechSessionCache } = require('../services/qntechAuthService.cjs');
+const { getCustomReportTemplatesDir, listReportTemplates, syncBundledTemplatesToAppData } = require('../services/reportTemplateService.cjs');
 const router = express.Router();
 
 let importProgress = { current: 0, total: 0, status: 'idle', result: null };
 
-module.exports = function (db, baseDir) {
-  const reportsDir = path.join(baseDir, 'templates', 'reports');
-  if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true });
+module.exports = function (db, baseDir, appDataPath) {
+  const reportsDir = getCustomReportTemplatesDir(appDataPath);
+  const excelOriginalsDir = path.join(appDataPath, 'templates', 'excel-originals');
+  if (!fs.existsSync(excelOriginalsDir)) fs.mkdirSync(excelOriginalsDir, { recursive: true });
+  syncBundledTemplatesToAppData(baseDir, appDataPath);
 
   const reportStorage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, reportsDir),
+    destination: (req, file, cb) => cb(null, file.fieldname === 'excel_original' ? excelOriginalsDir : reportsDir),
     filename: (req, file, cb) => {
       try { cb(null, Buffer.from(file.originalname, 'latin1').toString('utf8')); }
       catch (e) { cb(null, file.originalname); }
@@ -24,10 +28,11 @@ module.exports = function (db, baseDir) {
   // ── 설정 조회 ──
   router.get('/api/settings', (req, res) => {
     try {
+      const reportTemplates = listReportTemplates(baseDir, appDataPath);
       const settings = db.prepare('SELECT * FROM app_settings WHERE id = 1').get();
       const configItems = db.prepare('SELECT * FROM config_items ORDER BY category, display_order').all();
       const credentials = db.prepare('SELECT service_key, service_name, service_url, user_id, password, updated_at FROM web_app_credentials ORDER BY id').all();
-      res.json({ success: true, settings, configItems, credentials });
+      res.json({ success: true, settings, configItems, credentials, reportTemplates });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
@@ -63,6 +68,10 @@ module.exports = function (db, baseDir) {
       const result = db.prepare('UPDATE web_app_credentials SET service_url = ?, user_id = ?, password = ?, updated_at = CURRENT_TIMESTAMP WHERE service_key = ?').run(normalizedServiceUrl, userId || '', password || '', serviceKey);
       if (result.changes === 0) {
         return res.status(404).json({ success: false, message: '대상 설정을 찾을 수 없습니다.' });
+      }
+
+      if (serviceKey === 'water_analysis_app') {
+        invalidateQntechSessionCache('water_analysis_app credentials updated');
       }
 
       const credential = db.prepare('SELECT service_key, service_name, service_url, user_id, password, updated_at FROM web_app_credentials WHERE service_key = ?').get(serviceKey);
@@ -397,16 +406,23 @@ module.exports = function (db, baseDir) {
       });
 
       const insertWater = db.prepare(`
-        INSERT INTO water_quality (date, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+        INSERT INTO water_quality (
+          date, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss,
+          site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
         ON CONFLICT(date, location) DO UPDATE SET 
           nh3_n = excluded.nh3_n, no3_n = excluded.no3_n, 
-          po4_p = excluded.po4_p, alkalinity = excluded.alkalinity
+          po4_p = excluded.po4_p, alkalinity = excluded.alkalinity,
+          site_name = excluded.site_name,
+          author = excluded.author,
+          last_modified = excluded.last_modified,
+          is_synced = excluded.is_synced
       `);
 
       const importedData = [];
 
       db.transaction(() => {
+        const metadata = getCurrentRecordMetadata(db);
         for (let r = startRow; r <= endRow; r++) {
           const dateStr = getCellValue(db, sheet, r, dateCol);
           const formatted = formatDate(dateStr) || dateStr;
@@ -416,7 +432,7 @@ module.exports = function (db, baseDir) {
 
           // Default location if no locations are mapped (fallback to '기본')
           if (Object.keys(locations).length === 0) {
-            insertWater.run(formatted, '기본', null, null, null, null, null, null, null, null);
+            insertWater.run(formatted, '기본', null, null, null, null, null, null, null, null, metadata.siteName, metadata.author, metadata.createdAt, metadata.lastModified, metadata.isSynced);
             importedData.push({ date: formatted, location: '기본' });
           } else {
             Object.entries(locations).forEach(([locName, cols]) => {
@@ -430,7 +446,7 @@ module.exports = function (db, baseDir) {
               });
 
               // tn, tp, cod, ss는 키트 분석 항목이 아니므로 null로 저장
-              insertWater.run(formatted, locName, vals.nh3_n, vals.no3_n, vals.po4_p, vals.alkalinity, null, null, null, null);
+              insertWater.run(formatted, locName, vals.nh3_n, vals.no3_n, vals.po4_p, vals.alkalinity, null, null, null, null, metadata.siteName, metadata.author, metadata.createdAt, metadata.lastModified, metadata.isSynced);
 
               rowResults[`${locName}_nh3_n`] = vals.nh3_n;
             });
@@ -462,14 +478,16 @@ module.exports = function (db, baseDir) {
 
       if (files['excel_original']) {
         const original = files['excel_original'][0];
-        const originalPath = `templates/reports/${original.filename}`;
+        const originalPath = `appdata/templates/excel-originals/${original.filename}`;
         db.prepare('UPDATE app_settings SET excel_template_path = ? WHERE id = 1').run(originalPath);
 
-        const filePath = path.join(baseDir, originalPath);
+        const filePath = path.join(excelOriginalsDir, original.filename);
         const sheets = await parseAndStoreExcel(db, filePath);
         result.originalPath = originalPath;
         result.sheets = sheets;
       }
+
+      result.reportTemplates = listReportTemplates(baseDir, appDataPath);
 
       res.json({ success: true, message: '파일 업로드 및 데이터 저장 완료', ...result });
     } catch (err) {

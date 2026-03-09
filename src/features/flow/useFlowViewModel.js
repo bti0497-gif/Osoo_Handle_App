@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { FlowModel } from './FlowModel';
-import { DriveSyncService } from '../../services/DriveSyncService';
 
 export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
     const [history, setHistory] = useState([]);
@@ -24,8 +23,6 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
         try {
             const today = new Date();
             const todayStr = today.toISOString().split('T')[0];
-
-            await DriveSyncService.syncOperationalDataFromCloud(currentUser?.name, todayStr);
 
             const historyData = await FlowModel.fetchHistory();
             if (historyData.success) {

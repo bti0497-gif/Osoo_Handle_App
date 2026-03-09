@@ -1,192 +1,568 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useDialog } from '../../components/common/DialogProvider';
+import DailyLogPdfPreview from './DailyLogPdfPreview';
 import { useDailyLogViewModel } from './useDailyLogViewModel';
 
-const DailyLogView = ({ currentUser }) => {
-    const {
-        date,
-        setDate,
-        data,
-        loading,
-        handlePrint
-    } = useDailyLogViewModel(currentUser);
+const formatDisplayDate = (value) => {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+        return '';
+    }
 
-    const API_BASE_URL = 'http://localhost:8901';
+    const [year, month, day] = normalized.split('-');
+    if (!year || !month || !day) {
+        return normalized;
+    }
+
+    return `${year}-${month}-${day}`;
+};
+
+const DailyLogView = ({ currentUser, templateName = '수질분석일지', title = '수질분석일지' }) => {
+    const { showAlert } = useDialog();
+    const {
+        startDate,
+        endDate,
+        isRangeMode,
+        setIsRangeMode,
+        setStartDate,
+        setEndDate,
+        currentPage,
+        pageIndicator,
+        previewUrl,
+        isManifestLoading,
+        isPreviewAssetLoading,
+        manifestError,
+        manifestErrorCode,
+        hasPreviousPage,
+        hasNextPage,
+        handlePrevPage,
+        handleNextPage,
+        handlePrintCurrent,
+        handleDownloadCurrent,
+        handlePrintRange,
+        handleDownloadRange
+    } = useDailyLogViewModel(currentUser, undefined, templateName);
+    const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
+    const [isPreviewLoading, setIsPreviewLoading] = useState(true);
+    const [previewError, setPreviewError] = useState('');
+    const outputMenuRef = useRef(null);
+    const lastAlertMessageRef = useRef('');
+    const startDateInputRef = useRef(null);
+    const endDateInputRef = useRef(null);
+
+    useEffect(() => {
+        const handlePointerDown = (event) => {
+            if (!outputMenuRef.current?.contains(event.target)) {
+                setIsOutputMenuOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        return () => document.removeEventListener('mousedown', handlePointerDown);
+    }, []);
+
+    useEffect(() => {
+        setIsPreviewLoading(Boolean(previewUrl));
+        setPreviewError('');
+    }, [previewUrl]);
+
+    useEffect(() => {
+        if (manifestErrorCode !== 'REPORT_TEMPLATE_MISSING' || !manifestError) {
+            return;
+        }
+
+        if (lastAlertMessageRef.current === manifestError) {
+            return;
+        }
+
+        lastAlertMessageRef.current = manifestError;
+        showAlert(manifestError, `${title} 양식 필요`);
+    }, [manifestError, manifestErrorCode, showAlert, title]);
+
+    const handleMenuAction = (action) => {
+        setIsOutputMenuOpen(false);
+        action();
+    };
+
+    const outputMenuItemStyle = {
+        width: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        padding: '12px 14px',
+        border: 'none',
+        backgroundColor: '#ffffff',
+        color: '#0f172a',
+        fontSize: '0.8125rem',
+        fontWeight: 800,
+        cursor: 'pointer',
+        textAlign: 'left',
+        transition: 'background-color 0.15s ease'
+    };
+
+    const handleMenuItemMouseEnter = (event) => {
+        event.currentTarget.style.backgroundColor = '#e2e8f0';
+    };
+
+    const handleMenuItemMouseLeave = (event) => {
+        event.currentTarget.style.backgroundColor = '#ffffff';
+    };
+
+    const openDatePicker = (inputRef) => {
+        const input = inputRef.current;
+        if (!input) {
+            return;
+        }
+
+        if (typeof input.showPicker === 'function') {
+            input.showPicker();
+            return;
+        }
+
+        input.focus();
+        input.click();
+    };
 
     return (
-        <div className="panel-container">
-            <div className="dynamic-panel flex-1 shadow-2xl border-slate-200">
-                <div className="panel-header bg-slate-50/50 flex justify-between items-center no-print">
-                    <div>
-                        <h1 className="text-2xl font-bold text-slate-800 tracking-tight">통합 운영 일지 출력</h1>
-                        <p className="text-slate-500 text-[11px] font-medium">관리자 승인 및 리포트 생성을 관리합니다.</p>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2 bg-white border-2 border-slate-800 px-3 py-1 rounded-lg">
-                            <span className="material-icons text-slate-400 text-sm">calendar_today</span>
-                            <input
-                                type="date"
-                                value={date}
-                                onChange={(e) => setDate(e.target.value)}
-                                className="border-none focus:ring-0 text-xs font-bold outline-none"
-                            />
+        <div
+            className="panel-container"
+            style={{
+                padding: 0,
+                gap: 0,
+                alignItems: 'stretch',
+                overflow: 'hidden',
+                height: '100%'
+            }}
+        >
+            <div
+                className="dynamic-panel shadow-2xl border-slate-200"
+                style={{
+                    flex: 1,
+                    width: '100%',
+                    minWidth: 0,
+                    maxWidth: 'none',
+                    height: '100%',
+                    minHeight: 0,
+                    borderRadius: 0,
+                    borderTop: 'none',
+                    borderLeft: 'none',
+                    boxShadow: 'none'
+                }}
+            >
+                <div
+                    className="panel-header no-print"
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 12px',
+                        backgroundColor: '#f8fafc'
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <button
+                                type="button"
+                                onClick={setIsRangeMode}
+                                aria-pressed={isRangeMode}
+                                style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    border: 'none',
+                                    background: 'transparent',
+                                    padding: 0,
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <span style={{ fontSize: '0.76rem', fontWeight: 900, color: isRangeMode ? '#0f172a' : '#64748b' }}>기간선택</span>
+                                <span
+                                    style={{
+                                        position: 'relative',
+                                        width: '38px',
+                                        height: '22px',
+                                        borderRadius: '999px',
+                                        backgroundColor: isRangeMode ? '#2563eb' : '#cbd5e1',
+                                        transition: 'background-color 0.2s ease'
+                                    }}
+                                >
+                                    <span
+                                        style={{
+                                            position: 'absolute',
+                                            top: '2px',
+                                            left: isRangeMode ? '18px' : '2px',
+                                            width: '18px',
+                                            height: '18px',
+                                            borderRadius: '50%',
+                                            backgroundColor: '#ffffff',
+                                            boxShadow: '0 1px 3px rgba(15, 23, 42, 0.28)',
+                                            transition: 'left 0.2s ease'
+                                        }}
+                                    />
+                                </span>
+                            </button>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                <div
+                                    className="dailylog-date-field"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => openDatePicker(startDateInputRef)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault();
+                                            openDatePicker(startDateInputRef);
+                                        }
+                                    }}
+                                    style={{
+                                        position: 'relative',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        backgroundColor: '#ffffff',
+                                        border: '1px solid #334155',
+                                        padding: '2px 6px',
+                                        borderRadius: '8px',
+                                        height: '30px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    <span className="material-icons" style={{ color: '#64748b', fontSize: '14px' }}>event</span>
+                                    <span
+                                        style={{
+                                            fontSize: '0.8rem',
+                                            fontWeight: 700,
+                                            color: '#0f172a',
+                                            letterSpacing: '0.01em',
+                                            minWidth: '92px',
+                                            lineHeight: 1.1
+                                        }}
+                                    >
+                                        {formatDisplayDate(startDate)}
+                                    </span>
+                                    <span className="material-icons" style={{ color: '#0f172a', fontSize: '16px' }}>arrow_drop_down</span>
+                                    <input
+                                        ref={startDateInputRef}
+                                        className="dailylog-native-date-input"
+                                        type="date"
+                                        value={startDate}
+                                        onChange={(e) => setStartDate(e.target.value)}
+                                        tabIndex={-1}
+                                    />
+                                </div>
+                                {isRangeMode && (
+                                    <>
+                                        <span style={{ color: '#64748b', fontSize: '0.76rem', fontWeight: 800 }}>~</span>
+                                        <div
+                                            className="dailylog-date-field"
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={() => openDatePicker(endDateInputRef)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter' || event.key === ' ') {
+                                                    event.preventDefault();
+                                                    openDatePicker(endDateInputRef);
+                                                }
+                                            }}
+                                            style={{
+                                                position: 'relative',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '4px',
+                                                backgroundColor: '#ffffff',
+                                                border: '1px solid #334155',
+                                                padding: '2px 6px',
+                                                borderRadius: '8px',
+                                                height: '30px',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            <span className="material-icons" style={{ color: '#64748b', fontSize: '14px' }}>date_range</span>
+                                            <span
+                                                style={{
+                                                    fontSize: '0.8rem',
+                                                    fontWeight: 700,
+                                                    color: '#0f172a',
+                                                    letterSpacing: '0.01em',
+                                                    minWidth: '92px',
+                                                    lineHeight: 1.1
+                                                }}
+                                            >
+                                                {formatDisplayDate(endDate)}
+                                            </span>
+                                            <span className="material-icons" style={{ color: '#0f172a', fontSize: '16px' }}>arrow_drop_down</span>
+                                            <input
+                                                ref={endDateInputRef}
+                                                className="dailylog-native-date-input"
+                                                type="date"
+                                                value={endDate}
+                                                onChange={(e) => setEndDate(e.target.value)}
+                                                tabIndex={-1}
+                                            />
+                                        </div>
+                                    </>
+                                )}
+                            </div>
                         </div>
+                    </div>
+                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                        <div style={{ fontSize: '0.95rem', fontWeight: 900, color: '#0f172a', minWidth: '44px', textAlign: 'right' }}>{pageIndicator}</div>
                         <button
-                            onClick={handlePrint}
-                            className="bg-slate-800 text-white px-4 py-2 rounded-lg font-black flex items-center gap-2 hover:bg-slate-700 transition-colors text-xs"
+                            type="button"
+                            onClick={handlePrevPage}
+                            disabled={!hasPreviousPage}
+                            style={{
+                                width: '38px',
+                                height: '38px',
+                                borderRadius: '10px',
+                                border: '1px solid #cbd5e1',
+                                backgroundColor: hasPreviousPage ? '#ffffff' : '#f8fafc',
+                                color: hasPreviousPage ? '#0f172a' : '#cbd5e1',
+                                cursor: hasPreviousPage ? 'pointer' : 'default'
+                            }}
                         >
-                            <span className="material-icons text-sm">print</span>
-                            인쇄
+                            <span className="material-icons" style={{ fontSize: '18px' }}>chevron_left</span>
                         </button>
-                        <a
-                            href={`${API_BASE_URL}/api/logs/generate-excel?date=${date}&templateName=template.xlsx`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-black flex items-center gap-2 hover:bg-emerald-700 transition-colors text-xs"
+                        <button
+                            type="button"
+                            onClick={handleNextPage}
+                            disabled={!hasNextPage}
+                            style={{
+                                width: '38px',
+                                height: '38px',
+                                borderRadius: '10px',
+                                border: '1px solid #cbd5e1',
+                                backgroundColor: hasNextPage ? '#ffffff' : '#f8fafc',
+                                color: hasNextPage ? '#0f172a' : '#cbd5e1',
+                                cursor: hasNextPage ? 'pointer' : 'default'
+                            }}
                         >
-                            <span className="material-icons text-sm">description</span>
-                            EXCEL
-                        </a>
+                            <span className="material-icons" style={{ fontSize: '18px' }}>chevron_right</span>
+                        </button>
+                        <div ref={outputMenuRef} style={{ position: 'relative' }}>
+                        <button
+                            type="button"
+                            onClick={() => setIsOutputMenuOpen((prev) => !prev)}
+                            disabled={!currentPage}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                height: '38px',
+                                padding: '0 12px',
+                                border: 'none',
+                                borderRadius: '10px',
+                                backgroundColor: currentPage ? '#0f172a' : '#94a3b8',
+                                color: '#ffffff',
+                                fontSize: '0.8125rem',
+                                fontWeight: 900,
+                                cursor: currentPage ? 'pointer' : 'default'
+                            }}
+                        >
+                            <span className="material-icons" style={{ fontSize: '18px' }}>print</span>
+                            출력
+                            <span className="material-icons" style={{ fontSize: '18px' }}>arrow_drop_down</span>
+                        </button>
+
+                        {isOutputMenuOpen && (
+                            <div style={{
+                                position: 'absolute',
+                                top: 'calc(100% + 8px)',
+                                right: 0,
+                                minWidth: '220px',
+                                backgroundColor: '#ffffff',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: '12px',
+                                boxShadow: '0 16px 32px -16px rgba(15, 23, 42, 0.35)',
+                                overflow: 'hidden',
+                                zIndex: 20
+                            }}>
+                                <button
+                                    type="button"
+                                    onClick={() => handleMenuAction(handlePrintCurrent)}
+                                    onMouseEnter={handleMenuItemMouseEnter}
+                                    onMouseLeave={handleMenuItemMouseLeave}
+                                    style={outputMenuItemStyle}
+                                >
+                                    <span className="material-icons" style={{ fontSize: '18px' }}>print</span>
+                                    현재 페이지 인쇄
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleMenuAction(handleDownloadCurrent)}
+                                    style={{
+                                        borderTop: '1px solid #e2e8f0',
+                                        ...outputMenuItemStyle
+                                    }}
+                                    onMouseEnter={handleMenuItemMouseEnter}
+                                    onMouseLeave={handleMenuItemMouseLeave}
+                                >
+                                    <span className="material-icons" style={{ fontSize: '18px' }}>picture_as_pdf</span>
+                                    현재 페이지 PDF
+                                </button>
+                                {isRangeMode && startDate !== endDate && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleMenuAction(handlePrintRange)}
+                                        style={{
+                                            borderTop: '1px solid #e2e8f0',
+                                            ...outputMenuItemStyle
+                                        }}
+                                        onMouseEnter={handleMenuItemMouseEnter}
+                                        onMouseLeave={handleMenuItemMouseLeave}
+                                    >
+                                        <span className="material-icons" style={{ fontSize: '18px' }}>local_printshop</span>
+                                        선택 기간 전체 인쇄
+                                    </button>
+                                )}
+                                {isRangeMode && startDate !== endDate && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleMenuAction(handleDownloadRange)}
+                                        style={{
+                                            borderTop: '1px solid #e2e8f0',
+                                            ...outputMenuItemStyle
+                                        }}
+                                        onMouseEnter={handleMenuItemMouseEnter}
+                                        onMouseLeave={handleMenuItemMouseLeave}
+                                    >
+                                        <span className="material-icons" style={{ fontSize: '18px' }}>download</span>
+                                        선택 기간 전체 PDF
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                        </div>
                     </div>
                 </div>
 
-                <div className="panel-content bg-slate-50/20 log-print-area">
-                    {/* 실제 인쇄될 양식 */}
-                    <div className="bg-white border-2 border-slate-800 p-8 shadow-sm max-w-[800px] mx-auto print:p-0 print:border-0 print:shadow-none">
-                        <div className="text-center mb-8 border-b-4 border-slate-800 pb-6">
-                            <h2 className="text-4xl font-black uppercase tracking-[0.3em] text-slate-900">운 영 일 지</h2>
-                            <p className="text-xl font-black mt-4 border-2 border-slate-800 inline-block px-4 py-1">{date}</p>
-                        </div>
+                <div
+                    className="panel-content log-print-area"
+                    style={{
+                        backgroundColor: '#ffffff',
+                        padding: '0',
+                        overflow: 'hidden',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        minHeight: 0
+                    }}
+                >
+                    <div
+                        style={{
+                            flex: 1,
+                            width: '100%',
+                            minHeight: 0,
+                            backgroundColor: '#ffffff',
+                            position: 'relative',
+                            overflow: 'hidden',
+                            display: 'flex'
+                        }}
+                    >
+                        {(isManifestLoading || isPreviewAssetLoading || (isPreviewLoading && Boolean(currentPage))) && (
+                            <div
+                                style={{
+                                    position: 'absolute',
+                                    inset: 0,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+                                    zIndex: 1
+                                }}
+                            >
+                                <div className="spinner" style={{ margin: 0 }} />
+                            </div>
+                        )}
 
-                        <div className="grid grid-cols-2 gap-8">
-                            {/* 1. 유량 현황 */}
-                            <section className="col-span-1">
-                                <h3 className="text-xs font-black bg-slate-800 text-white px-2 py-1 mb-2 inline-block">1. 유량 가동 현황 (㎥)</h3>
-                                <table className="w-full border-collapse border-2 border-slate-800 text-xs text-center">
-                                    <thead>
-                                        <tr className="bg-slate-100">
-                                            <th className="border-2 border-slate-800 p-1">구분</th>
-                                            <th className="border-2 border-slate-800 p-1">검침값</th>
-                                            <th className="border-2 border-slate-800 p-1">금일발생</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {loading ? (
-                                            <tr><td colSpan="3" className="p-4">...</td></tr>
-                                        ) : ['inflow', 'discharge', 'sludge'].map(t => {
-                                            const r = data.flows.find(f => f.type === t);
-                                            let label = t === 'inflow' ? '유입량' : t === 'discharge' ? '방류량' : '잉여슬러지';
-                                            return (
-                                                <tr key={t}>
-                                                    <td className="border-2 border-slate-800 p-1 font-black">{label}</td>
-                                                    <td className="border-2 border-slate-800 p-1 font-mono">{r?.raw_value || '-'}</td>
-                                                    <td className="border-2 border-slate-800 p-1 font-mono font-black">{r?.calculated_flow || '-'}</td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </section>
-
-                            {/* 2. 약품 수급 */}
-                            <section className="col-span-1">
-                                <h3 className="text-xs font-black bg-slate-800 text-white px-2 py-1 mb-2 inline-block">2. 약품 수급 및 재고</h3>
-                                <table className="w-full border-collapse border-2 border-slate-800 text-xs text-center">
-                                    <thead>
-                                        <tr className="bg-slate-100">
-                                            <th className="border-2 border-slate-800 p-1">약품명</th>
-                                            <th className="border-2 border-slate-800 p-1">입/사용</th>
-                                            <th className="border-2 border-slate-800 p-1 font-black">현재고</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {loading ? (
-                                            <tr><td colSpan="3" className="p-4">...</td></tr>
-                                        ) : data.medicines.map(m => (
-                                            <tr key={m.id}>
-                                                <td className="border-2 border-slate-800 p-1 font-black">{m.medicine_name}</td>
-                                                <td className="border-2 border-slate-800 p-1 text-[10px]">
-                                                    {m.purchase_amount}/{m.usage_amount}
-                                                </td>
-                                                <td className="border-2 border-slate-800 p-1 font-black bg-slate-50">{m.current_inventory}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </section>
-
-                            {/* 3. 분석 데이터 */}
-                            <section className="col-span-2">
-                                <h3 className="text-xs font-black bg-slate-800 text-white px-2 py-1 mb-2 inline-block">3. 수질 분석 데이터</h3>
-                                <table className="w-full border-collapse border-2 border-slate-800 text-xs text-center">
-                                    <thead>
-                                        <tr className="bg-slate-100">
-                                            <th className="border-2 border-slate-800 p-1">위치</th>
-                                            <th className="border-2 border-slate-800 p-1">NH3-N</th>
-                                            <th className="border-2 border-slate-800 p-1">NO3-N</th>
-                                            <th className="border-2 border-slate-800 p-1">PO4-P</th>
-                                            <th className="border-2 border-slate-800 p-1 font-black">알칼리도</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {loading ? (
-                                            <tr><td colSpan="5" className="p-4">...</td></tr>
-                                        ) : data.waterQuality.map(w => (
-                                            <tr key={w.id}>
-                                                <td className="border-2 border-slate-800 p-1 font-black">{w.location}</td>
-                                                <td className="border-2 border-slate-800 p-1 font-mono">{w.nh3_n}</td>
-                                                <td className="border-2 border-slate-800 p-1 font-mono">{w.no3_n}</td>
-                                                <td className="border-2 border-slate-800 p-1 font-mono">{w.po4_p}</td>
-                                                <td className="border-2 border-slate-800 p-1 font-black text-blue-800 bg-blue-50/30">{w.alkalinity}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </section>
-
-                            {/* 4. 특이사항/시설관리 */}
-                            <section className="col-span-2">
-                                <h3 className="text-xs font-black bg-slate-800 text-white px-2 py-1 mb-2 inline-block">4. 시설 유지관리 및 특이사항</h3>
-                                <div className="border-2 border-slate-800 p-4 min-h-[150px] text-xs">
-                                    {loading ? (
-                                        <p className="text-center p-4">Loading...</p>
-                                    ) : data.facilities.map(f => (
-                                        <div key={f.id} className="mb-4 border-b border-slate-200 pb-2">
-                                            <p className="font-black underline mb-1">[{f.facility_name}] - {f.company || '자체'}</p>
-                                            <p className="leading-relaxed font-medium">{f.content}</p>
-                                        </div>
-                                    ))}
+                        {manifestError ? (
+                            <div style={{ padding: '40px 32px', color: '#991b1b', fontWeight: 700 }}>{manifestError}</div>
+                        ) : !currentPage ? (
+                            <div
+                                style={{
+                                    flex: 1,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    padding: '32px'
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        minWidth: '320px',
+                                        maxWidth: '520px',
+                                        padding: '28px 32px',
+                                        borderRadius: '16px',
+                                        border: '1px solid #94a3b8',
+                                        backgroundColor: '#eef2f7',
+                                        boxShadow: '0 16px 32px -24px rgba(15, 23, 42, 0.28)',
+                                        textAlign: 'center'
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            width: '52px',
+                                            height: '52px',
+                                            borderRadius: '50%',
+                                            margin: '0 auto 14px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            backgroundColor: '#cbd5e1',
+                                            color: '#1e293b'
+                                        }}
+                                    >
+                                        <span className="material-icons" style={{ fontSize: '28px' }}>description</span>
+                                    </div>
+                                    <div style={{ fontSize: '1rem', fontWeight: 900, color: '#020617', marginBottom: '8px' }}>
+                                        표시할 수질분석일지 페이지가 없습니다.
+                                    </div>
+                                    <div style={{ fontSize: '0.84rem', fontWeight: 800, color: '#334155', lineHeight: 1.5 }}>
+                                        선택한 날짜 또는 기간에 연결된 수질분석 데이터가 없어 미리보기를 만들 수 없습니다.
+                                    </div>
                                 </div>
-                            </section>
-                        </div>
-
-                        <div className="mt-12 flex justify-end gap-12 text-sm font-black">
-                            <div className="flex flex-col items-center">
-                                <span>담당자</span>
-                                <div className="w-16 h-16 border-2 border-slate-800 mt-2 flex items-center justify-center text-slate-200 font-black text-xl">印</div>
                             </div>
-                            <div className="flex flex-col items-center">
-                                <span>관리책임자</span>
-                                <div className="w-16 h-16 border-2 border-slate-800 mt-2 flex items-center justify-center text-slate-200 font-black text-xl">印</div>
-                            </div>
-                        </div>
+                        ) : previewError ? (
+                            <div style={{ padding: '40px 32px', color: '#991b1b', fontWeight: 700 }}>{previewError}</div>
+                        ) : (
+                            <DailyLogPdfPreview
+                                url={previewUrl}
+                                title={`${title} PDF Preview`}
+                                onRenderStart={() => {
+                                    setIsPreviewLoading(true);
+                                    setPreviewError('');
+                                }}
+                                onRenderComplete={() => setIsPreviewLoading(false)}
+                                onRenderError={(error) => {
+                                    setIsPreviewLoading(false);
+                                    const nextMessage = error?.message || 'PDF 미리보기를 렌더링하지 못했습니다.';
+                                    setPreviewError(nextMessage);
+                                    if (nextMessage.includes('양식을 찾을 수 없습니다.') && lastAlertMessageRef.current !== nextMessage) {
+                                        lastAlertMessageRef.current = nextMessage;
+                                        showAlert(nextMessage, `${title} 양식 필요`);
+                                    }
+                                }}
+                            />
+                        )}
                     </div>
                 </div>
             </div>
-
-            <style>{`
-                @media print {
-                    .no-print { display: none !important; }
-                    body { background: white; width: 210mm; height: 297mm; }
-                    .main-content { padding: 0 !important; margin: 0 !important; overflow: visible !important; }
-                    .app-shell, .app-main-body, .sidebar, .header, .status-bar { display: none !important; }
-                    .panel-container { padding: 0 !important; height: auto !important; width: 100% !important; overflow: visible !important; }
-                    .dynamic-panel { width: 100% !important; height: auto !important; border: none !important; box-shadow: none !important; border-radius: 0 !important; overflow: visible !important; }
-                    .panel-content { padding: 0 !important; overflow: visible !important; }
-                    .log-print-area { padding: 0 !important; width: 100% !important; max-width: none !important; }
-                }
-            `}</style>
+            <style>{dailyLogDateInputStyles}</style>
         </div>
     );
 };
+
+/* Chromium date input is visually large by default, so tighten its internal segments. */
+const dailyLogDateInputStyles = `
+    .dailylog-date-field:focus-visible {
+        outline: 2px solid #60a5fa;
+        outline-offset: 2px;
+    }
+
+    .dailylog-date-field .dailylog-native-date-input {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+    }
+`;
 
 export default DailyLogView;

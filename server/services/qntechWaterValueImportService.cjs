@@ -140,11 +140,66 @@ function normalizeMeasurementValue(value) {
   return normalized;
 }
 
-function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappings = []) {
+function normalizeProjectDate(projectRegDt, fallbackDate) {
+  const fallback = String(fallbackDate || '').trim().slice(0, 10);
+  const raw = String(projectRegDt || '').trim();
+  if (!raw) return fallback;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return fallback || raw.slice(0, 10);
+  }
+
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+}
+
+function toTrimmedString(value) {
+  const normalized = String(value || '').trim();
+  return normalized || '';
+}
+
+function buildQntechMeasurementGroup(projectDate, project, measurementOrder) {
+  const projectId = toTrimmedString(project?.id);
+  if (projectId) return `qntech:${projectId}`;
+  return `qntech:${projectDate}:${measurementOrder}`;
+}
+
+function buildSourceLabel(project, measurementOrder, totalForDate) {
+  const analysisProcess = toTrimmedString(project?.analysisProcess);
+  const note = toTrimmedString(project?.note);
+
+  if (analysisProcess) return analysisProcess;
+  if (note) return note;
+  if (totalForDate > 1) return `${measurementOrder}차`;
+  return '';
+}
+
+function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappings = [], options = {}) {
+  const { fallbackDate = '' } = options;
   const rowMap = new Map();
   const unmatchedSamples = [];
+  const projectsWithDate = (Array.isArray(projects) ? projects : []).map((project) => ({
+    project,
+    projectDate: normalizeProjectDate(project?.regDt, fallbackDate)
+  }));
+  const totalCountByDate = new Map();
 
-  projects.forEach((project) => {
+  projectsWithDate.forEach(({ projectDate }) => {
+    totalCountByDate.set(projectDate, (totalCountByDate.get(projectDate) || 0) + 1);
+  });
+
+  const orderByDate = new Map();
+
+  projectsWithDate.forEach(({ project, projectDate }) => {
+    const measurementOrder = (orderByDate.get(projectDate) || 0) + 1;
+    orderByDate.set(projectDate, measurementOrder);
+
+    const measurementGroup = buildQntechMeasurementGroup(projectDate, project, measurementOrder);
+    const sourceLabel = buildSourceLabel(project, measurementOrder, totalCountByDate.get(projectDate) || 0);
     const resolver = buildSampleLocationResolver(project.measurements || [], activeLocations, configuredSampleMappings);
 
     (project.measurements || []).forEach((measurement) => {
@@ -157,9 +212,14 @@ function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappi
         return;
       }
 
-      const rowKey = `${project.regDt}|${targetLocation}`;
+      const rowKey = `${projectDate}|${measurementGroup}|${targetLocation}`;
       const row = rowMap.get(rowKey) || {
-        date: String(project.regDt || '').slice(0, 10),
+        date: projectDate,
+        measurement_group: measurementGroup,
+        measurement_order: measurementOrder,
+        source_type: 'qntech',
+        source_label: sourceLabel || null,
+        qntech_project_id: toTrimmedString(project?.id) || null,
         location: targetLocation
       };
 

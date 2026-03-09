@@ -43,11 +43,20 @@ app.use(require('./routes/medicineRoutes.cjs')(db));
 app.use(require('./routes/waterQualityRoutes.cjs')(db, BASE_DIR));
 app.use(require('./routes/kitRoutes.cjs')(db));
 app.use(require('./routes/facilityRoutes.cjs')(db));
-app.use(require('./routes/settingsRoutes.cjs')(db, BASE_DIR));
+app.use(require('./routes/settingsRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use(require('./routes/uploadRoutes.cjs')(BASE_DIR));
 app.use(require('./routes/locationRoutes.cjs')(BASE_DIR));
-app.use(require('./routes/excelRoutes.cjs')(db, BASE_DIR));
+app.use(require('./routes/excelRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use('/api/auth', require('./routes/authRoutes.cjs')(db));
+
+// --- Background Scheduler Start ---
+const syncScheduler = require('./cron/syncScheduler.cjs');
+const isBigQuerySyncEnabled = process.env.BIGQUERY_SYNC_ENABLED === 'true';
+if (isBigQuerySyncEnabled) {
+  syncScheduler.start();
+} else {
+  console.log('[Scheduler] BIGQUERY_SYNC_ENABLED != true, 백그라운드 동기화는 비활성화됩니다.');
+}
 
 async function findFreePort(startPort, endPort) {
   for (let p = startPort; p <= endPort; p++) {

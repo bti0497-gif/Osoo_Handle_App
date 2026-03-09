@@ -37,11 +37,11 @@ const WaterQualityView = ({ currentUser }) => {
         history, loading,
         updateReading, submitBatch, refresh, pendingChanges,
         isImportingFromQntech, isImportingRangeFromQntech,
-        lastImportSummary, lastRangeImportSummary, rangeImportProgress,
+        rangeImportProgress,
         handleImportFromQntech, handleImportRangeFromQntech
     } = useWaterQualityViewModel(currentUser, { showAlert });
 
-    const [selectedDate, setSelectedDate] = useState(null);
+    const [selectedRowKey, setSelectedRowKey] = useState(null);
     const [isManualEditMode, setIsManualEditMode] = useState(false);
     const [doubleClickedCell, setDoubleClickedCell] = useState(null); // { date, colId }
     const [activeInput, setActiveInput] = useState(null);
@@ -56,7 +56,7 @@ const WaterQualityView = ({ currentUser }) => {
     const closeEditMode = () => {
         setIsManualEditMode(false);
         setDoubleClickedCell(null);
-        setSelectedDate(null);
+        setSelectedRowKey(null);
     };
 
     useEffect(() => {
@@ -81,10 +81,11 @@ const WaterQualityView = ({ currentUser }) => {
         return () => window.removeEventListener('keydown', handleEsc);
     }, [activeInput, isManualEditMode, doubleClickedCell]);
 
-    const scrollKey = todayStr;
+    const scrollKey = history.find((row) => row.date === todayStr)?.rowKey || null;
 
     const activeLocations = locationItems.filter(i => i.checked);
     const po4pLocations = ['유량조정조', '포기조', '방류조'];
+    const selectedRow = history.find((row) => row.rowKey === selectedRowKey) || null;
 
     const getShortName = (name) => {
         if (name === '유량조정조') return '유량';
@@ -132,35 +133,35 @@ const WaterQualityView = ({ currentUser }) => {
 
     const handleRowSelect = (row) => {
         if (row.isFuture) return; // 미래 날짜 선택 차단
-        if (isManualEditMode && selectedDate === row.date) return;
-        const nextSelectedDate = row.date === selectedDate ? null : row.date;
-        setSelectedDate(nextSelectedDate);
+        if (isManualEditMode && selectedRowKey === row.rowKey) return;
+        const nextSelectedRowKey = row.rowKey === selectedRowKey ? null : row.rowKey;
+        setSelectedRowKey(nextSelectedRowKey);
 
-        if (nextSelectedDate) {
-            setRangeStartDate(nextSelectedDate);
-            setRangeEndDate(nextSelectedDate);
+        if (nextSelectedRowKey) {
+            setRangeStartDate(row.date);
+            setRangeEndDate(row.date);
         }
     };
 
     const handleCellDoubleClick = (row, col) => {
         if ((row.date !== todayStr || todaySaved) && !row.isFuture) {
-            setDoubleClickedCell({ date: row.date, colId: col.id });
-            setSelectedDate(row.date);
+            setDoubleClickedCell({ rowKey: row.rowKey, colId: col.id });
+            setSelectedRowKey(row.rowKey);
         }
     };
 
     const extraActions = (
         <>
-            {selectedDate && !isManualEditMode && (
+            {selectedRowKey && !isManualEditMode && (
                 <button
                     onClick={() => setIsManualEditMode(true)}
-                    disabled={history.find(h => h.date === selectedDate)?.isFuture}
+                    disabled={selectedRow?.isFuture}
                     style={{
                         padding: '5px 14px', borderRadius: 6, border: '1px solid #cbd5e1',
-                        fontWeight: 800, fontSize: 11, cursor: history.find(h => h.date === selectedDate)?.isFuture ? 'not-allowed' : 'pointer',
+                        fontWeight: 800, fontSize: 11, cursor: selectedRow?.isFuture ? 'not-allowed' : 'pointer',
                         background: '#fff', color: '#475569',
                         display: 'flex', alignItems: 'center', gap: 4,
-                        opacity: history.find(h => h.date === selectedDate)?.isFuture ? 0.5 : 1
+                        opacity: selectedRow?.isFuture ? 0.5 : 1
                     }}
                 >
                     <span className="material-icons" style={{ fontSize: 14 }}>edit</span>
@@ -265,16 +266,16 @@ const WaterQualityView = ({ currentUser }) => {
         const val = row[colId];
         const errorMsg = row[`${colId}_error`];
 
-        const changed = pendingChanges[row.date]?.[colId] !== undefined;
-        const isSelected = selectedDate === row.date;
+        const changed = pendingChanges[row.rowKey]?.[colId] !== undefined;
+        const isSelected = selectedRowKey === row.rowKey;
         const isToday = row.date === todayStr;
         const isFuture = row.isFuture;
 
         const isManual = isSelected && isManualEditMode;
-        const isCellDoubleClicked = doubleClickedCell?.date === row.date && doubleClickedCell?.colId === colId;
+        const isCellDoubleClicked = doubleClickedCell?.rowKey === row.rowKey && doubleClickedCell?.colId === colId;
         const isReadOnly = (isFuture || row.date !== todayStr || todaySaved) && !isManual && !isCellDoubleClicked;
 
-        const isRawActive = activeInput?.date === row.date && activeInput?.colId === colId;
+        const isRawActive = activeInput?.rowKey === row.rowKey && activeInput?.colId === colId;
 
         const displayVal = normalizeDisplayWaterValue(val);
 
@@ -323,7 +324,7 @@ const WaterQualityView = ({ currentUser }) => {
                         }}
                         onFocus={e => {
                             if (isReadOnly) return;
-                            setActiveInput({ date: row.date, colId: colId });
+                            setActiveInput({ rowKey: row.rowKey, colId: colId });
                             setLocalValue(normalizeDisplayWaterValue(val));
                             if (!isCellDoubleClicked) e.target.select();
                         }}
@@ -334,17 +335,17 @@ const WaterQualityView = ({ currentUser }) => {
                                 const paramId = colId.substring(0, lastUnderscore);
                                 const locName = colId.substring(lastUnderscore + 1);
 
-                                updateReading(row.date, locName, paramId, localValue);
+                                updateReading(row.rowKey, locName, paramId, localValue);
                             }
                             setActiveInput(null);
                             setLocalValue(null);
                             if (isCellDoubleClicked) {
                                 setDoubleClickedCell(null);
-                                await submitBatch({ targetDates: [row.date], silent: true });
+                                await submitBatch({ targetRowKeys: [row.rowKey], silent: true });
                             }
                             if (closeModeAfterBlurRef.current) {
                                 closeModeAfterBlurRef.current = false;
-                                await submitBatch({ targetDates: [row.date], silent: true });
+                                await submitBatch({ targetRowKeys: [row.rowKey], silent: true });
                                 closeEditMode();
                             }
                         }}
@@ -359,7 +360,7 @@ const WaterQualityView = ({ currentUser }) => {
     const renderRowHeader = (row) => {
         const isToday = row.date === todayStr;
         const isFuture = row.isFuture;
-        const isSelected = selectedDate === row.date;
+        const isSelected = selectedRowKey === row.rowKey;
         return (
             <div style={{
                 width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -384,7 +385,7 @@ const WaterQualityView = ({ currentUser }) => {
                 description="노란색 셀을 클릭하여 분석 수치를 입력하세요. (과거 데이터를 수정하려면 해당 행을 클릭하세요)"
                 columns={gridCols}
                 data={history}
-                keyField="date"
+                keyField="rowKey"
                 scrollToKey={scrollKey}
                 width={calculatedWidth}
                 height={400}
@@ -486,51 +487,6 @@ const WaterQualityView = ({ currentUser }) => {
                         </div>
                     )}
                 </div>
-                {lastImportSummary && (
-                <div style={{
-                    padding: '8px 16px',
-                    borderTop: '1px solid #e2e8f0',
-                    background: '#ffffff',
-                    fontSize: 11,
-                    color: '#475569',
-                    display: 'flex',
-                    gap: 12,
-                    flexWrap: 'wrap'
-                }}>
-                    <span style={{ fontWeight: 800, color: '#0f172a' }}>
-                        불러온 현장: {lastImportSummary.siteName || '-'}
-                    </span>
-                    <span>값 {lastImportSummary.importedRowCount}건</span>
-                    <span>사진 {lastImportSummary.savedPhotoCount}건</span>
-                    <span>사진폴더: {lastImportSummary.photoDirectory}</span>
-                    {lastImportSummary.unmatchedSamples?.length > 0 && (
-                        <span style={{ color: '#b45309' }}>
-                            미매핑 샘플: {lastImportSummary.unmatchedSamples.join(', ')}
-                        </span>
-                    )}
-                </div>
-                )}
-                {lastRangeImportSummary && (
-                <div style={{
-                    padding: '8px 16px',
-                    borderTop: '1px solid #e2e8f0',
-                    background: '#ffffff',
-                    fontSize: 11,
-                    color: '#475569',
-                    display: 'flex',
-                    gap: 12,
-                    flexWrap: 'wrap'
-                }}>
-                    <span style={{ fontWeight: 800, color: '#0f172a' }}>
-                        기간 저장: {lastRangeImportSummary.startDate} ~ {lastRangeImportSummary.endDate}
-                    </span>
-                    <span>처리일수 {lastRangeImportSummary.processedDates}일</span>
-                    <span>값 저장 {lastRangeImportSummary.insertedRowCount}건</span>
-                    <span>사진 저장 {lastRangeImportSummary.savedPhotoCount}건</span>
-                    <span>기존값 유지 날짜 {lastRangeImportSummary.existingValueDateCount}일</span>
-                    <span>사진루트: {lastRangeImportSummary.photoRoot}</span>
-                </div>
-                )}
             </div>
 
             {/* 하단 바 */}

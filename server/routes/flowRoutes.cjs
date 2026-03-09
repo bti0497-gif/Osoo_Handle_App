@@ -1,4 +1,5 @@
 const express = require('express');
+const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const router = express.Router();
 
 module.exports = function (db) {
@@ -35,13 +36,42 @@ module.exports = function (db) {
     const { date, items } = req.body; // items: [{type, raw_value, calculated_flow, is_manual, is_reset}]
     try {
       const results = [];
-      const stmt = db.prepare(`INSERT OR REPLACE INTO flow_readings (date, type, raw_value, calculated_flow, is_reset, is_manual, sludge_export) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+      const stmt = db.prepare(`
+        INSERT INTO flow_readings (
+          date, type, raw_value, calculated_flow, is_reset, is_manual, sludge_export,
+          site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(date, type) DO UPDATE SET
+          raw_value = excluded.raw_value,
+          calculated_flow = excluded.calculated_flow,
+          is_reset = excluded.is_reset,
+          is_manual = excluded.is_manual,
+          sludge_export = excluded.sludge_export,
+          site_name = excluded.site_name,
+          author = excluded.author,
+          last_modified = excluded.last_modified,
+          is_synced = excluded.is_synced
+      `);
 
       const insertMany = db.transaction((rows) => {
+        const metadata = getCurrentRecordMetadata(db);
         for (const item of rows) {
           const { type, raw_value, calculated_flow, is_reset, is_manual } = item;
           // 프론트엔드에서 이미 계산된 flow와 raw를 넘겨주므로 그대로 저장 (수동이든 자동이든)
-          stmt.run(date, type, raw_value, calculated_flow, is_reset ? 1 : 0, is_manual ? 1 : 0, null);
+          stmt.run(
+            date,
+            type,
+            raw_value,
+            calculated_flow,
+            is_reset ? 1 : 0,
+            is_manual ? 1 : 0,
+            null,
+            metadata.siteName,
+            metadata.author,
+            metadata.createdAt,
+            metadata.lastModified,
+            metadata.isSynced
+          );
           results.push({ type, calculated_flow });
         }
       });
@@ -58,6 +88,7 @@ module.exports = function (db) {
   router.post('/api/flows', (req, res) => {
     const { date, type, raw_value, is_reset, is_manual, manual_flow, sludge_export } = req.body;
     try {
+      const metadata = getCurrentRecordMetadata(db);
       const prevReading = db.prepare('SELECT raw_value, calculated_flow FROM flow_readings WHERE type = ? AND date < ? ORDER BY date DESC LIMIT 1').get(type, date);
 
       // 보정 로직 동일 적용
@@ -73,7 +104,35 @@ module.exports = function (db) {
       if (is_manual) { calculated_flow = manual_flow; }
       else if (!is_reset && effectivePrevRaw !== undefined) { calculated_flow = raw_value - effectivePrevRaw; }
 
-      const info = db.prepare(`INSERT OR REPLACE INTO flow_readings (date, type, raw_value, calculated_flow, is_reset, is_manual, sludge_export) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(date, type, raw_value, calculated_flow, is_reset ? 1 : 0, is_manual ? 1 : 0, sludge_export);
+      const info = db.prepare(`
+        INSERT INTO flow_readings (
+          date, type, raw_value, calculated_flow, is_reset, is_manual, sludge_export,
+          site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(date, type) DO UPDATE SET
+          raw_value = excluded.raw_value,
+          calculated_flow = excluded.calculated_flow,
+          is_reset = excluded.is_reset,
+          is_manual = excluded.is_manual,
+          sludge_export = excluded.sludge_export,
+          site_name = excluded.site_name,
+          author = excluded.author,
+          last_modified = excluded.last_modified,
+          is_synced = excluded.is_synced
+      `).run(
+        date,
+        type,
+        raw_value,
+        calculated_flow,
+        is_reset ? 1 : 0,
+        is_manual ? 1 : 0,
+        sludge_export,
+        metadata.siteName,
+        metadata.author,
+        metadata.createdAt,
+        metadata.lastModified,
+        metadata.isSynced
+      );
       res.json({ success: true, id: info.lastInsertRowid });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });

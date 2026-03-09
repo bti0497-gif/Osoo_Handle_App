@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { MedicineModel } from './MedicineModel';
 import { SettingsModel } from '../settings/SettingsModel';
-import { DriveSyncService } from '../../services/DriveSyncService';
 
 export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
     const [history, setHistory] = useState([]);
@@ -35,8 +34,6 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
         try {
             const today = new Date();
             const todayStr = today.toISOString().split('T')[0];
-
-            await DriveSyncService.syncOperationalDataFromCloud(currentUser?.name, todayStr);
 
             // 설정에서 활성화된 약품 항목 가져오기
             const settingsData = await SettingsModel.getSettings();
@@ -212,9 +209,6 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
             }
 
             if (!silent) showAlert?.("데이터가 성공적으로 저장되었습니다.");
-
-            const todayStr = new Date().toISOString().split('T')[0];
-            await DriveSyncService.syncDetailedDataToCloud(currentUser?.name, todayStr, { medicines: items });
 
             await loadLogs();
         } catch (err) {

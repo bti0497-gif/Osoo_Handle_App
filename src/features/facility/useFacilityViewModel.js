@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { FacilityModel } from './FacilityModel';
-import { DriveSyncService } from '../../services/DriveSyncService';
 
 export const useFacilityViewModel = (currentUser, { showAlert } = {}) => {
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -21,9 +20,6 @@ export const useFacilityViewModel = (currentUser, { showAlert } = {}) => {
     const loadLogs = async () => {
         setLoading(true);
         try {
-            // 1. 클라우드 데이터 동기화 확인
-            await DriveSyncService.syncOperationalDataFromCloud(currentUser?.name, date);
-
             const data = await FacilityModel.fetchLogs(date);
             setLogs(data);
         } catch (err) {
@@ -40,10 +36,6 @@ export const useFacilityViewModel = (currentUser, { showAlert } = {}) => {
     const submitForm = async () => {
         try {
             await FacilityModel.saveLog({ ...form, date });
-
-            // 3. 전체 데이터 클라우드 동기화
-            const allFacilities = await FacilityModel.fetchLogs(date);
-            await DriveSyncService.syncDetailedDataToCloud(currentUser?.name, date, { facilities: allFacilities });
 
             showAlert?.("상태: 시설 일지 기록 완료");
             await loadLogs();

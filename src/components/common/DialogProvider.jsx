@@ -50,20 +50,21 @@ export const DialogProvider = ({ children }) => {
                 }}>
                     <div style={{
                         backgroundColor: 'white',
-                        padding: '1.5rem',
+                        padding: '1.25rem',
                         borderRadius: '16px',
-                        width: '360px',
+                        width: '420px',
+                        maxWidth: 'calc(100vw - 32px)',
                         boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
                         display: 'flex', flexDirection: 'column', gap: '1rem',
                         animation: 'dialogFadeIn 0.2s ease-out'
                     }}>
-                        <h3 style={{ fontSize: '1.125rem', fontWeight: 800, color: '#1e293b', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <h3 style={{ fontSize: '1rem', fontWeight: 800, color: '#1e293b', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span className="material-icons" style={{ color: dialog.type === 'confirm' ? '#3b82f6' : '#f59e0b', fontSize: '20px' }}>
                                 {dialog.type === 'confirm' ? 'help_outline' : 'info'}
                             </span>
                             {dialog.title}
                         </h3>
-                        <p style={{ fontSize: '0.875rem', color: '#475569', margin: 0, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                        <p style={{ fontSize: '0.8125rem', color: '#475569', margin: 0, lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'keep-all' }}>
                             {dialog.message}
                         </p>
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.5rem' }}>

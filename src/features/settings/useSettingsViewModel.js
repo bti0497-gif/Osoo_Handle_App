@@ -134,6 +134,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                 if (data.settings.excel_template_path) {
                     setExcelFileName(data.settings.excel_template_path.split(/[/\\]/).pop());
                 }
+                setTemplateFileNames('');
                 if (data.settings.flow_sheet) setFlowConfig({ sheet: data.settings.flow_sheet, startRow: data.settings.flow_start_row || 1, endRow: data.settings.flow_end_row || 31, dateCol: data.settings.flow_date_col || 'A' });
                 if (data.settings.med_sheet) setMedicineConfig({ sheet: data.settings.med_sheet, startRow: data.settings.med_start_row || 1, endRow: data.settings.med_end_row || 31, dateCol: data.settings.med_date_col || 'A' });
                 if (data.settings.kit_sheet) setKitConfig({ sheet: data.settings.kit_sheet, startRow: data.settings.kit_start_row || 1, endRow: data.settings.kit_end_row || 31, dateCol: data.settings.kit_date_col || 'A' });
@@ -406,12 +407,6 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
             ];
             const response = await SettingsModel.saveSettings({ settings: siteInfo, configItems });
 
-            if (templateFiles.length > 0) {
-                const formData = new FormData();
-                templateFiles.forEach(file => formData.append('report_templates', file));
-                await SettingsModel.uploadFiles(formData);
-            }
-
             if (response.success) {
                 showAlert?.('설정이 성공적으로 저장되었습니다. (서버 동기화 포함)');
                 setTemplateFiles([]);
@@ -557,9 +552,29 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         }
     };
 
-    const handleTemplateFileChange = (files) => {
+    const handleTemplateFileChange = async (files) => {
         setTemplateFiles(files);
-        setTemplateFileNames(files.length > 0 ? files.map(f => f.name).join(', ') : '');
+        setTemplateFileNames('');
+
+        if (files.length === 0) {
+            return;
+        }
+
+        setIsUploading(true);
+        try {
+            const formData = new FormData();
+            files.forEach((file) => formData.append('report_templates', file));
+            const result = await SettingsModel.uploadFiles(formData);
+            setTemplateFiles([]);
+            setTemplateFileNames('');
+            showAlert?.('선택한 양식 파일을 앱 로컬 폴더에 복사했습니다.');
+        } catch (err) {
+            console.error('Template upload error:', err);
+            showAlert?.('양식 파일 복사 중 오류가 발생했습니다: ' + err.message);
+            loadSettings();
+        } finally {
+            setIsUploading(false);
+        }
     };
 
     return {
