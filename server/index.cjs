@@ -6,6 +6,7 @@ const cors = require('cors');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
 
 const { db, appDataPath } = require('./database.cjs');
+const { warmUpExcelPdfConverter } = require('./services/excelPdfService.cjs');
 
 const BASE_DIR = path.join(__dirname, '..');
 
@@ -83,6 +84,10 @@ findFreePort(API_PORT_MIN, API_PORT_MAX).then((actualPort) => {
     if (actualPort !== API_PORT_MIN) {
       console.warn(`[주의] 기본 포트(${API_PORT_MIN})가 이미 사용 중이어서 포트 ${actualPort}로 시작했습니다.`);
     }
+
+    warmUpExcelPdfConverter(appDataPath).catch((error) => {
+      console.warn(`[Excel PDF Warmup Error] ${error.message}`);
+    });
   });
   server.on('error', (err) => { console.error('[Server Error]', err.message); });
 });

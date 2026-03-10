@@ -1,6 +1,12 @@
+const ExcelJS = require('exceljs');
 const { execFile } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+
+let pdfConversionQueue = Promise.resolve();
+let warmupPromise = null;
+let hasWarmedUp = false;
 
 function ensureDirectory(dirPath) {
   if (!fs.existsSync(dirPath)) {
@@ -24,7 +30,7 @@ function toPowerShellLiteral(value) {
   return `'${String(value || '').replace(/'/g, "''")}'`;
 }
 
-function convertExcelToPdf(sourcePath, outputPath) {
+function runExcelToPdfConversion(sourcePath, outputPath) {
   const sourceAbsolutePath = path.resolve(sourcePath);
   const outputAbsolutePath = path.resolve(outputPath);
 
@@ -82,6 +88,47 @@ function convertExcelToPdf(sourcePath, outputPath) {
   });
 }
 
+function convertExcelToPdf(sourcePath, outputPath) {
+  const conversionTask = pdfConversionQueue
+    .catch(() => {})
+    .then(() => runExcelToPdfConversion(sourcePath, outputPath));
+
+  pdfConversionQueue = conversionTask.catch(() => {});
+  return conversionTask;
+}
+
+async function warmUpExcelPdfConverter(appDataPath) {
+  if (hasWarmedUp) {
+    return;
+  }
+
+  if (warmupPromise) {
+    return warmupPromise;
+  }
+
+  warmupPromise = (async () => {
+    const warmupDir = ensureDirectory(
+      appDataPath
+        ? path.join(appDataPath, 'temp', 'report-previews', 'warmup')
+        : path.join(os.tmpdir(), 'osoo-handle-pdf-warmup')
+    );
+    const workbookPath = path.join(warmupDir, 'excel-pdf-warmup.xlsx');
+    const pdfPath = path.join(warmupDir, 'excel-pdf-warmup.pdf');
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('warmup');
+    worksheet.getCell('A1').value = 'warmup';
+    await workbook.xlsx.writeFile(workbookPath);
+
+    await convertExcelToPdf(workbookPath, pdfPath);
+    hasWarmedUp = true;
+  })().finally(() => {
+    warmupPromise = null;
+  });
+
+  return warmupPromise;
+}
+
 function getPreviewPdfPath(appDataPath, templateFileName, date) {
   const previewDir = ensureDirectory(path.join(appDataPath, 'temp', 'report-previews'));
   const safeTemplateName = sanitizeFileNameSegment(path.parse(templateFileName || 'preview').name) || 'preview';
@@ -92,4 +139,5 @@ function getPreviewPdfPath(appDataPath, templateFileName, date) {
 module.exports = {
   convertExcelToPdf,
   getPreviewPdfPath,
+  warmUpExcelPdfConverter,
 };

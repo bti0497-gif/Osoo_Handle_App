@@ -17,17 +17,30 @@ import Dashboard from './views/Dashboard';
 import { KitManagementView } from './features/kit';
 
 const PlaceholderView = ({ title }) => (
-    <div className="panel-container">
-        <div className="dynamic-panel shadow-2xl border-slate-200" style={{ width: '820px', flexShrink: 0 }}>
-            <div className="panel-header">
-                <h2 className="title">{title}</h2>
-                <p style={{ fontSize: '0.8125rem', color: '#64748b', marginTop: '0.25rem' }}>준비 중인 메뉴입니다.</p>
-            </div>
-            <div className="panel-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1' }}>
-                <div style={{ textAlign: 'center' }}>
-                    <span className="material-icons" style={{ fontSize: '48px', marginBottom: '1rem' }}>construction</span>
-                    <p style={{ fontWeight: 700 }}>이 기능은 현재 개발 중입니다.</p>
-                </div>
+    <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        width: '70%',
+        backgroundColor: '#FFFFFF',
+        borderRight: '1px solid #e2e8f0'
+    }}>
+        <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '12px 16px',
+            backgroundColor: '#f8fafc',
+            borderBottom: '1px solid #f1f5f9',
+            flexShrink: 0
+        }}>
+            <h2 style={{ fontSize: '0.95rem', fontWeight: 900, color: '#0f172a', margin: 0 }}>{title}</h2>
+            <span style={{ fontSize: '0.8125rem', color: '#64748b' }}>준비 중인 메뉴입니다.</span>
+        </div>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1' }}>
+            <div style={{ textAlign: 'center' }}>
+                <span className="material-icons" style={{ fontSize: '48px', marginBottom: '1rem' }}>construction</span>
+                <p style={{ fontWeight: 700 }}>이 기능은 현재 개발 중입니다.</p>
             </div>
         </div>
     </div>

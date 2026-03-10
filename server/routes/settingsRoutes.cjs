@@ -11,6 +11,7 @@ const router = express.Router();
 let importProgress = { current: 0, total: 0, status: 'idle', result: null };
 
 module.exports = function (db, baseDir, appDataPath) {
+  const defaultQntechPhotoRoot = path.join(appDataPath, '사진관리', '수질분석');
   const reportsDir = getCustomReportTemplatesDir(appDataPath);
   const excelOriginalsDir = path.join(appDataPath, 'templates', 'excel-originals');
   if (!fs.existsSync(excelOriginalsDir)) fs.mkdirSync(excelOriginalsDir, { recursive: true });
@@ -90,7 +91,7 @@ module.exports = function (db, baseDir, appDataPath) {
         UPDATE app_settings
         SET qntech_photo_root = ?, qntech_sample_mappings = ?
         WHERE id = 1
-      `).run(photoRoot || '사진관리/수질분석', serializedMappings);
+      `).run(photoRoot || defaultQntechPhotoRoot, serializedMappings);
 
       const settings = db.prepare('SELECT qntech_photo_root, qntech_sample_mappings FROM app_settings WHERE id = 1').get();
       res.json({ success: true, settings, message: 'QnTECH 불러오기 설정이 저장되었습니다.' });

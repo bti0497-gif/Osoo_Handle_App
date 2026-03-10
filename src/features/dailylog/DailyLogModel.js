@@ -2,7 +2,7 @@ import { apiClient } from '../../core/api';
 
 const previewPdfBlobUrlCache = new Map();
 const previewPdfRequestCache = new Map();
-const PREVIEW_PDF_URL_VERSION = '2026-03-09-photo-orientation-v2';
+const PREVIEW_PDF_URL_VERSION = '2026-03-10-photo-frame-v8';
 
 function buildAbsoluteApiUrl(endpoint, params = {}) {
     const searchParams = new URLSearchParams();
@@ -63,6 +63,10 @@ export const DailyLogModel = {
 
     async fetchPreviewManifest(startDate, endDate, templateName) {
         return apiClient.get('/api/logs/preview-manifest', { startDate, endDate, templateName });
+    },
+
+    async fetchPreviewPageData({ startDate, endDate, pageKey, templateName }) {
+        return apiClient.get('/api/logs/preview-page-data', { startDate, endDate, pageKey, templateName });
     },
 
     getPagePreviewPdfUrl({ startDate, endDate, pageKey, templateName, download = false }) {

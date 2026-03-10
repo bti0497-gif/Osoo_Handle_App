@@ -78,6 +78,14 @@ async function ensureDrivePhotoFolder(siteName, date) {
 }
 
 function getDefaultPhotoRoot(baseDir) {
+  const appDataRoot = process.env.APPDATA
+    ? path.join(process.env.APPDATA, 'Osoo_Handle_App')
+    : '';
+
+  if (appDataRoot) {
+    return path.join(appDataRoot, '사진관리', '수질분석');
+  }
+
   return path.join(baseDir, '사진관리', '수질분석');
 }
 

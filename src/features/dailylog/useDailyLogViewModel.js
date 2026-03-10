@@ -1,7 +1,16 @@
 import { startTransition, useEffect, useMemo, useState } from 'react';
 import { DailyLogModel } from './DailyLogModel';
 
-export const useDailyLogViewModel = (currentUser, initialDate, templateName) => {
+function buildCurrentPdfFileName(templateName, currentPage) {
+    if (!currentPage) {
+        return 'preview.pdf';
+    }
+
+    const safeTemplateName = String(templateName || '수질분석일지').trim() || '수질분석일지';
+    return `${safeTemplateName}-${currentPage.date}-${currentPage.pageNumberForDate}.pdf`;
+}
+
+export const useDailyLogViewModel = (currentUser, initialDate, templateName, showAlert) => {
     const today = initialDate || new Date().toISOString().split('T')[0];
     const [startDate, setStartDate] = useState(today);
     const [endDate, setEndDate] = useState(today);
@@ -11,7 +20,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName) => 
     const [isManifestLoading, setIsManifestLoading] = useState(true);
     const [manifestError, setManifestError] = useState('');
     const [manifestErrorCode, setManifestErrorCode] = useState('');
-    const [resolvedPreviewUrl, setResolvedPreviewUrl] = useState('');
+    const [pageRenderData, setPageRenderData] = useState(null);
     const [isPreviewAssetLoading, setIsPreviewAssetLoading] = useState(false);
 
     useEffect(() => {
@@ -59,16 +68,15 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName) => 
 
     const currentPage = pages[currentPageIndex] || null;
 
-    const pagePreviewUrls = useMemo(() => pages.map((page) => DailyLogModel.getPagePreviewPdfUrl({
+    const firstPagePreviewUrl = useMemo(() => DailyLogModel.getPagePreviewPdfUrl({
         startDate,
         endDate,
-        pageKey: page.pageKey,
         templateName,
-    })), [endDate, pages, startDate, templateName]);
+    }), [endDate, startDate, templateName]);
 
     const previewUrl = useMemo(() => {
-        if (!currentPage) {
-            return '';
+        if (!currentPage || currentPageIndex === 0) {
+            return firstPagePreviewUrl;
         }
 
         return DailyLogModel.getPagePreviewPdfUrl({
@@ -77,22 +85,14 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName) => 
             pageKey: currentPage.pageKey,
             templateName,
         });
-    }, [currentPage, endDate, startDate, templateName]);
-
-    useEffect(() => {
-        if (!pagePreviewUrls.length) {
-            return;
-        }
-
-        DailyLogModel.primePreviewPdfUrls(pagePreviewUrls);
-    }, [pagePreviewUrls]);
+    }, [currentPage, currentPageIndex, endDate, firstPagePreviewUrl, startDate, templateName]);
 
     useEffect(() => {
         let isDisposed = false;
 
-        const resolvePreviewAsset = async () => {
-            if (!previewUrl) {
-                setResolvedPreviewUrl('');
+        const loadPageRenderData = async () => {
+            if (!currentPage) {
+                setPageRenderData(null);
                 setIsPreviewAssetLoading(false);
                 return;
             }
@@ -100,13 +100,19 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName) => 
             setIsPreviewAssetLoading(true);
 
             try {
-                const nextResolvedUrl = await DailyLogModel.getCachedPreviewPdfUrl(previewUrl);
+                const result = await DailyLogModel.fetchPreviewPageData({
+                    startDate,
+                    endDate,
+                    pageKey: currentPage.pageKey,
+                    templateName,
+                });
+
                 if (!isDisposed) {
-                    setResolvedPreviewUrl(nextResolvedUrl);
+                    setPageRenderData(result.page || null);
                 }
             } catch (_) {
                 if (!isDisposed) {
-                    setResolvedPreviewUrl('');
+                    setPageRenderData(null);
                 }
             } finally {
                 if (!isDisposed) {
@@ -115,12 +121,20 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName) => 
             }
         };
 
-        resolvePreviewAsset();
+        loadPageRenderData();
 
         return () => {
             isDisposed = true;
         };
-    }, [previewUrl]);
+    }, [currentPage, endDate, startDate, templateName]);
+
+    useEffect(() => {
+        if (!currentPage || !previewUrl) {
+            return;
+        }
+
+        DailyLogModel.primePreviewPdfUrls([previewUrl]);
+    }, [currentPage, previewUrl]);
 
     const currentPageDownloadUrl = useMemo(() => {
         if (!currentPage) {
@@ -197,30 +211,94 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName) => 
         });
     };
 
-    const handlePrintCurrent = () => {
-        window.open(previewUrl, '_blank', 'noopener,noreferrer');
+    const handlePrintCurrent = async () => {
+        if (!previewUrl) {
+            return;
+        }
+
+        try {
+            const pdfUrl = await DailyLogModel.getCachedPreviewPdfUrl(previewUrl);
+            const iframe = document.createElement('iframe');
+            iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:0;height:0;border:none;';
+            document.body.appendChild(iframe);
+            iframe.src = pdfUrl;
+            iframe.onload = () => {
+                try {
+                    iframe.contentWindow.focus();
+                    iframe.contentWindow.print();
+                } catch (_) {
+                    window.open(pdfUrl, '_blank');
+                }
+                setTimeout(() => document.body.removeChild(iframe), 60000);
+            };
+        } catch (_) {
+            window.open(previewUrl, '_blank');
+        }
     };
 
-    const handleDownloadCurrent = () => {
+    const handleDownloadCurrent = async () => {
+        if (!previewUrl) {
+            return;
+        }
+
         const link = document.createElement('a');
-        link.href = currentPageDownloadUrl;
-        link.download = '';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        try {
+            const cachedUrl = await DailyLogModel.getCachedPreviewPdfUrl(previewUrl);
+            link.href = cachedUrl;
+            link.download = buildCurrentPdfFileName(templateName, currentPage);
+            document.body.appendChild(link);
+            link.click();
+            await showAlert?.('PDF 저장이 완료되었습니다. 다운로드 폴더를 확인해 주세요.', 'PDF 저장 완료');
+        } catch (_) {
+            link.href = currentPageDownloadUrl;
+            link.download = '';
+            document.body.appendChild(link);
+            link.click();
+            await showAlert?.('PDF 저장이 완료되었습니다. 다운로드 폴더를 확인해 주세요.', 'PDF 저장 완료');
+        } finally {
+            document.body.removeChild(link);
+        }
     };
 
-    const handlePrintRange = () => {
-        window.open(rangePreviewUrl, '_blank', 'noopener,noreferrer');
+    const handlePrintRange = async () => {
+        try {
+            const pdfUrl = await DailyLogModel.getCachedPreviewPdfUrl(rangePreviewUrl);
+            const iframe = document.createElement('iframe');
+            iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:0;height:0;border:none;';
+            document.body.appendChild(iframe);
+            iframe.src = pdfUrl;
+            iframe.onload = () => {
+                try {
+                    iframe.contentWindow.focus();
+                    iframe.contentWindow.print();
+                } catch (_) {
+                    window.open(pdfUrl, '_blank');
+                }
+                setTimeout(() => document.body.removeChild(iframe), 60000);
+            };
+        } catch (_) {
+            window.open(rangePreviewUrl, '_blank');
+        }
     };
 
-    const handleDownloadRange = () => {
+    const handleDownloadRange = async () => {
         const link = document.createElement('a');
-        link.href = rangeDownloadUrl;
-        link.download = '';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        try {
+            const cachedUrl = await DailyLogModel.getCachedPreviewPdfUrl(rangePreviewUrl);
+            link.href = cachedUrl;
+            link.download = '';
+            document.body.appendChild(link);
+            link.click();
+            await showAlert?.('PDF 저장이 완료되었습니다. 다운로드 폴더를 확인해 주세요.', 'PDF 저장 완료');
+        } catch (_) {
+            link.href = rangeDownloadUrl;
+            link.download = '';
+            document.body.appendChild(link);
+            link.click();
+            await showAlert?.('PDF 저장이 완료되었습니다. 다운로드 폴더를 확인해 주세요.', 'PDF 저장 완료');
+        } finally {
+            document.body.removeChild(link);
+        }
     };
 
     const pageIndicator = currentPage
@@ -240,10 +318,11 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName) => 
         setEndDate: handleEndDateChange,
         pages,
         currentPage,
+        pageRenderData,
         currentPageIndex,
         pageIndicator,
         selectedDateLabel,
-        previewUrl: resolvedPreviewUrl || previewUrl,
+        previewUrl,
         isManifestLoading,
         isPreviewAssetLoading,
         manifestError,

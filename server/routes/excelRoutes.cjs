@@ -5,9 +5,11 @@ const fs = require('fs');
 const {
   buildBatchPreviewPdf,
   buildPreviewManifest,
+  buildPageRenderData,
   buildPagePreviewPdf,
   findPageInManifest,
   normalizeDateRange,
+  parsePageKey,
 } = require('../services/dailyLogPreviewService.cjs');
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
 const router = express.Router();
@@ -33,6 +35,22 @@ module.exports = function(db, baseDir, appDataPath) {
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate);
+
+      const firstPage = manifest.pages[0];
+      if (firstPage) {
+        setImmediate(() => {
+          buildPagePreviewPdf({
+            db,
+            baseDir,
+            appDataPath,
+            templateInfo,
+            page: firstPage,
+          }).catch((error) => {
+            console.warn('[Excel Preview Warmup Error]', error.message);
+          });
+        });
+      }
+
       return res.json({ success: true, ...manifest });
     } catch (err) {
       return res.status(400).json({ success: false, error: err.message });
@@ -76,6 +94,83 @@ module.exports = function(db, baseDir, appDataPath) {
     } catch (err) {
       console.error('[Excel Preview PDF Error]', err.message);
       return res.status(500).json({ error: `Excel PDF 미리보기 생성에 실패했습니다: ${err.message}` });
+    }
+  });
+
+  router.get('/api/logs/preview-page-data', async (req, res) => {
+    const { date, startDate, endDate, pageKey, templateName } = req.query;
+    const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, templateName, { excelOnly: true });
+
+    if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
+      return res.status(404).json(buildMissingTemplateResponse(templateName));
+    }
+
+    try {
+      const range = normalizeDateRange(startDate || date, endDate || date || startDate);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate);
+      const targetPage = findPageInManifest(manifest, pageKey);
+
+      if (!targetPage) {
+        return res.status(404).json({ error: 'Preview page not found' });
+      }
+
+      const renderData = buildPageRenderData({ db, baseDir, page: targetPage });
+      const photoUrls = Object.fromEntries(
+        Object.entries(renderData.selectedPhotos || {})
+          .filter(([, photoPath]) => Boolean(photoPath))
+          .map(([analyteKey]) => [
+            analyteKey,
+            `${req.protocol}://${req.get('host')}/api/logs/preview-photo?startDate=${encodeURIComponent(range.startDate)}&endDate=${encodeURIComponent(range.endDate)}&pageKey=${encodeURIComponent(targetPage.pageKey)}&templateName=${encodeURIComponent(templateInfo.fileName)}&analyte=${encodeURIComponent(analyteKey)}`,
+          ])
+      );
+
+      return res.json({
+        success: true,
+        page: {
+          ...renderData,
+          photoUrls,
+          selectedPhotos: undefined,
+        },
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  router.get('/api/logs/preview-photo', async (req, res) => {
+    const { date, startDate, endDate, pageKey, templateName, analyte } = req.query;
+    const analyteKey = String(analyte || '').trim();
+    const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, templateName, { excelOnly: true });
+
+    if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
+      return res.status(404).json(buildMissingTemplateResponse(templateName));
+    }
+
+    if (!analyteKey) {
+      return res.status(400).json({ error: 'analyte is required' });
+    }
+
+    try {
+      const range = normalizeDateRange(startDate || date, endDate || date || startDate);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate);
+      const parsedPageKey = pageKey ? parsePageKey(pageKey) : null;
+      const targetPage = findPageInManifest(manifest, pageKey || (parsedPageKey ? pageKey : ''));
+
+      if (!targetPage) {
+        return res.status(404).json({ error: 'Preview page not found' });
+      }
+
+      const renderData = buildPageRenderData({ db, baseDir, page: targetPage });
+      const photoPath = renderData.selectedPhotos?.[analyteKey];
+
+      if (!photoPath || !fs.existsSync(photoPath)) {
+        return res.status(404).json({ error: 'Preview photo not found' });
+      }
+
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      return res.sendFile(photoPath);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
     }
   });
 

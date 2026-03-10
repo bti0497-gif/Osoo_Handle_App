@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 
 const buildPdfPreviewUrl = (url) => {
     if (!url) {
@@ -8,15 +8,7 @@ const buildPdfPreviewUrl = (url) => {
     return `${url}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`;
 };
 
-const DailyLogPdfPreview = ({ url, title, onRenderStart, onRenderComplete, onRenderError }) => {
-    useEffect(() => {
-        if (!url) {
-            return;
-        }
-
-        onRenderStart?.();
-    }, [url]);
-
+const DailyLogPdfPreview = ({ url, title, onRenderError }) => {
     if (!url) {
         return null;
     }
@@ -37,9 +29,9 @@ const DailyLogPdfPreview = ({ url, title, onRenderStart, onRenderComplete, onRen
             }}
         >
             <iframe
+                key={url}
                 title={title}
                 src={buildPdfPreviewUrl(url)}
-                onLoad={() => onRenderComplete?.({ ready: true })}
                 onError={() => onRenderError?.(new Error('PDF 미리보기를 렌더링하지 못했습니다.'))}
                 style={{
                     width: 'min(100%, 960px)',

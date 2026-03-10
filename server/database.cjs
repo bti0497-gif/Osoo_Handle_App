@@ -10,6 +10,56 @@ if (!fs.existsSync(appDataPath)) {
   fs.mkdirSync(appDataPath, { recursive: true });
 }
 
+const LEGACY_QNTECH_PHOTO_ROOT = '사진관리/수질분석';
+const DEFAULT_QNTECH_PHOTO_ROOT = path.join(appDataPath, '사진관리', '수질분석');
+
+function ensureDirectory(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+}
+
+function copyDirectoryRecursive(sourceDir, targetDir) {
+  if (!fs.existsSync(sourceDir)) {
+    return;
+  }
+
+  ensureDirectory(targetDir);
+
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+
+    if (entry.isDirectory()) {
+      copyDirectoryRecursive(sourcePath, targetPath);
+      continue;
+    }
+
+    if (!fs.existsSync(targetPath)) {
+      fs.copyFileSync(sourcePath, targetPath);
+    }
+  }
+}
+
+function migrateLegacyQntechPhotoRoot(dbInstance) {
+  const current = dbInstance.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
+  const normalized = String(current?.qntech_photo_root || '').trim();
+  const normalizedSlash = normalized.replace(/\\/g, '/');
+
+  if (normalized && normalizedSlash !== LEGACY_QNTECH_PHOTO_ROOT) {
+    return;
+  }
+
+  const legacyPhotoRoot = path.join(__dirname, '..', '사진관리', '수질분석');
+  if (fs.existsSync(legacyPhotoRoot)) {
+    copyDirectoryRecursive(legacyPhotoRoot, DEFAULT_QNTECH_PHOTO_ROOT);
+  } else {
+    ensureDirectory(DEFAULT_QNTECH_PHOTO_ROOT);
+  }
+
+  dbInstance.prepare('UPDATE app_settings SET qntech_photo_root = ? WHERE id = 1').run(DEFAULT_QNTECH_PHOTO_ROOT);
+}
+
 const dbPath = path.join(appDataPath, 'osoo.db');
 const db = new sqlite3(dbPath);
 console.log(`Using database at: ${dbPath}`);
@@ -318,10 +368,12 @@ if (!settingsExists) {
 
 db.prepare(`
   UPDATE app_settings
-  SET qntech_photo_root = COALESCE(NULLIF(qntech_photo_root, ''), '사진관리/수질분석'),
+  SET qntech_photo_root = COALESCE(NULLIF(qntech_photo_root, ''), ?),
       qntech_sample_mappings = COALESCE(NULLIF(qntech_sample_mappings, ''), '[]')
   WHERE id = 1
-`).run();
+`).run(DEFAULT_QNTECH_PHOTO_ROOT);
+
+migrateLegacyQntechPhotoRoot(db);
 
 db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('road_web', '도로공사 웹페이지 설정', ?, '', '')").run(DEFAULT_ROAD_WEB_URL);
 db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('water_analysis_app', '수질분석 앱 설정', ?, '', '')").run(DEFAULT_WATER_ANALYSIS_URL);

@@ -9,7 +9,7 @@ const { convertExcelToPdf } = require('./excelPdfService.cjs');
 const { getActiveLocations } = require('./qntechWaterValueImportService.cjs');
 const { resolvePhotoRoot } = require('./qntechWaterPhotoImportService.cjs');
 
-const PREVIEW_RENDER_VERSION = '2026-03-09-photo-orientation-v5';
+const PREVIEW_RENDER_VERSION = '2026-03-10-photo-frame-v9';
 
 const ANALYTE_DEFINITIONS = [
   {
@@ -42,14 +42,11 @@ const ANALYTE_DEFINITIONS = [
   }
 ];
 
-const IMAGE_LAYOUT_BY_ANALYTE = {
-  ammonia: { aspectRatio: 1.5, paddingX: 14, paddingY: 8, widthFillRatio: 0.96, heightFillRatio: 0.96 },
-  nitrate: { aspectRatio: 1.5, paddingX: 14, paddingY: 8, widthFillRatio: 0.96, heightFillRatio: 0.96 },
-  phosphorus: { aspectRatio: 1.5, paddingX: 14, paddingY: 8, widthFillRatio: 0.96, heightFillRatio: 0.96 },
-  alkalinity: { aspectRatio: 1.5, paddingX: 14, paddingY: 8, widthFillRatio: 0.96, heightFillRatio: 0.96 }
-};
+const IMAGE_EDGE_INSET_PIXELS = 0.5;
+const IMAGE_VERTICAL_OFFSET_PIXELS = 2;
 
 const pendingPreviewJobs = new Map();
+const DEFAULT_RENDER_LOCATIONS = ['유량조정조', '혐기조', '무산소조', '포기조', '침전조'];
 
 function ensureDirectory(dirPath) {
   if (!fs.existsSync(dirPath)) {
@@ -241,43 +238,38 @@ function pixelsToRowPosition(worksheet, startRow, offsetPixels) {
   return position;
 }
 
-function getImagePlacement(worksheet, address, analyteKey) {
+function getImagePlacement(worksheet, address) {
+  const fallbackAddress = parseCellAddress(address);
   const range = getMergedRangeForCell(worksheet, address);
   if (!range) {
     return {
-      tl: { col: columnToIndex(parseCellAddress(address)?.column || 'A'), row: (parseCellAddress(address)?.rowNumber || 1) - 1 },
-      ext: { width: 200, height: 240 }
+      tl: { col: columnToIndex(fallbackAddress?.column || 'A'), row: (fallbackAddress?.rowNumber || 1) - 1 },
+      br: {
+        col: columnToIndex(fallbackAddress?.column || 'A') + 1,
+        row: fallbackAddress?.rowNumber || 1,
+      },
+      renderSize: { width: 199, height: 239 },
     };
   }
 
-  const layout = IMAGE_LAYOUT_BY_ANALYTE[analyteKey] || { aspectRatio: 1.5, paddingX: 14, paddingY: 8, widthFillRatio: 0.96, heightFillRatio: 0.96 };
   const targetWidth = sumPixels(range.startColumn, range.endColumn, (columnNumber) => getColumnWidthPixels(worksheet, columnNumber));
   const targetHeight = sumPixels(range.startRow, range.endRow, (rowNumber) => getRowHeightPixels(worksheet, rowNumber));
-  const paddingX = Math.max(layout.paddingX, Math.round(targetWidth * 0.025));
-  const paddingY = Math.max(layout.paddingY, Math.round(targetHeight * 0.02));
-  const availableWidth = Math.max(40, targetWidth - (paddingX * 2));
-  const availableHeight = Math.max(40, targetHeight - (paddingY * 2));
-  const preferredWidth = Math.max(1, Math.round(availableWidth * layout.widthFillRatio));
-  const preferredHeight = Math.max(1, Math.round(availableHeight * layout.heightFillRatio));
-  let width = preferredWidth;
-  let height = Math.round(width / layout.aspectRatio);
-
-  if (height > preferredHeight) {
-    height = preferredHeight;
-    width = Math.round(height * layout.aspectRatio);
-  }
-
-  width = Math.max(1, Math.min(availableWidth, width));
-  height = Math.max(1, Math.min(availableHeight, height));
-  const offsetX = Math.max(0, Math.round((targetWidth - width) / 2));
-  const offsetY = Math.max(0, Math.round((targetHeight - height) / 2));
+  const insetPixels = IMAGE_EDGE_INSET_PIXELS;
+  const width = Math.max(1, Math.round(targetWidth - (insetPixels * 2)));
+  const height = Math.max(1, Math.round(targetHeight - (insetPixels * 2)));
+  const offsetX = insetPixels;
+  const offsetY = insetPixels + IMAGE_VERTICAL_OFFSET_PIXELS;
 
   return {
     tl: {
       col: pixelsToColumnPosition(worksheet, range.startColumn, offsetX),
       row: pixelsToRowPosition(worksheet, range.startRow, offsetY),
     },
-    ext: { width, height },
+    br: {
+      col: pixelsToColumnPosition(worksheet, range.startColumn, targetWidth - offsetX),
+      row: pixelsToRowPosition(worksheet, range.startRow, targetHeight - insetPixels),
+    },
+    renderSize: { width, height },
   };
 }
 
@@ -498,6 +490,27 @@ function buildPageContext(db, baseDir, page) {
   };
 }
 
+function buildPageRenderData({ db, baseDir, page }) {
+  const pageContext = buildPageContext(db, baseDir, page);
+
+  return {
+    pageKey: page.pageKey,
+    date: page.date,
+    sourceLabel: page.sourceLabel || '',
+    pageNumberForDate: page.pageNumberForDate,
+    totalPagesForDate: page.totalPagesForDate,
+    locationLabels: (pageContext.activeLocations.length ? pageContext.activeLocations : DEFAULT_RENDER_LOCATIONS).slice(0, 5),
+    rows: pageContext.rows.map((row) => ({
+      location: row.location || '',
+      nh3_n: row.nh3_n ?? '',
+      no3_n: row.no3_n ?? '',
+      po4_p: row.po4_p ?? '',
+      alkalinity: row.alkalinity ?? '',
+    })),
+    selectedPhotos: pageContext.photoSelection.selectedPhotos,
+  };
+}
+
 function setCellValue(worksheet, address, value) {
   worksheet.getCell(address).value = value === undefined || value === null ? '' : value;
 }
@@ -507,13 +520,14 @@ async function addNormalizedImageToNamedCell(workbook, worksheet, namedCell, ima
     return;
   }
 
-  const placement = getImagePlacement(worksheet, namedCell.cell.address, analyteKey);
+  const placement = getImagePlacement(worksheet, namedCell.cell.address);
+  const { renderSize, ...excelPlacement } = placement;
 
   const { data: normalizedBuffer } = await sharp(imagePath)
     .rotate()
     .resize({
-      width: Math.max(1, Math.round(placement.ext.width)),
-      height: Math.max(1, Math.round(placement.ext.height)),
+      width: Math.max(1, Math.round(renderSize.width)),
+      height: Math.max(1, Math.round(renderSize.height)),
       fit: 'cover',
       position: 'centre'
     })
@@ -522,7 +536,7 @@ async function addNormalizedImageToNamedCell(workbook, worksheet, namedCell, ima
 
   const imageId = workbook.addImage({ buffer: normalizedBuffer, extension: 'jpeg' });
 
-  worksheet.addImage(imageId, placement);
+  worksheet.addImage(imageId, excelPlacement);
 }
 
 async function bindWorkbookToPage(templatePath, workbookPath, page, pageContext) {
@@ -657,6 +671,7 @@ async function buildBatchPreviewPdf({ db, baseDir, appDataPath, templateInfo, ma
 module.exports = {
   buildBatchPreviewPdf,
   buildPreviewManifest,
+  buildPageRenderData,
   buildPagePreviewPdf,
   findPageInManifest,
   normalizeDateRange,

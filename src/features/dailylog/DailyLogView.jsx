@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useDialog } from '../../components/common/DialogProvider';
-import DailyLogPdfPreview from './DailyLogPdfPreview';
+import DailyLogFixedPreview from './DailyLogFixedPreview';
 import { useDailyLogViewModel } from './useDailyLogViewModel';
 
 const formatDisplayDate = (value) => {
@@ -26,7 +26,9 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         setIsRangeMode,
         setStartDate,
         setEndDate,
+        pages,
         currentPage,
+        pageRenderData,
         pageIndicator,
         previewUrl,
         isManifestLoading,
@@ -41,14 +43,15 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         handleDownloadCurrent,
         handlePrintRange,
         handleDownloadRange
-    } = useDailyLogViewModel(currentUser, undefined, templateName);
+    } = useDailyLogViewModel(currentUser, undefined, templateName, showAlert);
     const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
-    const [isPreviewLoading, setIsPreviewLoading] = useState(true);
     const [previewError, setPreviewError] = useState('');
     const outputMenuRef = useRef(null);
     const lastAlertMessageRef = useRef('');
     const startDateInputRef = useRef(null);
     const endDateInputRef = useRef(null);
+    const showSingleDayBatchActions = !isRangeMode && pages.length > 1;
+    const showRangeBatchActions = isRangeMode && startDate !== endDate;
 
     useEffect(() => {
         const handlePointerDown = (event) => {
@@ -62,7 +65,6 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
     }, []);
 
     useEffect(() => {
-        setIsPreviewLoading(Boolean(previewUrl));
         setPreviewError('');
     }, [previewUrl]);
 
@@ -125,40 +127,26 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
 
     return (
         <div
-            className="panel-container"
             style={{
-                padding: 0,
-                gap: 0,
-                alignItems: 'stretch',
-                overflow: 'hidden',
-                height: '100%'
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
+                width: '70%',
+                backgroundColor: '#FFFFFF',
+                borderRight: '1px solid #e2e8f0'
             }}
         >
             <div
-                className="dynamic-panel shadow-2xl border-slate-200"
                 style={{
-                    flex: 1,
-                    width: '100%',
-                    minWidth: 0,
-                    maxWidth: 'none',
-                    height: '100%',
-                    minHeight: 0,
-                    borderRadius: 0,
-                    borderTop: 'none',
-                    borderLeft: 'none',
-                    boxShadow: 'none'
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '8px 12px',
+                    backgroundColor: '#f8fafc',
+                    borderBottom: '1px solid #f1f5f9',
+                    flexShrink: 0
                 }}
             >
-                <div
-                    className="panel-header no-print"
-                    style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '8px 12px',
-                        backgroundColor: '#f8fafc'
-                    }}
-                >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flexWrap: 'wrap' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                             <button
@@ -399,7 +387,37 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                                     <span className="material-icons" style={{ fontSize: '18px' }}>picture_as_pdf</span>
                                     현재 페이지 PDF
                                 </button>
-                                {isRangeMode && startDate !== endDate && (
+                                {showSingleDayBatchActions && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleMenuAction(handlePrintRange)}
+                                        style={{
+                                            borderTop: '1px solid #e2e8f0',
+                                            ...outputMenuItemStyle
+                                        }}
+                                        onMouseEnter={handleMenuItemMouseEnter}
+                                        onMouseLeave={handleMenuItemMouseLeave}
+                                    >
+                                        <span className="material-icons" style={{ fontSize: '18px' }}>local_printshop</span>
+                                        금일 페이지 전체 인쇄
+                                    </button>
+                                )}
+                                {showSingleDayBatchActions && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleMenuAction(handleDownloadRange)}
+                                        style={{
+                                            borderTop: '1px solid #e2e8f0',
+                                            ...outputMenuItemStyle
+                                        }}
+                                        onMouseEnter={handleMenuItemMouseEnter}
+                                        onMouseLeave={handleMenuItemMouseLeave}
+                                    >
+                                        <span className="material-icons" style={{ fontSize: '18px' }}>download</span>
+                                        금일 페이지 전체 PDF
+                                    </button>
+                                )}
+                                {showRangeBatchActions && (
                                     <button
                                         type="button"
                                         onClick={() => handleMenuAction(handlePrintRange)}
@@ -414,7 +432,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                                         선택 기간 전체 인쇄
                                     </button>
                                 )}
-                                {isRangeMode && startDate !== endDate && (
+                                {showRangeBatchActions && (
                                     <button
                                         type="button"
                                         onClick={() => handleMenuAction(handleDownloadRange)}
@@ -436,8 +454,9 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                 </div>
 
                 <div
-                    className="panel-content log-print-area"
+                    className="log-print-area"
                     style={{
+                        flex: 1,
                         backgroundColor: '#ffffff',
                         padding: '0',
                         overflow: 'hidden',
@@ -457,7 +476,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                             display: 'flex'
                         }}
                     >
-                        {(isManifestLoading || isPreviewAssetLoading || (isPreviewLoading && Boolean(currentPage))) && (
+                        {(isManifestLoading || isPreviewAssetLoading) && (
                             <div
                                 style={{
                                     position: 'absolute',
@@ -523,28 +542,13 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                         ) : previewError ? (
                             <div style={{ padding: '40px 32px', color: '#991b1b', fontWeight: 700 }}>{previewError}</div>
                         ) : (
-                            <DailyLogPdfPreview
-                                url={previewUrl}
-                                title={`${title} PDF Preview`}
-                                onRenderStart={() => {
-                                    setIsPreviewLoading(true);
-                                    setPreviewError('');
-                                }}
-                                onRenderComplete={() => setIsPreviewLoading(false)}
-                                onRenderError={(error) => {
-                                    setIsPreviewLoading(false);
-                                    const nextMessage = error?.message || 'PDF 미리보기를 렌더링하지 못했습니다.';
-                                    setPreviewError(nextMessage);
-                                    if (nextMessage.includes('양식을 찾을 수 없습니다.') && lastAlertMessageRef.current !== nextMessage) {
-                                        lastAlertMessageRef.current = nextMessage;
-                                        showAlert(nextMessage, `${title} 양식 필요`);
-                                    }
-                                }}
+                            <DailyLogFixedPreview
+                                page={pageRenderData}
+                                title={title}
                             />
                         )}
                     </div>
                 </div>
-            </div>
             <style>{dailyLogDateInputStyles}</style>
         </div>
     );
