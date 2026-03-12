@@ -30,9 +30,9 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         currentPage,
         pageRenderData,
         pageIndicator,
-        previewUrl,
         isManifestLoading,
         isPreviewAssetLoading,
+        isOutputProcessing,
         manifestError,
         manifestErrorCode,
         hasPreviousPage,
@@ -45,7 +45,6 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         handleDownloadRange
     } = useDailyLogViewModel(currentUser, undefined, templateName, showAlert);
     const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
-    const [previewError, setPreviewError] = useState('');
     const outputMenuRef = useRef(null);
     const lastAlertMessageRef = useRef('');
     const startDateInputRef = useRef(null);
@@ -63,10 +62,6 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         document.addEventListener('mousedown', handlePointerDown);
         return () => document.removeEventListener('mousedown', handlePointerDown);
     }, []);
-
-    useEffect(() => {
-        setPreviewError('');
-    }, [previewUrl]);
 
     useEffect(() => {
         if (manifestErrorCode !== 'REPORT_TEMPLATE_MISSING' || !manifestError) {
@@ -476,7 +471,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                             display: 'flex'
                         }}
                     >
-                        {(isManifestLoading || isPreviewAssetLoading) && (
+                        {(isManifestLoading || isPreviewAssetLoading || isOutputProcessing) && (
                             <div
                                 style={{
                                     position: 'absolute',
@@ -539,8 +534,6 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                                     </div>
                                 </div>
                             </div>
-                        ) : previewError ? (
-                            <div style={{ padding: '40px 32px', color: '#991b1b', fontWeight: 700 }}>{previewError}</div>
                         ) : (
                             <DailyLogFixedPreview
                                 page={pageRenderData}

@@ -12,6 +12,7 @@ const {
   parsePageKey,
 } = require('../services/dailyLogPreviewService.cjs');
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
+const { getHtmlTemplatePath } = require('../services/excelTemplateHtmlService.cjs');
 const router = express.Router();
 
 function buildMissingTemplateResponse(templateName) {
@@ -24,6 +25,28 @@ function buildMissingTemplateResponse(templateName) {
 }
 
 module.exports = function(db, baseDir, appDataPath) {
+  router.get('/api/logs/preview-template-html', async (req, res) => {
+    const { templateName } = req.query;
+    const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, templateName, { excelOnly: true });
+
+    if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
+      return res.status(404).json(buildMissingTemplateResponse(templateName));
+    }
+
+    const htmlPath = getHtmlTemplatePath(appDataPath, templateInfo.fileName);
+    if (!fs.existsSync(htmlPath)) {
+      return res.status(404).json({
+        code: 'REPORT_TEMPLATE_HTML_MISSING',
+        error: 'HTML 템플릿을 찾을 수 없습니다.',
+        userMessage: 'HTML 템플릿이 아직 생성되지 않았습니다. 설정에서 양식 파일을 다시 업로드해 주세요.'
+      });
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    return res.sendFile(htmlPath);
+  });
+
   router.get('/api/logs/preview-manifest', async (req, res) => {
     const { startDate, endDate, date, templateName } = req.query;
 
@@ -35,21 +58,6 @@ module.exports = function(db, baseDir, appDataPath) {
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate);
-
-      const firstPage = manifest.pages[0];
-      if (firstPage) {
-        setImmediate(() => {
-          buildPagePreviewPdf({
-            db,
-            baseDir,
-            appDataPath,
-            templateInfo,
-            page: firstPage,
-          }).catch((error) => {
-            console.warn('[Excel Preview Warmup Error]', error.message);
-          });
-        });
-      }
 
       return res.json({ success: true, ...manifest });
     } catch (err) {

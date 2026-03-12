@@ -1,19 +1,26 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { fork } = require('child_process');
-const { setupAutoUpdater } = require('./updater.cjs');
+const { setupAutoUpdater, checkForUpdates } = require('./updater.cjs');
 
 let mainWindow = null;
 let serverProcess = null;
 
 const isDev = !app.isPackaged;
-const SERVER_SCRIPT = path.join(__dirname, '..', 'server.cjs');
 
 function startServer() {
   if (serverProcess) return;
 
-  serverProcess = fork(SERVER_SCRIPT, [], {
-    cwd: path.join(__dirname, '..'),
+  const appRootPath = isDev ? path.join(__dirname, '..') : app.getAppPath();
+  const unpackedServerScript = path.join(process.resourcesPath, 'app.asar.unpacked', 'server.cjs');
+  const serverScriptPath = !isDev && fs.existsSync(unpackedServerScript)
+    ? unpackedServerScript
+    : path.join(appRootPath, 'server.cjs');
+  const serverWorkingDirectory = isDev ? path.join(__dirname, '..') : process.resourcesPath;
+
+  serverProcess = fork(serverScriptPath, [], {
+    cwd: serverWorkingDirectory,
     stdio: 'pipe',
     env: { ...process.env, ELECTRON: '1' }
   });
@@ -77,6 +84,60 @@ function createWindow() {
   });
 }
 
+function createHiddenPdfWindow() {
+  return new BrowserWindow({
+    show: false,
+    width: 1280,
+    height: 960,
+    autoHideMenuBar: true,
+    webPreferences: {
+      sandbox: false,
+      contextIsolation: true,
+    },
+  });
+}
+
+async function waitForPdfContentReady(webContents) {
+  await webContents.executeJavaScript(`
+    new Promise((resolve) => {
+      const imagePromises = Array.from(document.images || []).map((image) => {
+        if (image.complete) {
+          return Promise.resolve();
+        }
+
+        return new Promise((done) => {
+          image.addEventListener('load', done, { once: true });
+          image.addEventListener('error', done, { once: true });
+        });
+      });
+
+      const fontReady = document.fonts?.ready || Promise.resolve();
+
+      Promise.all([fontReady, ...imagePromises])
+        .catch(() => undefined)
+        .finally(() => setTimeout(resolve, 150));
+    });
+  `);
+}
+
+async function buildPdfBufferFromHtml(htmlContent, printBackground) {
+  const pdfWindow = createHiddenPdfWindow();
+
+  try {
+    await pdfWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+    await waitForPdfContentReady(pdfWindow.webContents);
+    return await pdfWindow.webContents.printToPDF({
+      printBackground,
+      pageSize: 'A4',
+      preferCSSPageSize: true,
+    });
+  } finally {
+    if (!pdfWindow.isDestroyed()) {
+      pdfWindow.destroy();
+    }
+  }
+}
+
 app.whenReady().then(() => {
   startServer();
   createWindow();
@@ -97,6 +158,33 @@ app.on('before-quit', () => {
 
 ipcMain.handle('app:getVersion', () => app.getVersion());
 ipcMain.handle('app:checkForUpdates', () => {
-  const { autoUpdater } = require('electron-updater');
-  autoUpdater.checkForUpdatesAndNotify();
+  return checkForUpdates();
+});
+
+ipcMain.handle('pdf:save', async (_event, options = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    throw new Error('메인 윈도우가 준비되지 않았습니다.');
+  }
+
+  const { defaultFileName = 'report.pdf', printBackground = true, htmlContent = '' } = options;
+
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'PDF로 저장',
+    defaultPath: defaultFileName,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+
+  if (canceled || !filePath) {
+    return { canceled: true };
+  }
+
+  const pdfBuffer = htmlContent
+    ? await buildPdfBufferFromHtml(htmlContent, printBackground)
+    : await mainWindow.webContents.printToPDF({
+      printBackground,
+      pageSize: 'A4',
+    });
+
+  fs.writeFileSync(filePath, pdfBuffer);
+  return { canceled: false, filePath };
 });

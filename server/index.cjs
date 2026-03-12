@@ -48,6 +48,7 @@ app.use(require('./routes/settingsRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use(require('./routes/uploadRoutes.cjs')(BASE_DIR));
 app.use(require('./routes/locationRoutes.cjs')(BASE_DIR));
 app.use(require('./routes/excelRoutes.cjs')(db, BASE_DIR, appDataPath));
+app.use(require('./routes/hwpRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use('/api/auth', require('./routes/authRoutes.cjs')(db));
 
 // --- Background Scheduler Start ---

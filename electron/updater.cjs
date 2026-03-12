@@ -1,6 +1,16 @@
-const { autoUpdater } = require('electron-updater');
+let autoUpdater = null;
+
+try {
+  ({ autoUpdater } = require('electron-updater'));
+} catch (error) {
+  console.warn('[Updater] electron-updater를 찾을 수 없어 자동 업데이트를 비활성화합니다.', error.message);
+}
 
 function setupAutoUpdater(mainWindow) {
+  if (!autoUpdater) {
+    return false;
+  }
+
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
@@ -52,6 +62,15 @@ function setupAutoUpdater(mainWindow) {
   });
 
   autoUpdater.checkForUpdatesAndNotify();
+  return true;
 }
 
-module.exports = { setupAutoUpdater };
+function checkForUpdates() {
+  if (!autoUpdater) {
+    throw new Error('자동 업데이트 모듈을 찾을 수 없습니다.');
+  }
+
+  return autoUpdater.checkForUpdatesAndNotify();
+}
+
+module.exports = { setupAutoUpdater, checkForUpdates };

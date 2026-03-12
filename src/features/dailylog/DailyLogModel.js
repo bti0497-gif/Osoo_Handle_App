@@ -69,6 +69,24 @@ export const DailyLogModel = {
         return apiClient.get('/api/logs/preview-page-data', { startDate, endDate, pageKey, templateName });
     },
 
+    async fetchTemplateHtml(templateName) {
+        const response = await apiClient.getRaw('/api/logs/preview-template-html', { templateName });
+
+        if (!response.ok) {
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+                const payload = await response.json();
+                const error = new Error(payload?.userMessage || payload?.error || 'HTML 템플릿을 불러오지 못했습니다.');
+                error.data = payload;
+                throw error;
+            }
+
+            throw new Error('HTML 템플릿을 불러오지 못했습니다.');
+        }
+
+        return response.text();
+    },
+
     getPagePreviewPdfUrl({ startDate, endDate, pageKey, templateName, download = false }) {
         return buildAbsoluteApiUrl('/api/logs/preview-pdf', {
             startDate,

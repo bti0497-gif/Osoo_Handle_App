@@ -16,13 +16,13 @@ function buildValueSlots(rows = [], fieldKey) {
 }
 
 const pageStyle = {
-    width: 'min(100%, 980px)',
+    width: 'min(100%, 920px)',
     aspectRatio: '210 / 297',
     background: '#fff',
     border: '1px solid #cbd5e1',
     boxShadow: '0 18px 40px -24px rgba(15, 23, 42, 0.45)',
     margin: '24px auto',
-    padding: '34px 38px 28px',
+    padding: '52px 44px 34px',
     boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
@@ -80,12 +80,11 @@ function DailyLogFixedPreview({ page, title }) {
             }}
         >
             <div style={pageStyle}>
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: '18px' }}>
-                    <div style={{ flex: 1 }} />
-                    <div style={{ flex: 2, textAlign: 'center', fontSize: '2.15rem', fontWeight: 700, letterSpacing: '0.12em', color: '#0f172a' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', marginBottom: '26px' }}>
+                    <div style={{ textAlign: 'center', fontSize: '1.95rem', fontWeight: 700, letterSpacing: '0.12em', color: '#0f172a' }}>
                         수질분석 일지
                     </div>
-                    <div style={{ flex: 1, textAlign: 'right', fontSize: '1rem', fontWeight: 600, color: '#64748b' }}>
+                    <div style={{ textAlign: 'center', fontSize: '0.96rem', fontWeight: 600, color: '#64748b' }}>
                         {page.date}
                     </div>
                 </div>

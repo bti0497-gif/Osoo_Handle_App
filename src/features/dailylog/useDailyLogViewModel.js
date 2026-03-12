@@ -1,5 +1,6 @@
-import { startTransition, useEffect, useMemo, useState } from 'react';
+import { startTransition, useEffect, useState } from 'react';
 import { DailyLogModel } from './DailyLogModel';
+import { buildFixedPreviewPrintableDocumentHtml, openPrintableDocument } from './dailyLogHtmlDocument';
 
 function buildCurrentPdfFileName(templateName, currentPage) {
     if (!currentPage) {
@@ -8,6 +9,13 @@ function buildCurrentPdfFileName(templateName, currentPage) {
 
     const safeTemplateName = String(templateName || '수질분석일지').trim() || '수질분석일지';
     return `${safeTemplateName}-${currentPage.date}-${currentPage.pageNumberForDate}.pdf`;
+}
+
+function buildRangePdfFileName(templateName, startDate, endDate) {
+    const safeTemplateName = String(templateName || '수질분석일지').trim() || '수질분석일지';
+    return startDate === endDate
+        ? `${safeTemplateName}-${startDate}.pdf`
+        : `${safeTemplateName}-${startDate}_${endDate}.pdf`;
 }
 
 export const useDailyLogViewModel = (currentUser, initialDate, templateName, showAlert) => {
@@ -22,6 +30,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
     const [manifestErrorCode, setManifestErrorCode] = useState('');
     const [pageRenderData, setPageRenderData] = useState(null);
     const [isPreviewAssetLoading, setIsPreviewAssetLoading] = useState(false);
+    const [isOutputProcessing, setIsOutputProcessing] = useState(false);
 
     useEffect(() => {
         let isDisposed = false;
@@ -68,25 +77,6 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
 
     const currentPage = pages[currentPageIndex] || null;
 
-    const firstPagePreviewUrl = useMemo(() => DailyLogModel.getPagePreviewPdfUrl({
-        startDate,
-        endDate,
-        templateName,
-    }), [endDate, startDate, templateName]);
-
-    const previewUrl = useMemo(() => {
-        if (!currentPage || currentPageIndex === 0) {
-            return firstPagePreviewUrl;
-        }
-
-        return DailyLogModel.getPagePreviewPdfUrl({
-            startDate,
-            endDate,
-            pageKey: currentPage.pageKey,
-            templateName,
-        });
-    }, [currentPage, currentPageIndex, endDate, firstPagePreviewUrl, startDate, templateName]);
-
     useEffect(() => {
         let isDisposed = false;
 
@@ -127,41 +117,6 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
             isDisposed = true;
         };
     }, [currentPage, endDate, startDate, templateName]);
-
-    useEffect(() => {
-        if (!currentPage || !previewUrl) {
-            return;
-        }
-
-        DailyLogModel.primePreviewPdfUrls([previewUrl]);
-    }, [currentPage, previewUrl]);
-
-    const currentPageDownloadUrl = useMemo(() => {
-        if (!currentPage) {
-            return '';
-        }
-
-        return DailyLogModel.getPagePreviewPdfUrl({
-            startDate,
-            endDate,
-            pageKey: currentPage.pageKey,
-            templateName,
-            download: true,
-        });
-    }, [currentPage, endDate, startDate, templateName]);
-
-    const rangePreviewUrl = useMemo(() => DailyLogModel.getBatchPreviewPdfUrl({
-        startDate,
-        endDate,
-        templateName,
-    }), [endDate, startDate, templateName]);
-
-    const rangeDownloadUrl = useMemo(() => DailyLogModel.getBatchPreviewPdfUrl({
-        startDate,
-        endDate,
-        templateName,
-        download: true,
-    }), [endDate, startDate, templateName]);
 
     const handleStartDateChange = (nextDate) => {
         setStartDate(nextDate);
@@ -211,93 +166,126 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         });
     };
 
+    const openHtmlPrintDocument = async (pagesToRender, defaultFileName) => {
+        if (!pagesToRender.length) {
+            return;
+        }
+
+        const title = defaultFileName.replace(/\.pdf$/i, '');
+        const documentHtml = buildFixedPreviewPrintableDocumentHtml({
+            pages: pagesToRender,
+            title,
+        });
+
+        openPrintableDocument(documentHtml);
+    };
+
+    const savePdfDocument = async (pagesToRender, defaultFileName) => {
+        if (!pagesToRender.length) {
+            return;
+        }
+
+        const documentHtml = buildFixedPreviewPrintableDocumentHtml({
+            pages: pagesToRender,
+            title: defaultFileName.replace(/\.pdf$/i, ''),
+        });
+
+        const electronApi = window?.electronAPI;
+        if (electronApi?.savePdf) {
+            const result = await electronApi.savePdf({
+                defaultFileName,
+                htmlContent: documentHtml,
+            });
+
+            return result;
+        }
+
+        openPrintableDocument(documentHtml);
+        await showAlert?.('브라우저 환경에서는 시스템 인쇄 창에서 PDF로 저장해 주세요.', 'PDF 저장 안내');
+        return { canceled: true, fallback: true };
+    };
+
+    const fetchRenderPages = async (targetPages) => {
+        return Promise.all(targetPages.map(async (page) => {
+            if (pageRenderData && currentPage?.pageKey === page.pageKey) {
+                return pageRenderData;
+            }
+
+            const result = await DailyLogModel.fetchPreviewPageData({
+                startDate,
+                endDate,
+                pageKey: page.pageKey,
+                templateName,
+            });
+
+            return result.page || null;
+        }));
+    };
+
     const handlePrintCurrent = async () => {
-        if (!previewUrl) {
+        if (!currentPage || !pageRenderData) {
             return;
         }
 
         try {
-            const pdfUrl = await DailyLogModel.getCachedPreviewPdfUrl(previewUrl);
-            const iframe = document.createElement('iframe');
-            iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:0;height:0;border:none;';
-            document.body.appendChild(iframe);
-            iframe.src = pdfUrl;
-            iframe.onload = () => {
-                try {
-                    iframe.contentWindow.focus();
-                    iframe.contentWindow.print();
-                } catch (_) {
-                    window.open(pdfUrl, '_blank');
-                }
-                setTimeout(() => document.body.removeChild(iframe), 60000);
-            };
-        } catch (_) {
-            window.open(previewUrl, '_blank');
+            setIsOutputProcessing(true);
+            await openHtmlPrintDocument([pageRenderData], buildCurrentPdfFileName(templateName, currentPage));
+        } catch (error) {
+            await showAlert?.(error?.data?.userMessage || error?.message || '출력용 HTML 문서를 만들지 못했습니다.', '출력 실패');
+        } finally {
+            setIsOutputProcessing(false);
         }
     };
 
     const handleDownloadCurrent = async () => {
-        if (!previewUrl) {
+        if (!currentPage || !pageRenderData) {
             return;
         }
-
-        const link = document.createElement('a');
         try {
-            const cachedUrl = await DailyLogModel.getCachedPreviewPdfUrl(previewUrl);
-            link.href = cachedUrl;
-            link.download = buildCurrentPdfFileName(templateName, currentPage);
-            document.body.appendChild(link);
-            link.click();
-            await showAlert?.('PDF 저장이 완료되었습니다. 다운로드 폴더를 확인해 주세요.', 'PDF 저장 완료');
-        } catch (_) {
-            link.href = currentPageDownloadUrl;
-            link.download = '';
-            document.body.appendChild(link);
-            link.click();
-            await showAlert?.('PDF 저장이 완료되었습니다. 다운로드 폴더를 확인해 주세요.', 'PDF 저장 완료');
+            setIsOutputProcessing(true);
+            const result = await savePdfDocument([pageRenderData], buildCurrentPdfFileName(templateName, currentPage));
+            if (!result?.canceled && !result?.fallback) {
+                await showAlert?.('PDF 저장이 완료되었습니다.', 'PDF 저장 완료');
+            }
+        } catch (error) {
+            await showAlert?.(error?.data?.userMessage || error?.message || 'PDF 저장용 HTML 문서를 만들지 못했습니다.', 'PDF 저장 실패');
         } finally {
-            document.body.removeChild(link);
+            setIsOutputProcessing(false);
         }
     };
 
     const handlePrintRange = async () => {
         try {
-            const pdfUrl = await DailyLogModel.getCachedPreviewPdfUrl(rangePreviewUrl);
-            const iframe = document.createElement('iframe');
-            iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:0;height:0;border:none;';
-            document.body.appendChild(iframe);
-            iframe.src = pdfUrl;
-            iframe.onload = () => {
-                try {
-                    iframe.contentWindow.focus();
-                    iframe.contentWindow.print();
-                } catch (_) {
-                    window.open(pdfUrl, '_blank');
-                }
-                setTimeout(() => document.body.removeChild(iframe), 60000);
-            };
-        } catch (_) {
-            window.open(rangePreviewUrl, '_blank');
+            if (!pages.length) {
+                return;
+            }
+
+            setIsOutputProcessing(true);
+            const renderPages = (await fetchRenderPages(pages)).filter(Boolean);
+            await openHtmlPrintDocument(renderPages, buildRangePdfFileName(templateName, startDate, endDate));
+        } catch (error) {
+            await showAlert?.(error?.data?.userMessage || error?.message || '범위 출력용 HTML 문서를 만들지 못했습니다.', '출력 실패');
+        } finally {
+            setIsOutputProcessing(false);
         }
     };
 
     const handleDownloadRange = async () => {
-        const link = document.createElement('a');
         try {
-            const cachedUrl = await DailyLogModel.getCachedPreviewPdfUrl(rangePreviewUrl);
-            link.href = cachedUrl;
-            link.download = '';
-            document.body.appendChild(link);
-            link.click();
-            await showAlert?.('PDF 저장이 완료되었습니다. 다운로드 폴더를 확인해 주세요.', 'PDF 저장 완료');
-        } catch (_) {
-            link.href = rangeDownloadUrl;
-            link.download = '';
-            document.body.appendChild(link);
-            link.click();
-            await showAlert?.('PDF 저장이 완료되었습니다. 다운로드 폴더를 확인해 주세요.', 'PDF 저장 완료');
+            if (!pages.length) {
+                return;
+            }
+
+            setIsOutputProcessing(true);
+            const renderPages = (await fetchRenderPages(pages)).filter(Boolean);
+            const result = await savePdfDocument(renderPages, buildRangePdfFileName(templateName, startDate, endDate));
+            if (!result?.canceled && !result?.fallback) {
+                await showAlert?.('PDF 저장이 완료되었습니다.', 'PDF 저장 완료');
+            }
+        } catch (error) {
+            await showAlert?.(error?.data?.userMessage || error?.message || '범위 PDF 저장용 HTML 문서를 만들지 못했습니다.', 'PDF 저장 실패');
         } finally {
-            document.body.removeChild(link);
+            setIsOutputProcessing(false);
         }
     };
 
@@ -322,9 +310,9 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         currentPageIndex,
         pageIndicator,
         selectedDateLabel,
-        previewUrl,
         isManifestLoading,
         isPreviewAssetLoading,
+        isOutputProcessing,
         manifestError,
         manifestErrorCode,
         hasPreviousPage: currentPageIndex > 0,

@@ -6,6 +6,10 @@ const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cj
 const { parseAndStoreExcel, getStoredSheets, getStoredRow, getCellValue, hasStoredData, formatDate } = require('../services/excelService.cjs');
 const { normalizeBaseUrl, invalidateQntechSessionCache } = require('../services/qntechAuthService.cjs');
 const { getCustomReportTemplatesDir, listReportTemplates, syncBundledTemplatesToAppData } = require('../services/reportTemplateService.cjs');
+const {
+  convertExcelTemplateToHtml,
+  getHtmlTemplatePath,
+} = require('../services/excelTemplateHtmlService.cjs');
 const router = express.Router();
 
 let importProgress = { current: 0, total: 0, status: 'idle', result: null };
@@ -486,6 +490,29 @@ module.exports = function (db, baseDir, appDataPath) {
         const sheets = await parseAndStoreExcel(db, filePath);
         result.originalPath = originalPath;
         result.sheets = sheets;
+      }
+
+      // 보고서 템플릿 업로드 시: Excel 템플릿은 HTML로 1회 변환하여 캐시 (인쇄/미리보기 속도 개선)
+      const reportTemplates = files['report_templates'] || [];
+      const htmlConversions = [];
+
+      for (const templateFile of reportTemplates) {
+        const ext = path.extname(templateFile.filename || '').toLowerCase();
+        if (ext === '.xlsx' || ext === '.xlsm' || ext === '.xls') {
+          const templatePath = path.join(reportsDir, templateFile.filename);
+          const htmlPath = getHtmlTemplatePath(appDataPath, templateFile.filename);
+          htmlConversions.push(
+            convertExcelTemplateToHtml({
+              sourcePath: templatePath,
+              outputPath: htmlPath,
+              options: { maxRows: 150, maxCols: 40 },
+            }).then(() => ({ fileName: templateFile.filename, htmlPath }))
+          );
+        }
+      }
+
+      if (htmlConversions.length) {
+        result.htmlTemplates = await Promise.allSettled(htmlConversions);
       }
 
       result.reportTemplates = listReportTemplates(baseDir, appDataPath);
