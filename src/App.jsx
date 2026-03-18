@@ -17,30 +17,36 @@ import Dashboard from './views/Dashboard';
 import { KitManagementView } from './features/kit';
 
 const PlaceholderView = ({ title }) => (
-    <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        width: '70%',
-        backgroundColor: '#FFFFFF',
-        borderRight: '1px solid #e2e8f0'
-    }}>
-        <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '12px 16px',
-            backgroundColor: '#f8fafc',
-            borderBottom: '1px solid #f1f5f9',
-            flexShrink: 0
-        }}>
-            <h2 style={{ fontSize: '0.95rem', fontWeight: 900, color: '#0f172a', margin: 0 }}>{title}</h2>
-            <span style={{ fontSize: '0.8125rem', color: '#64748b' }}>준비 중인 메뉴입니다.</span>
+    <div style={{ display: 'flex', width: '100%', height: '100%', backgroundColor: '#ffffff', padding: '1.25rem', gap: '1.25rem' }}>
+        {/* 좌측 조건 영역 */}
+        <div style={{ width: '380px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <h1 style={{ fontSize: '1.25rem', fontWeight: 900, color: '#1e293b', letterSpacing: '-0.025em', margin: 0 }}>
+                {title}
+            </h1>
+            
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1', border: '1px dashed #e2e8f0', borderRadius: '12px' }}>
+                <span className="material-icons" style={{ fontSize: '48px', marginBottom: '1rem' }}>event</span>
+                <p style={{ fontWeight: 700 }}>조회 조건을 설정하세요.</p>
+            </div>
+
+            <div>
+                <button style={{
+                    width: '100%', height: '48px', backgroundColor: '#1e293b', color: 'white',
+                    border: 'none', borderRadius: '12px', fontSize: '1rem', fontWeight: 900,
+                    cursor: 'not-allowed', opacity: 0.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                }}>
+                    <span className="material-icons">download</span> 일지 생성하기
+                </button>
+            </div>
         </div>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#cbd5e1' }}>
-            <div style={{ textAlign: 'center' }}>
-                <span className="material-icons" style={{ fontSize: '48px', marginBottom: '1rem' }}>construction</span>
-                <p style={{ fontWeight: 700 }}>이 기능은 현재 개발 중입니다.</p>
+
+        {/* 우측 미리보기 영역 */}
+        <div style={{ flex: 1, maxWidth: '1200px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px' }}>
+                <div style={{ textAlign: 'center', color: '#cbd5e1' }}>
+                    <span className="material-icons" style={{ fontSize: '48px', marginBottom: '1rem' }}>table_chart</span>
+                    <p style={{ fontWeight: 700 }}>이 기능은 현재 개발 중입니다.</p>
+                </div>
             </div>
         </div>
     </div>
@@ -89,8 +95,8 @@ function App() {
             case 'kit': return <KitManagementView currentUser={user} />;
             case 'facility': return <FacilityManagementView currentUser={user} />;
             case 'log': return <PlaceholderView title="일지작성" />;
-            case 'log_daily': return <PlaceholderView title="일일업무일지" />;
-            case 'log_water': return <DailyLogView currentUser={user} templateName="수질분석일지" title="수질분석일지" />;
+            case 'log_daily': return <DailyLogView key="log_daily" currentUser={user} templateName="일일업무일지" title="일일업무일지" />;
+            case 'log_water': return <DailyLogView key="log_water" currentUser={user} templateName="수질분석일지" title="수질분석일지" />;
             case 'log_med_mgmt': return <PlaceholderView title="약품관리대장" />;
             case 'log_med_in': return <PlaceholderView title="약품입고일지" />;
             case 'log_sludge_out': return <PlaceholderView title="슬러지반출관리대장" />;
@@ -108,6 +114,13 @@ function App() {
             case 'settings': return <SettingsView currentUser={user} />;
             default: return <Dashboard title="통합 대시보드" />;
         }
+    };
+
+    const getHelpText = () => {
+        if (activeTab.startsWith('log')) {
+            return 'Ctrl(또는 Cmd)+클릭: 띄엄띄엄 여러 문서 선택 | Shift+클릭: 한 번에 여러 문서 범위 선택';
+        }
+        return undefined; // StatusBar의 기본값을 사용하게 함
     };
 
     return (
@@ -128,7 +141,10 @@ function App() {
                 </main>
             </div>
 
-            <StatusBar title={TAB_LABELS[activeTab] || TAB_LABELS[DEFAULT_TAB]} />
+            <StatusBar 
+                title={TAB_LABELS[activeTab] || TAB_LABELS[DEFAULT_TAB]} 
+                helpText={getHelpText()} 
+            />
         </div>
     );
 }

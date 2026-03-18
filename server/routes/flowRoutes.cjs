@@ -3,6 +3,17 @@ const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cj
 const router = express.Router();
 
 module.exports = function (db) {
+  function calculateSludgeYearlyCumulative(targetDate, previousCalculatedFlow, sludgeExport) {
+    const currentYear = String(targetDate || '').slice(0, 4);
+    const previousCumulative = previousCalculatedFlow ?? 0;
+
+    if (String(targetDate || '').slice(5, 10) === '01-01') {
+      return sludgeExport ?? 0;
+    }
+
+    return currentYear ? previousCumulative + (sludgeExport ?? 0) : (sludgeExport ?? 0);
+  }
+
   router.get('/api/flows', (req, res) => {
     const { date } = req.query;
     const flows = db.prepare('SELECT * FROM flow_readings WHERE date = ?').all(date);
@@ -56,7 +67,8 @@ module.exports = function (db) {
       const insertMany = db.transaction((rows) => {
         const metadata = getCurrentRecordMetadata(db);
         for (const item of rows) {
-          const { type, raw_value, calculated_flow, is_reset, is_manual } = item;
+          const { type, raw_value, calculated_flow, sludge_export, is_reset, is_manual } = item;
+          const sludgeAmount = type === '슬러지' ? (sludge_export ?? raw_value ?? null) : null;
           // 프론트엔드에서 이미 계산된 flow와 raw를 넘겨주므로 그대로 저장 (수동이든 자동이든)
           stmt.run(
             date,
@@ -65,7 +77,7 @@ module.exports = function (db) {
             calculated_flow,
             is_reset ? 1 : 0,
             is_manual ? 1 : 0,
-            null,
+            sludgeAmount,
             metadata.siteName,
             metadata.author,
             metadata.createdAt,
@@ -89,7 +101,7 @@ module.exports = function (db) {
     const { date, type, raw_value, is_reset, is_manual, manual_flow, sludge_export } = req.body;
     try {
       const metadata = getCurrentRecordMetadata(db);
-      const prevReading = db.prepare('SELECT raw_value, calculated_flow FROM flow_readings WHERE type = ? AND date < ? ORDER BY date DESC LIMIT 1').get(type, date);
+      const prevReading = db.prepare('SELECT raw_value, calculated_flow, date FROM flow_readings WHERE type = ? AND date < ? ORDER BY date DESC LIMIT 1').get(type, date);
 
       // 보정 로직 동일 적용
       const effectivePrevRaw = (prevReading?.raw_value === null && prevReading?.calculated_flow > 10000)
@@ -101,7 +113,14 @@ module.exports = function (db) {
       }
 
       let calculated_flow = 0;
-      if (is_manual) { calculated_flow = manual_flow; }
+      const sludgeAmount = type === '슬러지' ? (sludge_export ?? raw_value ?? null) : null;
+
+      if (type === '슬러지' && !is_manual) {
+        const prevSameYearCalculated = prevReading && String(prevReading.date || '').slice(0, 4) === String(date || '').slice(0, 4)
+          ? Number(prevReading.calculated_flow || 0)
+          : 0;
+        calculated_flow = calculateSludgeYearlyCumulative(date, prevSameYearCalculated, sludgeAmount);
+      } else if (is_manual) { calculated_flow = manual_flow; }
       else if (!is_reset && effectivePrevRaw !== undefined) { calculated_flow = raw_value - effectivePrevRaw; }
 
       const info = db.prepare(`
@@ -126,7 +145,7 @@ module.exports = function (db) {
         calculated_flow,
         is_reset ? 1 : 0,
         is_manual ? 1 : 0,
-        sludge_export,
+        sludgeAmount,
         metadata.siteName,
         metadata.author,
         metadata.createdAt,

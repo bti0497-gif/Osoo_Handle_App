@@ -298,7 +298,7 @@ const FlowManagementView = ({ currentUser }) => {
                             }}
                             onBlur={async () => {
                                 if (isRawActive && localValue !== null) {
-                                    if (isManual || isCellDoubleClicked) updateManualReading(row.date, flowName, 'raw', localValue);
+                                    if (isManual) updateManualReading(row.date, flowName, 'raw', localValue);
                                     else updateReading(row.date, flowName, localValue);
                                 }
                                 setActiveInput(null);

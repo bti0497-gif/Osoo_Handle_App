@@ -1,5 +1,15 @@
 import { apiClient } from '../../core/api';
 
+const DAILY_WORK_LOG_TEMPLATES = ['일일업무일지'];
+
+function getApiPrefix(templateName) {
+    const normalized = String(templateName || '').trim();
+    if (DAILY_WORK_LOG_TEMPLATES.includes(normalized)) {
+        return '/api/daily-work-log';
+    }
+    return '/api/logs';
+}
+
 const previewPdfBlobUrlCache = new Map();
 const previewPdfRequestCache = new Map();
 const PREVIEW_PDF_URL_VERSION = '2026-03-10-photo-frame-v8';
@@ -45,6 +55,25 @@ export const DailyLogModel = {
         return `${apiClient.getBaseUrl()}/api/logs/preview-pdf?${params.toString()}`;
     },
 
+    async fetchActiveDates(startDate, endDate, templateName, siteName) {
+        if (!startDate || !endDate) return [];
+        try {
+            const result = await apiClient.get(`${getApiPrefix(templateName)}/active-dates`, {
+                startDate,
+                endDate,
+                templateName,
+                siteName,
+            });
+            if (result && result.activeDates && Array.isArray(result.activeDates)) {
+                return result.activeDates;
+            }
+            return [];
+        } catch (error) {
+            console.error('Failed to fetch active dates:', error);
+            return [];
+        }
+    },
+
     getPreviewPdfDownloadUrl(date, templateName) {
         const params = new URLSearchParams();
 
@@ -61,16 +90,19 @@ export const DailyLogModel = {
         return `${apiClient.getBaseUrl()}/api/logs/preview-pdf?${params.toString()}`;
     },
 
-    async fetchPreviewManifest(startDate, endDate, templateName) {
-        return apiClient.get('/api/logs/preview-manifest', { startDate, endDate, templateName });
+    async fetchPreviewManifest(startDate, endDate, templateName, siteName) {
+        const prefix = getApiPrefix(templateName);
+        return apiClient.get(`${prefix}/preview-manifest`, { startDate, endDate, templateName, siteName });
     },
 
-    async fetchPreviewPageData({ startDate, endDate, pageKey, templateName }) {
-        return apiClient.get('/api/logs/preview-page-data', { startDate, endDate, pageKey, templateName });
+    async fetchPreviewPageData({ startDate, endDate, pageKey, templateName, siteName }) {
+        const prefix = getApiPrefix(templateName);
+        return apiClient.get(`${prefix}/preview-page-data`, { startDate, endDate, pageKey, templateName, siteName });
     },
 
     async fetchTemplateHtml(templateName) {
-        const response = await apiClient.getRaw('/api/logs/preview-template-html', { templateName });
+        const prefix = getApiPrefix(templateName);
+        const response = await apiClient.getRaw(`${prefix}/preview-template-html`, { templateName });
 
         if (!response.ok) {
             const contentType = response.headers.get('content-type') || '';
@@ -88,7 +120,8 @@ export const DailyLogModel = {
     },
 
     getPagePreviewPdfUrl({ startDate, endDate, pageKey, templateName, download = false }) {
-        return buildAbsoluteApiUrl('/api/logs/preview-pdf', {
+        const prefix = getApiPrefix(templateName);
+        return buildAbsoluteApiUrl(`${prefix}/preview-pdf`, {
             startDate,
             endDate,
             pageKey,
@@ -97,11 +130,13 @@ export const DailyLogModel = {
         });
     },
 
-    getBatchPreviewPdfUrl({ startDate, endDate, templateName, download = false }) {
-        return buildAbsoluteApiUrl('/api/logs/batch-pdf', {
+    getBatchPreviewPdfUrl({ startDate, endDate, templateName, siteName, download = false }) {
+        const prefix = getApiPrefix(templateName);
+        return buildAbsoluteApiUrl(`${prefix}/batch-pdf`, {
             startDate,
             endDate,
             templateName,
+            siteName,
             download: download ? '1' : undefined,
         });
     },
@@ -152,5 +187,41 @@ export const DailyLogModel = {
         urls.forEach((url) => {
             this.getCachedPreviewPdfUrl(url).catch(() => {});
         });
+    },
+
+    fetchExportExcel: async (dateString, templateName, siteName) => {
+        let url;
+        const encodedTemplateName = templateName ? encodeURIComponent(templateName) : '';
+        const ranges = dateString.split(',');
+
+        if (templateName === '일일업무일지') {
+            const baseParam = `templateName=${encodedTemplateName}${siteName ? `&siteName=${encodeURIComponent(siteName)}` : ''}`;
+            if (ranges.length === 1) {
+                const encodedDate = encodeURIComponent(ranges[0].trim());
+                url = `/api/daily-work-log/export?date=${encodedDate}&${baseParam}`;
+            } else {
+                const encodedStartDate = encodeURIComponent(ranges[0].trim());
+                const encodedEndDate = encodeURIComponent(ranges[1].trim());
+                url = `/api/daily-work-log/export?startDate=${encodedStartDate}&endDate=${encodedEndDate}&${baseParam}`;
+            }
+        } else {
+            const baseParam = `templateName=${encodedTemplateName}${siteName ? `&siteName=${encodeURIComponent(siteName)}` : ''}`;
+            if (ranges.length === 1) {
+                const encodedDate = encodeURIComponent(ranges[0].trim());
+                url = `/api/logs/export?date=${encodedDate}&${baseParam}`;
+            } else {
+                const encodedStartDate = encodeURIComponent(ranges[0].trim());
+                const encodedEndDate = encodeURIComponent(ranges[1].trim());
+                url = `/api/logs/export?startDate=${encodedStartDate}&endDate=${encodedEndDate}&${baseParam}`;
+            }
+        }
+
+        console.log('[DailyLogModel] fetchExportExcel - URL:', url);
+        console.log('[DailyLogModel] fetchExportExcel - ranges:', ranges);
+        console.log('[DailyLogModel] fetchExportExcel - templateName:', templateName);
+        console.log('[DailyLogModel] fetchExportExcel - siteName:', siteName);
+
+        // 서버에 요청 → 서버가 파일을 생성하고 시스템 Excel로 열어줌
+        return apiClient.get(url);
     }
 };

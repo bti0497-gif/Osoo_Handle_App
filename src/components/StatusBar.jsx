@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-const StatusBar = ({ title }) => {
+const StatusBar = ({ title, helpText }) => {
     const [time, setTime] = useState(new Date().toLocaleTimeString());
 
     useEffect(() => {
@@ -21,7 +21,7 @@ const StatusBar = ({ title }) => {
                 </div>
                 <div className="status-item" style={{ borderLeft: '1px solid #475569', paddingLeft: '1rem' }}>
                     <span className="material-icons text-green-400" style={{ fontSize: '14px' }}>info</span>
-                    <span>도움말: 각 항목의 상세 데이터는 왼쪽 메뉴를 통해 접근하세요.</span>
+                    <span>도움말: {helpText || '각 항목의 상세 데이터는 왼쪽 메뉴를 통해 접근하세요.'}</span>
                 </div>
             </div>
 

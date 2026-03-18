@@ -15,7 +15,7 @@ class ApiError extends Error {
 }
 
 async function request(endpoint, options = {}) {
-  const { timeout = 30000, raw = false, ...fetchOptions } = options;
+  const { timeout = 30000, raw = false, _hasRetried = false, ...fetchOptions } = options;
 
   const url = `${getApiBase()}${endpoint}`;
   const controller = new AbortController();
@@ -34,6 +34,12 @@ async function request(endpoint, options = {}) {
     if (!contentType || !contentType.includes('application/json')) {
       // JSON이 아닌 응답(404 HTML 등)이 오면 포트가 바뀌었을 가능성이 큼
       await rediscoverServer();
+      if (!_hasRetried) {
+        return request(endpoint, {
+          ...options,
+          _hasRetried: true,
+        });
+      }
       throw new ApiError(
         '서버 응답 형식이 올바르지 않습니다. 서버 재탐색을 시도했습니다. 잠시 후 다시 시도해 주세요.',
         response.status
@@ -44,7 +50,7 @@ async function request(endpoint, options = {}) {
 
     if (!response.ok) {
       throw new ApiError(
-        data.message || `요청 실패 (${response.status})`,
+        data.userMessage || data.message || data.error || `요청 실패 (${response.status})`,
         response.status,
         data
       );
@@ -62,6 +68,12 @@ async function request(endpoint, options = {}) {
 
     if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
       await rediscoverServer();
+      if (!_hasRetried) {
+        return request(endpoint, {
+          ...options,
+          _hasRetried: true,
+        });
+      }
       throw new ApiError('서버 연결에 실패했습니다. 재연결을 시도합니다.', 0);
     }
 

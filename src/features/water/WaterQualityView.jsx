@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useWaterQualityViewModel } from './useWaterQualityViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogProvider';
+import { useBatchProcess } from '../../hooks/useBatchProcess';
+import { BatchProgressDialog } from '../../components/common';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
-
 const formatLocalDate = (date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -36,10 +37,11 @@ const WaterQualityView = ({ currentUser }) => {
     const {
         history, loading,
         updateReading, submitBatch, refresh, pendingChanges,
-        isImportingFromQntech, isImportingRangeFromQntech,
-        rangeImportProgress,
+        isImportingFromQntech,
         handleImportFromQntech, handleImportRangeFromQntech
     } = useWaterQualityViewModel(currentUser, { showAlert });
+
+    const batchProcess = useBatchProcess();
 
     const [selectedRowKey, setSelectedRowKey] = useState(null);
     const [isManualEditMode, setIsManualEditMode] = useState(false);
@@ -212,23 +214,61 @@ const WaterQualityView = ({ currentUser }) => {
 
         const confirmed = await showConfirm?.('기간 불러오기는 즉시 저장됩니다. 기존 값이 있는 날짜는 값은 유지하고 사진만 저장합니다. 계속하시겠습니까?');
         if (!confirmed) return;
-        await handleImportRangeFromQntech(rangeStartDate, rangeEndDate);
+
+        // 기간 내 모든 날짜 배열 생성
+        const datesToImport = [];
+        let curr = new Date(rangeStartDate);
+        const end = new Date(rangeEndDate);
+        
+        while (curr <= end) {
+            datesToImport.push(formatLocalDate(curr));
+            curr.setDate(curr.getDate() + 1);
+        }
+
+        let totalImportedRowCount = 0;
+        let totalSavedPhotoCount = 0;
+
+        const success = await batchProcess.executeBatch(
+            datesToImport,
+            (dateStr) => ({ id: dateStr, title: `${formatImportProgressDate(dateStr)} 데이터` }),
+            async (dateStr, updateMessage) => {
+                updateMessage('QnTECH 서버에서 수집 중...');
+                // 개별 날짜 가져오기 호출 (isImportingRangeFromQntech 대신 개별용 함수 재사용)
+                const result = await handleImportFromQntech(dateStr, true); // true: silent (showAlert 생략)
+                
+                if (result?.summary) {
+                    const rowCnt = result.summary.importedRowCount || 0;
+                    const photoCnt = result.summary.savedPhotoCount || 0;
+                    totalImportedRowCount += rowCnt;
+                    totalSavedPhotoCount += photoCnt;
+                    updateMessage(`값 ${rowCnt}건, 사진 ${photoCnt}장 저장됨`);
+                } else {
+                    updateMessage('저장 완료');
+                }
+            },
+            { stopOnError: false }
+        );
+
+        if (success) {
+            batchProcess.resetBatch();
+            showAlert?.(`기간 데이터 불러오기가 완료되었습니다. 총 값 ${totalImportedRowCount}건, 사진 ${totalSavedPhotoCount}장 저장됨`);
+        } else {
+            showAlert?.(`일부 데이터 불러오기에 실패했습니다. 결과창을 확인하세요.\n성공한 건: 값 ${totalImportedRowCount}건, 사진 ${totalSavedPhotoCount}장`);
+        }
     };
 
-    const rangeImportStatusText = isImportingRangeFromQntech
-        ? (() => {
-            const dateLabel = formatImportProgressDate(rangeImportProgress.currentDate);
-            const countLabel = rangeImportProgress.totalDates > 0
-                ? `(${rangeImportProgress.completedDates}/${rangeImportProgress.totalDates})`
-                : '';
-
-            if (dateLabel) {
-                return `${dateLabel} 데이터 불러오는 중... ${countLabel}`.trim();
-            }
-
-            return rangeImportProgress.message || '기간 데이터를 불러오는 중...';
-        })()
-        : '';
+    // const rangeImportStatusText = isImportingRangeFromQntech
+    //     ? (() => {
+    //         const dateLabel = formatImportProgressDate(rangeImportProgress.currentDate);
+    //         const countLabel = rangeImportProgress.totalDates > 0
+    //             ? `(${rangeImportProgress.completedDates}/${rangeImportProgress.totalDates})`
+    //             : '';
+    //         if (dateLabel) {
+    //             return `${dateLabel} 데이터 불러오는 중... ${countLabel}`.trim();
+    //         }
+    //         return rangeImportProgress.message || '기간 데이터를 불러오는 중...';
+    //     })()
+    //     : '';
 
     const getRowStyle = (row, isSelected, isHovered) => {
         const isToday = row.date === todayStr;
@@ -456,36 +496,20 @@ const WaterQualityView = ({ currentUser }) => {
                         />
                         <button
                             onClick={handleQntechImportClick}
-                            disabled={(isImportingFromQntech || isImportingRangeFromQntech) || !rangeStartDate || !rangeEndDate}
+                            disabled={(isImportingFromQntech || batchProcess.isProcessing) || !rangeStartDate || !rangeEndDate}
                             style={{
                                 padding: '5px 14px', borderRadius: 6, border: '1px solid #cbd5e1',
                                 fontWeight: 800, fontSize: 11,
-                                cursor: (isImportingFromQntech || isImportingRangeFromQntech) ? 'wait' : 'pointer',
+                                cursor: (isImportingFromQntech || batchProcess.isProcessing) ? 'wait' : 'pointer',
                                 background: '#f8fafc', color: '#0f172a',
                                 display: 'flex', alignItems: 'center', gap: 4,
-                                opacity: (isImportingFromQntech || isImportingRangeFromQntech) ? 0.7 : 1
+                                opacity: (isImportingFromQntech || batchProcess.isProcessing) ? 0.7 : 1
                             }}
                         >
                             <span className="material-icons" style={{ fontSize: 14 }}>cloud_download</span>
-                            {(isImportingFromQntech || isImportingRangeFromQntech) ? '가져오는 중...' : 'QnTECH 가져오기'}
+                            {(isImportingFromQntech || batchProcess.isProcessing) ? '가져오는 중...' : 'QnTECH 가져오기'}
                         </button>
                     </div>
-                    {isImportingRangeFromQntech && (
-                        <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            padding: '7px 10px',
-                            borderRadius: 8,
-                            background: '#eff6ff',
-                            color: '#1d4ed8',
-                            fontSize: 11,
-                            fontWeight: 800
-                        }}>
-                            <span className="material-icons" style={{ fontSize: 14 }}>hourglass_top</span>
-                            <span>{rangeImportStatusText}</span>
-                        </div>
-                    )}
                 </div>
             </div>
 
@@ -515,6 +539,17 @@ const WaterQualityView = ({ currentUser }) => {
                     </button>
                 </div>
             </div>
+
+            {/* 일괄 작업 다이얼로그 추가 */}
+            <BatchProgressDialog
+                isOpen={batchProcess.tasks.length > 0}
+                title="QnTECH 데이터 일괄 가져오기"
+                tasks={batchProcess.tasks}
+                progress={batchProcess.progress}
+                isProcessing={batchProcess.isProcessing}
+                isFinished={batchProcess.isFinished}
+                onClose={() => batchProcess.resetBatch()}
+            />
         </div>
     );
 };

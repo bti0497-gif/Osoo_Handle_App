@@ -3,6 +3,7 @@ const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 const {
+  buildBatchExportExcel,
   buildBatchPreviewPdf,
   buildPreviewManifest,
   buildPageRenderData,
@@ -10,6 +11,7 @@ const {
   findPageInManifest,
   normalizeDateRange,
   parsePageKey,
+  getActiveDates,
 } = require('../services/dailyLogPreviewService.cjs');
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
 const { getHtmlTemplatePath } = require('../services/excelTemplateHtmlService.cjs');
@@ -44,7 +46,35 @@ module.exports = function(db, baseDir, appDataPath) {
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
     return res.sendFile(htmlPath);
+  });
+
+  router.get('/api/logs/active-dates', async (req, res) => {
+    const { startDate, endDate, templateName } = req.query;
+
+    const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, templateName, { excelOnly: true });
+    if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
+      return res.status(404).json(buildMissingTemplateResponse(templateName));
+    }
+
+    try {
+      if (!startDate || !endDate) {
+        return res.status(400).json({ success: false, error: 'startDate 및 endDate가 필요합니다.' });
+      }
+
+      const range = normalizeDateRange(startDate, endDate);
+      const { siteName } = req.query;
+      const activeDates = getActiveDates(db, range.startDate, range.endDate, siteName);
+      console.log(`[Active Dates API] Range: ${range.startDate} ~ ${range.endDate}, Site: ${siteName || 'ALL'}, Found: ${activeDates.length}`);
+      if (activeDates.length > 0) {
+          console.log(`[Active Dates API] Sample dates: ${activeDates.slice(0, 5).join(', ')}${activeDates.length > 5 ? '...' : ''}`);
+      }
+      return res.json({ success: true, activeDates });
+    } catch (err) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
   });
 
   router.get('/api/logs/preview-manifest', async (req, res) => {
@@ -56,8 +86,9 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
+      const { siteName } = req.query;
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      const manifest = buildPreviewManifest(db, range.startDate, range.endDate);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
 
       return res.json({ success: true, ...manifest });
     } catch (err) {
@@ -74,8 +105,9 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
+      const { siteName } = req.query;
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      const manifest = buildPreviewManifest(db, range.startDate, range.endDate);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       const targetPage = findPageInManifest(manifest, pageKey);
 
       if (!targetPage) {
@@ -88,6 +120,7 @@ module.exports = function(db, baseDir, appDataPath) {
         appDataPath,
         templateInfo,
         page: targetPage,
+        siteName,
       });
 
       const outputFileName = `${path.parse(templateInfo.fileName).name}-${targetPage.date}-${targetPage.pageNumberForDate}.pdf`;
@@ -114,21 +147,22 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
+      const { siteName } = req.query;
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      const manifest = buildPreviewManifest(db, range.startDate, range.endDate);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       const targetPage = findPageInManifest(manifest, pageKey);
 
       if (!targetPage) {
         return res.status(404).json({ error: 'Preview page not found' });
       }
 
-      const renderData = buildPageRenderData({ db, baseDir, page: targetPage });
+      const renderData = buildPageRenderData({ db, baseDir, page: targetPage, siteName });
       const photoUrls = Object.fromEntries(
         Object.entries(renderData.selectedPhotos || {})
           .filter(([, photoPath]) => Boolean(photoPath))
           .map(([analyteKey]) => [
             analyteKey,
-            `${req.protocol}://${req.get('host')}/api/logs/preview-photo?startDate=${encodeURIComponent(range.startDate)}&endDate=${encodeURIComponent(range.endDate)}&pageKey=${encodeURIComponent(targetPage.pageKey)}&templateName=${encodeURIComponent(templateInfo.fileName)}&analyte=${encodeURIComponent(analyteKey)}`,
+            `${req.protocol}://${req.get('host')}/api/logs/preview-photo?startDate=${encodeURIComponent(range.startDate)}&endDate=${encodeURIComponent(range.endDate)}&pageKey=${encodeURIComponent(targetPage.pageKey)}&templateName=${encodeURIComponent(templateInfo.fileName)}&analyte=${encodeURIComponent(analyteKey)}${siteName ? `&siteName=${encodeURIComponent(siteName)}` : ''}`,
           ])
       );
 
@@ -159,8 +193,9 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
+      const { siteName } = req.query;
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      const manifest = buildPreviewManifest(db, range.startDate, range.endDate);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       const parsedPageKey = pageKey ? parsePageKey(pageKey) : null;
       const targetPage = findPageInManifest(manifest, pageKey || (parsedPageKey ? pageKey : ''));
 
@@ -168,7 +203,7 @@ module.exports = function(db, baseDir, appDataPath) {
         return res.status(404).json({ error: 'Preview page not found' });
       }
 
-      const renderData = buildPageRenderData({ db, baseDir, page: targetPage });
+      const renderData = buildPageRenderData({ db, baseDir, page: targetPage, siteName });
       const photoPath = renderData.selectedPhotos?.[analyteKey];
 
       if (!photoPath || !fs.existsSync(photoPath)) {
@@ -191,14 +226,16 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
+      const { siteName } = req.query;
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      const manifest = buildPreviewManifest(db, range.startDate, range.endDate);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       const pdfPath = await buildBatchPreviewPdf({
         db,
         baseDir,
         appDataPath,
         templateInfo,
         manifest,
+        siteName,
       });
       const outputFileName = `${path.parse(templateInfo.fileName).name}-${range.startDate}-${range.endDate}.pdf`;
 
@@ -213,6 +250,55 @@ module.exports = function(db, baseDir, appDataPath) {
     } catch (err) {
       console.error('[Excel Batch PDF Error]', err.message);
       return res.status(500).json({ error: `기간 PDF 생성에 실패했습니다: ${err.message}` });
+    }
+  });
+
+  router.get('/api/logs/export', async (req, res) => {
+    const { date, startDate, endDate, templateName } = req.query;
+    const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, templateName, { excelOnly: true });
+
+    if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
+      return res.status(404).json(buildMissingTemplateResponse(templateName));
+    }
+
+    try {
+      const { siteName } = req.query;
+      const range = normalizeDateRange(startDate || date, endDate || date || startDate);
+      console.log(`[Excel Export] Request Range: ${range.startDate} ~ ${range.endDate}, Site: ${siteName || 'ALL'}`);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
+      console.log(`[Excel Export] Manifest generated. Total Sheets: ${manifest.pages.length}`);
+      if (manifest.pages.length > 0) {
+          const distinctDates = [...new Set(manifest.pages.map(p => p.date))];
+          console.log(`[Excel Export] Manifest Dates: ${distinctDates.join(', ')}`);
+      }
+      
+      if (!manifest.pages.length) {
+          return res.status(400).json({ error: '선택한 기간에 수질분석 데이터가 없습니다.' });
+      }
+
+      const outputPaths = await buildBatchExportExcel({
+        db,
+        baseDir,
+        appDataPath,
+        templateInfo,
+        manifest,
+        siteName,
+      });
+
+      // 생성된 각 파일을 시스템 기본 프로그램(Excel)으로 열기
+      const { exec } = require('child_process');
+      for (const filePath of outputPaths) {
+        exec(`start "" "${filePath}"`);
+      }
+
+      return res.json({ 
+        success: true, 
+        message: `${outputPaths.length}개의 엑셀 파일을 열었습니다.`,
+        files: outputPaths.map(p => path.basename(p)),
+      });
+    } catch (err) {
+      console.error('[Excel Batch Export Error]', err.message);
+      return res.status(500).json({ error: `내보내기에 실패했습니다: ${err.message}` });
     }
   });
 

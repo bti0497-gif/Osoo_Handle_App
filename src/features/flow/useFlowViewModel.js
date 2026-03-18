@@ -13,6 +13,23 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
 
     const flowTypes = ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '슬러지', '전력량계'];
 
+    const findPreviousSludgeCumulative = (rows, currentIndex, rowDate, type) => {
+        const currentYear = String(rowDate || '').slice(0, 4);
+
+        for (let i = currentIndex - 1; i >= 0; i--) {
+            if (String(rows[i].date || '').slice(0, 4) !== currentYear) {
+                break;
+            }
+
+            const candidate = correctData(rows[i][type]);
+            if (candidate.flow !== null && candidate.flow !== undefined) {
+                return Number(candidate.flow);
+            }
+        }
+
+        return 0;
+    };
+
     const correctData = (data) => {
         if (!data) return { reading: null, flow: null, error: null };
         return { reading: data.raw, flow: data.diff, error: data.error };
@@ -102,16 +119,24 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
 
             let flow = null;
             let errorMsg = null;
-            if (numRaw !== null && prevReading !== null) {
+
+            if (type === '슬러지') {
+                if (numRaw !== null) {
+                    const previousCumulative = findPreviousSludgeCumulative(newHist, idx, rowDate, type);
+                    flow = Math.round((previousCumulative + numRaw) * 10) / 10;
+
+                    if (numRaw > 10000) {
+                        errorMsg = '입력값이 정상 범위를 초과합니다.';
+                    } else if (numRaw < 0) {
+                        errorMsg = '반출량은 음수일 수 없습니다.';
+                    }
+                }
+            } else if (numRaw !== null && prevReading !== null) {
                 flow = Math.round((numRaw - prevReading) * 10) / 10;
                 if (numRaw < prevReading) {
                     errorMsg = "전일 검침값보다 작습니다.";
                 } else if (flow > 5000000) {
                     errorMsg = "입력값이 비정상적으로 큽니다.";
-                }
-            } else if (numRaw !== null && type === '슬러지') {
-                if (numRaw > 10000) {
-                    errorMsg = "입력값이 정상 범위를 초과합니다.";
                 }
             }
 
@@ -194,6 +219,7 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
                         type,
                         raw_value: data.raw,
                         calculated_flow: data.diff,
+                        sludge_export: type === '슬러지' ? data.raw : null,
                         is_manual: !!data.isManual,
                         is_reset: false
                     });

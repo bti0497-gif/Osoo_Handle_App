@@ -48,6 +48,7 @@ app.use(require('./routes/settingsRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use(require('./routes/uploadRoutes.cjs')(BASE_DIR));
 app.use(require('./routes/locationRoutes.cjs')(BASE_DIR));
 app.use(require('./routes/excelRoutes.cjs')(db, BASE_DIR, appDataPath));
+app.use(require('./routes/dailyWorkLogRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use(require('./routes/hwpRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use('/api/auth', require('./routes/authRoutes.cjs')(db));
 
@@ -76,9 +77,13 @@ async function findFreePort(startPort, endPort) {
 const API_PORT_MIN = (Number(process.env.VITE_PORT) || 8900) + 1;
 const API_PORT_MAX = API_PORT_MIN + 50;
 
-findFreePort(API_PORT_MIN, API_PORT_MAX).then((actualPort) => {
+function writePortFile(port) {
   const portFilePath = path.join(appDataPath, 'server.port');
-  try { fs.writeFileSync(portFilePath, String(actualPort), 'utf8'); } catch (_) { }
+  try { fs.writeFileSync(portFilePath, String(port), 'utf8'); } catch (_) { }
+}
+
+function startListening(actualPort) {
+  writePortFile(actualPort);
 
   const server = app.listen(actualPort, '127.0.0.1', () => {
     console.log(`Local Bridge Server running at http://localhost:${actualPort}`);
@@ -91,4 +96,27 @@ findFreePort(API_PORT_MIN, API_PORT_MAX).then((actualPort) => {
     });
   });
   server.on('error', (err) => { console.error('[Server Error]', err.message); });
-});
+}
+
+if (process.env.ELECTRON === '1') {
+  findFreePort(API_PORT_MIN, API_PORT_MAX).then((actualPort) => {
+    startListening(actualPort);
+  });
+} else {
+  const fixedPort = API_PORT_MIN;
+  const server = app.listen(fixedPort, '127.0.0.1', () => {
+    writePortFile(fixedPort);
+    console.log(`Local Bridge Server running at http://localhost:${fixedPort}`);
+    warmUpExcelPdfConverter(appDataPath).catch((error) => {
+      console.warn(`[Excel PDF Warmup Error] ${error.message}`);
+    });
+  });
+
+  server.on('error', (err) => {
+    console.error('[Server Error]', err.message);
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[Server Error] 개발 환경에서는 백엔드 포트 ${fixedPort}를 고정 사용합니다. 기존 프로세스를 종료한 뒤 다시 시작해 주세요.`);
+    }
+    process.exit(1);
+  });
+}

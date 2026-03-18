@@ -101,16 +101,8 @@ export const useWaterQualityViewModel = (currentUser, { showAlert } = {}) => {
     const [loading, setLoading] = useState(false);
     const [pendingChanges, setPendingChanges] = useState({});
     const [isImportingFromQntech, setIsImportingFromQntech] = useState(false);
-    const [isImportingRangeFromQntech, setIsImportingRangeFromQntech] = useState(false);
     const [lastImportSummary, setLastImportSummary] = useState(null);
     const [lastRangeImportSummary, setLastRangeImportSummary] = useState(null);
-    const [rangeImportProgress, setRangeImportProgress] = useState({
-        status: 'idle',
-        totalDates: 0,
-        completedDates: 0,
-        currentDate: null,
-        message: ''
-    });
     const pendingChangesRef = useRef({});
 
     useEffect(() => {
@@ -118,11 +110,7 @@ export const useWaterQualityViewModel = (currentUser, { showAlert } = {}) => {
     }, []);
 
     useEffect(() => {
-        return () => {
-            if (rangeImportPollingRef.current) {
-                clearInterval(rangeImportPollingRef.current);
-            }
-        };
+        loadReadings();
     }, []);
 
     const normalizeWaterValue = (value) => {
@@ -313,7 +301,7 @@ export const useWaterQualityViewModel = (currentUser, { showAlert } = {}) => {
         }
     };
 
-    const handleImportFromQntech = async (date) => {
+    const handleImportFromQntech = async (date, silent = false) => {
         setIsImportingFromQntech(true);
         try {
             const result = await WaterQualityModel.importFromQntech(date);
@@ -338,14 +326,18 @@ export const useWaterQualityViewModel = (currentUser, { showAlert } = {}) => {
             const importedRowCount = result.summary?.importedRowCount || 0;
             const savedPhotoCount = result.summary?.savedPhotoCount || 0;
 
-            if (importedRowCount === 0 && savedPhotoCount === 0) {
-                showAlert?.('데이터가 없습니다.');
-            } else {
-                showAlert?.(`QnTECH 데이터를 저장했습니다. 값 ${importedRowCount}건, 사진 ${savedPhotoCount}건`);
+            if (!silent) {
+                if (importedRowCount === 0 && savedPhotoCount === 0) {
+                    showAlert?.('데이터가 없습니다.');
+                } else {
+                    showAlert?.(`QnTECH 데이터를 저장했습니다. 값 ${importedRowCount}건, 사진 ${savedPhotoCount}건`);
+                }
             }
             return result;
         } catch (err) {
-            showAlert?.(`QnTECH 불러오기 실패: ${err.message}`);
+            if (!silent) {
+                showAlert?.(`QnTECH 불러오기 실패: ${err.message}`);
+            }
             throw err;
         } finally {
             setIsImportingFromQntech(false);
@@ -353,36 +345,8 @@ export const useWaterQualityViewModel = (currentUser, { showAlert } = {}) => {
     };
 
     const handleImportRangeFromQntech = async (startDate, endDate) => {
-        const stopRangeImportPolling = () => {
-            if (rangeImportPollingRef.current) {
-                clearInterval(rangeImportPollingRef.current);
-                rangeImportPollingRef.current = null;
-            }
-        };
-
-        const pollRangeImportProgress = async () => {
-            try {
-                const progressResponse = await WaterQualityModel.fetchRangeImportProgress();
-                if (progressResponse?.success && progressResponse.progress) {
-                    setRangeImportProgress(progressResponse.progress);
-                }
-            } catch (_) {
-            }
-        };
-
-        setIsImportingRangeFromQntech(true);
-        setRangeImportProgress({
-            status: 'processing',
-            totalDates: 0,
-            completedDates: 0,
-            currentDate: startDate,
-            message: `${startDate} 데이터를 준비하는 중...`
-        });
-
-        stopRangeImportPolling();
-        await pollRangeImportProgress();
-        rangeImportPollingRef.current = setInterval(pollRangeImportProgress, 1000);
-
+        // 기존의 기간 불러오기(단일 API 호출)를 남겨두되, 
+        // 뷰에서는 handleImportFromQntech를 개별적으로 루프돌면서 호출하도록 변경됨
         try {
             const result = await WaterQualityModel.importRangeFromQntech(startDate, endDate);
             if (!result?.success) {
@@ -404,35 +368,11 @@ export const useWaterQualityViewModel = (currentUser, { showAlert } = {}) => {
                 summaryRows: result.summaryRows || []
             });
             setLastImportSummary(null);
-            setRangeImportProgress({
-                status: 'completed',
-                totalDates: result.processedDates || 0,
-                completedDates: result.processedDates || 0,
-                currentDate: result.endDate || endDate,
-                message: '기간 데이터 불러오기가 완료되었습니다.'
-            });
 
             await loadReadings();
-            const insertedRowCount = result.summary?.insertedRowCount || 0;
-            const savedPhotoCount = result.summary?.savedPhotoCount || 0;
-
-            if (insertedRowCount === 0 && savedPhotoCount === 0) {
-                showAlert?.('데이터가 없습니다.');
-            } else {
-                showAlert?.(`기간 불러오기가 완료되었습니다. 값 ${insertedRowCount}건 저장, 사진 ${savedPhotoCount}건 저장`);
-            }
             return result;
         } catch (err) {
-            setRangeImportProgress((prev) => ({
-                ...prev,
-                status: 'error',
-                message: err.message
-            }));
-            showAlert?.(`QnTECH 기간 불러오기 실패: ${err.message}`);
             throw err;
-        } finally {
-            stopRangeImportPolling();
-            setIsImportingRangeFromQntech(false);
         }
     };
 
@@ -516,10 +456,8 @@ export const useWaterQualityViewModel = (currentUser, { showAlert } = {}) => {
         refresh: loadReadings,
         pendingChanges,
         isImportingFromQntech,
-        isImportingRangeFromQntech,
         lastImportSummary,
         lastRangeImportSummary,
-        rangeImportProgress,
         handleImportFromQntech,
         handleImportRangeFromQntech,
         applyImportedWaterValues

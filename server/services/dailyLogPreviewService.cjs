@@ -1,6 +1,8 @@
 const crypto = require('crypto');
 const ExcelJS = require('exceljs');
 const fs = require('fs');
+const JSZip = require('jszip');
+const os = require('os');
 const path = require('path');
 const { PDFDocument } = require('pdf-lib');
 const sharp = require('sharp');
@@ -9,7 +11,7 @@ const { convertExcelToPdf } = require('./excelPdfService.cjs');
 const { getActiveLocations } = require('./qntechWaterValueImportService.cjs');
 const { resolvePhotoRoot } = require('./qntechWaterPhotoImportService.cjs');
 
-const PREVIEW_RENDER_VERSION = '2026-03-10-photo-frame-v9';
+const PREVIEW_RENDER_VERSION = '2026-03-16-photo-anchor-lock-v10';
 
 const ANALYTE_DEFINITIONS = [
   {
@@ -41,9 +43,6 @@ const ANALYTE_DEFINITIONS = [
     photoKeywords: ['알칼리도', '알칼리']
   }
 ];
-
-const IMAGE_EDGE_INSET_PIXELS = 0.5;
-const IMAGE_VERTICAL_OFFSET_PIXELS = 2;
 
 const pendingPreviewJobs = new Map();
 const DEFAULT_RENDER_LOCATIONS = ['유량조정조', '혐기조', '무산소조', '포기조', '침전조'];
@@ -147,131 +146,6 @@ function parseCellRange(range) {
   };
 }
 
-function getMergedRangeForCell(worksheet, address) {
-  const parsedAddress = parseCellAddress(address);
-  if (!parsedAddress) {
-    return null;
-  }
-
-  const merges = Array.isArray(worksheet.model?.merges) ? worksheet.model.merges : [];
-  for (const mergeRef of merges) {
-    const range = parseCellRange(mergeRef);
-    if (!range) continue;
-
-    if (
-      parsedAddress.columnNumber >= range.startColumn
-      && parsedAddress.columnNumber <= range.endColumn
-      && parsedAddress.rowNumber >= range.startRow
-      && parsedAddress.rowNumber <= range.endRow
-    ) {
-      return range;
-    }
-  }
-
-  return {
-    startColumn: parsedAddress.columnNumber,
-    endColumn: parsedAddress.columnNumber,
-    startRow: parsedAddress.rowNumber,
-    endRow: parsedAddress.rowNumber,
-  };
-}
-
-function getColumnWidthPixels(worksheet, columnNumber) {
-  const column = worksheet.getColumn(columnNumber);
-  const width = Number(column?.width || worksheet.properties?.defaultColWidth || 8.43);
-  return Math.max(16, Math.round((((256 * width) + Math.round(128 / 7)) / 256) * 7));
-}
-
-function getRowHeightPixels(worksheet, rowNumber) {
-  const row = worksheet.getRow(rowNumber);
-  const height = Number(row?.height || worksheet.properties?.defaultRowHeight || 15);
-  return Math.max(16, Math.round(height * (96 / 72)));
-}
-
-function sumPixels(start, end, sizeGetter) {
-  let total = 0;
-  for (let index = start; index <= end; index += 1) {
-    total += sizeGetter(index);
-  }
-  return total;
-}
-
-function pixelsToColumnPosition(worksheet, startColumn, offsetPixels) {
-  let remaining = Math.max(0, offsetPixels);
-  let position = startColumn - 1;
-  let currentColumn = startColumn;
-
-  while (remaining > 0) {
-    const columnWidth = getColumnWidthPixels(worksheet, currentColumn);
-    if (remaining >= columnWidth) {
-      position += 1;
-      remaining -= columnWidth;
-      currentColumn += 1;
-      continue;
-    }
-
-    position += remaining / columnWidth;
-    break;
-  }
-
-  return position;
-}
-
-function pixelsToRowPosition(worksheet, startRow, offsetPixels) {
-  let remaining = Math.max(0, offsetPixels);
-  let position = startRow - 1;
-  let currentRow = startRow;
-
-  while (remaining > 0) {
-    const rowHeight = getRowHeightPixels(worksheet, currentRow);
-    if (remaining >= rowHeight) {
-      position += 1;
-      remaining -= rowHeight;
-      currentRow += 1;
-      continue;
-    }
-
-    position += remaining / rowHeight;
-    break;
-  }
-
-  return position;
-}
-
-function getImagePlacement(worksheet, address) {
-  const fallbackAddress = parseCellAddress(address);
-  const range = getMergedRangeForCell(worksheet, address);
-  if (!range) {
-    return {
-      tl: { col: columnToIndex(fallbackAddress?.column || 'A'), row: (fallbackAddress?.rowNumber || 1) - 1 },
-      br: {
-        col: columnToIndex(fallbackAddress?.column || 'A') + 1,
-        row: fallbackAddress?.rowNumber || 1,
-      },
-      renderSize: { width: 199, height: 239 },
-    };
-  }
-
-  const targetWidth = sumPixels(range.startColumn, range.endColumn, (columnNumber) => getColumnWidthPixels(worksheet, columnNumber));
-  const targetHeight = sumPixels(range.startRow, range.endRow, (rowNumber) => getRowHeightPixels(worksheet, rowNumber));
-  const insetPixels = IMAGE_EDGE_INSET_PIXELS;
-  const width = Math.max(1, Math.round(targetWidth - (insetPixels * 2)));
-  const height = Math.max(1, Math.round(targetHeight - (insetPixels * 2)));
-  const offsetX = insetPixels;
-  const offsetY = insetPixels + IMAGE_VERTICAL_OFFSET_PIXELS;
-
-  return {
-    tl: {
-      col: pixelsToColumnPosition(worksheet, range.startColumn, offsetX),
-      row: pixelsToRowPosition(worksheet, range.startRow, offsetY),
-    },
-    br: {
-      col: pixelsToColumnPosition(worksheet, range.startColumn, targetWidth - offsetX),
-      row: pixelsToRowPosition(worksheet, range.startRow, targetHeight - insetPixels),
-    },
-    renderSize: { width, height },
-  };
-}
 
 function parseNamedCellEntries(workbook) {
   const model = workbook.definedNames && Array.isArray(workbook.definedNames.model) ? workbook.definedNames.model : [];
@@ -321,8 +195,8 @@ function getPreviewDirectories(appDataPath) {
   };
 }
 
-function listPageGroups(db, startDate, endDate) {
-  return db.prepare(`
+function listPageGroups(db, startDate, endDate, siteName) {
+  let query = `
     SELECT
       date,
       measurement_group AS measurementGroup,
@@ -333,13 +207,30 @@ function listPageGroups(db, startDate, endDate) {
       MAX(COALESCE(last_modified, created_at, '')) AS lastModified
     FROM water_quality
     WHERE date BETWEEN ? AND ?
+  `;
+  let params = [startDate, endDate];
+
+  if (siteName) {
+    query += ' AND site_name = ?';
+    params.push(siteName);
+  }
+
+  query += `
     GROUP BY date, measurement_group
     ORDER BY date ASC, measurementOrder ASC, measurementGroup ASC
-  `).all(startDate, endDate);
+  `;
+
+  return db.prepare(query).all(...params);
 }
 
-function buildPreviewManifest(db, startDate, endDate) {
-  const groups = listPageGroups(db, startDate, endDate);
+function buildPreviewManifest(db, startDate, endDate, siteName) {
+  console.log(`[Manifest] Building manifest for ${startDate} ~ ${endDate} (Site: ${siteName || 'null'})`);
+  const groups = listPageGroups(db, startDate, endDate, siteName);
+  console.log(`[Manifest] Groups found (database rows): ${groups.length}`);
+  if (groups.length > 0) {
+      console.log(`[Manifest] Database first group: ${groups[0].date}, last group: ${groups[groups.length - 1].date}`);
+  }
+  
   const perDateCounts = groups.reduce((acc, row) => {
     acc.set(row.date, (acc.get(row.date) || 0) + 1);
     return acc;
@@ -366,6 +257,10 @@ function buildPreviewManifest(db, startDate, endDate) {
     };
   });
 
+  console.log(`[Manifest] Result pages: ${pages.length}`);
+  if (pages.length > 0) {
+      console.log(`[Manifest] Result last page date: ${pages[pages.length-1].date}`);
+  }
   return {
     startDate,
     endDate,
@@ -393,11 +288,13 @@ function getDatePhotoDirectory(baseDir, configuredPhotoRoot, date) {
 
 function listPhotoFiles(baseDir, configuredPhotoRoot, date) {
   const photoDir = getDatePhotoDirectory(baseDir, configuredPhotoRoot, date);
+  console.log(`[Photo] Listing files in: ${photoDir}`);
   if (!fs.existsSync(photoDir)) {
+    console.log(`[Photo] Directory does not exist: ${photoDir}`);
     return [];
   }
 
-  return fs.readdirSync(photoDir, { withFileTypes: true })
+  const files = fs.readdirSync(photoDir, { withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => {
       const absolutePath = path.join(photoDir, entry.name);
@@ -409,6 +306,8 @@ function listPhotoFiles(baseDir, configuredPhotoRoot, date) {
         lastModifiedMs: stat.mtimeMs
       };
     });
+  console.log(`[Photo] Found ${files.length} files for ${date}`);
+  return files;
 }
 
 function sortRowsByLocation(rows, activeLocations) {
@@ -423,7 +322,23 @@ function sortRowsByLocation(rows, activeLocations) {
 
 function selectPhotoForAnalyte(photoFiles, page, analyteDefinition) {
   const normalizedSourceLabel = normalizeKey(page.sourceLabel);
-  const candidates = photoFiles.filter((photoFile) => analyteDefinition.photoKeywords.some((keyword) => photoFile.normalizedName.includes(normalizeKey(keyword))));
+  const candidates = photoFiles.filter((photoFile) => {
+    return analyteDefinition.photoKeywords.some((keyword) => {
+      const normKeyword = normalizeKey(keyword);
+      const isMatch = photoFile.normalizedName.includes(normKeyword);
+      if (isMatch) {
+        console.log(`[Photo Match] SUCCESS: "${photoFile.fileName}" matches keyword "${keyword}" (norm: "${normKeyword}")`);
+      }
+      return isMatch;
+    });
+  });
+  
+  if (candidates.length > 0) {
+      console.log(`[Photo] Final candidates for ${analyteDefinition.key}: ${candidates.map(c => c.fileName).join(', ')}`);
+  } else {
+      console.log(`[Photo] No candidates for ${analyteDefinition.key} among ${photoFiles.length} files. Keywords looked for: ${analyteDefinition.photoKeywords.join(', ')}`);
+  }
+
   if (!candidates.length) return null;
 
   if (normalizedSourceLabel) {
@@ -470,9 +385,20 @@ function getTemplateSignature(templatePath) {
   return `${path.basename(templatePath)}:${stat.mtimeMs}:${stat.size}`;
 }
 
-function buildPageContext(db, baseDir, page) {
+function buildPageContext(db, baseDir, page, siteName) {
   const activeLocations = getActiveLocations(db);
-  const rows = sortRowsByLocation(getPageRows(db, page), activeLocations);
+  
+  // 1. 해당 측정 그룹의 모든 데이터 조회
+  let query = 'SELECT * FROM water_quality WHERE date = ? AND measurement_group = ?';
+  let params = [page.date, page.measurementGroup];
+
+  if (siteName) {
+    query += ' AND site_name = ?';
+    params.push(siteName);
+  }
+
+  const baseRows = db.prepare(query).all(...params);
+  const rows = sortRowsByLocation(baseRows, activeLocations);
   const photoFiles = listPhotoFiles(baseDir, getConfiguredPhotoRoot(db), page.date);
   const photoSelection = buildPhotoSelection(photoFiles, page);
 
@@ -490,8 +416,8 @@ function buildPageContext(db, baseDir, page) {
   };
 }
 
-function buildPageRenderData({ db, baseDir, page }) {
-  const pageContext = buildPageContext(db, baseDir, page);
+function buildPageRenderData({ db, baseDir, page, siteName }) {
+  const pageContext = buildPageContext(db, baseDir, page, siteName);
 
   return {
     pageKey: page.pageKey,
@@ -515,33 +441,279 @@ function setCellValue(worksheet, address, value) {
   worksheet.getCell(address).value = value === undefined || value === null ? '' : value;
 }
 
+// --- Image Sizing Helpers ---
+const IMAGE_EDGE_INSET_PIXELS = 5; // 이미지와 셀 경계 사이의 여백 (픽셀)
+const IMAGE_VERTICAL_OFFSET_PIXELS = 2; // 이미지의 세로 위치 조정 (픽셀)
+const PIXELS_PER_INCH = 96;
+const CENTIMETERS_PER_INCH = 2.54;
+const FIXED_IMAGE_WIDTH_CM = 6.54;
+const FIXED_IMAGE_HEIGHT_CM = 9.93;
+const FIXED_IMAGE_WIDTH_PIXELS = Math.round((FIXED_IMAGE_WIDTH_CM / CENTIMETERS_PER_INCH) * PIXELS_PER_INCH);
+const FIXED_IMAGE_HEIGHT_PIXELS = Math.round((FIXED_IMAGE_HEIGHT_CM / CENTIMETERS_PER_INCH) * PIXELS_PER_INCH);
+const EMUS_PER_PIXEL = 9525;
+// Calibrated from a user-adjusted workbook saved on 2026-03-16:
+// C:\Users\ASUS\AppData\Local\Temp\수질분석일지-2026-03-01-1773641602782.xlsx
+// Do not tweak these values casually. If the template layout changes, re-calibrate
+// from a newly saved workbook and update all analyte anchors together.
+const FIXED_PHOTO_ANCHORS = Object.freeze({
+  ammonia: {
+    tl: { nativeCol: 7, nativeColOff: 1, nativeRow: 3, nativeRowOff: 21810 },
+    ext: { width: 3570866 / EMUS_PER_PIXEL, height: 2331425 / EMUS_PER_PIXEL },
+  },
+  nitrate: {
+    tl: { nativeCol: 7, nativeColOff: 1, nativeRow: 16, nativeRowOff: 21810 },
+    ext: { width: 3570866 / EMUS_PER_PIXEL, height: 2331425 / EMUS_PER_PIXEL },
+  },
+  phosphorus: {
+    tl: { nativeCol: 7, nativeColOff: 0, nativeRow: 29, nativeRowOff: 21810 },
+    ext: { width: 3574675 / EMUS_PER_PIXEL, height: 2331425 / EMUS_PER_PIXEL },
+  },
+  alkalinity: {
+    tl: { nativeCol: 7, nativeColOff: 0, nativeRow: 42, nativeRowOff: 21810 },
+    ext: { width: 3574675 / EMUS_PER_PIXEL, height: 2331425 / EMUS_PER_PIXEL },
+  },
+});
+
+function validateFixedPhotoAnchors() {
+  const analyteKeys = ANALYTE_DEFINITIONS.map((definition) => definition.key);
+
+  for (const analyteKey of analyteKeys) {
+    const anchor = FIXED_PHOTO_ANCHORS[analyteKey];
+    if (!anchor) {
+      throw new Error(`고정 사진 anchor가 누락되었습니다: ${analyteKey}`);
+    }
+
+    const { tl, ext } = anchor;
+    const hasValidAnchor = tl
+      && Number.isInteger(tl.nativeCol)
+      && Number.isInteger(tl.nativeColOff)
+      && Number.isInteger(tl.nativeRow)
+      && Number.isInteger(tl.nativeRowOff)
+      && ext
+      && Number.isFinite(ext.width)
+      && Number.isFinite(ext.height)
+      && ext.width > 0
+      && ext.height > 0;
+
+    if (!hasValidAnchor) {
+      throw new Error(`고정 사진 anchor 형식이 잘못되었습니다: ${analyteKey}`);
+    }
+  }
+}
+
+validateFixedPhotoAnchors();
+
+function getColumnWidthPixels(worksheet, colNumber) {
+  const column = worksheet.getColumn(colNumber);
+  // ExcelJS의 column.width는 'character width' 단위이므로 픽셀로 변환 필요
+  // 기본 폰트 (Calibri 11pt) 기준 1 character width = 약 7 픽셀
+  // 정확한 값은 폰트, DPI 등에 따라 달라지므로 근사치 사용
+  return (column.width || 8.43) * 7;
+}
+
+function getRowHeightPixels(worksheet, rowNumber) {
+  const row = worksheet.getRow(rowNumber);
+  // ExcelJS의 row.height는 'point' 단위이므로 픽셀로 변환 필요
+  // 1 point = 1/72 inch, 1 inch = 96 pixels (standard DPI)
+  return (row.height || 15) * (96 / 72);
+}
+
+function sumPixels(start, end, getDimension) {
+  let total = 0;
+  for (let i = start; i <= end; i++) {
+    total += getDimension(i);
+  }
+  return total;
+}
+
+function pixelsToColumnPosition(worksheet, startColumnNumber, pixels) {
+  let remainingPixels = Math.max(0, Number(pixels) || 0);
+  let columnNumber = startColumnNumber;
+
+  while (true) {
+    const colWidthPixels = getColumnWidthPixels(worksheet, columnNumber);
+    if (remainingPixels <= colWidthPixels) {
+      return (columnNumber - 1) + (remainingPixels / colWidthPixels);
+    }
+
+    remainingPixels -= colWidthPixels;
+    columnNumber += 1;
+  }
+}
+
+function pixelsToRowPosition(worksheet, startRowNumber, pixels) {
+  let remainingPixels = Math.max(0, Number(pixels) || 0);
+  let rowNumber = startRowNumber;
+
+  while (true) {
+    const rowHeightPixels = getRowHeightPixels(worksheet, rowNumber);
+    if (remainingPixels <= rowHeightPixels) {
+      return (rowNumber - 1) + (remainingPixels / rowHeightPixels);
+    }
+
+    remainingPixels -= rowHeightPixels;
+    rowNumber += 1;
+  }
+}
+
+function getMergedRangeForCell(worksheet, address) {
+  const parsedAddress = parseCellAddress(address);
+  if (!parsedAddress) {
+    return null;
+  }
+
+  const merges = Array.isArray(worksheet.model?.merges) ? worksheet.model.merges : [];
+  for (const mergeRef of merges) {
+    const range = parseCellRange(mergeRef);
+    if (!range) continue;
+
+    if (
+      parsedAddress.columnNumber >= range.startColumn
+      && parsedAddress.columnNumber <= range.endColumn
+      && parsedAddress.rowNumber >= range.startRow
+      && parsedAddress.rowNumber <= range.endRow
+    ) {
+      return range;
+    }
+  }
+
+  return {
+    startColumn: parsedAddress.columnNumber,
+    endColumn: parsedAddress.columnNumber,
+    startRow: parsedAddress.rowNumber,
+    endRow: parsedAddress.rowNumber,
+  };
+}
+
 async function addNormalizedImageToNamedCell(workbook, worksheet, namedCell, imagePath, analyteKey) {
   if (!imagePath || !fs.existsSync(imagePath)) {
     return;
   }
 
-  const placement = getImagePlacement(worksheet, namedCell.cell.address);
-  const { renderSize, ...excelPlacement } = placement;
+  const fixedAnchor = FIXED_PHOTO_ANCHORS[analyteKey];
+  if (fixedAnchor) {
+    const { data: normalizedBuffer } = await sharp(imagePath)
+      .rotate()
+      .resize({
+        width: Math.max(20, Math.round(fixedAnchor.ext.width) * 2),
+        height: Math.max(20, Math.round(fixedAnchor.ext.height) * 2),
+        fit: 'cover',
+        position: 'centre'
+      })
+      .jpeg({ quality: 90, mozjpeg: true })
+      .toBuffer({ resolveWithObject: true });
 
+    const imageId = workbook.addImage({ buffer: normalizedBuffer, extension: 'jpeg' });
+    worksheet.addImage(imageId, {
+      tl: fixedAnchor.tl,
+      ext: fixedAnchor.ext,
+      editAs: 'oneCell',
+    });
+    return;
+  }
+
+  // Find the merged range and target dimensions
+  const range = getMergedRangeForCell(worksheet, namedCell.cell.address);
+  // Calculate exact target cell/merge area in pixels
+  const targetColWidth = sumPixels(range.startColumn, range.endColumn, (col) => getColumnWidthPixels(worksheet, col));
+  const targetRowHeight = sumPixels(range.startRow, range.endRow, (row) => getRowHeightPixels(worksheet, row));
+
+  const inset = IMAGE_EDGE_INSET_PIXELS;
+  const renderW = Math.max(40, Math.round(targetColWidth - inset * 2));
+  const renderH = Math.max(40, Math.round(targetRowHeight - inset * 2));
+
+  // High-res buffer (2x display size)
   const { data: normalizedBuffer } = await sharp(imagePath)
     .rotate()
     .resize({
-      width: Math.max(1, Math.round(renderSize.width)),
-      height: Math.max(1, Math.round(renderSize.height)),
+      width: Math.max(20, renderW * 2),
+      height: Math.max(20, renderH * 2),
       fit: 'cover',
       position: 'centre'
     })
-    .jpeg({ quality: 82, mozjpeg: true })
+    .jpeg({ quality: 90, mozjpeg: true })
     .toBuffer({ resolveWithObject: true });
 
   const imageId = workbook.addImage({ buffer: normalizedBuffer, extension: 'jpeg' });
 
-  worksheet.addImage(imageId, excelPlacement);
+  // Match the user-adjusted reference image size in Excel: 6.54cm x 9.93cm
+  const fixedWidth = FIXED_IMAGE_WIDTH_PIXELS;
+  const fixedHeight = FIXED_IMAGE_HEIGHT_PIXELS;
+
+  const offsetX = Math.max(0, Math.floor((targetColWidth - fixedWidth) / 2));
+  const offsetY = Math.max(0, Math.floor((targetRowHeight - fixedHeight) / 2)) + IMAGE_VERTICAL_OFFSET_PIXELS;
+  const anchorCol = pixelsToColumnPosition(worksheet, range.startColumn, offsetX);
+  const anchorRow = pixelsToRowPosition(worksheet, range.startRow, offsetY);
+
+  worksheet.addImage(imageId, {
+    tl: { col: anchorCol, row: anchorRow },
+    ext: { width: fixedWidth, height: fixedHeight },
+    editAs: 'oneCell',
+  });
+}
+
+function stripTemplateImages(workbook) {
+  workbook.media = [];
+  workbook.worksheets.forEach((worksheet) => {
+    worksheet._media = [];
+  });
+}
+
+async function sanitizeWorkbookDrawingXml(workbookPath) {
+  if (!workbookPath || !fs.existsSync(workbookPath)) {
+    return;
+  }
+
+  const zipBuffer = fs.readFileSync(workbookPath);
+  const zip = await JSZip.loadAsync(zipBuffer);
+  const drawingPaths = Object.keys(zip.files).filter((filePath) => /^xl\/drawings\/drawing\d+\.xml$/i.test(filePath));
+
+  if (!drawingPaths.length) {
+    return;
+  }
+
+  const sanitizedWidthEmu = String(FIXED_IMAGE_WIDTH_PIXELS * EMUS_PER_PIXEL);
+  const sanitizedHeightEmu = String(FIXED_IMAGE_HEIGHT_PIXELS * EMUS_PER_PIXEL);
+  let hasChanges = false;
+
+  for (const drawingPath of drawingPaths) {
+    const xml = await zip.file(drawingPath).async('string');
+    let sanitizedXml = xml
+      .replace(/<a:extLst>[\s\S]*?<\/a:extLst>/g, '')
+      .replace(/<a:ext\s+cx="0"\s+cy="0"\s*\/>/g, `<a:ext cx="${sanitizedWidthEmu}" cy="${sanitizedHeightEmu}"/>`);
+
+    sanitizedXml = sanitizedXml.replace(/<xdr:oneCellAnchor\b[\s\S]*?<\/xdr:oneCellAnchor>/g, (anchorXml) => {
+      const extMatch = anchorXml.match(/<xdr:ext\s+cx="(\d+)"\s+cy="(\d+)"\s*\/>/);
+      if (!extMatch) {
+        return anchorXml;
+      }
+
+      const [, anchorCx, anchorCy] = extMatch;
+      return anchorXml.replace(/<a:ext\s+cx="\d+"\s+cy="\d+"\s*\/>/, `<a:ext cx="${anchorCx}" cy="${anchorCy}"/>`);
+    });
+
+    if (sanitizedXml !== xml) {
+      zip.file(drawingPath, sanitizedXml);
+      hasChanges = true;
+    }
+  }
+
+  if (!hasChanges) {
+    return;
+  }
+
+  const sanitizedBuffer = await zip.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 9 },
+  });
+  fs.writeFileSync(workbookPath, sanitizedBuffer);
 }
 
 async function bindWorkbookToPage(templatePath, workbookPath, page, pageContext) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(templatePath);
+  stripTemplateImages(workbook);
 
   const namedCells = parseNamedCellEntries(workbook);
   const rows = pageContext.rows;
@@ -575,6 +747,7 @@ async function bindWorkbookToPage(templatePath, workbookPath, page, pageContext)
   }
 
   await workbook.xlsx.writeFile(workbookPath);
+  await sanitizeWorkbookDrawingXml(workbookPath);
 }
 
 async function runPendingJob(cacheKey, factory) {
@@ -594,54 +767,31 @@ async function runPendingJob(cacheKey, factory) {
   return promise;
 }
 
-async function buildPagePreviewPdf({ db, baseDir, appDataPath, templateInfo, page }) {
-  const pageContext = buildPageContext(db, baseDir, page);
+async function buildPagePreviewPdf({ db, baseDir, appDataPath, templateInfo, page, siteName }) {
+  const pageContext = buildPageContext(db, baseDir, page, siteName);
   const templateSignature = getTemplateSignature(templateInfo.absolutePath);
   const cacheKey = hashParts([templateSignature, pageContext.contentSignature]);
   const directories = getPreviewDirectories(appDataPath);
   const workbookPath = path.join(directories.workbookDir, `${cacheKey}.xlsx`);
   const pdfPath = path.join(directories.pagePdfDir, `${cacheKey}.pdf`);
 
-  if (fs.existsSync(pdfPath)) {
-    return { pdfPath, cacheKey, pageContext };
-  }
-
   await runPendingJob(cacheKey, async () => {
     if (fs.existsSync(pdfPath)) {
-      return pdfPath;
+      return { pdfPath, workbookPath };
     }
 
     await bindWorkbookToPage(templateInfo.absolutePath, workbookPath, page, pageContext);
+
+    const { convertExcelToPdf } = require('./excelPdfService.cjs');
     await convertExcelToPdf(workbookPath, pdfPath);
   });
 
-  return { pdfPath, cacheKey, pageContext };
+  return { pdfPath, workbookPath };
 }
 
-async function mergePdfFiles(pdfPaths, outputPath) {
-  const mergedPdf = await PDFDocument.create();
-
-  for (const pdfPath of pdfPaths) {
-    const bytes = fs.readFileSync(pdfPath);
-    const sourcePdf = await PDFDocument.load(bytes);
-    const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
-    copiedPages.forEach((page) => mergedPdf.addPage(page));
-  }
-
-  const mergedBytes = await mergedPdf.save();
-  fs.writeFileSync(outputPath, mergedBytes);
-  return outputPath;
-}
-
-async function buildBatchPreviewPdf({ db, baseDir, appDataPath, templateInfo, manifest }) {
+async function buildBatchPreviewPdf({ db, baseDir, appDataPath, templateInfo, manifest, siteName }) {
   if (!manifest.pages.length) {
     throw new Error('선택한 기간에 수질분석 데이터가 없습니다.');
-  }
-
-  const pageResults = [];
-  for (const page of manifest.pages) {
-    const pageResult = await buildPagePreviewPdf({ db, baseDir, appDataPath, templateInfo, page });
-    pageResults.push(pageResult);
   }
 
   const directories = getPreviewDirectories(appDataPath);
@@ -649,26 +799,174 @@ async function buildBatchPreviewPdf({ db, baseDir, appDataPath, templateInfo, ma
     getTemplateSignature(templateInfo.absolutePath),
     manifest.startDate,
     manifest.endDate,
-    ...pageResults.map((result) => result.cacheKey)
   ]);
   const outputPath = path.join(directories.batchPdfDir, `${batchKey}.pdf`);
 
-  if (fs.existsSync(outputPath)) {
-    return outputPath;
-  }
-
-  await runPendingJob(`batch:${batchKey}`, async () => {
+  await runPendingJob(batchKey, async () => {
     if (fs.existsSync(outputPath)) {
       return outputPath;
     }
 
-    await mergePdfFiles(pageResults.map((result) => result.pdfPath), outputPath);
+    const pdfPaths = [];
+    for (const page of manifest.pages) {
+      const { pdfPath } = await buildPagePreviewPdf({ db, baseDir, appDataPath, templateInfo, page, siteName });
+      pdfPaths.push(pdfPath);
+    }
+
+    const { PDFDocument } = require('pdf-lib');
+    const merged = await PDFDocument.create();
+    for (const pdfPath of pdfPaths) {
+      const pdfBytes = fs.readFileSync(pdfPath);
+      const doc = await PDFDocument.load(pdfBytes);
+      const copiedPages = await merged.copyPages(doc, doc.getPageIndices());
+      copiedPages.forEach((page) => merged.addPage(page));
+    }
+    const mergedBytes = await merged.save();
+    fs.writeFileSync(outputPath, mergedBytes);
   });
 
   return outputPath;
 }
 
+function cloneSheet(workbook, sourceSheet, newSheetName) {
+  const newSheet = workbook.addWorksheet(newSheetName);
+
+  newSheet.pageSetup = { ...(sourceSheet.pageSetup || {}), blackAndWhite: false, draft: false };
+  newSheet.properties = { ...(sourceSheet.properties || {}) };
+  newSheet.views = [ ...(sourceSheet.views || []) ];
+
+  // 컬럼 데이터 및 스타일 복사
+  sourceSheet.columns.forEach((col, i) => {
+    const newCol = newSheet.getColumn(i + 1);
+    newCol.width = col.width;
+    newCol.style = col.style ? JSON.parse(JSON.stringify(col.style)) : undefined;
+  });
+
+  sourceSheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+    const newRow = newSheet.getRow(rowNumber);
+    newRow.height = row.height;
+    newRow.hidden = row.hidden;
+    newRow.outlineLevel = row.outlineLevel;
+
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      const newCell = newRow.getCell(colNumber);
+      newCell.value = cell.value;
+      if (cell.style) {
+        newCell.style = JSON.parse(JSON.stringify(cell.style));
+      }
+      if (cell.numFmt) newCell.numFmt = cell.numFmt;
+    });
+  });
+
+  // 병합 정보 복사 (model.merges가 없을 경우를 대비해 직접 탐색은 어려우므로 모델 활용)
+  const merges = sourceSheet.model.merges || [];
+  merges.forEach(merge => {
+    try { newSheet.mergeCells(merge); } catch (_) {}
+  });
+
+  return newSheet;
+}
+
+// --- 엑셀 내보내기: 단일 파일 내 시트 추가(복사) 방식 ---
+async function buildBatchExportExcel({ db, baseDir, appDataPath, templateInfo, manifest, siteName }) {
+  const startTotal = Date.now();
+  console.log(`[Excel Export] 내보내기 요청 파라미터: startDate=${manifest.startDate}, endDate=${manifest.endDate}, siteName=${siteName || 'null'}`);
+  console.log(`[Excel Export] 매니페스트 정보: 총 ${manifest.pages.length}개 페이지`);
+  manifest.pages.forEach((p, idx) => {
+    console.log(`[Excel Export] 페이지[${idx}]: 날짜=${p.date}, 그룹=${p.measurementGroup}, 차수=${p.measurementOrder}`);
+  });
+
+  if (!manifest.pages.length) {
+    throw new Error('선택한 기간에 수질분석 데이터가 없습니다.');
+  }
+
+  console.log(`[Excel Export] 내보내기 시작: 총 ${manifest.pages.length}개 시트 (기간: ${manifest.startDate} ~ ${manifest.endDate}, 사이트: ${siteName || '전체'})`);
+
+  const tempDir = os.tmpdir();
+  const baseFileName = path.parse(templateInfo.fileName).name;
+  const dateSuffix = manifest.startDate === manifest.endDate ? manifest.startDate : `${manifest.startDate}_${manifest.endDate}`;
+  const clearFileName = `${baseFileName}-${dateSuffix}-${Date.now()}.xlsx`;
+  const outputPath = path.join(tempDir, clearFileName);
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(templateInfo.absolutePath);
+  stripTemplateImages(workbook);
+  
+  const templateSheet = workbook.worksheets[0];
+  const templateSheetName = templateSheet.name;
+  const namedCells = parseNamedCellEntries(workbook);
+
+  for (let i = 0; i < manifest.pages.length; i++) {
+    const startPage = Date.now();
+    const page = manifest.pages[i];
+    const pageContext = buildPageContext(db, baseDir, page, siteName);
+    
+    let finalSheetName = `${i + 1}차`;
+    console.log(`[Excel Export] [${i + 1}/${manifest.pages.length}] "${finalSheetName}" (${page.date}) 처리 중...`);
+
+    const currentSheet = cloneSheet(workbook, templateSheet, finalSheetName);
+
+    const rows = pageContext.rows;
+    let imagesAdded = 0;
+    for (const namedCell of namedCells) {
+      if (namedCell.cell.sheetName !== templateSheetName) continue;
+      
+      if (namedCell.normalizedName === normalizeKey('날짜')) {
+        setCellValue(currentSheet, namedCell.cell.address, page.date);
+        continue;
+      }
+
+      const valueBinding = extractAnalyteValueBinding(namedCell);
+      if (valueBinding) {
+        const row = rows[valueBinding.position];
+        setCellValue(currentSheet, namedCell.cell.address, row?.[valueBinding.definition.field] ?? '');
+        continue;
+      }
+
+      const analyteDefinition = ANALYTE_NAME_MAP.get(namedCell.normalizedName);
+      if (analyteDefinition && analyteDefinition.photoNames.some((photoName) => normalizeKey(photoName) === namedCell.normalizedName)) {
+        const imagePath = pageContext.photoSelection.selectedPhotos[analyteDefinition.key];
+        if (imagePath) {
+          await addNormalizedImageToNamedCell(workbook, currentSheet, namedCell, imagePath, analyteDefinition.key);
+          imagesAdded++;
+        }
+      }
+    }
+    console.log(`[Excel Export] [${i + 1}/${manifest.pages.length}] 완료 (${Date.now() - startPage}ms, 이미지 ${imagesAdded}개)`);
+  }
+
+  workbook.removeWorksheet(templateSheet.id);
+  if (workbook.definedNames) {
+    workbook.definedNames.model = [];
+  }
+
+  console.log(`[Excel Export] 파일 저장 중: ${outputPath}`);
+  const startSave = Date.now();
+  await workbook.xlsx.writeFile(outputPath);
+  await sanitizeWorkbookDrawingXml(outputPath);
+  console.log(`[Excel Export] 저장 완료 (${Date.now() - startSave}ms)`);
+  console.log(`[Excel Export] 전체 공정 완료 (${Date.now() - startTotal}ms)`);
+
+  return [outputPath];
+}
+
+function getActiveDates(db, startDate, endDate, siteName) {
+  let query = 'SELECT DISTINCT date FROM water_quality WHERE date BETWEEN ? AND ?';
+  let params = [startDate, endDate];
+
+  if (siteName) {
+    query += ' AND site_name = ?';
+    params.push(siteName);
+  }
+
+  query += ' ORDER BY date ASC';
+
+  const rows = db.prepare(query).all(...params);
+  return rows.map(r => r.date);
+}
+
 module.exports = {
+  buildBatchExportExcel,
   buildBatchPreviewPdf,
   buildPreviewManifest,
   buildPageRenderData,
@@ -676,4 +974,6 @@ module.exports = {
   findPageInManifest,
   normalizeDateRange,
   parsePageKey,
+  normalizeKey,
+  getActiveDates,
 };

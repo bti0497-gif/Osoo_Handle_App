@@ -27,6 +27,12 @@ export function buildBindingsFromPage(page) {
         return {};
     }
 
+    // 서버에서 이미 완성된 bindings를 보내줄 경우 (일일업무일지 등)
+    if (page.bindings && typeof page.bindings === 'object') {
+        return { ...page.bindings };
+    }
+
+    // 수질분석일지 전용 바인딩 (레거시)
     const bindings = {
         날짜: page.date || '',
     };
@@ -108,11 +114,11 @@ export function buildPrintableDocumentHtml({ templateHtml, pages, title }) {
     }
 
     .dailylog-print-page {
-      width: 100%;
-      max-width: 1120px;
+      width: 160mm; /* A4 210mm - (25mm * 2) */
       break-after: page;
       page-break-after: always;
       background: #ffffff;
+      margin: 0 auto;
     }
 
     .dailylog-print-page:last-child {
@@ -122,7 +128,10 @@ export function buildPrintableDocumentHtml({ templateHtml, pages, title }) {
 
     @page {
       size: A4;
-      margin: 10mm;
+      margin-top: 45mm;
+      margin-bottom: 30mm;
+      margin-left: 25mm;
+      margin-right: 25mm;
     }
 
     @media print {
