@@ -5,14 +5,33 @@ const fs = require('fs');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const { parseAndStoreExcel, getStoredSheets, getStoredRow, getCellValue, hasStoredData, formatDate } = require('../services/excelService.cjs');
 const { normalizeBaseUrl, invalidateQntechSessionCache } = require('../services/qntechAuthService.cjs');
-const { getCustomReportTemplatesDir, listReportTemplates, syncBundledTemplatesToAppData } = require('../services/reportTemplateService.cjs');
 const {
-  convertExcelTemplateToHtml,
-  getHtmlTemplatePath,
-} = require('../services/excelTemplateHtmlService.cjs');
+  ALLOWED_REPORT_TEMPLATE_NAMES,
+  getCustomReportTemplatesDir,
+  isAllowedReportTemplateName,
+  listReportTemplates,
+  syncBundledTemplatesToAppData,
+} = require('../services/reportTemplateService.cjs');
 const router = express.Router();
 
 let importProgress = { current: 0, total: 0, status: 'idle', result: null };
+
+function cleanupDisallowedReportTemplates(reportsDir) {
+  const entries = fs.readdirSync(reportsDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name);
+
+  for (const fileName of entries) {
+    if (isAllowedReportTemplateName(fileName)) {
+      continue;
+    }
+
+    const fullPath = path.join(reportsDir, fileName);
+    if (fs.existsSync(fullPath)) {
+      fs.unlinkSync(fullPath);
+    }
+  }
+}
 
 module.exports = function (db, baseDir, appDataPath) {
   const defaultQntechPhotoRoot = path.join(appDataPath, '사진관리', '수질분석');
@@ -24,8 +43,12 @@ module.exports = function (db, baseDir, appDataPath) {
   const reportStorage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, file.fieldname === 'excel_original' ? excelOriginalsDir : reportsDir),
     filename: (req, file, cb) => {
-      try { cb(null, Buffer.from(file.originalname, 'latin1').toString('utf8')); }
-      catch (e) { cb(null, file.originalname); }
+      try {
+        const decoded = Buffer.from(file.originalname, 'latin1').toString('utf8');
+        cb(null, decoded.normalize('NFC'));
+      } catch (e) {
+        cb(null, String(file.originalname || '').normalize('NFC'));
+      }
     }
   });
   const reportUpload = multer({ storage: reportStorage });
@@ -33,6 +56,7 @@ module.exports = function (db, baseDir, appDataPath) {
   // ── 설정 조회 ──
   router.get('/api/settings', (req, res) => {
     try {
+      cleanupDisallowedReportTemplates(reportsDir);
       const reportTemplates = listReportTemplates(baseDir, appDataPath);
       const settings = db.prepare('SELECT * FROM app_settings WHERE id = 1').get();
       const configItems = db.prepare('SELECT * FROM config_items ORDER BY category, display_order').all();
@@ -492,28 +516,65 @@ module.exports = function (db, baseDir, appDataPath) {
         result.sheets = sheets;
       }
 
-      // 보고서 템플릿 업로드 시: Excel 템플릿은 HTML로 1회 변환하여 캐시 (인쇄/미리보기 속도 개선)
       const reportTemplates = files['report_templates'] || [];
-      const htmlConversions = [];
+      const replacedTemplates = [];
+
+      cleanupDisallowedReportTemplates(reportsDir);
+
+      const invalidTemplateFiles = reportTemplates
+        .map((templateFile) => String(templateFile.filename || '').normalize('NFC'))
+        .filter((fileName) => !isAllowedReportTemplateName(fileName));
+
+      if (invalidTemplateFiles.length) {
+        for (const templateFile of reportTemplates) {
+          const uploadedPath = path.join(reportsDir, String(templateFile.filename || '').normalize('NFC'));
+          if (fs.existsSync(uploadedPath)) {
+            fs.unlinkSync(uploadedPath);
+          }
+        }
+
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_REPORT_TEMPLATE_NAME',
+          message: '이 파일은 양식으로 저장할 수 없습니다.',
+          userMessage: `이 파일은 양식으로 저장할 수 없습니다.\n허용된 양식 이름: ${ALLOWED_REPORT_TEMPLATE_NAMES.join(', ')}`,
+          invalidFiles: invalidTemplateFiles,
+        });
+      }
 
       for (const templateFile of reportTemplates) {
-        const ext = path.extname(templateFile.filename || '').toLowerCase();
-        if (ext === '.xlsx' || ext === '.xlsm' || ext === '.xls') {
-          const templatePath = path.join(reportsDir, templateFile.filename);
-          const htmlPath = getHtmlTemplatePath(appDataPath, templateFile.filename);
-          htmlConversions.push(
-            convertExcelTemplateToHtml({
-              sourcePath: templatePath,
-              outputPath: htmlPath,
-              options: { maxRows: 150, maxCols: 40 },
-            }).then(() => ({ fileName: templateFile.filename, htmlPath }))
-          );
+        const uploadedName = String(templateFile.filename || '').normalize('NFC');
+        const uploadedIdentity = path.parse(uploadedName).name.normalize('NFC').trim().toLowerCase();
+
+        // 같은 양식명(확장자 제외)으로 기존 파일이 있으면 새 파일로 대체한다.
+        const existingFiles = fs.readdirSync(reportsDir, { withFileTypes: true })
+          .filter((entry) => entry.isFile())
+          .map((entry) => entry.name);
+
+        for (const existingName of existingFiles) {
+          if (existingName === uploadedName) {
+            continue;
+          }
+
+          if (path.parse(existingName).name.normalize('NFC').trim().toLowerCase() !== uploadedIdentity) {
+            continue;
+          }
+
+          const existingPath = path.join(reportsDir, existingName);
+
+          if (fs.existsSync(existingPath)) {
+            fs.unlinkSync(existingPath);
+          }
+
+          replacedTemplates.push({
+            template: uploadedIdentity,
+            removedFile: existingName,
+            appliedFile: uploadedName,
+          });
         }
       }
 
-      if (htmlConversions.length) {
-        result.htmlTemplates = await Promise.allSettled(htmlConversions);
-      }
+      result.replacedTemplates = replacedTemplates;
 
       result.reportTemplates = listReportTemplates(baseDir, appDataPath);
 

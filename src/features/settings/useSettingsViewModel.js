@@ -87,7 +87,23 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         waterAnalysisApp: false
     });
 
+    // --- Log Mapping State ---
+    const LOG_TYPES = [
+        { id: 'daily_work_log', label: '일일업무일지' },
+        { id: 'water_analysis_log', label: '수질분석일지' },
+        { id: 'medicine_ledger', label: '약품관리대장' },
+        { id: 'medicine_receipt_log', label: '약품입고일지' },
+        { id: 'sludge_export_ledger', label: '슬러지반출관리대장' },
+        { id: 'sludge_photo_ledger', label: '슬러지사진대지' }
+    ];
+    const [selectedLogType, setSelectedLogType] = useState('daily_work_log');
+    const [logMappings, setLogMappings] = useState([]);
+    const [dbColumns, setDbColumns] = useState({});
+    const [isLogMappingLoading, setIsLogMappingLoading] = useState(false);
 
+    // --- Gemini API Key State ---
+    const [geminiApiKey, setGeminiApiKey] = useState('');
+    const [geminiKeyVisible, setGeminiKeyVisible] = useState(false);
 
     const [importProgress, setImportProgress] = useState({ current: 0, total: 0, status: 'idle', isVisible: false });
     const [importedData, setImportedData] = useState(null);
@@ -107,7 +123,17 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                 checkExcelStatus();
             }
         }
+        if (activeTab === 'logMapping') {
+            loadLogMappings(selectedLogType);
+            loadDbColumns();
+        }
     }, [activeTab]);
+
+    useEffect(() => {
+        if (activeTab === 'logMapping') {
+            loadLogMappings(selectedLogType);
+        }
+    }, [selectedLogType]);
 
     useEffect(() => {
         if (activeTab === 'flow' && flowConfig.sheet && flowConfig.startRow)
@@ -158,6 +184,11 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                             password: credentialMap.water_analysis_app?.password || ''
                         }
                     });
+
+                    // Gemini API Key 복원
+                    if (credentialMap.gemini_api) {
+                        setGeminiApiKey(credentialMap.gemini_api.password || '');
+                    }
                 }
 
                 let restoredQntechMappings = [];
@@ -529,6 +560,85 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         }
     };
 
+    // --- Log Mapping Handlers ---
+    const loadLogMappings = async (logType) => {
+        setIsLogMappingLoading(true);
+        try {
+            const res = await SettingsModel.getLogMappings(logType);
+            if (res.success) {
+                setLogMappings(res.mappings.map(m => ({
+                    fieldName: m.field_name,
+                    mappingType: m.mapping_type || 'column',
+                    mappingValue: m.mapping_value || ''
+                })));
+            }
+        } catch (err) {
+            console.error('Log mappings load failed:', err);
+            setLogMappings([]);
+        } finally {
+            setIsLogMappingLoading(false);
+        }
+    };
+
+    const loadDbColumns = async () => {
+        try {
+            const res = await SettingsModel.getDbColumns();
+            if (res.success) setDbColumns(res.tables);
+        } catch (err) {
+            console.error('DB columns load failed:', err);
+        }
+    };
+
+    const addLogMapping = () => {
+        setLogMappings(prev => [...prev, { fieldName: '', mappingType: 'column', mappingValue: '' }]);
+    };
+
+    const removeLogMapping = (index) => {
+        setLogMappings(prev => prev.filter((_, i) => i !== index));
+    };
+
+    const updateLogMapping = (index, field, value) => {
+        setLogMappings(prev => prev.map((m, i) => i === index ? { ...m, [field]: value } : m));
+    };
+
+    const toggleMappingType = (index) => {
+        setLogMappings(prev => prev.map((m, i) => {
+            if (i !== index) return m;
+            return { ...m, mappingType: m.mappingType === 'column' ? 'formula' : 'column', mappingValue: '' };
+        }));
+    };
+
+    const handleSaveLogMappings = async () => {
+        try {
+            const cleaned = logMappings.filter(m => m.fieldName.trim());
+            const res = await SettingsModel.saveLogMappings(selectedLogType, cleaned);
+            if (res.success) {
+                showAlert?.('일지 매핑이 저장되었습니다.');
+            } else {
+                throw new Error(res.message);
+            }
+        } catch (err) {
+            showAlert?.('일지 매핑 저장 실패: ' + err.message);
+        }
+    };
+
+    // --- Gemini API Key Handler ---
+    const handleSaveGeminiApiKey = async () => {
+        try {
+            const response = await SettingsModel.saveWebAppCredentials({
+                serviceKey: 'gemini_api',
+                serviceUrl: '',
+                userId: '',
+                password: geminiApiKey
+            });
+            if (!response?.success) throw new Error(response?.message || '저장에 실패했습니다.');
+            showAlert?.('Gemini API 키가 저장되었습니다.');
+        } catch (err) {
+            console.error('Gemini API key save error:', err);
+            showAlert?.('Gemini API 키 저장 실패: ' + err.message);
+        }
+    };
+
     const handleExcelFileUpload = async (file) => {
         if (!file) return;
         setIsUploading(true);
@@ -602,5 +712,11 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         updateQntechImportSettingField, updateQntechSampleMapping, addQntechSampleMapping, removeQntechSampleMapping, handleSaveQntechImportSettings,
         handleApply,
         alphabet: ALPHABET,
+        // Log Mapping
+        LOG_TYPES, selectedLogType, setSelectedLogType,
+        logMappings, dbColumns, isLogMappingLoading,
+        addLogMapping, removeLogMapping, updateLogMapping, toggleMappingType, handleSaveLogMappings,
+        // Gemini API
+        geminiApiKey, setGeminiApiKey, geminiKeyVisible, setGeminiKeyVisible, handleSaveGeminiApiKey,
     };
 };

@@ -1,25 +1,6 @@
 import { startTransition, useEffect, useState } from 'react';
 import { DailyLogModel } from './DailyLogModel';
 import { SettingsModel } from '../settings/SettingsModel';
-import { buildFixedPreviewPrintableDocumentHtml, buildPrintableDocumentHtml, buildBindingsFromPage, applyBindingsToHtml, openPrintableDocument } from './dailyLogHtmlDocument';
-
-const FIXED_PREVIEW_TEMPLATES = ['수질분석일지'];
-
-function buildCurrentPdfFileName(templateName, currentPage) {
-    if (!currentPage) {
-        return 'preview.pdf';
-    }
-
-    const safeTemplateName = String(templateName || '일지').trim() || '일지';
-    return `${safeTemplateName}-${currentPage.date}-${currentPage.pageNumberForDate}.pdf`;
-}
-
-function buildRangePdfFileName(templateName, startDate, endDate) {
-    const safeTemplateName = String(templateName || '일지').trim() || '일지';
-    return startDate === endDate
-        ? `${safeTemplateName}-${startDate}.pdf`
-        : `${safeTemplateName}-${startDate}_${endDate}.pdf`;
-}
 
 function parseLocalDateString(value) {
     const normalized = String(value || '').trim();
@@ -375,141 +356,6 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         });
     };
 
-    const buildDocumentHtml = async (pagesToRender, title) => {
-        if (FIXED_PREVIEW_TEMPLATES.includes(templateName)) {
-            return buildFixedPreviewPrintableDocumentHtml({ pages: pagesToRender, title });
-        }
-
-        // HTML 템플릿 기반 (일일업무일지 등)
-        const htmlTemplate = await DailyLogModel.fetchTemplateHtml(templateName);
-        return buildPrintableDocumentHtml({
-            templateHtml: htmlTemplate,
-            pages: pagesToRender,
-            title,
-        });
-    };
-
-    const openHtmlPrintDocument = async (pagesToRender, defaultFileName) => {
-        if (!pagesToRender.length) {
-            return;
-        }
-
-        const title = defaultFileName.replace(/\.pdf$/i, '');
-        const documentHtml = await buildDocumentHtml(pagesToRender, title);
-
-        openPrintableDocument(documentHtml);
-    };
-
-    const savePdfDocument = async (pagesToRender, defaultFileName) => {
-        if (!pagesToRender.length) {
-            return;
-        }
-
-        const documentHtml = await buildDocumentHtml(
-            pagesToRender,
-            defaultFileName.replace(/\.pdf$/i, ''),
-        );
-
-        const electronApi = window?.electronAPI;
-        if (electronApi?.savePdf) {
-            const result = await electronApi.savePdf({
-                defaultFileName,
-                htmlContent: documentHtml,
-            });
-
-            return result;
-        }
-
-        openPrintableDocument(documentHtml);
-        await showAlert?.('브라우저 환경에서는 시스템 인쇄 창에서 PDF로 저장해 주세요.', 'PDF 저장 안내');
-        return { canceled: true, fallback: true };
-    };
-
-    const fetchRenderPages = async (targetPages) => {
-        return Promise.all(targetPages.map(async (page) => {
-            if (pageRenderData && currentPage?.pageKey === page.pageKey) {
-                return pageRenderData;
-            }
-
-            const result = await DailyLogModel.fetchPreviewPageData({
-                startDate: computedStartDate,
-                endDate: computedEndDate,
-                pageKey: page.pageKey,
-                templateName,
-                siteName,
-            });
-
-            return result.page || null;
-        }));
-    };
-
-    const handlePrintCurrent = async () => {
-        if (!currentPage || !pageRenderData) {
-            return;
-        }
-
-        try {
-            setIsOutputProcessing(true);
-            await openHtmlPrintDocument([pageRenderData], buildCurrentPdfFileName(templateName, currentPage));
-        } catch (error) {
-            await showAlert?.(error?.data?.userMessage || error?.message || '출력용 HTML 문서를 만들지 못했습니다.', '출력 실패');
-        } finally {
-            setIsOutputProcessing(false);
-        }
-    };
-
-    const handleDownloadCurrent = async () => {
-        if (!currentPage || !pageRenderData) {
-            return;
-        }
-        try {
-            setIsOutputProcessing(true);
-            const result = await savePdfDocument([pageRenderData], buildCurrentPdfFileName(templateName, currentPage));
-            if (!result?.canceled && !result?.fallback) {
-                await showAlert?.('PDF 저장이 완료되었습니다.', 'PDF 저장 완료');
-            }
-        } catch (error) {
-            await showAlert?.(error?.data?.userMessage || error?.message || 'PDF 저장용 HTML 문서를 만들지 못했습니다.', 'PDF 저장 실패');
-        } finally {
-            setIsOutputProcessing(false);
-        }
-    };
-
-    const handlePrintRange = async () => {
-        try {
-            if (!pages.length) {
-                return;
-            }
-
-            setIsOutputProcessing(true);
-            const renderPages = (await fetchRenderPages(pages)).filter(Boolean);
-            await openHtmlPrintDocument(renderPages, buildRangePdfFileName(templateName, computedStartDate, computedEndDate));
-        } catch (error) {
-            await showAlert?.(error?.data?.userMessage || error?.message || '범위 출력용 HTML 문서를 만들지 못했습니다.', '출력 실패');
-        } finally {
-            setIsOutputProcessing(false);
-        }
-    };
-
-    const handleDownloadRange = async () => {
-        try {
-            if (!pages.length) {
-                return;
-            }
-
-            setIsOutputProcessing(true);
-            const renderPages = (await fetchRenderPages(pages)).filter(Boolean);
-            const result = await savePdfDocument(renderPages, buildRangePdfFileName(templateName, computedStartDate, computedEndDate));
-            if (!result?.canceled && !result?.fallback) {
-                await showAlert?.('PDF 저장이 완료되었습니다.', 'PDF 저장 완료');
-            }
-        } catch (error) {
-            await showAlert?.(error?.data?.userMessage || error?.message || '범위 PDF 저장용 HTML 문서를 만들지 못했습니다.', 'PDF 저장 실패');
-        } finally {
-            setIsOutputProcessing(false);
-        }
-    };
-
     const handleExportExcel = async () => {
         const dateRangeStr = sortedDates.length > 1
             ? `${computedStartDate},${computedEndDate}`
@@ -622,10 +468,6 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         hasNextPage: currentPageIndex < pages.length - 1,
         handlePrevPage: () => handleMovePage(-1),
         handleNextPage: () => handleMovePage(1),
-        handlePrintCurrent,
-        handleDownloadCurrent,
-        handlePrintRange,
-        handleDownloadRange,
         handleExportExcel,
         activeDates,
         setCalendarActiveStartDate,

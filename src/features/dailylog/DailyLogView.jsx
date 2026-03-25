@@ -1,28 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import '../../styles/calendar-custom.css';
 import { useDialog } from '../../components/common/DialogProvider';
-import DailyLogFixedPreview from './DailyLogFixedPreview';
-import ExcelHtmlPrintView from './ExcelHtmlPrintView';
 import DailyLogStatusDashboard from './DailyLogStatusDashboard';
 import { useDailyLogViewModel } from './useDailyLogViewModel';
-
-const FIXED_PREVIEW_TEMPLATES = ['수질분석일지'];
-
-const formatDisplayDate = (value) => {
-    const normalized = String(value || '').trim();
-    if (!normalized) {
-        return '';
-    }
-
-    const [year, month, day] = normalized.split('-');
-    if (!year || !month || !day) {
-        return normalized;
-    }
-
-    return `${year}-${month}-${day}`;
-};
 
 const DailyLogView = ({ currentUser, templateName = '수질분석일지', title = '수질분석일지' }) => {
     const { showAlert } = useDialog();
@@ -30,22 +12,11 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         selectedDates,
         handleDateClick,
         pages,
-        currentPage,
-        pageRenderData,
-        pageIndicator,
         isManifestLoading,
         isPreviewAssetLoading,
         isOutputProcessing,
         manifestError,
         manifestErrorCode,
-        hasPreviousPage,
-        hasNextPage,
-        handlePrevPage,
-        handleNextPage,
-        handlePrintCurrent,
-        handleDownloadCurrent,
-        handlePrintRange,
-        handleDownloadRange,
         activeDates,
         setCalendarActiveStartDate,
         handleExportExcel,
@@ -54,24 +25,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         dashboardSummary,
         isDashboardLoading,
     } = useDailyLogViewModel(currentUser, undefined, templateName, showAlert);
-    const [isOutputMenuOpen, setIsOutputMenuOpen] = useState(false);
-    const outputMenuRef = useRef(null);
     const lastAlertMessageRef = useRef('');
-    
-    const isMultipleDates = selectedDates && selectedDates.length > 1;
-    const showSingleDayBatchActions = !isMultipleDates && pages.length > 1;
-    const showRangeBatchActions = isMultipleDates;
-
-    useEffect(() => {
-        const handlePointerDown = (event) => {
-            if (!outputMenuRef.current?.contains(event.target)) {
-                setIsOutputMenuOpen(false);
-            }
-        };
-
-        document.addEventListener('mousedown', handlePointerDown);
-        return () => document.removeEventListener('mousedown', handlePointerDown);
-    }, []);
 
     useEffect(() => {
         if (manifestErrorCode !== 'REPORT_TEMPLATE_MISSING' || !manifestError) {
@@ -85,50 +39,6 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         lastAlertMessageRef.current = manifestError;
         showAlert(manifestError, `${title} 양식 필요`);
     }, [manifestError, manifestErrorCode, showAlert, title]);
-
-    const handleMenuAction = (action) => {
-        setIsOutputMenuOpen(false);
-        action();
-    };
-
-    const outputMenuItemStyle = {
-        width: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px',
-        padding: '12px 14px',
-        border: 'none',
-        backgroundColor: '#ffffff',
-        color: '#0f172a',
-        fontSize: '0.8125rem',
-        fontWeight: 800,
-        cursor: 'pointer',
-        textAlign: 'left',
-        transition: 'background-color 0.15s ease'
-    };
-
-    const handleMenuItemMouseEnter = (event) => {
-        event.currentTarget.style.backgroundColor = '#e2e8f0';
-    };
-
-    const handleMenuItemMouseLeave = (event) => {
-        event.currentTarget.style.backgroundColor = '#ffffff';
-    };
-
-    const openDatePicker = (inputRef) => {
-        const input = inputRef.current;
-        if (!input) {
-            return;
-        }
-
-        if (typeof input.showPicker === 'function') {
-            input.showPicker();
-            return;
-        }
-
-        input.focus();
-        input.click();
-    };
 
     // date 포맷 지원 함수 (캘린더의 타일 비교를 위함)
     const getFormattedDateString = (date) => {

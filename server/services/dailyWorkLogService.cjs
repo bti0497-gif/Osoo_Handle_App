@@ -8,6 +8,7 @@ const { PDFDocument } = require('pdf-lib');
 const { convertExcelToPdf } = require('./excelPdfService.cjs');
 
 const PREVIEW_RENDER_VERSION = '2026-03-16-daily-work-log-flow-aggregate-v5';
+const EXPORT_TEMP_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 const pendingPreviewJobs = new Map();
 
@@ -16,6 +17,32 @@ function ensureDirectory(dirPath) {
     fs.mkdirSync(dirPath, { recursive: true });
   }
   return dirPath;
+}
+
+function getExportTempDirectory() {
+  return ensureDirectory(path.join(os.tmpdir(), 'osoo-handle-app', 'daily-work-log-exports'));
+}
+
+function cleanupOldExportTempFiles() {
+  const targetDir = getExportTempDirectory();
+  const now = Date.now();
+
+  const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const fullPath = path.join(targetDir, entry.name);
+    try {
+      const stat = fs.statSync(fullPath);
+      if ((now - stat.mtimeMs) > EXPORT_TEMP_RETENTION_MS) {
+        fs.unlinkSync(fullPath);
+      }
+    } catch (_) {
+      // 파일이 이미 삭제되었거나 접근 불가한 경우 무시
+    }
+  }
 }
 
 function normalizeDate(value) {
@@ -664,8 +691,8 @@ async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }
     throw new Error('선택한 기간에 데이터가 없습니다.');
   }
 
-  // 시스템 임시 폴더 사용
-  const tempDir = os.tmpdir();
+  cleanupOldExportTempFiles();
+  const tempDir = getExportTempDirectory();
   const baseFileName = path.parse(templateInfo.fileName).name;
   const dateSuffix = manifest.startDate === manifest.endDate ? manifest.startDate : `${manifest.startDate}_${manifest.endDate}`;
   const clearFileName = `${baseFileName}-${dateSuffix}-${Date.now()}.xlsx`;

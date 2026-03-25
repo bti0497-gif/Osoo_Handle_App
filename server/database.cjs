@@ -467,14 +467,14 @@ syncTables.forEach(tableName => {
     console.log(`Adding 'author' column to ${tableName}`);
     db.prepare(`ALTER TABLE ${tableName} ADD COLUMN author TEXT`).run();
   }
-  
+
   if (!cols.includes('is_synced')) {
     console.log(`Adding 'is_synced' column to ${tableName}`);
     db.prepare(`ALTER TABLE ${tableName} ADD COLUMN is_synced INTEGER DEFAULT 0`).run();
     // 기존 데이터는 모두 미동기화(0) 상태로 초기화하여 최초 동기화 유도
     db.prepare(`UPDATE ${tableName} SET is_synced = 0`).run();
   }
-  
+
   if (!cols.includes('last_modified')) {
     console.log(`Adding 'last_modified' column to ${tableName}`);
     db.prepare(`ALTER TABLE ${tableName} ADD COLUMN last_modified TEXT`).run();

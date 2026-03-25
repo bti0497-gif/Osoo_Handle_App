@@ -2,9 +2,28 @@ const fs = require('fs');
 const path = require('path');
 
 const EXCEL_TEMPLATE_EXTENSIONS = new Set(['.xlsx', '.xls', '.xlsm']);
+const ALLOWED_REPORT_TEMPLATE_NAMES = [
+  '일일업무일지',
+  '수질분석일지',
+  '약품관리대장',
+  '약품입고일지',
+  '슬러지반출관리대장',
+  '슬러지사진대지',
+];
+const ALLOWED_REPORT_TEMPLATE_IDENTITIES = new Set(
+  ALLOWED_REPORT_TEMPLATE_NAMES.map((name) => normalizeTemplateKey(name))
+);
 
 function normalizeTemplateKey(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '').normalize('NFC').trim().toLowerCase();
+}
+
+function getTemplateIdentity(value) {
+  return normalizeTemplateKey(path.parse(String(value || '')).name);
+}
+
+function isAllowedReportTemplateName(value) {
+  return ALLOWED_REPORT_TEMPLATE_IDENTITIES.has(getTemplateIdentity(value));
 }
 
 function ensureDirectory(dirPath) {
@@ -46,6 +65,20 @@ function listFiles(dirPath) {
     .sort((left, right) => left.localeCompare(right, 'ko'));
 }
 
+function removeDisallowedTemplates(dirPath) {
+  const files = listFiles(dirPath);
+  files.forEach((fileName) => {
+    if (isAllowedReportTemplateName(fileName)) {
+      return;
+    }
+
+    const fullPath = path.join(dirPath, fileName);
+    if (fs.existsSync(fullPath)) {
+      fs.unlinkSync(fullPath);
+    }
+  });
+}
+
 function isExcelReportTemplate(fileName) {
   return EXCEL_TEMPLATE_EXTENSIONS.has(path.extname(String(fileName || '')).toLowerCase());
 }
@@ -67,10 +100,15 @@ function isTemplateMatched(fileName, templateName) {
 
 function syncBundledTemplatesToAppData(baseDir, appDataPath) {
   const customDir = getCustomReportTemplatesDir(appDataPath);
+  removeDisallowedTemplates(customDir);
   const bundledDirs = getBundledReportTemplateDirs(baseDir);
 
   bundledDirs.forEach((bundledDir) => {
     listFiles(bundledDir).forEach((fileName) => {
+      if (!isAllowedReportTemplateName(fileName)) {
+        return;
+      }
+
       const sourcePath = path.join(bundledDir, fileName);
       const targetPath = path.join(customDir, fileName);
       if (!fs.existsSync(targetPath)) {
@@ -84,22 +122,30 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
 
 function listReportTemplates(baseDir, appDataPath) {
   const customDir = syncBundledTemplatesToAppData(baseDir, appDataPath);
-  return listFiles(customDir).map((fileName) => ({
+  return listFiles(customDir)
+    .filter((fileName) => isAllowedReportTemplateName(fileName))
+    .map((fileName) => ({
     fileName,
     relativePath: path.posix.join('templates', 'reports', fileName),
     isExcelTemplate: isExcelReportTemplate(fileName)
-  }));
+    }));
 }
 
 function resolveReportTemplatePath(baseDir, appDataPath, templateName, options = {}) {
   const customDir = syncBundledTemplatesToAppData(baseDir, appDataPath);
   const { excelOnly = false } = options;
-  const availableTemplates = listFiles(customDir).filter((fileName) => !excelOnly || isExcelReportTemplate(fileName));
+  const availableTemplates = listFiles(customDir)
+    .filter((fileName) => isAllowedReportTemplateName(fileName))
+    .filter((fileName) => !excelOnly || isExcelReportTemplate(fileName));
 
   let targetName = String(templateName || '').trim();
   if (!targetName) {
     targetName = availableTemplates.find((fileName) => isExcelReportTemplate(fileName)) || '';
   } else {
+    if (!isAllowedReportTemplateName(targetName)) {
+      return null;
+    }
+
     const matchedTemplate = availableTemplates.find((fileName) => isTemplateMatched(fileName, targetName));
     targetName = matchedTemplate || '';
   }
@@ -121,7 +167,9 @@ function resolveReportTemplatePath(baseDir, appDataPath, templateName, options =
 }
 
 module.exports = {
+  ALLOWED_REPORT_TEMPLATE_NAMES,
   getCustomReportTemplatesDir,
+  isAllowedReportTemplateName,
   isExcelReportTemplate,
   listReportTemplates,
   resolveReportTemplatePath,

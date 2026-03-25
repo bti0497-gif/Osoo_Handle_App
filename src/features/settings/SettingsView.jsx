@@ -26,6 +26,12 @@ const SettingsView = ({ currentUser }) => {
         updateQntechImportSettingField, updateQntechSampleMapping, addQntechSampleMapping, removeQntechSampleMapping, handleSaveQntechImportSettings,
         handleApply,
         alphabet,
+        // Log Mapping
+        LOG_TYPES, selectedLogType, setSelectedLogType,
+        logMappings, dbColumns, isLogMappingLoading,
+        addLogMapping, removeLogMapping, updateLogMapping, toggleMappingType, handleSaveLogMappings,
+        // Gemini API
+        geminiApiKey, setGeminiApiKey, geminiKeyVisible, setGeminiKeyVisible, handleSaveGeminiApiKey,
     } = vm;
 
     const renderFlowSettings = () => {
@@ -1072,10 +1078,377 @@ const SettingsView = ({ currentUser }) => {
         );
     };
 
+    // --- 일지 매핑용 DB 컬럼 옵션 구성 ---
+    const dbColumnOptions = Object.entries(dbColumns).flatMap(([table, cols]) =>
+        cols.map(c => `${table}.${c}`)
+    );
+
+    const renderLogMappingSettings = () => (
+        <div style={{ display: 'flex', height: '100%', minHeight: '480px' }}>
+            {/* 좌측: 일지 종류 리스트 */}
+            <div style={{
+                width: '200px',
+                flexShrink: 0,
+                borderRight: '1px solid #e2e8f0',
+                backgroundColor: '#f8fafc',
+                padding: '1rem 0',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '2px'
+            }}>
+                <div style={{
+                    padding: '0.5rem 1.25rem',
+                    fontSize: '0.7rem',
+                    fontWeight: 900,
+                    color: '#94a3b8',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                }}>
+                    일지 양식 선택
+                </div>
+                {LOG_TYPES.map(logType => (
+                    <button
+                        key={logType.id}
+                        onClick={() => setSelectedLogType(logType.id)}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            width: '100%',
+                            padding: '0.625rem 1.25rem',
+                            border: 'none',
+                            background: selectedLogType === logType.id ? '#e2e8f0' : 'transparent',
+                            color: selectedLogType === logType.id ? '#0f172a' : '#475569',
+                            fontWeight: selectedLogType === logType.id ? 900 : 700,
+                            fontSize: '0.8125rem',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            transition: 'all 0.15s',
+                            borderLeft: selectedLogType === logType.id ? '3px solid #1e293b' : '3px solid transparent'
+                        }}
+                    >
+                        <span className="material-icons" style={{ fontSize: '16px', color: selectedLogType === logType.id ? '#1e293b' : '#94a3b8' }}>
+                            description
+                        </span>
+                        {logType.label}
+                    </button>
+                ))}
+            </div>
+
+            {/* 우측: 매핑 패널 */}
+            <div style={{ flex: 1, padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 900, color: '#1e293b' }}>
+                            {LOG_TYPES.find(t => t.id === selectedLogType)?.label || ''} 매핑
+                        </h3>
+                        <span style={{ fontSize: '0.725rem', color: '#64748b', fontWeight: 600 }}>
+                            Excel 셀 이름 / HWP 책갈피와 DB 컬럼을 연결합니다.
+                        </span>
+                    </div>
+                    <button
+                        onClick={addLogMapping}
+                        style={{
+                            border: '1px solid #cbd5e1',
+                            background: 'white',
+                            color: '#0f172a',
+                            borderRadius: '8px',
+                            height: '34px',
+                            padding: '0 12px',
+                            fontSize: '0.75rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                        }}
+                    >
+                        <span className="material-icons" style={{ fontSize: '16px' }}>add</span>
+                        매핑 추가
+                    </button>
+                </div>
+
+                {/* 헤더 */}
+                {logMappings.length > 0 && (
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1.2fr auto 1.5fr auto',
+                        gap: '8px',
+                        alignItems: 'center',
+                        padding: '0 4px'
+                    }}>
+                        <span style={{ fontSize: '0.625rem', fontWeight: 900, color: '#94a3b8' }}>필드명 (셀이름/책갈피)</span>
+                        <span style={{ fontSize: '0.625rem', fontWeight: 900, color: '#94a3b8', textAlign: 'center' }}>모드</span>
+                        <span style={{ fontSize: '0.625rem', fontWeight: 900, color: '#94a3b8' }}>매핑 값</span>
+                        <span />
+                    </div>
+                )}
+
+                {isLogMappingLoading ? (
+                    <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontWeight: 700, fontSize: '0.8125rem' }}>
+                        불러오는 중...
+                    </div>
+                ) : logMappings.length === 0 ? (
+                    <div style={{
+                        padding: '2rem',
+                        textAlign: 'center',
+                        color: '#94a3b8',
+                        fontWeight: 700,
+                        fontSize: '0.8125rem',
+                        backgroundColor: '#f8fafc',
+                        borderRadius: '10px',
+                        border: '1px dashed #cbd5e1'
+                    }}>
+                        매핑 항목이 없습니다. "매핑 추가" 버튼을 눌러 시작하세요.
+                    </div>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {logMappings.map((mapping, index) => (
+                            <div
+                                key={index}
+                                style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '1.2fr auto 1.5fr auto',
+                                    gap: '8px',
+                                    alignItems: 'center'
+                                }}
+                            >
+                                {/* 필드명 입력 */}
+                                <input
+                                    type="text"
+                                    value={mapping.fieldName}
+                                    onChange={(e) => updateLogMapping(index, 'fieldName', e.target.value)}
+                                    placeholder="예: B3 또는 전력사용량"
+                                    style={{
+                                        width: '100%',
+                                        height: '38px',
+                                        border: '1.5px solid #cbd5e1',
+                                        borderRadius: '8px',
+                                        padding: '0 10px',
+                                        fontSize: '0.8125rem',
+                                        fontWeight: 700,
+                                        color: '#1e293b',
+                                        boxSizing: 'border-box',
+                                        backgroundColor: 'white'
+                                    }}
+                                />
+
+                                {/* fx 토글 버튼 */}
+                                <button
+                                    type="button"
+                                    onClick={() => toggleMappingType(index)}
+                                    title={mapping.mappingType === 'column' ? 'DB 컬럼 모드 (클릭하면 수식 모드로 전환)' : '수식 모드 (클릭하면 DB 컬럼 모드로 전환)'}
+                                    style={{
+                                        width: '38px',
+                                        height: '38px',
+                                        border: `1.5px solid ${mapping.mappingType === 'formula' ? '#3b82f6' : '#cbd5e1'}`,
+                                        borderRadius: '8px',
+                                        backgroundColor: mapping.mappingType === 'formula' ? '#eff6ff' : 'white',
+                                        color: mapping.mappingType === 'formula' ? '#2563eb' : '#64748b',
+                                        fontWeight: 900,
+                                        fontSize: '0.875rem',
+                                        fontFamily: 'serif',
+                                        fontStyle: 'italic',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                    }}
+                                >
+                                    fx
+                                </button>
+
+                                {/* 매핑 값 */}
+                                {mapping.mappingType === 'column' ? (
+                                    <select
+                                        value={mapping.mappingValue}
+                                        onChange={(e) => updateLogMapping(index, 'mappingValue', e.target.value)}
+                                        style={{
+                                            width: '100%',
+                                            height: '38px',
+                                            border: '1.5px solid #cbd5e1',
+                                            borderRadius: '8px',
+                                            padding: '0 10px',
+                                            fontSize: '0.8125rem',
+                                            fontWeight: 700,
+                                            color: '#1e293b',
+                                            boxSizing: 'border-box',
+                                            backgroundColor: 'white'
+                                        }}
+                                    >
+                                        <option value="">컬럼 선택</option>
+                                        {dbColumnOptions.map(opt => (
+                                            <option key={opt} value={opt}>{opt}</option>
+                                        ))}
+                                    </select>
+                                ) : (
+                                    <input
+                                        type="text"
+                                        value={mapping.mappingValue}
+                                        onChange={(e) => updateLogMapping(index, 'mappingValue', e.target.value)}
+                                        placeholder="=내부반송1+내부반송2"
+                                        style={{
+                                            width: '100%',
+                                            height: '38px',
+                                            border: '1.5px solid #3b82f6',
+                                            borderRadius: '8px',
+                                            padding: '0 10px',
+                                            fontSize: '0.8125rem',
+                                            fontWeight: 700,
+                                            fontFamily: 'monospace',
+                                            color: '#1e40af',
+                                            boxSizing: 'border-box',
+                                            backgroundColor: '#f0f9ff'
+                                        }}
+                                    />
+                                )}
+
+                                {/* 삭제 버튼 */}
+                                <button
+                                    type="button"
+                                    onClick={() => removeLogMapping(index)}
+                                    style={{
+                                        width: '38px',
+                                        height: '38px',
+                                        border: '1px solid #fecaca',
+                                        background: '#fff1f2',
+                                        color: '#be123c',
+                                        borderRadius: '8px',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 800,
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                    }}
+                                >
+                                    <span className="material-icons" style={{ fontSize: '18px' }}>delete</span>
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* 저장 버튼 */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                    <button
+                        onClick={handleSaveLogMappings}
+                        style={{
+                            minWidth: '160px',
+                            height: '42px',
+                            border: 'none',
+                            borderRadius: '10px',
+                            backgroundColor: '#1e293b',
+                            color: 'white',
+                            fontSize: '0.8125rem',
+                            fontWeight: 900,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '6px'
+                        }}
+                    >
+                        <span className="material-icons" style={{ fontSize: '18px' }}>save</span>
+                        매핑 저장
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+
     const renderWebAppSettings = () => (
         <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             {renderCredentialSection('roadWeb', '도로공사 웹페이지 설정', '도로공사 웹페이지 로그인 계정을 저장합니다.')}
             {renderCredentialSection('waterAnalysisApp', '수질분석 앱 설정', '수질분석 앱 로그인 계정을 저장합니다.')}
+
+            {/* Gemini API Key Section */}
+            <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1rem',
+                backgroundColor: '#f8fafc',
+                padding: '1.5rem',
+                borderRadius: '14px',
+                border: '1px solid #e2e8f0'
+            }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 900, color: '#1e293b' }}>Gemini API 설정</h3>
+                    <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>AI 기능에 필요한 Gemini API 키를 등록합니다.</span>
+                </div>
+                <div>
+                    <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>API Key</label>
+                    <div style={{ position: 'relative' }}>
+                        <input
+                            type={geminiKeyVisible ? 'text' : 'password'}
+                            value={geminiApiKey}
+                            onChange={(e) => setGeminiApiKey(e.target.value)}
+                            placeholder="AIza..."
+                            style={{
+                                width: '100%',
+                                height: '42px',
+                                border: '1.5px solid #cbd5e1',
+                                borderRadius: '8px',
+                                padding: '0 42px 0 12px',
+                                fontSize: '0.8125rem',
+                                fontWeight: 700,
+                                fontFamily: 'monospace',
+                                color: '#1e293b',
+                                boxSizing: 'border-box',
+                                backgroundColor: 'white'
+                            }}
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setGeminiKeyVisible(prev => !prev)}
+                            style={{
+                                position: 'absolute',
+                                top: '50%',
+                                right: '10px',
+                                transform: 'translateY(-50%)',
+                                border: 'none',
+                                background: 'none',
+                                padding: 0,
+                                width: '24px',
+                                height: '24px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                color: '#64748b'
+                            }}
+                            aria-label={geminiKeyVisible ? 'API 키 숨기기' : 'API 키 표시'}
+                        >
+                            <span className="material-icons" style={{ fontSize: '20px' }}>
+                                {geminiKeyVisible ? 'visibility_off' : 'visibility'}
+                            </span>
+                        </button>
+                    </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                        onClick={handleSaveGeminiApiKey}
+                        style={{
+                            minWidth: '132px',
+                            height: '42px',
+                            border: 'none',
+                            borderRadius: '10px',
+                            backgroundColor: '#1e293b',
+                            color: 'white',
+                            fontSize: '0.8125rem',
+                            fontWeight: 900,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '6px'
+                        }}
+                    >
+                        <span className="material-icons" style={{ fontSize: '18px' }}>save</span>
+                        저장하기
+                    </button>
+                </div>
+            </div>
             <div style={{
                 display: 'flex',
                 flexDirection: 'column',
@@ -1585,6 +1958,7 @@ const SettingsView = ({ currentUser }) => {
                             { id: 'medicine', label: '약품설정' },
                             { id: 'water', label: '수질설정' },
                             { id: 'kit', label: '키트설정' },
+                            { id: 'logMapping', label: '일지설정' },
                             { id: 'webapp', label: '웹/앱설정' }
                         ].map((tab) => (
                             <button
@@ -1615,7 +1989,8 @@ const SettingsView = ({ currentUser }) => {
                                 activeTab === 'medicine' ? renderMedicineSettings() :
                                     activeTab === 'water' ? renderWaterSettings() :
                                         activeTab === 'kit' ? renderKitSettings() :
-                                            activeTab === 'webapp' ? renderWebAppSettings() : null}
+                                            activeTab === 'logMapping' ? renderLogMappingSettings() :
+                                                activeTab === 'webapp' ? renderWebAppSettings() : null}
                     </div>
                     {renderImportProgress()}
                     {renderDataModal()}
