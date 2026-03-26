@@ -265,8 +265,8 @@ function buildBindingsForDate(db, date) {
 
   const bindings = {};
 
-  // --- 기본 정보 ---
-  bindings['제목'] = '일 일 업 무 일 지';
+  // 제목은 양식 파일 원본 값을 유지한다 (현장마다 다른 제목 사용)
+  // bindings['제목'] = '일 일 업 무 일 지';
   bindings['날짜'] = date;
   bindings['이름'] = settings.manager_name || '';
 
@@ -685,8 +685,146 @@ function cloneSheet(workbook, sourceSheet, newSheetName) {
   return newSheet;
 }
 
-// --- 엑셀 내보내기: 단일 파일 내 시트 추가(복사) 방식 ---
+// --- 엑셀 내보내기: JSZip 기반 (도형/이미지/카메라 보존) ---
+
+/**
+ * xlsx 파일을 zip으로 열어, definedNames에서 셀 이름 ↔ 셀 주소 매핑을 추출한다.
+ * ExcelJS는 사용하지 않고, workbook.xml의 XML을 직접 파싱한다.
+ */
+function parseDefinedNamesFromXml(workbookXml) {
+  const names = [];
+  // <definedName name="..." ...>RANGE</definedName> 패턴 매칭
+  const regex = /<definedName\s+name="([^"]+)"[^>]*>([^<]+)<\/definedName>/g;
+  let match;
+  while ((match = regex.exec(workbookXml)) !== null) {
+    const name = match[1];
+    const range = match[2];
+    const cellRef = parseCellReference(range);
+    if (cellRef) {
+      names.push({ name, normalizedName: normalizeKey(name), cell: cellRef });
+    }
+  }
+  return names;
+}
+
+/**
+ * workbook.xml에서 시트 이름 → rId 매핑을, workbook.xml.rels에서 rId → 파일명 매핑을 추출하여
+ * 시트 이름 → 실제 zip 경로를 반환한다.
+ */
+function resolveSheetPaths(workbookXml, relsXml) {
+  const sheetMap = {};
+  // <sheet name="..." sheetId="..." r:id="..."/>
+  const sheetRegex = /<sheet\s+name="([^"]+)"[^>]*r:id="([^"]+)"[^>]*\/?>/g;
+  let m;
+  while ((m = sheetRegex.exec(workbookXml)) !== null) {
+    sheetMap[m[1]] = m[2]; // name → rId
+  }
+
+  const relMap = {};
+  // <Relationship Id="..." ... Target="..."/>
+  const relRegex = /<Relationship\s[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"[^>]*/g;
+  while ((m = relRegex.exec(relsXml)) !== null) {
+    relMap[m[1]] = m[2]; // rId → target path
+  }
+
+  const result = {};
+  for (const [sheetName, rId] of Object.entries(sheetMap)) {
+    const target = relMap[rId];
+    if (target) {
+      // target은 "worksheets/sheet1.xml" 형태, zip 경로는 "xl/worksheets/sheet1.xml"
+      result[sheetName] = target.startsWith('/') ? target.slice(1) : `xl/${target}`;
+    }
+  }
+  return result;
+}
+
+/**
+ * 셀 주소(예: "F5")를 열 번호(1-based)로 변환한다.
+ */
+function colLetterToNumber(letters) {
+  let n = 0;
+  for (const ch of letters) {
+    n = n * 26 + (ch.charCodeAt(0) - 64);
+  }
+  return n;
+}
+
+/**
+ * 열 번호(1-based)를 셀 주소 문자열(예: "AF")로 변환한다.
+ */
+function colNumberToLetter(num) {
+  let result = '';
+  while (num > 0) {
+    const remainder = (num - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    num = Math.floor((num - 1) / 26);
+  }
+  return result;
+}
+
+/**
+ * 시트 XML 내에서 특정 셀의 값을 교체한다.
+ * 기존 셀 태그의 <v>...</v> 값을 새 값으로 교체하거나,
+ * 셀이 없으면 해당 행에 새 셀을 삽입한다.
+ *
+ * 숫자 값은 <v>로, 문자열은 inlineStr 방식의 <is><t>로 저장한다.
+ */
+function setCellInSheetXml(sheetXml, address, value) {
+  const colMatch = address.match(/^([A-Z]+)(\d+)$/);
+  if (!colMatch) return sheetXml;
+  const colLetters = colMatch[1];
+  const rowNum = colMatch[2];
+
+  const strValue = value === undefined || value === null ? '' : String(value);
+  const isNum = strValue !== '' && !isNaN(Number(strValue)) && isFinite(Number(strValue));
+
+  // 기존 셀을 찾아서 교체
+  // <c r="F5" ...>...</c> 또는 <c r="F5" .../>
+  const cellRegex = new RegExp(
+    `(<c\\s[^>]*r="${address}"[^>]*?)(?:\\/>|>([\\s\\S]*?)<\\/c>)`,
+    'i'
+  );
+  const cellMatch = cellRegex.exec(sheetXml);
+
+  if (cellMatch) {
+    // 기존 셀이 있음 → 값 교체
+    let openTag = cellMatch[1];
+    if (isNum) {
+      // 숫자: t 속성 제거, <v> 사용
+      openTag = openTag.replace(/\s+t="[^"]*"/, '');
+      const replacement = `${openTag}><v>${strValue}</v></c>`;
+      return sheetXml.replace(cellMatch[0], replacement);
+    } else {
+      // 문자열: t="inlineStr", <is><t> 사용
+      openTag = openTag.replace(/\s+t="[^"]*"/, '');
+      openTag = openTag.replace(/(r="[^"]+")/, `$1 t="inlineStr"`);
+      const escaped = strValue.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const replacement = `${openTag}><is><t>${escaped}</t></is></c>`;
+      return sheetXml.replace(cellMatch[0], replacement);
+    }
+  }
+
+  // 셀이 없으면 → 해당 행에 새 셀을 삽입
+  const rowRegex = new RegExp(`(<row\\s[^>]*r="${rowNum}"[^>]*?>)([\\s\\S]*?)(<\\/row>)`, 'i');
+  const rowMatch = rowRegex.exec(sheetXml);
+  if (rowMatch) {
+    let newCell;
+    if (isNum) {
+      newCell = `<c r="${address}"><v>${strValue}</v></c>`;
+    } else {
+      const escaped = strValue.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      newCell = `<c r="${address}" t="inlineStr"><is><t>${escaped}</t></is></c>`;
+    }
+    const updatedRow = `${rowMatch[1]}${rowMatch[2]}${newCell}${rowMatch[3]}`;
+    return sheetXml.replace(rowMatch[0], updatedRow);
+  }
+
+  return sheetXml; // 행도 없으면 변경하지 않음
+}
+
 async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }) {
+  const JSZip = require('jszip');
+
   if (!manifest.pages.length) {
     throw new Error('선택한 기간에 데이터가 없습니다.');
   }
@@ -694,69 +832,215 @@ async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }
   cleanupOldExportTempFiles();
   const tempDir = getExportTempDirectory();
   const baseFileName = path.parse(templateInfo.fileName).name;
-  const dateSuffix = manifest.startDate === manifest.endDate ? manifest.startDate : `${manifest.startDate}_${manifest.endDate}`;
+  const templateBuffer = fs.readFileSync(templateInfo.absolutePath);
+  const dateSuffix = manifest.startDate === manifest.endDate
+    ? manifest.startDate
+    : `${manifest.startDate}_${manifest.endDate}`;
   const clearFileName = `${baseFileName}-${dateSuffix}-${Date.now()}.xlsx`;
   const outputPath = path.join(tempDir, clearFileName);
 
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(templateInfo.absolutePath);
-  
-  const templateSheet = workbook.worksheets[0];
-  const templateSheetName = templateSheet.name;
-  const namedCells = parseNamedCellEntries(workbook);
+  const zip = await JSZip.loadAsync(templateBuffer);
+  let wbXml = await zip.file('xl/workbook.xml').async('string');
+  let wbRelsXml = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+  let contentTypesXml = await zip.file('[Content_Types].xml').async('string');
 
-  // [Phase 1]: 날짜별 시트 생성. 일일업무일지는 날짜당 1시트를 기준으로 한다.
-  const mappingTasks = [];
+  const namedCells = parseDefinedNamesFromXml(wbXml);
+  const sheetPaths = resolveSheetPaths(wbXml, wbRelsXml);
+  const firstSheetName = Object.keys(sheetPaths)[0];
+  const firstSheetZipPath = sheetPaths[firstSheetName]; // e.g. "xl/worksheets/sheet1.xml"
 
+  console.log(`[Daily Work Log Export] JSZip multi-sheet: ${namedCells.length} named cells, template sheet: "${firstSheetName}"`);
+
+  // 원본 시트 관련 파일 경로 파악
+  const sheetFileName = path.basename(firstSheetZipPath); // "sheet1.xml"
+  const sheetBaseName = path.parse(sheetFileName).name;   // "sheet1"
+  const sheetDir = path.dirname(firstSheetZipPath);       // "xl/worksheets"
+
+  // 원본 시트 XML 읽기
+  const templateSheetXml = await zip.file(firstSheetZipPath).async('string');
+
+  // 원본 시트의 rels 파일 (도형/이미지 참조)
+  const sheetRelsPath = `${sheetDir}/_rels/${sheetFileName}.rels`;
+  const hasSheetRels = !!zip.file(sheetRelsPath);
+  const templateSheetRels = hasSheetRels ? await zip.file(sheetRelsPath).async('string') : null;
+
+  // 원본 시트의 drawing 파일 찾기
+  let templateDrawingPath = null;
+  let templateDrawingXml = null;
+  let templateDrawingRelsPath = null;
+  let templateDrawingRels = null;
+  if (templateSheetRels) {
+    const drawMatch = templateSheetRels.match(/Target="([^"]*drawing[^"]*\.xml)"/i);
+    if (drawMatch) {
+      const drawTarget = drawMatch[1];
+      templateDrawingPath = drawTarget.startsWith('/')
+        ? drawTarget.slice(1)
+        : path.posix.join('xl/worksheets', drawTarget).replace(/\.\.\//g, '').replace('worksheets/drawings', 'drawings');
+
+      // normalize path: ../drawings/drawing1.xml → xl/drawings/drawing1.xml
+      if (drawTarget.startsWith('..')) {
+        templateDrawingPath = path.posix.normalize(`xl/worksheets/${drawTarget}`);
+      }
+
+      if (zip.file(templateDrawingPath)) {
+        templateDrawingXml = await zip.file(templateDrawingPath).async('string');
+        const drawingFileName = path.basename(templateDrawingPath);
+        templateDrawingRelsPath = `${path.dirname(templateDrawingPath)}/_rels/${drawingFileName}.rels`;
+        if (zip.file(templateDrawingRelsPath)) {
+          templateDrawingRels = await zip.file(templateDrawingRelsPath).async('string');
+        }
+      }
+    }
+  }
+
+  // 원본 시트의 인쇄 영역 definedName 항목 추출을 위한 준비
+  const escapedOrigName = firstSheetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // wbRelsXml에서 기존 최대 rId 번호 찾기
+  const rIdMatches = [...wbRelsXml.matchAll(/Id="rId(\d+)"/g)];
+  let maxRId = rIdMatches.reduce((max, m) => Math.max(max, parseInt(m[1])), 0);
+
+  // wbXml에서 기존 최대 sheetId 찾기
+  const sheetIdMatches = [...wbXml.matchAll(/sheetId="(\d+)"/g)];
+  let maxSheetId = sheetIdMatches.reduce((max, m) => Math.max(max, parseInt(m[1])), 0);
+
+  // [Content_Types].xml에서 기존 시트 Override 추가용 위치 찾기
+  const contentTypeInsertPoint = '</Types>';
+
+  // 각 날짜에 대해 시트를 복제하고 바인딩 적용
   for (let i = 0; i < manifest.pages.length; i++) {
     const page = manifest.pages[i];
     const pageDate = page.date || '날짜미상';
-    const sheetName = pageDate;
-    
-    // 2. 템플릿 기반으로 시트 생성 (첫 번째 페이지는 기존 템플릿 시트 이름 변경, 나머지는 복사)
-    let currentSheet;
-    if (i === 0) {
-      currentSheet = templateSheet;
-      currentSheet.name = sheetName;
-    } else {
-      currentSheet = cloneSheet(workbook, templateSheet, sheetName);
-    }
-    
-    // 3. 차후 바인딩을 위해 작업 저장
-    mappingTasks.push({
-      sheet: currentSheet,
-      page: page
-    });
-  }
-
-  // [Phase 2]: 준비된 빈 시트에 일괄 데이터 바인딩
-  for (let j = 0; j < mappingTasks.length; j++) {
-    const task = mappingTasks[j];
-    const currentSheet = task.sheet;
-    const page = task.page;
-
-    // 데이터 바인딩
     const bindings = buildBindingsForDate(db, page.date);
-    for (const namedCell of namedCells) {
-      if (namedCell.cell.sheetName !== templateSheetName) continue;
 
-      const normalizedName = namedCell.normalizedName;
-      const originalName = namedCell.name;
+    if (i === 0) {
+      // === 첫 번째 시트: 원본 시트를 직접 수정 ===
+      let sheetXml = templateSheetXml;
+      for (const nc of namedCells) {
+        if (nc.cell.sheetName !== firstSheetName) continue;
+        const nName = nc.normalizedName;
+        const oName = nc.name;
+        let value;
+        if (Object.prototype.hasOwnProperty.call(bindings, nName)) value = bindings[nName];
+        else if (Object.prototype.hasOwnProperty.call(bindings, oName)) value = bindings[oName];
+        else continue;
+        sheetXml = setCellInSheetXml(sheetXml, nc.cell.address, value);
+      }
+      zip.file(firstSheetZipPath, sheetXml);
 
-      let value;
-      if (Object.prototype.hasOwnProperty.call(bindings, normalizedName)) {
-        value = bindings[normalizedName];
-      } else if (Object.prototype.hasOwnProperty.call(bindings, originalName)) {
-        value = bindings[originalName];
-      } else {
-        continue;
+      // 시트 이름 변경
+      wbXml = wbXml.replace(
+        new RegExp(`name="${escapedOrigName}"`),
+        `name="${pageDate}"`
+      );
+      // definedName 참조도 업데이트
+      wbXml = wbXml.replace(new RegExp(`'${escapedOrigName}'!`, 'g'), `'${pageDate}'!`);
+      wbXml = wbXml.replace(new RegExp(`${escapedOrigName}!`, 'g'), `'${pageDate}'!`);
+
+    } else {
+      // === 추가 시트: 시트 XML/도면/rels를 복사 ===
+      const newSheetNum = i + 1;
+      const newSheetFileName = `sheet${maxSheetId + newSheetNum}.xml`;
+      const newSheetZipPath = `${sheetDir}/${newSheetFileName}`;
+      const newRId = `rId${++maxRId}`;
+      const newSheetId = ++maxSheetId;
+
+      // 시트 XML 복사 및 바인딩
+      let newSheetXml = templateSheetXml;
+      for (const nc of namedCells) {
+        if (nc.cell.sheetName !== firstSheetName) continue;
+        const nName = nc.normalizedName;
+        const oName = nc.name;
+        let value;
+        if (Object.prototype.hasOwnProperty.call(bindings, nName)) value = bindings[nName];
+        else if (Object.prototype.hasOwnProperty.call(bindings, oName)) value = bindings[oName];
+        else continue;
+        newSheetXml = setCellInSheetXml(newSheetXml, nc.cell.address, value);
+      }
+      zip.file(newSheetZipPath, newSheetXml);
+
+      // 시트 rels 복사 (도면 참조 포함)
+      let newDrawingPath = null;
+      if (templateSheetRels) {
+        let newSheetRels = templateSheetRels;
+
+        // drawing 파일도 복제
+        if (templateDrawingPath && templateDrawingXml) {
+          const drawingBaseName = path.parse(path.basename(templateDrawingPath)).name;
+          const newDrawingFileName = `${drawingBaseName}_s${newSheetNum}.xml`;
+          newDrawingPath = `${path.dirname(templateDrawingPath)}/${newDrawingFileName}`;
+
+          zip.file(newDrawingPath, templateDrawingXml);
+
+          // drawing rels도 복사 (이미지 참조)
+          if (templateDrawingRels) {
+            const newDrawingRelsPath = `${path.dirname(templateDrawingPath)}/_rels/${newDrawingFileName}.rels`;
+            zip.file(newDrawingRelsPath, templateDrawingRels);
+          }
+
+          // 시트 rels에서 drawing 경로를 새 경로로 교체
+          const oldDrawingTarget = path.basename(templateDrawingPath);
+          newSheetRels = newSheetRels.replace(oldDrawingTarget, newDrawingFileName);
+        }
+
+        const newSheetRelsPath = `${sheetDir}/_rels/${newSheetFileName}.rels`;
+        zip.file(newSheetRelsPath, newSheetRels);
       }
 
-      setCellValue(currentSheet, namedCell.cell.address, value);
+      // workbook.xml에 새 시트 등록
+      const sheetInsertRegex = /(<\/sheets>)/;
+      wbXml = wbXml.replace(
+        sheetInsertRegex,
+        `<sheet name="${pageDate}" sheetId="${newSheetId}" r:id="${newRId}"/></sheets>`
+      );
+
+      // 인쇄영역 등 definedName을 새 시트에도 적용
+      // localSheetId는 시트 순서 (0-based index)
+      const printAreaRegex = /<definedName\s+name="_xlnm\.Print_Area"[^>]*>([^<]+)<\/definedName>/;
+      const printAreaMatch = printAreaRegex.exec(wbXml);
+      if (printAreaMatch) {
+        const origRange = printAreaMatch[1];
+        // 첫 시트 이름으로 된 참조를 새 시트 이름으로 교체
+        const newRangeRef = origRange.replace(
+          new RegExp(`'[^']*'!`),
+          `'${pageDate}'!`
+        );
+        const newDefinedName = `<definedName name="_xlnm.Print_Area" localSheetId="${i}">${newRangeRef}</definedName>`;
+        wbXml = wbXml.replace('</definedNames>', `${newDefinedName}</definedNames>`);
+      }
+
+      // workbook.xml.rels에 새 관계 등록
+      wbRelsXml = wbRelsXml.replace(
+        '</Relationships>',
+        `<Relationship Id="${newRId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/${newSheetFileName}"/></Relationships>`
+      );
+
+      // [Content_Types].xml에 새 시트 등록
+      contentTypesXml = contentTypesXml.replace(
+        contentTypeInsertPoint,
+        `<Override PartName="/xl/worksheets/${newSheetFileName}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>${contentTypeInsertPoint}`
+      );
+
+      // drawing도 [Content_Types].xml에 등록
+      if (newDrawingPath) {
+        const drawingPartName = '/' + newDrawingPath.replace(/\\/g, '/');
+        contentTypesXml = contentTypesXml.replace(
+          contentTypeInsertPoint,
+          `<Override PartName="${drawingPartName}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>${contentTypeInsertPoint}`
+        );
+      }
     }
   }
 
-  await workbook.xlsx.writeFile(outputPath);
+  // 수정된 메타 XML들을 zip에 반영
+  zip.file('xl/workbook.xml', wbXml);
+  zip.file('xl/_rels/workbook.xml.rels', wbRelsXml);
+  zip.file('[Content_Types].xml', contentTypesXml);
+
+  const outputBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  fs.writeFileSync(outputPath, outputBuffer);
+
+  console.log(`[Daily Work Log Export] Generated single file with ${manifest.pages.length} sheet(s): ${path.basename(outputPath)}`);
   return [outputPath];
 }
 

@@ -27,10 +27,12 @@
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "googleapis": "^171.4.0",
+    "jszip": "^3.10.1",
     "multer": "^2.0.2",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.5.207",
     "react": "^19.2.0",
+    "react-calendar": "^6.0.0",
     "react-dom": "^19.2.0",
     "react-quill-new": "^3.8.3",
     "sharp": "^0.34.5"

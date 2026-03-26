@@ -108,6 +108,10 @@ module.exports = function (db, baseDir, appDataPath) {
       return res.status(404).json(buildMissingTemplateResponse());
     }
 
+    // DEBUG: 어떤 양식 파일이 사용되는지 확인
+    const tStat = fs.statSync(templateInfo.absolutePath);
+    console.log(`[Daily Work Log Export] Template: ${templateInfo.absolutePath} (${tStat.size} bytes, mtime: ${tStat.mtime.toISOString()})`);
+
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
