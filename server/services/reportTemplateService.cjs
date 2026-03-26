@@ -103,16 +103,27 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
   removeDisallowedTemplates(customDir);
   const bundledDirs = getBundledReportTemplateDirs(baseDir);
 
+  const existingFiles = listFiles(customDir);
+  const existingIdentities = new Set(existingFiles.map(f => getTemplateIdentity(f)));
+
   bundledDirs.forEach((bundledDir) => {
     listFiles(bundledDir).forEach((fileName) => {
       if (!isAllowedReportTemplateName(fileName)) {
         return;
       }
 
+      const identity = getTemplateIdentity(fileName);
       const sourcePath = path.join(bundledDir, fileName);
       const targetPath = path.join(customDir, fileName);
+
+      // 해당 식별자의 파일이 이미 존재하면 (확장자 상관없이) 복사하지 않음
+      if (existingIdentities.has(identity)) {
+        return;
+      }
+
       if (!fs.existsSync(targetPath)) {
         fs.copyFileSync(sourcePath, targetPath);
+        existingIdentities.add(identity); // 새로 추가된 식별자 기록
       }
     });
   });

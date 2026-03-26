@@ -546,31 +546,29 @@ module.exports = function (db, baseDir, appDataPath) {
         const uploadedName = String(templateFile.filename || '').normalize('NFC');
         const uploadedIdentity = path.parse(uploadedName).name.normalize('NFC').trim().toLowerCase();
 
-        // 같은 양식명(확장자 제외)으로 기존 파일이 있으면 새 파일로 대체한다.
-        const existingFiles = fs.readdirSync(reportsDir, { withFileTypes: true })
+        // 현재 디렉토리의 모든 파일을 확인하여, 식별자가 같은 모든 파일을 삭제한다.
+        // (Multer가 방금 저장한 파일은 제외하고, 나머지는 확장자와 상관없이 삭제)
+        const currentFiles = fs.readdirSync(reportsDir, { withFileTypes: true })
           .filter((entry) => entry.isFile())
           .map((entry) => entry.name);
 
-        for (const existingName of existingFiles) {
+        for (const existingName of currentFiles) {
           if (existingName === uploadedName) {
             continue;
           }
 
-          if (path.parse(existingName).name.normalize('NFC').trim().toLowerCase() !== uploadedIdentity) {
-            continue;
+          const existingIdentity = path.parse(existingName).name.normalize('NFC').trim().toLowerCase();
+          if (existingIdentity === uploadedIdentity) {
+            const existingPath = path.join(reportsDir, existingName);
+            if (fs.existsSync(existingPath)) {
+              fs.unlinkSync(existingPath);
+              replacedTemplates.push({
+                template: uploadedIdentity,
+                removedFile: existingName,
+                appliedFile: uploadedName,
+              });
+            }
           }
-
-          const existingPath = path.join(reportsDir, existingName);
-
-          if (fs.existsSync(existingPath)) {
-            fs.unlinkSync(existingPath);
-          }
-
-          replacedTemplates.push({
-            template: uploadedIdentity,
-            removedFile: existingName,
-            appliedFile: uploadedName,
-          });
         }
       }
 
