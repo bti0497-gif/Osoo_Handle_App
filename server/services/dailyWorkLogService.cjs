@@ -137,7 +137,7 @@ function getKitLogs(db, date) {
 }
 
 function getSiteSettings(db) {
-  return db.prepare('SELECT site_name, manager_name, method, series FROM app_settings WHERE id = 1').get() || {};
+  return db.prepare('SELECT site_name, manager_name, method, series, flow_option FROM app_settings WHERE id = 1').get() || {};
 }
 
 function getActiveConfigItems(db, category) {
@@ -199,6 +199,98 @@ function findFlowByKeyword(flows, keyword) {
   });
 }
 
+/**
+ * flowOption에 따라 내부/외부 반송 유량값을 결정하는 헬퍼
+ * @param {Array} flows - 해당 날짜의 flow_readings 목록
+ * @param {string} keyword - '내부반송' 또는 '외부반송'
+ * @param {string} flowOption - 'single1' | 'single2' | 'combined'
+ * @returns {{ raw_value, calculated_flow }} 또는 null
+ */
+function getFlowByOption(flows, keyword, flowOption) {
+  // 1계열 현장이면 기존 방식 그대로
+  if (!flowOption || flowOption === 'single1') {
+    // 1계열: '내부반송유량계' 또는 '내부반송유량계1' 형태
+    return flows.find(f => {
+      const t = String(f.type || '').trim();
+      return t.includes(keyword) && !t.endsWith('2');
+    }) || findFlowByKeyword(flows, keyword);
+  }
+
+  if (flowOption === 'single2') {
+    // 2계열만: '내부반송유량계2' 형태
+    return flows.find(f => {
+      const t = String(f.type || '').trim();
+      return t.includes(keyword) && t.endsWith('2');
+    }) || null;
+  }
+
+  if (flowOption === 'combined') {
+    // 1+2계열 합산
+    const series1 = flows.find(f => {
+      const t = String(f.type || '').trim();
+      return t.includes(keyword) && !t.endsWith('2');
+    });
+    const series2 = flows.find(f => {
+      const t = String(f.type || '').trim();
+      return t.includes(keyword) && t.endsWith('2');
+    });
+
+    if (!series1 && !series2) return null;
+    if (!series2) return series1;
+    if (!series1) return series2;
+
+    // 두 계열 합산
+    const rawVal1 = parseFloat(series1.raw_value) || 0;
+    const rawVal2 = parseFloat(series2.raw_value) || 0;
+    const calcFlow1 = parseFloat(series1.calculated_flow) || 0;
+    const calcFlow2 = parseFloat(series2.calculated_flow) || 0;
+
+    return {
+      ...series1,
+      raw_value: rawVal1 + rawVal2,
+      calculated_flow: calcFlow1 + calcFlow2
+    };
+  }
+
+  // fallback
+  return findFlowByKeyword(flows, keyword);
+}
+
+/**
+ * flowOption에 따라 내부/외부 반송 기간 합계를 구하는 헬퍼
+ */
+function sumFlowFieldByOption(db, keyword, field, startDate, endDate, flowOption) {
+  if (!flowOption || flowOption === 'single1') {
+    // 1계열: type이 keyword를 포함하고 '2'로 끝나지 않는 것
+    const row = db.prepare(
+      `SELECT SUM(${field}) as total FROM flow_readings WHERE type LIKE ? AND type NOT LIKE '%2' AND date BETWEEN ? AND ?`
+    ).get(`%${keyword}%`, startDate, endDate);
+    return row?.total ?? '';
+  }
+
+  if (flowOption === 'single2') {
+    // 2계열만: type이 keyword를 포함하고 '2'로 끝나는 것
+    const row = db.prepare(
+      `SELECT SUM(${field}) as total FROM flow_readings WHERE type LIKE ? AND type LIKE '%2' AND date BETWEEN ? AND ?`
+    ).get(`%${keyword}%`, startDate, endDate);
+    return row?.total ?? '';
+  }
+
+  if (flowOption === 'combined') {
+    // 1+2계열 합산: keyword를 포함하는 모든 type의 합
+    const row = db.prepare(
+      `SELECT SUM(${field}) as total FROM flow_readings WHERE type LIKE ? AND date BETWEEN ? AND ?`
+    ).get(`%${keyword}%`, startDate, endDate);
+    return row?.total ?? '';
+  }
+
+  // fallback
+  const row = db.prepare(
+    `SELECT SUM(${field}) as total FROM flow_readings WHERE type LIKE ? AND date BETWEEN ? AND ?`
+  ).get(`%${keyword}%`, startDate, endDate);
+  return row?.total ?? '';
+}
+
 function findMedicineByKeyword(medicines, keyword) {
   return medicines.find(m => {
     const n = String(m.medicine_name || '').trim();
@@ -255,6 +347,7 @@ function findKitNameByKeyword(db, keyword) {
  */
 function buildBindingsForDate(db, date) {
   const settings = getSiteSettings(db);
+  const flowOption = settings.flow_option || 'single1';
   const flows = getFlowReadings(db, date);
   const prevFlows = getFlowReadingsForPrevDate(db, date);
   const medicines = getMedicineLogs(db, date);
@@ -271,7 +364,7 @@ function buildBindingsForDate(db, date) {
   bindings['이름'] = settings.manager_name || '';
 
   // --- 유량 데이터 ---
-  // 유입유량계
+  // 유입유량계 (유입은 대부분 1개이므로 flowOption 적용 안 함)
   const flowIn = findFlowByKeyword(flows, '유입');
   const prevFlowIn = findFlowByKeyword(prevFlows, '유입');
   const flowInType = findFlowTypeNameByKeyword(db, '유입');
@@ -281,7 +374,7 @@ function buildBindingsForDate(db, date) {
   bindings['월간유입'] = sumFlowField(db, flowInType, 'calculated_flow', monthStart, date);
   bindings['연간유입'] = sumFlowField(db, flowInType, 'calculated_flow', yearStart, date);
 
-  // 방류유량계
+  // 방류유량계 (방류도 대부분 1개이므로 flowOption 적용 안 함)
   const flowOut = findFlowByKeyword(flows, '방류');
   const prevFlowOut = findFlowByKeyword(prevFlows, '방류');
   const flowOutType = findFlowTypeNameByKeyword(db, '방류');
@@ -291,25 +384,23 @@ function buildBindingsForDate(db, date) {
   bindings['월간방류'] = sumFlowField(db, flowOutType, 'calculated_flow', monthStart, date);
   bindings['연간방류'] = sumFlowField(db, flowOutType, 'calculated_flow', yearStart, date);
 
-  // 내부반송유량계
-  const flowInternal = findFlowByKeyword(flows, '내부반송') || findFlowByKeyword(flows, '내부');
-  const prevFlowInternal = findFlowByKeyword(prevFlows, '내부반송') || findFlowByKeyword(prevFlows, '내부');
-  const flowInternalType = findFlowTypeNameByKeyword(db, '내부');
+  // 내부반송유량계 ── flowOption 적용
+  const flowInternal = getFlowByOption(flows, '내부반송', flowOption) || getFlowByOption(flows, '내부', flowOption);
+  const prevFlowInternal = getFlowByOption(prevFlows, '내부반송', flowOption) || getFlowByOption(prevFlows, '내부', flowOption);
   bindings['내부반송전일'] = prevFlowInternal?.raw_value ?? '';
   bindings['내부반송금일'] = flowInternal?.raw_value ?? '';
   bindings['내부누계'] = flowInternal?.calculated_flow ?? '';
-  bindings['월간내부'] = sumFlowField(db, flowInternalType, 'calculated_flow', monthStart, date);
-  bindings['연간내부'] = sumFlowField(db, flowInternalType, 'calculated_flow', yearStart, date);
+  bindings['월간내부'] = sumFlowFieldByOption(db, '내부반송', 'calculated_flow', monthStart, date, flowOption);
+  bindings['연간내부'] = sumFlowFieldByOption(db, '내부반송', 'calculated_flow', yearStart, date, flowOption);
 
-  // 외부반송유량계
-  const flowExternal = findFlowByKeyword(flows, '외부반송') || findFlowByKeyword(flows, '외부');
-  const prevFlowExternal = findFlowByKeyword(prevFlows, '외부반송') || findFlowByKeyword(prevFlows, '외부');
-  const flowExternalType = findFlowTypeNameByKeyword(db, '외부');
+  // 외부반송유량계 ── flowOption 적용
+  const flowExternal = getFlowByOption(flows, '외부반송', flowOption) || getFlowByOption(flows, '외부', flowOption);
+  const prevFlowExternal = getFlowByOption(prevFlows, '외부반송', flowOption) || getFlowByOption(prevFlows, '외부', flowOption);
   bindings['외부반송전일'] = prevFlowExternal?.raw_value ?? '';
   bindings['외부반송금일'] = flowExternal?.raw_value ?? '';
   bindings['외부누계'] = flowExternal?.calculated_flow ?? '';
-  bindings['월간외부'] = sumFlowField(db, flowExternalType, 'calculated_flow', monthStart, date);
-  bindings['연간외부'] = sumFlowField(db, flowExternalType, 'calculated_flow', yearStart, date);
+  bindings['월간외부'] = sumFlowFieldByOption(db, '외부반송', 'calculated_flow', monthStart, date, flowOption);
+  bindings['연간외부'] = sumFlowFieldByOption(db, '외부반송', 'calculated_flow', yearStart, date, flowOption);
 
   // 슬러지 처리량은 총 누계(calculated_flow)가 아니라 반출량(sludge_export) 기준이다.
   // 반출이 없는 날이 많으므로 값이 없으면 빈 칸으로 유지하고, 월간/연간도 반출량만 누적한다.
@@ -320,97 +411,122 @@ function buildBindingsForDate(db, date) {
   bindings['연간슬러지'] = sumFlowField(db, sludgeType, 'COALESCE(sludge_export, raw_value)', yearStart, date);
 
   // --- 약품 데이터 ---
-  // 포도당
-  const medGlucose = findMedicineByKeyword(medicines, '포도당');
-  const glucoseName = findMedicineNameByKeyword(db, '포도당');
-  bindings['포도당구입'] = medGlucose?.purchase_amount ?? '';
-  bindings['포도당사용'] = medGlucose?.usage_amount ?? '';
-  bindings['포도당재고'] = medGlucose?.current_inventory ?? '';
-  bindings['월간포도당'] = sumMedicineField(db, glucoseName, 'usage_amount', monthStart, date);
-  bindings['연간포도당'] = sumMedicineField(db, glucoseName, 'usage_amount', yearStart, date);
+  let allMedicineItems = getActiveConfigItems(db, 'medicine');
+  
+  // 과거 매핑 찌꺼기(DB 칼럼명 형태) 제외
+  allMedicineItems = allMedicineItems.filter(item => {
+    const name = item.item_name || '';
+    return !name.includes('_purchase') && !name.includes('_usage') && !name.includes('_inventory');
+  });
 
-  // 중탄산 (중탄산나트륨)
-  const medSodium = findMedicineByKeyword(medicines, '중탄산');
-  const sodiumName = findMedicineNameByKeyword(db, '중탄산');
-  bindings['중탄산구입'] = medSodium?.purchase_amount ?? '';
-  bindings['중탄산사용'] = medSodium?.usage_amount ?? '';
-  bindings['중탄산재고'] = medSodium?.current_inventory ?? '';
-  bindings['월간중탄산'] = sumMedicineField(db, sodiumName, 'usage_amount', monthStart, date);
-  bindings['연간중탄산'] = sumMedicineField(db, sodiumName, 'usage_amount', yearStart, date);
-
-  // 팩 (PAC)
-  const medPac = findMedicineByKeyword(medicines, '팩') || findMedicineByKeyword(medicines, 'PAC');
-  const pacName = findMedicineNameByKeyword(db, '팩');
-  bindings['팩구입'] = medPac?.purchase_amount ?? '';
-  bindings['팩사용'] = medPac?.usage_amount ?? '';
-  bindings['팩재고'] = medPac?.current_inventory ?? '';
-  bindings['월간팩'] = sumMedicineField(db, pacName, 'usage_amount', monthStart, date);
-  bindings['연간팩'] = sumMedicineField(db, pacName, 'usage_amount', yearStart, date);
-
-  // 추가약품 1~3 (config_items에서 medicine 카테고리의 4번째~6번째 항목)
-  const allMedicineItems = getActiveConfigItems(db, 'medicine');
-  const baseMedicineKeywords = ['포도당', '중탄산', '팩', 'PAC'];
-  const extraMedicines = allMedicineItems.filter(item => 
-    !baseMedicineKeywords.some(kw => item.item_name.includes(kw))
-  );
-
-  for (let i = 0; i < 3; i++) {
-    const idx = i + 1;
-    const extraItem = extraMedicines[i];
-    if (extraItem) {
-      const extraMed = findMedicineByKeyword(medicines, extraItem.item_name);
-      bindings[`추가약품명${idx}`] = extraItem.item_name;
-      bindings[`추가약품${idx}구입`] = extraMed?.purchase_amount ?? '';
-      bindings[`추가약품${idx}사용`] = extraMed?.usage_amount ?? '';
-      bindings[`추가약품${idx}재고`] = extraMed?.current_inventory ?? '';
-      bindings[`월간추가약품${idx}`] = sumMedicineField(db, extraItem.item_name, 'usage_amount', monthStart, date);
-      bindings[`연간추가약품${idx}`] = sumMedicineField(db, extraItem.item_name, 'usage_amount', yearStart, date);
-    } else {
-      bindings[`추가약품명${idx}`] = '';
-      bindings[`추가약품${idx}구입`] = '';
-      bindings[`추가약품${idx}사용`] = '';
-      bindings[`추가약품${idx}재고`] = '';
-      bindings[`월간추가약품${idx}`] = '';
-      bindings[`연간추가약품${idx}`] = '';
+  allMedicineItems.forEach((item, idx) => {
+    const medName = item.item_name;
+    const medNameNoSpace = medName.replace(/\s+/g, '');
+    let medLog = findMedicineByKeyword(medicines, medName);
+    
+    // PAC/팩 특수 처리
+    if (medNameNoSpace === '팩' || medNameNoSpace.toUpperCase() === 'PAC') {
+      medLog = findMedicineByKeyword(medicines, '팩') || findMedicineByKeyword(medicines, 'PAC') || medLog;
     }
-  }
+
+    const purchase = medLog?.purchase_amount ?? '';
+    const usage = medLog?.usage_amount ?? '';
+    const inventory = medLog?.current_inventory ?? '';
+    const mTotal = sumMedicineField(db, medName, 'usage_amount', monthStart, date);
+    const yTotal = sumMedicineField(db, medName, 'usage_amount', yearStart, date);
+
+    // 기본 이름들
+    const baseNames = [medNameNoSpace];
+    if (medNameNoSpace === '중탄산나트륨') baseNames.push('중탄산');
+    if (medNameNoSpace === '팩' || medNameNoSpace.toUpperCase() === 'PAC') baseNames.push('팩', 'PAC');
+
+    // 추가 확장을 위한 약품명 별명 매핑 (사용자가 엑셀에 지은 다양한 이름 지원)
+    if (medNameNoSpace.includes('알루민산') || medNameNoSpace.includes('알민산')) {
+      baseNames.push('알루민산', '알루민산나트륨', '알민산', '알민산나트륨');
+    }
+    if (medNameNoSpace.includes('차염') || medNameNoSpace.includes('차아염소산')) {
+      baseNames.push('차염', '차염소산', '차염소산나트륨', '차아염소산', '차아염소산나트륨');
+    }
+    if (medNameNoSpace.includes('인산나트륨') || medNameNoSpace.includes('인산염')) {
+      baseNames.push('인산나트륨', '인산염');
+    }
+    if (medNameNoSpace.includes('폴리머')) {
+      baseNames.push('폴리머', 'Polymer');
+    }
+
+    // 중복 제거
+    const uniqueBaseNames = [...new Set(baseNames)];
+
+    uniqueBaseNames.forEach(bName => {
+      bindings[`${bName}구입`] = purchase;
+      bindings[`${bName}구입량`] = purchase;
+      bindings[`${bName}사용`] = usage;
+      bindings[`${bName}사용량`] = usage;
+      bindings[`${bName}재고`] = inventory;
+      bindings[`${bName}재고량`] = inventory;
+      bindings[`${bName}잔량`] = inventory;
+      bindings[`월간${bName}`] = mTotal;
+      bindings[`연간${bName}`] = yTotal;
+      bindings[`${bName}월간`] = mTotal;
+      bindings[`${bName}월간누계`] = mTotal;
+      bindings[`${bName}월간사용량누계`] = mTotal;
+      bindings[`${bName}연간`] = yTotal;
+      bindings[`${bName}연간누계`] = yTotal;
+      bindings[`${bName}_purchase`] = purchase;
+      bindings[`${bName}_usage`] = usage;
+      bindings[`${bName}_inventory`] = inventory;
+    });
+
+    // 추가약품 호환용 (첫 3개 기본약품 제외한 나머지)
+    // 포도당(1), 중탄산(2), 팩(3) 제외
+    if (idx >= 3) {
+       const extraIdx = idx - 2;
+       // 사용자의 의도대로 현장별 추가 약품 이름을 엑셀 폼에 동적으로 뿌려줌.
+       bindings[`추가약품명${extraIdx}`] = medName;
+       bindings[`추가약품${extraIdx}구입`] = purchase;
+       bindings[`추가약품${extraIdx}사용`] = usage;
+       bindings[`추가약품${extraIdx}재고`] = inventory;
+       bindings[`월간추가약품${extraIdx}`] = mTotal;
+       bindings[`연간추가약품${extraIdx}`] = yTotal;
+    }
+  });
 
   // --- 키트 데이터 ---
-  // 암모니아
-  const kitNh3 = findKitByKeyword(kits, '암모니아');
-  const kitNh3Name = findKitNameByKeyword(db, '암모니아');
-  bindings['암모니아구입'] = kitNh3?.purchase_amount ?? '';
-  bindings['암모니아사용'] = kitNh3?.usage_amount ?? '';
-  bindings['암모니아재고'] = kitNh3?.current_inventory ?? '';
-  bindings['월간암모니아'] = sumKitField(db, kitNh3Name, 'usage_amount', monthStart, date);
-  bindings['연간암모니아'] = sumKitField(db, kitNh3Name, 'usage_amount', yearStart, date);
+  const allKitItems = getActiveConfigItems(db, 'kit');
+  allKitItems.forEach((item) => {
+    const kitName = item.item_name;
+    const kitNameNoSpace = kitName.replace(/\s+/g, '');
+    const kitLog = findKitByKeyword(kits, kitName);
 
-  // 질산
-  const kitNo3 = findKitByKeyword(kits, '질산');
-  const kitNo3Name = findKitNameByKeyword(db, '질산');
-  bindings['질산구입'] = kitNo3?.purchase_amount ?? '';
-  bindings['질산사용'] = kitNo3?.usage_amount ?? '';
-  bindings['질산재고'] = kitNo3?.current_inventory ?? '';
-  bindings['월간질산'] = sumKitField(db, kitNo3Name, 'usage_amount', monthStart, date);
-  bindings['연간질산'] = sumKitField(db, kitNo3Name, 'usage_amount', yearStart, date);
+    const purchase = kitLog?.purchase_amount ?? '';
+    const usage = kitLog?.usage_amount ?? '';
+    const inventory = kitLog?.current_inventory ?? '';
+    const mTotal = sumKitField(db, kitName, 'usage_amount', monthStart, date);
+    const yTotal = sumKitField(db, kitName, 'usage_amount', yearStart, date);
 
-  // 인
-  const kitP = findKitByKeyword(kits, '인');
-  const kitPName = findKitNameByKeyword(db, '인');
-  bindings['인구입'] = kitP?.purchase_amount ?? '';
-  bindings['인사용'] = kitP?.usage_amount ?? '';
-  bindings['인재고'] = kitP?.current_inventory ?? '';
-  bindings['월간인'] = sumKitField(db, kitPName, 'usage_amount', monthStart, date);
-  bindings['연간인'] = sumKitField(db, kitPName, 'usage_amount', yearStart, date);
+    const baseNames = [kitNameNoSpace];
+    if (kitNameNoSpace.includes('암모니아')) baseNames.push('암모니아');
+    if (kitNameNoSpace.includes('질산')) baseNames.push('질산');
+    if (kitNameNoSpace === '인산염' || kitNameNoSpace === '오르토인산염') baseNames.push('인');
+    if (kitNameNoSpace.includes('알칼리')) baseNames.push('알칼리');
 
-  // 알칼리도
-  const kitAlk = findKitByKeyword(kits, '알칼리');
-  const kitAlkName = findKitNameByKeyword(db, '알칼리');
-  bindings['알칼리구입'] = kitAlk?.purchase_amount ?? '';
-  bindings['알칼리도사용'] = kitAlk?.usage_amount ?? '';
-  bindings['알칼리재고'] = kitAlk?.current_inventory ?? '';
-  bindings['월간알칼리'] = sumKitField(db, kitAlkName, 'usage_amount', monthStart, date);
-  bindings['연간알칼리'] = sumKitField(db, kitAlkName, 'usage_amount', yearStart, date);
+    baseNames.forEach(bName => {
+      bindings[`${bName}구입`] = purchase;
+      bindings[`${bName}구입량`] = purchase;
+      bindings[`${bName}사용`] = usage;
+      bindings[`${bName}사용량`] = usage;
+      bindings[`${bName}재고`] = inventory;
+      bindings[`${bName}재고량`] = inventory;
+      bindings[`${bName}잔량`] = inventory;
+      bindings[`월간${bName}`] = mTotal;
+      bindings[`연간${bName}`] = yTotal;
+      bindings[`${bName}월간`] = mTotal;
+      bindings[`${bName}월간누계`] = mTotal;
+      bindings[`${bName}월간사용량누계`] = mTotal;
+      bindings[`${bName}연간`] = yTotal;
+      bindings[`${bName}연간누계`] = yTotal;
+    });
+  });
 
   // --- 전력 (flow_readings에서 '전력' 타입) ---
   const flowPower = findFlowByKeyword(flows, '전력');
@@ -418,6 +534,19 @@ function buildBindingsForDate(db, date) {
   bindings['전일전력'] = prevFlowPower?.raw_value ?? '';
   bindings['금일전력'] = flowPower?.raw_value ?? '';
   bindings['전력사용'] = flowPower?.calculated_flow ?? '';
+  bindings['전력사용량'] = flowPower?.calculated_flow ?? '';
+  
+  // kw당 사용량 = (금일 전력사용량) / (금일 방류수 처리량)
+  let kwPerM3 = '';
+  const parsedPowerFlow = parseFloat(flowPower?.calculated_flow);
+  const parsedOutFlow = parseFloat(flowOut?.calculated_flow); // 방류처리량(calculated_flow) 사용
+  if (!isNaN(parsedPowerFlow) && !isNaN(parsedOutFlow) && parsedOutFlow > 0) {
+    kwPerM3 = (parsedPowerFlow / parsedOutFlow).toFixed(3); // 1m3당 사용량 (보통 소수점 3자리까지)
+  }
+  bindings['kw당사용량'] = kwPerM3;
+  bindings['전력효율'] = kwPerM3;
+  bindings['1m3당사용량'] = kwPerM3;
+
   // 전력계산은 수동 입력용이므로 빈 값 유지
   bindings['전력계산'] = '';
 
