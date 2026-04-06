@@ -106,10 +106,10 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
 
                 hist.sort((a, b) => a.date.localeCompare(b.date));
 
-                // 재고 자동 계산
-                dynamicTypes.forEach(type => {
-                    calculateInventory(hist, 0, type);
-                });
+                // 재고 자동 계산은 이제 더 이상 로드 시 수행하지 않음 (DB 값 신뢰)
+                // dynamicTypes.forEach(type => {
+                //     calculateInventory(hist, 0, type);
+                // });
 
                 setHistory(hist);
                 setPendingChanges({});
@@ -142,7 +142,11 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
             newHist[idx][type][field] = numVal;
             newHist[idx][type].error = errorMsg;
 
-            calculateInventory(newHist, idx, type);
+            // 오늘 날짜를 수정하는 경우에만 재고 자동 계산 (과거 데이터는 수동 수정 허용)
+            const todayStr = new Date().toISOString().split('T')[0];
+            if (rowDate === todayStr) {
+                calculateInventory(newHist, idx, type);
+            }
 
             setPendingChanges(p => {
                 const nextP = { ...p };

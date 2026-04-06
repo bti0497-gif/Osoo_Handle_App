@@ -120,20 +120,24 @@ function parseNamedCellEntries(workbook) {
 // --- Data Aggregation ---
 
 function getFlowReadings(db, date) {
-  return db.prepare('SELECT * FROM flow_readings WHERE date = ?').all(date);
+  const settings = getSiteSettings(db);
+  return db.prepare('SELECT * FROM flow_readings WHERE date = ? AND site_name = ?').all(date, settings.site_name);
 }
 
 function getFlowReadingsForPrevDate(db, date) {
   const prevDate = getPreviousDate(date);
-  return db.prepare('SELECT * FROM flow_readings WHERE date = ?').all(prevDate);
+  const settings = getSiteSettings(db);
+  return db.prepare('SELECT * FROM flow_readings WHERE date = ? AND site_name = ?').all(prevDate, settings.site_name);
 }
 
 function getMedicineLogs(db, date) {
-  return db.prepare('SELECT * FROM medicine_logs WHERE date = ?').all(date);
+  const settings = getSiteSettings(db);
+  return db.prepare('SELECT * FROM medicine_logs WHERE date = ? AND site_name = ?').all(date, settings.site_name);
 }
 
 function getKitLogs(db, date) {
-  return db.prepare('SELECT * FROM kit_logs WHERE date = ?').all(date);
+  const settings = getSiteSettings(db);
+  return db.prepare('SELECT * FROM kit_logs WHERE date = ? AND site_name = ?').all(date, settings.site_name);
 }
 
 function getSiteSettings(db) {
@@ -298,10 +302,12 @@ function findMedicineByKeyword(medicines, keyword) {
   });
 }
 
-function findKitByKeyword(kits, keyword) {
-  return kits.find(k => {
-    const n = String(k.kit_name || '').trim();
-    return n.includes(keyword);
+function findKitByKeyword(logs, keyword) {
+  if (!logs || !keyword) return null;
+  const kw = String(keyword).replace(/\s+/g, '').toUpperCase();
+  return logs.find(k => {
+    const n = String(k.kit_name || '').replace(/\s+/g, '').toUpperCase();
+    return n === kw || n.includes(kw) || kw.includes(n);
   });
 }
 
@@ -429,11 +435,12 @@ function buildBindingsForDate(db, date) {
       medLog = findMedicineByKeyword(medicines, '팩') || findMedicineByKeyword(medicines, 'PAC') || medLog;
     }
 
+    const siteName = getSiteSettings(db).site_name;
     const purchase = medLog?.purchase_amount ?? '';
     const usage = medLog?.usage_amount ?? '';
     const inventory = medLog?.current_inventory ?? '';
-    const mTotal = sumMedicineField(db, medName, 'usage_amount', monthStart, date);
-    const yTotal = sumMedicineField(db, medName, 'usage_amount', yearStart, date);
+    const mTotal = db.prepare('SELECT SUM(usage_amount) as total FROM medicine_logs WHERE medicine_name = ? AND site_name = ? AND date >= ? AND date <= ?').get(medName, siteName, monthStart, date)?.total || 0;
+    const yTotal = db.prepare('SELECT SUM(usage_amount) as total FROM medicine_logs WHERE medicine_name = ? AND site_name = ? AND date >= ? AND date <= ?').get(medName, siteName, yearStart, date)?.total || 0;
 
     // 기본 이름들
     const baseNames = [medNameNoSpace];
@@ -493,7 +500,14 @@ function buildBindingsForDate(db, date) {
   });
 
   // --- 키트 데이터 ---
-  const allKitItems = getActiveConfigItems(db, 'kit');
+  let allKitItems = getActiveConfigItems(db, 'kit');
+  allKitItems = allKitItems.filter(item => {
+    const name = item.item_name || '';
+    return !name.includes('_purchase') && !name.includes('_usage') && !name.includes('_inventory');
+  });
+
+  const siteName = getSiteSettings(db).site_name;
+
   allKitItems.forEach((item) => {
     const kitName = item.item_name;
     const kitNameNoSpace = kitName.replace(/\s+/g, '');
@@ -502,21 +516,21 @@ function buildBindingsForDate(db, date) {
     const purchase = kitLog?.purchase_amount ?? '';
     const usage = kitLog?.usage_amount ?? '';
     const inventory = kitLog?.current_inventory ?? '';
-    const mTotal = sumKitField(db, kitName, 'usage_amount', monthStart, date);
-    const yTotal = sumKitField(db, kitName, 'usage_amount', yearStart, date);
+    const mTotal = db.prepare('SELECT SUM(usage_amount) as total FROM kit_logs WHERE kit_name = ? AND site_name = ? AND date >= ? AND date <= ?').get(kitName, siteName, monthStart, date)?.total || 0;
+    const yTotal = db.prepare('SELECT SUM(usage_amount) as total FROM kit_logs WHERE kit_name = ? AND site_name = ? AND date >= ? AND date <= ?').get(kitName, siteName, yearStart, date)?.total || 0;
 
     const baseNames = [kitNameNoSpace];
     if (kitNameNoSpace.includes('암모니아') || kitNameNoSpace.toUpperCase().includes('NH3')) {
-      baseNames.push('암모니아', '암모니아성질소', 'NH3-N', 'NH3_N', 'NH3N', 'NH3');
+      baseNames.push('암모니아', 'NH3', 'NH3-N', 'NH3_N', 'NH3-N', 'NH3 -N');
     }
     if (kitNameNoSpace.includes('질산') || kitNameNoSpace.toUpperCase().includes('NO3')) {
-      baseNames.push('질산', '질산성질소', 'NO3-N', 'NO3_N', 'NO3N', 'NO3');
+      baseNames.push('질산', 'NO3', 'NO3-N', 'NO3_N');
     }
     if (kitNameNoSpace.includes('인산염') || kitNameNoSpace.includes('오르토인산염') || kitNameNoSpace.toUpperCase().includes('PO4')) {
-      baseNames.push('인', '인산염', '인산염인', '오르토인산염', 'PO4-P', 'PO4_P', 'PO4P', 'PO4');
+      baseNames.push('인', 'PO4', 'PO4-P', 'PO4_P');
     }
     if (kitNameNoSpace.includes('알칼리') || kitNameNoSpace.toUpperCase().includes('ALK')) {
-      baseNames.push('알칼리', '알칼리도', 'ALK');
+      baseNames.push('알칼리', 'ALK');
     }
 
     // 중복 제거
