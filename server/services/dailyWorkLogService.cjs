@@ -438,8 +438,8 @@ function buildBindingsForDate(db, date) {
     // 기본 이름들
     const baseNames = [medNameNoSpace];
     if (medNameNoSpace.includes('포도당')) baseNames.push('포도당');
-    if (medNameNoSpace.includes('중탄산')) baseNames.push('중탄산');
-    if (medNameNoSpace.includes('팩') || medNameNoSpace.toUpperCase().includes('PAC')) baseNames.push('팩', 'PAC');
+    if (medNameNoSpace.includes('중탄산')) baseNames.push('중탄산', '중탄산나트륨');
+    if (medNameNoSpace.includes('팩') || medNameNoSpace.toUpperCase().includes('PAC')) baseNames.push('팩', 'PAC', '팩(PAC)', 'PAC팩');
 
     // 추가 확장을 위한 약품명 별명 매핑 (사용자가 엑셀에 지은 다양한 이름 지원)
     if (medNameNoSpace.includes('알루민산') || medNameNoSpace.includes('알민산')) {
@@ -451,8 +451,8 @@ function buildBindingsForDate(db, date) {
     if (medNameNoSpace.includes('인산나트륨') || medNameNoSpace.includes('인산염')) {
       baseNames.push('인산나트륨', '인산염');
     }
-    if (medNameNoSpace.includes('폴리머')) {
-      baseNames.push('폴리머', 'Polymer');
+    if (medNameNoSpace.includes('폴리머') || medNameNoSpace.toUpperCase().includes('POLYMER')) {
+      baseNames.push('폴리머', 'Polymer', 'POLYMER');
     }
 
     // 중복 제거
@@ -506,17 +506,17 @@ function buildBindingsForDate(db, date) {
     const yTotal = sumKitField(db, kitName, 'usage_amount', yearStart, date);
 
     const baseNames = [kitNameNoSpace];
-    if (kitNameNoSpace.includes('암모니아') || kitNameNoSpace.includes('NH3')) {
-      baseNames.push('암모니아', 'NH3-N');
+    if (kitNameNoSpace.includes('암모니아') || kitNameNoSpace.toUpperCase().includes('NH3')) {
+      baseNames.push('암모니아', '암모니아성질소', 'NH3-N', 'NH3_N', 'NH3N', 'NH3');
     }
-    if (kitNameNoSpace.includes('질산') || kitNameNoSpace.includes('NO3')) {
-      baseNames.push('질산', 'NO3-N');
+    if (kitNameNoSpace.includes('질산') || kitNameNoSpace.toUpperCase().includes('NO3')) {
+      baseNames.push('질산', '질산성질소', 'NO3-N', 'NO3_N', 'NO3N', 'NO3');
     }
-    if (kitNameNoSpace.includes('인산염') || kitNameNoSpace.includes('오르토인산염') || kitNameNoSpace.includes('PO4')) {
-      baseNames.push('인', '인산염', 'PO4-P');
+    if (kitNameNoSpace.includes('인산염') || kitNameNoSpace.includes('오르토인산염') || kitNameNoSpace.toUpperCase().includes('PO4')) {
+      baseNames.push('인', '인산염', '인산염인', '오르토인산염', 'PO4-P', 'PO4_P', 'PO4P', 'PO4');
     }
-    if (kitNameNoSpace.includes('알칼리') || kitNameNoSpace.includes('ALK')) {
-      baseNames.push('알칼리', 'ALK');
+    if (kitNameNoSpace.includes('알칼리') || kitNameNoSpace.toUpperCase().includes('ALK')) {
+      baseNames.push('알칼리', '알칼리도', 'ALK');
     }
 
     // 중복 제거
@@ -575,8 +575,16 @@ function buildBindingsForDate(db, date) {
   bindings['산소'] = '';
   bindings['ml'] = '';
   bindings['svi'] = '';
+  // 엑셀 이름 관리자의 영문 대소문자 명명(PAC vs pac, NH3-N vs NH3_N 등) 차이를
+  // 근본적으로 백엔드단에서 무력화하기 위해 모든 바인딩 키를 정규화하여 복제합니다.
+  const normalizedBindings = { ...bindings };
+  for (const [key, val] of Object.entries(bindings)) {
+    if (key) {
+      normalizedBindings[normalizeKey(key)] = val;
+    }
+  }
 
-  return bindings;
+  return normalizedBindings;
 }
 
 // --- Manifest ---
