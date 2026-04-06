@@ -345,10 +345,11 @@ const settingsCols = db.prepare("PRAGMA table_info(app_settings)").all().map(c =
   'med_sheet', 'med_start_row', 'med_end_row', 'med_date_col',
   'water_sheet', 'water_start_row', 'water_end_row', 'water_date_col',
   'kit_sheet', 'kit_start_row', 'kit_end_row', 'kit_date_col',
-  'qntech_photo_root', 'qntech_sample_mappings'
+  'qntech_photo_root', 'qntech_sample_mappings',
+  'flow_option' // new column for flow mapping option
 ].forEach(col => {
   if (!settingsCols.includes(col)) {
-    const type = col.includes('row') ? 'INTEGER' : 'TEXT';
+    const type = col.includes('row') || col === 'flow_option' ? (col === 'flow_option' ? 'TEXT' : 'INTEGER') : 'TEXT';
     db.prepare(`ALTER TABLE app_settings ADD COLUMN ${col} ${type}`).run();
   }
 });

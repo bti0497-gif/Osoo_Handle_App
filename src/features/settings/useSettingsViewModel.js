@@ -22,6 +22,8 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         method: 'A2O',
         series: '1계열'
     });
+    // flowOption state: 'single1' (default), 'single2', or 'combined'
+    const [flowOption, setFlowOption] = useState('single1');
 
     const [flowItems, setFlowItems] = useState([
         { name: '유입유량계', checked: true }, { name: '방류유량계', checked: true },
@@ -162,6 +164,11 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                 }
                 setTemplateFileNames('');
                 if (data.settings.flow_sheet) setFlowConfig({ sheet: data.settings.flow_sheet, startRow: data.settings.flow_start_row || 1, endRow: data.settings.flow_end_row || 31, dateCol: data.settings.flow_date_col || 'A' });
+          // Ensure flowOption is set even if not present in DB
+          if (!data.settings.flow_option) {
+            const defaultFlowOption = data.settings.series === '2계열' ? 'combined' : 'single1';
+            setFlowOption(defaultFlowOption);
+          }
                 if (data.settings.med_sheet) setMedicineConfig({ sheet: data.settings.med_sheet, startRow: data.settings.med_start_row || 1, endRow: data.settings.med_end_row || 31, dateCol: data.settings.med_date_col || 'A' });
                 if (data.settings.kit_sheet) setKitConfig({ sheet: data.settings.kit_sheet, startRow: data.settings.kit_start_row || 1, endRow: data.settings.kit_end_row || 31, dateCol: data.settings.kit_date_col || 'A' });
                 if (data.settings.water_sheet) setWaterConfig({ sheet: data.settings.water_sheet, startRow: data.settings.water_start_row || 1, endRow: data.settings.water_end_row || 31, dateCol: data.settings.water_date_col || 'A' });
@@ -687,6 +694,18 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         }
     };
 
+    // --- Flow Option Save ---
+    const handleSaveFlowOption = async (option) => {
+        try {
+            setFlowOption(option);
+            await SettingsModel.saveFlowOption(option);
+            showAlert?.('유량 매핑 옵션이 저장되었습니다.');
+        } catch (err) {
+            console.error('Flow option save error:', err);
+            showAlert?.('유량 매핑 옵션 저장 중 오류: ' + err.message);
+        }
+    };
+
     return {
         activeTab, setActiveTab, isLoading, hasLoadedSettings,
         siteInfo, setSiteInfo, handleSeriesChange,
@@ -718,5 +737,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         addLogMapping, removeLogMapping, updateLogMapping, toggleMappingType, handleSaveLogMappings,
         // Gemini API
         geminiApiKey, setGeminiApiKey, geminiKeyVisible, setGeminiKeyVisible, handleSaveGeminiApiKey,
+        // Flow Option
+        flowOption, setFlowOption, handleSaveFlowOption,
     };
 };

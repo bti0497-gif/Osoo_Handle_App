@@ -425,7 +425,7 @@ function buildBindingsForDate(db, date) {
     let medLog = findMedicineByKeyword(medicines, medName);
     
     // PAC/팩 특수 처리
-    if (medNameNoSpace === '팩' || medNameNoSpace.toUpperCase() === 'PAC') {
+    if (medNameNoSpace.includes('팩') || medNameNoSpace.toUpperCase().includes('PAC')) {
       medLog = findMedicineByKeyword(medicines, '팩') || findMedicineByKeyword(medicines, 'PAC') || medLog;
     }
 
@@ -437,8 +437,9 @@ function buildBindingsForDate(db, date) {
 
     // 기본 이름들
     const baseNames = [medNameNoSpace];
-    if (medNameNoSpace === '중탄산나트륨') baseNames.push('중탄산');
-    if (medNameNoSpace === '팩' || medNameNoSpace.toUpperCase() === 'PAC') baseNames.push('팩', 'PAC');
+    if (medNameNoSpace.includes('포도당')) baseNames.push('포도당');
+    if (medNameNoSpace.includes('중탄산')) baseNames.push('중탄산');
+    if (medNameNoSpace.includes('팩') || medNameNoSpace.toUpperCase().includes('PAC')) baseNames.push('팩', 'PAC');
 
     // 추가 확장을 위한 약품명 별명 매핑 (사용자가 엑셀에 지은 다양한 이름 지원)
     if (medNameNoSpace.includes('알루민산') || medNameNoSpace.includes('알민산')) {
@@ -505,12 +506,23 @@ function buildBindingsForDate(db, date) {
     const yTotal = sumKitField(db, kitName, 'usage_amount', yearStart, date);
 
     const baseNames = [kitNameNoSpace];
-    if (kitNameNoSpace.includes('암모니아')) baseNames.push('암모니아');
-    if (kitNameNoSpace.includes('질산')) baseNames.push('질산');
-    if (kitNameNoSpace === '인산염' || kitNameNoSpace === '오르토인산염') baseNames.push('인');
-    if (kitNameNoSpace.includes('알칼리')) baseNames.push('알칼리');
+    if (kitNameNoSpace.includes('암모니아') || kitNameNoSpace.includes('NH3')) {
+      baseNames.push('암모니아', 'NH3-N');
+    }
+    if (kitNameNoSpace.includes('질산') || kitNameNoSpace.includes('NO3')) {
+      baseNames.push('질산', 'NO3-N');
+    }
+    if (kitNameNoSpace.includes('인산염') || kitNameNoSpace.includes('오르토인산염') || kitNameNoSpace.includes('PO4')) {
+      baseNames.push('인', '인산염', 'PO4-P');
+    }
+    if (kitNameNoSpace.includes('알칼리') || kitNameNoSpace.includes('ALK')) {
+      baseNames.push('알칼리', 'ALK');
+    }
 
-    baseNames.forEach(bName => {
+    // 중복 제거
+    const uniqueKitBaseNames = [...new Set(baseNames)];
+
+    uniqueKitBaseNames.forEach(bName => {
       bindings[`${bName}구입`] = purchase;
       bindings[`${bName}구입량`] = purchase;
       bindings[`${bName}사용`] = usage;

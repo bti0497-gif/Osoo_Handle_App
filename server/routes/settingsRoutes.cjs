@@ -83,6 +83,16 @@ module.exports = function (db, baseDir, appDataPath) {
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
+  // ── 유량 매핑 옵션 저장 ──
+  router.post('/api/settings/save-flow-option', (req, res) => {
+    const { flowOption } = req.body;
+    if (!flowOption) return res.status(400).json({ success: false, message: 'flowOption이 필요합니다.' });
+    try {
+      db.prepare('UPDATE app_settings SET flow_option = ? WHERE id = 1').run(flowOption);
+      res.json({ success: true, message: '유량 매핑 옵션이 저장되었습니다.' });
+    } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  });
+
   router.post('/api/settings/web-app-credentials', (req, res) => {
     const { serviceKey, serviceUrl, userId, password } = req.body || {};
     if (!serviceKey) {

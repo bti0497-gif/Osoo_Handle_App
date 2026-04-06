@@ -40,6 +40,10 @@ export const SettingsModel = {
         return apiClient.post('/api/settings/save-medicine-mapping', mappingData);
     },
 
+    async saveFlowOption(flowOption) {
+        return apiClient.post('/api/settings/save-flow-option', { flowOption });
+    },
+
     async getExcelStatus() {
         return apiClient.get('/api/settings/excel-status');
     },
