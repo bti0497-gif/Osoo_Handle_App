@@ -446,10 +446,10 @@ module.exports = function (db, baseDir, appDataPath) {
 
       const insertWater = db.prepare(`
         INSERT INTO water_quality (
-          date, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss,
+          date, measurement_group, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss,
           site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
-        ON CONFLICT(date, location) DO UPDATE SET 
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+        ON CONFLICT(date, measurement_group, location) DO UPDATE SET 
           nh3_n = excluded.nh3_n, no3_n = excluded.no3_n, 
           po4_p = excluded.po4_p, alkalinity = excluded.alkalinity,
           site_name = excluded.site_name,
@@ -471,7 +471,7 @@ module.exports = function (db, baseDir, appDataPath) {
 
           // Default location if no locations are mapped (fallback to '기본')
           if (Object.keys(locations).length === 0) {
-            insertWater.run(formatted, '기본', null, null, null, null, null, null, null, null, metadata.siteName, metadata.author, metadata.createdAt, metadata.lastModified, metadata.isSynced);
+            insertWater.run(formatted, '', '기본', null, null, null, null, null, null, null, null, metadata.siteName, metadata.author, metadata.createdAt, metadata.lastModified, metadata.isSynced);
             importedData.push({ date: formatted, location: '기본' });
           } else {
             Object.entries(locations).forEach(([locName, cols]) => {
@@ -485,7 +485,7 @@ module.exports = function (db, baseDir, appDataPath) {
               });
 
               // tn, tp, cod, ss는 키트 분석 항목이 아니므로 null로 저장
-              insertWater.run(formatted, locName, vals.nh3_n, vals.no3_n, vals.po4_p, vals.alkalinity, null, null, null, null, metadata.siteName, metadata.author, metadata.createdAt, metadata.lastModified, metadata.isSynced);
+              insertWater.run(formatted, '', locName, vals.nh3_n, vals.no3_n, vals.po4_p, vals.alkalinity, null, null, null, null, metadata.siteName, metadata.author, metadata.createdAt, metadata.lastModified, metadata.isSynced);
 
               rowResults[`${locName}_nh3_n`] = vals.nh3_n;
             });
