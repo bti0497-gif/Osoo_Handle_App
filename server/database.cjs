@@ -254,7 +254,11 @@ const waterColumnInfo = db.prepare("PRAGMA table_info(water_quality)").all();
 const requiredWaterTextColumns = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity', 'tn', 'tp', 'cod', 'ss'];
 const requiredWaterIdentityColumns = ['measurement_group', 'measurement_order', 'source_type', 'source_label', 'qntech_project_id'];
 const legacyWaterColumns = new Set(waterColumnInfo.map((item) => item.name));
-const shouldRebuildWaterQuality = requiredWaterTextColumns.some((column) => {
+
+const waterQualitySchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='water_quality'").get()?.sql || '';
+const hasCorrectUniqueConstraint = waterQualitySchema.includes('UNIQUE(date, measurement_group, location)') || waterQualitySchema.includes('UNIQUE (date, measurement_group, location)');
+
+const shouldRebuildWaterQuality = !hasCorrectUniqueConstraint || requiredWaterTextColumns.some((column) => {
   const info = waterColumnInfo.find((item) => item.name === column);
   return info && String(info.type || '').toUpperCase() !== 'TEXT';
 }) || requiredWaterIdentityColumns.some((column) => !waterColumnInfo.some((item) => item.name === column));
