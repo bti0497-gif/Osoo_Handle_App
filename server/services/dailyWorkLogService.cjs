@@ -530,6 +530,10 @@ function buildBindingsForDate(db, date) {
       bindings[`${bName}재고`] = inventory;
       bindings[`${bName}재고량`] = inventory;
       bindings[`${bName}잔량`] = inventory;
+      bindings[`${bName}`] = inventory; // 셀 이름이 'NH3-N' 등일 때 기본으로 재고(계산값) 바인딩
+      bindings[`${bName}_inventory`] = inventory;
+      bindings[`${bName}_usage`] = usage;
+      bindings[`${bName}_purchase`] = purchase;
       bindings[`월간${bName}`] = mTotal;
       bindings[`연간${bName}`] = yTotal;
       bindings[`${bName}월간`] = mTotal;
@@ -559,8 +563,8 @@ function buildBindingsForDate(db, date) {
   bindings['전력효율'] = kwPerM3;
   bindings['1m3당사용량'] = kwPerM3;
 
-  // 전력계산은 수동 입력용이므로 빈 값 유지
-  bindings['전력계산'] = '';
+  // 전력계산(방류량/전력량 계산값) 바인딩
+  bindings['전력계산'] = kwPerM3;
 
   // --- 수질 분석 (향후 구현, 현재는 빈 값) ---
   ['ph', 'bod', 'toc', 'ss', 'tn', 'tp', '대장균'].forEach(item => {
