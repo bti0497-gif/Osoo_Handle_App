@@ -212,7 +212,7 @@ const MedicineManagementView = ({ currentUser }) => {
                     pointerEvents: isFuture ? 'none' : 'auto',
                     opacity: isFuture ? 0.6 : 1
                 }}>
-                    {fmt(cellVal) || '-'}
+                    {fmt(cellVal) || ''}
                 </div>
             );
         }
@@ -238,7 +238,7 @@ const MedicineManagementView = ({ currentUser }) => {
             }} title={errorMsg || ''}>
                 {isReadOnly ? (
                     <span style={{ fontWeight: 700, fontSize: 11, color: errorMsg ? '#dc2626' : (changed ? '#1d4ed8' : '#1e293b') }}>
-                        {displayVal || '-'}
+                        {displayVal || ''}
                     </span>
                 ) : (
                     <input
@@ -254,7 +254,6 @@ const MedicineManagementView = ({ currentUser }) => {
                             pointerEvents: isReadOnly ? 'none' : 'auto'
                         }}
                         value={isActive ? localValue : displayVal}
-                        placeholder="-"
                         onChange={e => setLocalValue(e.target.value.replace(/,/g, ''))}
                         onKeyDown={e => {
                             if (e.key === 'Enter') e.currentTarget.blur();

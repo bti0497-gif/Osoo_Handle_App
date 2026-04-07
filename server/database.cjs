@@ -510,6 +510,12 @@ if (!attendanceSyncCols.includes('last_modified')) {
   db.prepare("UPDATE attendance SET last_modified = datetime('now', 'localtime') WHERE last_modified IS NULL").run();
 }
 
+// --- Facility Logs: location 컬럼 추가 ---
+const facilityCols = db.prepare("PRAGMA table_info(facility_logs)").all().map(c => c.name);
+if (!facilityCols.includes('location')) {
+  db.prepare('ALTER TABLE facility_logs ADD COLUMN location TEXT').run();
+}
+
 console.log('Database migration check complete.');
 
 module.exports = { db, appDataPath };

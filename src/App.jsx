@@ -15,6 +15,7 @@ import Header from './components/Header';
 import StatusBar from './components/StatusBar';
 import Dashboard from './views/Dashboard';
 import { KitManagementView } from './features/kit';
+import { CertificateView } from './features/certificate';
 
 const PlaceholderView = ({ title }) => (
     <div style={{ display: 'flex', width: '100%', height: '100%', backgroundColor: '#ffffff', padding: '1.25rem', gap: '1.25rem' }}>
@@ -93,7 +94,13 @@ function App() {
             case 'medicine': return <MedicineManagementView currentUser={user} />;
             case 'water': return <WaterQualityView currentUser={user} />;
             case 'kit': return <KitManagementView currentUser={user} />;
+            case 'certificate': return <CertificateView currentUser={user} />;
             case 'facility': return <FacilityManagementView currentUser={user} />;
+            // TODO: 장비이력카드 — 향후 EquipmentCardView 컴포넌트로 교체
+            //       · 장비 목록(사진, 기기명, 사양, 설치일 등) CRUD
+            //       · facility_logs 의 facility_id 컬럼과 연계하여 장비별 수리이력 조회
+            //       · 구글 드라이브 또는 로컬 파일로 장비 사진 관리
+            case 'equipment_card': return <PlaceholderView title="장비이력카드" />;
             case 'log': return <PlaceholderView title="일지작성" />;
             case 'log_daily': return <DailyLogView key="log_daily" currentUser={user} templateName="일일업무일지" title="일일업무일지" />;
             case 'log_water': return <DailyLogView key="log_water" currentUser={user} templateName="수질분석일지" title="수질분석일지" />;

@@ -334,7 +334,7 @@ const WaterQualityView = ({ currentUser }) => {
             }} title={errorMsg || ''}>
                 {isReadOnly ? (
                     <span style={{ fontWeight: 700, fontSize: 11, color: errorMsg ? '#dc2626' : (changed ? '#1d4ed8' : '#1e293b') }}>
-                        {displayVal || '-'}
+                        {displayVal || ''}
                     </span>
                 ) : (
                     <input
@@ -349,7 +349,6 @@ const WaterQualityView = ({ currentUser }) => {
                             boxSizing: 'border-box'
                         }}
                         value={isRawActive ? localValue : displayVal}
-                        placeholder="-"
                         onChange={e => {
                             setLocalValue(e.target.value);
                         }}

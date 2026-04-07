@@ -1,60 +1,45 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { FacilityModel } from './FacilityModel';
 
 export const useFacilityViewModel = (currentUser, { showAlert } = {}) => {
-    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [form, setForm] = useState({
-        facility_name: '',
-        content: '',
-        company: '',
-        price: '',
-        notes: ''
-    });
+    const [searchQuery, setSearchQuery] = useState('');
 
-    useEffect(() => {
-        loadLogs();
-    }, [date]);
-
-    const loadLogs = async () => {
+    const loadLogs = useCallback(async (q = '') => {
         setLoading(true);
         try {
-            const data = await FacilityModel.fetchLogs(date);
+            const data = await FacilityModel.fetchAll(q || undefined);
             setLogs(data);
         } catch (err) {
             console.error(err);
         } finally {
             setLoading(false);
         }
+    }, []);
+
+    useEffect(() => { loadLogs(); }, [loadLogs]);
+
+    const handleSearch = (q) => {
+        setSearchQuery(q);
+        loadLogs(q);
     };
 
-    const updateForm = (updates) => {
-        setForm(prev => ({ ...prev, ...updates }));
+    const createLog = async (data) => {
+        if (!data.facility_name && !data.location && !data.content) return;
+        await FacilityModel.create(data);
+        await loadLogs(searchQuery);
     };
 
-    const submitForm = async () => {
-        try {
-            await FacilityModel.saveLog({ ...form, date });
-
-            showAlert?.("상태: 시설 일지 기록 완료");
-            await loadLogs();
-            setForm({ facility_name: '', content: '', company: '', price: '', notes: '' });
-            return { success: true };
-        } catch (err) {
-            showAlert?.("오류: " + err.message);
-            return { success: false, error: err.message };
-        }
+    const updateLog = async (id, data) => {
+        await FacilityModel.update(id, data);
+        await loadLogs(searchQuery);
     };
 
-    return {
-        date,
-        setDate,
-        logs,
-        loading,
-        form,
-        updateForm,
-        submitForm,
-        refresh: loadLogs
+    const deleteLog = async (id) => {
+        await FacilityModel.remove(id);
+        await loadLogs(searchQuery);
     };
+
+    return { logs, loading, searchQuery, handleSearch, createLog, updateLog, deleteLog };
 };

@@ -136,10 +136,9 @@ const TABLE_MAPPINGS = {
     local_id: row.id,
     created_at: row.created_at,
     date: row.date,
+    location: row.location,
     facility_name: row.facility_name,
     content: row.content,
-    company: row.company,
-    price: row.price,
     notes: row.notes,
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()

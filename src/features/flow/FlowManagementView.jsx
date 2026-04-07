@@ -166,8 +166,8 @@ const FlowManagementView = ({ currentUser }) => {
                 ? { reading: row[flowName].raw, flow: row[flowName].diff }
                 : correctData(row[flowName]);
             const lockVal = subType === 'raw'
-                ? (ld.reading != null ? Number(ld.reading).toLocaleString() : '-')
-                : (ld.flow != null ? Number(ld.flow).toLocaleString() : '-');
+                ? (ld.reading != null ? Number(ld.reading).toLocaleString() : '')
+                : (ld.flow != null ? Number(ld.flow).toLocaleString() : '');
             return (
                 <div style={{ position: 'absolute', inset: 0, padding: '0 4px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', opacity: 0.4, pointerEvents: 'none', background: '#f8fafc' }}>
                     <span style={{ fontSize: subType === 'raw' ? 11 : 10.5, color: '#94a3b8' }}>{lockVal}</span>
@@ -199,7 +199,7 @@ const FlowManagementView = ({ currentUser }) => {
             const displayVal = d.reading != null ? Number(d.reading).toLocaleString() : '';
             return (
                 <div style={{ position: 'absolute', inset: 0, padding: '0 4px', background: '#e0f2fe', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box', pointerEvents: 'none' }} title="누계값으로 자동 계산">
-                    <span style={{ fontWeight: 700, fontSize: 11, color: '#0369a1' }}>{displayVal || '-'}</span>
+                    <span style={{ fontWeight: 700, fontSize: 11, color: '#0369a1' }}>{displayVal}</span>
                 </div>
             );
         }
@@ -264,7 +264,7 @@ const FlowManagementView = ({ currentUser }) => {
                 <div style={{ position: 'absolute', inset: 0, padding: '0 4px', background: d.error ? '#fee2e2' : ((!isReadOnly && (isManual || isCellDoubleClicked || (isToday && !todaySaved))) ? '#fef08a' : (isFuture ? '#f5f5f5' : 'transparent')), display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box', pointerEvents: 'none' }} title={d.error || ''}>
                     {isReadOnly ? (
                         <span style={{ fontWeight: 700, fontSize: 11, color: d.error ? '#dc2626' : (changed ? '#1d4ed8' : '#1e293b') }}>
-                            {displayVal || '-'}
+                            {displayVal}
                         </span>
                     ) : (
                         <input
@@ -280,7 +280,6 @@ const FlowManagementView = ({ currentUser }) => {
                                 pointerEvents: 'auto'
                             }}
                             value={isRawActive ? localValue : displayVal}
-                            placeholder="-"
                             onChange={e => { const v = e.target.value.replace(/,/g, ''); if (v === '' || /^-?\d*\.?\d*$/.test(v)) setLocalValue(v); }}
                             onKeyDown={e => {
                                 if (e.key === 'Enter') e.target.blur();
@@ -343,7 +342,6 @@ const FlowManagementView = ({ currentUser }) => {
                                 pointerEvents: 'auto'
                             }}
                             value={isDiffActive ? localValue : displayVal}
-                            placeholder="-"
                             onChange={e => { const v = e.target.value.replace(/,/g, ''); if (v === '' || /^-?\d*\.?\d*$/.test(v)) setLocalValue(v); }}
                             onKeyDown={e => {
                                 if (e.key === 'Enter') e.target.blur();
@@ -375,7 +373,7 @@ const FlowManagementView = ({ currentUser }) => {
                                 }
                             }}
                         />
-                    ) : (displayVal || '-')}
+                    ) : (displayVal || '')}
                 </div>
             );
         }

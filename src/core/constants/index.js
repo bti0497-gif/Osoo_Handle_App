@@ -13,10 +13,22 @@ export const MENUS = [
     icon: 'opacity',
     children: [
       { id: 'water', label: '수질분석' },
-      { id: 'kit', label: '키트관리' }
+      { id: 'kit', label: '키트관리' },
+      { id: 'certificate', label: '성적서' }
     ]
   },
-  { id: 'facility', label: '시설관리', icon: 'construction' },
+  {
+    id: 'facility_group',
+    label: '시설관리',
+    icon: 'construction',
+    children: [
+      { id: 'facility', label: '고장·수리이력' },
+      // TODO: 장비이력카드 — 현장별 장비 목록(사진·사양 포함)을 관리하고
+      //       고장·수리이력 테이블과 facility_id 외래키로 연계하여
+      //       장비별 누적 수리 내역을 조회할 수 있도록 구현 예정
+      { id: 'equipment_card', label: '장비이력카드' }
+    ]
+  },
   {
     id: 'log',
     label: '일지작성',
@@ -43,7 +55,10 @@ export const TAB_LABELS = {
   medicine: '약품관리',
   water: '수질분석',
   kit: '분석키트관리',
-  facility: '시설관리',
+  certificate: '성적서',
+  facility: '고장·수리이력',
+  // TODO: 장비이력카드 탭 레이블 — 장비이력카드 기능 구현 시 활성화
+  equipment_card: '장비이력카드',
   log: '일지작성',
   log_daily: '일일업무일지',
   log_water: '수질분석일지',
