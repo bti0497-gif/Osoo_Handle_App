@@ -9,7 +9,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
     const [currentPage, setCurrentPage] = useState(1);
     const [selectedPost, setSelectedPost] = useState(null);
     const [comments, setComments] = useState([]);
-    const [form, setForm] = useState({ title: '', content: '', is_notice: 0, attachments: '', parent_id: null });
+    const [form, setForm] = useState({ title: '', content: '', is_notice: 0, attachments: '', parent_id: null, target_site: '' });
     const postsPerPage = 10;
 
     const getReplyParentPost = (parentId) => {
@@ -102,7 +102,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
     const loadPosts = useCallback(async () => {
         try {
             setLoading(true);
-            const data = await BoardModel.fetchPosts(currentUser?.name);
+            const data = await BoardModel.fetchPosts(currentUser);
             const sortedData = sortThreadedPosts(data);
             setPosts(sortedData);
         } catch (error) {
@@ -111,7 +111,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
         } finally {
             setLoading(false);
         }
-    }, [currentUser?.name, showAlert]);
+    }, [currentUser, showAlert]);
 
     useEffect(() => { loadPosts(); }, [loadPosts]);
 
@@ -123,7 +123,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
                 ...form,
                 author: currentUser?.name || '익명'
             };
-            await BoardModel.savePost(postPayload);
+            await BoardModel.savePost(postPayload, currentUser);
 
             showAlert?.('저장 완료');
             await loadPosts();
@@ -141,7 +141,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
         const confirmed = await showConfirm?.('게시글을 삭제하시겠습니까?');
         if (!confirmed) return;
         try {
-            await BoardModel.deletePost(id);
+            await BoardModel.deletePost(id, currentUser);
             showAlert?.('삭제 완료');
             await loadPosts();
             setViewMode('list');
@@ -154,7 +154,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
 
     const viewPost = async (post) => {
         try {
-            const detail = await BoardModel.fetchPost(post.id);
+            const detail = await BoardModel.fetchPost(post.id, currentUser);
             setSelectedPost(detail);
             setViewMode('detail');
             loadComments(post.id);
@@ -170,13 +170,14 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
             content: post.content,
             is_notice: post.is_notice || 0,
             attachments: post.attachments || '',
-            parent_id: post.parent_id || null
+            parent_id: post.parent_id || null,
+            target_site: post.target_site || ''
         });
         setViewMode('form');
     };
 
     const resetForm = () => {
-        setForm({ title: '', content: '', is_notice: 0, attachments: '', parent_id: null });
+        setForm({ title: '', content: '', is_notice: 0, attachments: '', parent_id: null, target_site: '' });
         setSelectedPost(null);
         setComments([]);
     };
@@ -198,7 +199,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
                 author: currentUser?.name || '익명',
                 parent_id: parentId || null
             };
-            await BoardModel.saveComment(postId, commentData);
+            await BoardModel.saveComment(postId, commentData, currentUser);
 
             await loadComments(postId);
         } catch (err) {
@@ -209,7 +210,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
 
     const deleteComment = async (commentId, postId) => {
         try {
-            await BoardModel.deleteComment(commentId);
+            await BoardModel.deleteComment(commentId, currentUser);
             await loadComments(postId);
         } catch (err) {
             console.error(err);

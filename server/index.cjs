@@ -15,6 +15,7 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/uploads', express.static(path.join(BASE_DIR, 'uploads')));
+app.use('/사진관리', express.static(path.join(appDataPath, '사진관리')));
 
 process.on('uncaughtException', (err) => {
   console.error('[UncaughtException]', err.message);
@@ -41,10 +42,13 @@ app.get('/api/ping', (req, res) => res.json({ ok: true }));
 
 app.use(require('./routes/flowRoutes.cjs')(db));
 app.use(require('./routes/medicineRoutes.cjs')(db));
+app.use(require('./routes/medicineRegisterRoutes.cjs')(db, BASE_DIR, appDataPath));
+app.use(require('./routes/medicineInRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use(require('./routes/waterQualityRoutes.cjs')(db, BASE_DIR));
 app.use(require('./routes/kitRoutes.cjs')(db));
 app.use(require('./routes/facilityRoutes.cjs')(db));
 app.use(require('./routes/settingsRoutes.cjs')(db, BASE_DIR, appDataPath));
+app.use(require('./routes/boardRoutes.cjs')());
 app.use(require('./routes/uploadRoutes.cjs')(BASE_DIR));
 app.use(require('./routes/locationRoutes.cjs')(BASE_DIR));
 app.use(require('./routes/excelRoutes.cjs')(db, BASE_DIR, appDataPath));

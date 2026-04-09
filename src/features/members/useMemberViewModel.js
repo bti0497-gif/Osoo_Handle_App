@@ -76,8 +76,7 @@ export const useMemberViewModel = ({ showAlert, showConfirm } = {}) => {
 
             await MemberModel.saveMember(dataToSave);
 
-            // Supabase 저장 직후 로컬 DB에도 동기화 진행
-            await SyncService.syncMembers().catch(console.error);
+            // saveMember가 로컬 DB + Google Sheets 동시 저장하므로 별도 동기화 불필요
 
             showAlert?.("저장 완료");
             await loadMembers();

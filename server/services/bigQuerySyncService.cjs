@@ -1,32 +1,6 @@
-const { BigQuery } = require('@google-cloud/bigquery');
 const crypto = require('crypto');
-const path = require('path');
-const fs = require('fs');
 const { db } = require('../database.cjs');
-
-// 1. 설정: 구글 클라우드 키 파일 경로 및 데이터셋 ID
-const KEY_FILE_PATH = path.join(__dirname, '../config/work-jindan-194620a46d59.json');
-const DATASET_ID = 'daily_log_system';
-
-// 2. BigQuery 클라이언트 초기화 (Lazy Loading)
-let bigquery = null;
-
-function getBigQueryClient() {
-  if (bigquery) return bigquery;
-  
-  if (!fs.existsSync(KEY_FILE_PATH)) {
-    console.warn(`[BigQuery] Key file not found at: ${KEY_FILE_PATH}`);
-    return null;
-  }
-
-  try {
-    bigquery = new BigQuery({ keyFilename: KEY_FILE_PATH });
-    return bigquery;
-  } catch (err) {
-    console.error('[BigQuery] Client init failed:', err.message);
-    return null;
-  }
-}
+const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
 
 // 3. 현장 정보(현장명, 관리자명) 가져오기
 function getSiteInfo() {

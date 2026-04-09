@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
@@ -157,6 +157,11 @@ app.on('before-quit', () => {
 });
 
 ipcMain.handle('app:getVersion', () => app.getVersion());
+ipcMain.handle('shell:openFile', async (_event, filePath) => {
+  const err = await shell.openPath(filePath);
+  if (err) throw new Error(err);
+  return { ok: true };
+});
 ipcMain.handle('app:checkForUpdates', () => {
   return checkForUpdates();
 });

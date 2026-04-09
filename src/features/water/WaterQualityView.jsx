@@ -32,14 +32,14 @@ const normalizeDisplayWaterValue = (value) => {
 };
 
 const WaterQualityView = ({ currentUser }) => {
-    const { showAlert, showConfirm } = useDialog();
+    const { showToast, showConfirm } = useDialog();
     const { locationItems, config } = useSettingsViewModel();
     const {
         history, loading,
         updateReading, submitBatch, refresh, pendingChanges,
         isImportingFromQntech,
         handleImportFromQntech, handleImportRangeFromQntech
-    } = useWaterQualityViewModel(currentUser, { showAlert });
+    } = useWaterQualityViewModel(currentUser, { showToast });
 
     const batchProcess = useBatchProcess();
 
@@ -193,17 +193,17 @@ const WaterQualityView = ({ currentUser }) => {
 
     const handleQntechImportClick = async () => {
         if (!rangeStartDate || !rangeEndDate) {
-            showAlert?.('가져올 날짜를 선택하세요.');
+            showToast('가져올 날짜를 선택하세요.', 'error');
             return;
         }
 
         if (rangeStartDate > rangeEndDate) {
-            showAlert?.('앞의 날짜는 뒤의 날짜보다 클 수 없습니다.');
+            showToast('앞의 날짜는 뒤의 날짜보다 클 수 없습니다.', 'error');
             return;
         }
 
         if (rangeStartDate > todayStr || rangeEndDate > todayStr) {
-            showAlert?.('오늘날짜보다 미래의 날짜는 불러올 수 없습니다.');
+            showToast('오늘날짜보다 미래의 날짜는 불러올 수 없습니다.', 'error');
             return;
         }
 
@@ -251,9 +251,9 @@ const WaterQualityView = ({ currentUser }) => {
 
         if (success) {
             batchProcess.resetBatch();
-            showAlert?.(`기간 데이터 불러오기가 완료되었습니다. 총 값 ${totalImportedRowCount}건, 사진 ${totalSavedPhotoCount}장 저장됨`);
+            showToast(`기간 데이터 불러오기 완료 — 값 ${totalImportedRowCount}건, 사진 ${totalSavedPhotoCount}장`);
         } else {
-            showAlert?.(`일부 데이터 불러오기에 실패했습니다. 결과창을 확인하세요.\n성공한 건: 값 ${totalImportedRowCount}건, 사진 ${totalSavedPhotoCount}장`);
+            showToast(`일부 불러오기 실패 — 성공: 값 ${totalImportedRowCount}건, 사진 ${totalSavedPhotoCount}장`, 'error');
         }
     };
 

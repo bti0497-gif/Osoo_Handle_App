@@ -1,70 +1,73 @@
-import { supabase, apiClient } from '../../core/api';
+import { apiClient } from '../../core/api';
+
+/**
+ * _user 헬퍼 — 현재 로그인 사용자 정보를 요청 body에 포함시킨다.
+ * boardRoutes.cjs는 이 정보를 기준으로 가시성 필터와 권한 체크를 수행한다.
+ */
+function userPayload(currentUser) {
+    return {
+        _user: {
+            name: currentUser?.name || 'unknown',
+            role: currentUser?.role || 'manager',
+            site: currentUser?.site_name1 || ''
+        }
+    };
+}
 
 export const BoardModel = {
-    async fetchPosts(userName) {
-        let query = supabase
-            .from('posts')
-            .select(`
-                *,
-                comments (id)
-            `)
-            .order('is_notice', { ascending: false })
-            .order('created_at', { ascending: false });
-
-        if (userName && userName !== 'admin') {
-            query = query.or(`author.eq.${userName},is_notice.eq.1`);
-        }
-
-        const { data, error } = await query;
-        if (error) throw new Error(error.message);
-
-        return data.map(post => ({
-            ...post,
-            comment_count: post.comments ? post.comments.length : 0
-        }));
+    async fetchPosts(currentUser) {
+        const u = userPayload(currentUser)._user;
+        const res = await apiClient.get('/api/board/posts', {
+            _role: u.role,
+            _site: u.site,
+            _name: u.name
+        });
+        if (!res.success) throw new Error(res.message || '게시글 로드 실패');
+        return res.data;
     },
 
-    async fetchPost(id) {
-        const { data, error } = await supabase.from('posts').select('*').eq('id', id).single();
-        if (error) throw new Error(error.message);
-        return data;
+    async fetchPost(id, currentUser) {
+        const res = await apiClient.get(`/api/board/posts/${id}`);
+        if (!res.success) throw new Error(res.message || '게시글 로드 실패');
+        return res.data;
     },
 
-    async savePost(postData) {
+    async savePost(postData, currentUser) {
+        const body = { ...postData, ...userPayload(currentUser) };
         if (postData.id) {
-            const { data, error } = await supabase.from('posts').update(postData).eq('id', postData.id).select().single();
-            if (error) throw new Error(error.message);
-            return data;
+            const res = await apiClient.put(`/api/board/posts/${postData.id}`, body);
+            if (!res.success) throw new Error(res.message || '수정 실패');
+            return { id: postData.id, ...postData };
         } else {
-            const { data, error } = await supabase.from('posts').insert([postData]).select().single();
-            if (error) throw new Error(error.message);
-            return data;
+            const res = await apiClient.post('/api/board/posts', body);
+            if (!res.success) throw new Error(res.message || '작성 실패');
+            return res.data;
         }
     },
 
-    async deletePost(id) {
-        const { data, error } = await supabase.from('posts').delete().eq('id', id);
-        if (error) throw new Error(error.message);
-        return data;
+    async deletePost(id, currentUser) {
+        const res = await apiClient.delete(`/api/board/posts/${id}`);
+        if (!res.success) throw new Error(res.message || '삭제 실패');
+        return res.data;
     },
 
     async fetchComments(postId) {
-        const { data, error } = await supabase.from('comments').select('*').eq('post_id', postId).order('created_at', { ascending: true });
-        if (error) throw new Error(error.message);
-        return data;
+        const res = await apiClient.get(`/api/board/posts/${postId}/comments`);
+        if (!res.success) throw new Error(res.message || '댓글 로드 실패');
+        return res.data;
     },
 
-    async saveComment(postId, commentData) {
-        const payload = { ...commentData, post_id: postId };
-        const { data, error } = await supabase.from('comments').insert([payload]).select().single();
-        if (error) throw new Error(error.message);
-        return data;
+    async saveComment(postId, commentData, currentUser) {
+        const body = { ...commentData, ...userPayload(currentUser) };
+        const res = await apiClient.post(`/api/board/posts/${postId}/comments`, body);
+        if (!res.success) throw new Error(res.message || '댓글 작성 실패');
+        return res.data;
     },
 
-    async deleteComment(id) {
-        const { data, error } = await supabase.from('comments').delete().eq('id', id);
-        if (error) throw new Error(error.message);
-        return data;
+    async deleteComment(id, currentUser) {
+        const res = await apiClient.delete(`/api/board/comments/${id}`);
+        if (!res.success) throw new Error(res.message || '댓글 삭제 실패');
+        return res.data;
     },
 
     async uploadFile(file) {
@@ -73,3 +76,4 @@ export const BoardModel = {
         return apiClient.upload('/api/upload', formData);
     }
 };
+

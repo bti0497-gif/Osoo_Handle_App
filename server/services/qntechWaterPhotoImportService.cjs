@@ -8,9 +8,13 @@ const {
   getOrCreateFolderPath,
   uploadBufferToFolder
 } = require('./driveService.cjs');
+const {
+  sanitize,
+  waterAnalysisPhotoSegments,
+  waterAnalysisPhotoName,
+} = require('./drivePathService.cjs');
 
 const TARGET_PHOTO_ITEMS = ['암모니아성 질소', '질산성 질소', '오르토 인산염', '알칼리도'];
-const DRIVE_CATEGORY_NAME = '수질분석';
 
 function ensureDirectory(dirPath) {
   if (!fs.existsSync(dirPath)) {
@@ -18,12 +22,6 @@ function ensureDirectory(dirPath) {
   }
 }
 
-function sanitizeSegment(value) {
-  return String(value || '')
-    .replace(/[\\/:*?"<>|]/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 function matchTargetItem(name) {
   const compact = String(name || '').replace(/\s+/g, '');
@@ -42,23 +40,14 @@ function pickExtension(filePathValue, contentType) {
 }
 
 function buildProjectSourceLabel(project, projectIndex, totalProjects) {
-  const analysisProcess = sanitizeSegment(project?.analysisProcess);
-  const note = sanitizeSegment(project?.note);
+  const analysisProcess = sanitize(project?.analysisProcess);
+  const note = sanitize(project?.note);
   if (analysisProcess) return analysisProcess;
   if (note) return note;
   if (totalProjects > 1) return `${projectIndex + 1}차`;
   return '';
 }
 
-function buildReadablePhotoName(date, itemName, sourceLabel, extension, duplicateIndex = 0) {
-  const segments = [date];
-  if (sourceLabel) segments.push(sanitizeSegment(sourceLabel));
-  segments.push(sanitizeSegment(itemName));
-  if (duplicateIndex > 0) {
-    segments.push(String(duplicateIndex + 1));
-  }
-  return `${segments.filter(Boolean).join('-')}${extension}`;
-}
 
 async function ensureDrivePhotoFolder(siteName, date) {
   if (!isDriveConfigured()) {
@@ -66,14 +55,7 @@ async function ensureDrivePhotoFolder(siteName, date) {
   }
 
   const rootFolderId = getDriveRootFolderId();
-  const segments = [
-    sanitizeSegment(siteName || 'Unknown Site'),
-    DRIVE_CATEGORY_NAME,
-    date.slice(0, 4),
-    date.slice(5, 7),
-    date
-  ];
-
+  const segments = waterAnalysisPhotoSegments(siteName || 'Unknown Site', date);
   return getOrCreateFolderPath(rootFolderId, segments);
 }
 
@@ -160,7 +142,7 @@ async function saveProjectPhotos({ baseUrl, cookieJar, projects, date, baseDir, 
     const duplicateIndex = usedFileNames.get(`${file.sourceLabel}|${file.itemName}`) || 0;
     usedFileNames.set(`${file.sourceLabel}|${file.itemName}`, duplicateIndex + 1);
 
-    const readableName = buildReadablePhotoName(date, file.itemName, file.sourceLabel, ext, duplicateIndex);
+    const readableName = waterAnalysisPhotoName(date, file.itemName, file.sourceLabel, ext, duplicateIndex);
     const targetPath = path.join(photoDir, readableName);
     fs.writeFileSync(targetPath, downloaded.body);
 

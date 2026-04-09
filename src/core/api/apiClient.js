@@ -101,6 +101,19 @@ export const apiClient = {
     });
   },
 
+  async put(endpoint, body, options = {}) {
+    return request(endpoint, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      ...options,
+    });
+  },
+
+  async delete(endpoint, options = {}) {
+    return request(endpoint, { method: 'DELETE', ...options });
+  },
+
   async upload(endpoint, formData, options = {}) {
     return request(endpoint, {
       method: 'POST',

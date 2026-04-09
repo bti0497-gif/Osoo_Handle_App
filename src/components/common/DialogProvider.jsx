@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
 
 const DialogContext = createContext();
 
@@ -12,6 +12,17 @@ export const useDialog = () => {
 
 export const DialogProvider = ({ children }) => {
     const [dialogs, setDialogs] = useState([]);
+    const [toasts, setToasts] = useState([]);
+    const toastTimers = useRef({});
+
+    const showToast = useCallback((message, type = 'success') => {
+        const id = Date.now().toString(36) + Math.random().toString(36).substring(2);
+        setToasts(prev => [...prev, { id, message, type }]);
+        toastTimers.current[id] = setTimeout(() => {
+            setToasts(prev => prev.filter(t => t.id !== id));
+            delete toastTimers.current[id];
+        }, 3000);
+    }, []);
 
     const showAlert = useCallback((message, title = '알림') => {
         return new Promise((resolve) => {
@@ -38,7 +49,7 @@ export const DialogProvider = ({ children }) => {
     }, []);
 
     return (
-        <DialogContext.Provider value={{ showAlert, showConfirm }}>
+        <DialogContext.Provider value={{ showAlert, showConfirm, showToast }}>
             {children}
             {dialogs.map((dialog, index) => (
                 <div key={dialog.id} style={{
@@ -115,7 +126,41 @@ export const DialogProvider = ({ children }) => {
                     from { opacity: 0; transform: scale(0.95) translateY(-10px); }
                     to { opacity: 1; transform: scale(1) translateY(0); }
                 }
+                @keyframes toastSlideUp {
+                    from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+                    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+                }
             `}</style>
+            {/* 토스트 */}
+            {toasts.map((toast) => (
+                <div key={toast.id} style={{
+                    position: 'fixed',
+                    bottom: '32px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    backgroundColor: '#1e293b',
+                    color: '#ffffff',
+                    padding: '12px 20px',
+                    borderRadius: '10px',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+                    zIndex: 99999,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    whiteSpace: 'nowrap',
+                    maxWidth: 'calc(100vw - 48px)',
+                    borderLeft: `4px solid ${toast.type === 'error' ? '#f87171' : '#4ade80'}`,
+                    pointerEvents: 'none',
+                    animation: 'toastSlideUp 0.2s ease-out',
+                }}>
+                    <span style={{ color: toast.type === 'error' ? '#f87171' : '#4ade80', flexShrink: 0 }}>
+                        {toast.type === 'error' ? '✕' : '✓'}
+                    </span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{toast.message}</span>
+                </div>
+            ))}
         </DialogContext.Provider>
     );
 };

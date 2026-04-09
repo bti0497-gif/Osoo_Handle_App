@@ -81,8 +81,17 @@ export const AuthModel = {
         }
     },
 
-    async syncTodayData(memberName, date) {
-        // Supabase 통합 후 필요시 구현
+    async syncAttendanceBQ() {
+        try {
+            const res = await fetch(`${getApiBase()}/api/auth/sync-attendance-bq`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await res.json();
+            return data;
+        } catch (e) {
+            console.error('[AuthModel] BQ 동기화 오류:', e);
+        }
     },
 
     saveSession(userData) {

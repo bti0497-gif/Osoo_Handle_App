@@ -4,7 +4,7 @@ import { useAuthViewModel, LoginView, SyncService } from './features/auth';
 import { AttendanceView } from './features/attendance';
 import { MemberManagementView } from './features/members';
 import { FlowManagementView } from './features/flow';
-import { MedicineManagementView } from './features/medicine';
+import { MedicineManagementView, MedicineRegisterView, MedicineInView } from './features/medicine';
 import { WaterQualityView } from './features/water';
 import { FacilityManagementView } from './features/facility';
 import { DailyLogView } from './features/dailylog';
@@ -104,8 +104,8 @@ function App() {
             case 'log': return <PlaceholderView title="일지작성" />;
             case 'log_daily': return <DailyLogView key="log_daily" currentUser={user} templateName="일일업무일지" title="일일업무일지" />;
             case 'log_water': return <DailyLogView key="log_water" currentUser={user} templateName="수질분석일지" title="수질분석일지" />;
-            case 'log_med_mgmt': return <PlaceholderView title="약품관리대장" />;
-            case 'log_med_in': return <PlaceholderView title="약품입고일지" />;
+            case 'log_med_mgmt': return <MedicineRegisterView currentUser={user} />;
+            case 'log_med_in': return <MedicineInView currentUser={user} />;
             case 'log_sludge_out': return <PlaceholderView title="슬러지반출관리대장" />;
             case 'log_sludge_photo': return <PlaceholderView title="슬러지사진대지" />;
             case 'attendance':

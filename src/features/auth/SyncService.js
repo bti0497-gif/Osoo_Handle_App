@@ -1,22 +1,17 @@
-import { supabase } from '../../core/api/supabaseClient';
 import { getApiBase } from '../../core/api/serverConfig';
 
 export const SyncService = {
     async syncMembers() {
         try {
-            // 1. Supabase에서 최신 사용자 목록 가져오기 (admin 제외)
-            const { data: members, error } = await supabase
-                .from('members')
-                .select('*')
-                .neq('name', 'admin');
-
-            if (error) {
-                console.error('[SyncService] Supabase 멤버 로드 실패:', error.message);
+            // Google Sheets(또는 로컬 DB 폴백)에서 최신 회원 목록 가져오기
+            const res = await fetch(`${getApiBase()}/api/auth/members`);
+            const data = await res.json();
+            if (!data.success) {
+                console.error('[SyncService] 회원 로드 실패:', data.error);
                 return;
             }
-
-            // 2. 로컬 DB에 병합
-            for (const member of members) {
+            // 로컬 DB에 병합
+            for (const member of data.members || []) {
                 try {
                     await fetch(`${getApiBase()}/api/auth/sync-member`, {
                         method: 'POST',
@@ -24,10 +19,10 @@ export const SyncService = {
                         body: JSON.stringify(member)
                     });
                 } catch (e) {
-                    console.error('[SyncService] 멤버 강제 동기화 실패:', member.name, e);
+                    console.error('[SyncService] 멤버 로컬 동기화 실패:', member.name, e);
                 }
             }
-            console.log('[SyncService] 멤버 동기화 완료');
+            console.log('[SyncService] 회원 동기화 완료');
         } catch (e) {
             console.error('[SyncService] syncMembers 에러:', e);
         }
@@ -35,49 +30,17 @@ export const SyncService = {
 
     async syncAttendance() {
         try {
-            // 1. 로컬에 저장된 미동기화(is_synced=0) 출결 기록 가져오기
-            const res = await fetch(`${getApiBase()}/api/auth/unsynced-attendance`);
+            // 로컬 미동기화 출결 → BigQuery 전송
+            const res = await fetch(`${getApiBase()}/api/auth/sync-attendance-bq`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
             const data = await res.json();
-
-            if (!data.success || !data.logs || data.logs.length === 0) return;
-
-            const syncedIds = [];
-
-            // 2. Supabase에 업서트 (Upsert)
-            for (const log of data.logs) {
-                const { id, is_synced, ...logData } = log; // 로컬 DB 전용 컬럼 제거
-
-                const { data: existing } = await supabase
-                    .from('attendance')
-                    .select('id')
-                    .eq('member_id', log.member_id)
-                    .eq('date', log.date)
-                    .maybeSingle();
-
-                if (existing) {
-                    const { error } = await supabase
-                        .from('attendance')
-                        .update(logData)
-                        .eq('id', existing.id);
-                    if (!error) syncedIds.push(id);
-                } else {
-                    const { error } = await supabase
-                        .from('attendance')
-                        .insert([logData]);
-                    if (!error) syncedIds.push(id);
-                }
+            if (data.success) {
+                console.log(`[SyncService] 출결 BigQuery 동기화 완료 (${data.syncedCount}건)`);
+            } else {
+                console.error('[SyncService] 출결 동기화 실패:', data.error);
             }
-
-            // 3. 동기화 성공한 로컬 레코드의 is_synced = 1 처리
-            if (syncedIds.length > 0) {
-                await fetch(`${getApiBase()}/api/auth/mark-attendance-synced`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ids: syncedIds })
-                });
-            }
-
-            console.log(`[SyncService] 출결 정보 동기화 완료 (${syncedIds.length}건)`);
         } catch (e) {
             console.error('[SyncService] syncAttendance 에러:', e);
         }
@@ -100,3 +63,4 @@ export const SyncService = {
         });
     }
 };
+

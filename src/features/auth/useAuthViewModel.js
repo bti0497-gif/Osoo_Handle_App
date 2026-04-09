@@ -16,15 +16,24 @@ export const useAuthViewModel = () => {
     }, []);
 
     const performAutoLogout = useCallback(async (userData) => {
-        if (!userData) return;
-        try {
-            console.log(`[자동 로그아웃] ${userData.name} - 18:00 자동 퇴근 처리`);
-            await AuthModel.recordLogout(userData, true);
-        } catch (err) {
-            console.error("Auto logout sync failed:", err);
+        // 1. 아직 로그인 중이면 자동 퇴근 처리
+        if (userData) {
+            try {
+                console.log(`[자동 로그아웃] ${userData.name} - 20:00 자동 퇴근 처리`);
+                await AuthModel.recordLogout(userData, true);
+            } catch (err) {
+                console.error("Auto logout failed:", err);
+            }
+            AuthModel.clearSession();
+            setUser(null);
         }
-        AuthModel.clearSession();
-        setUser(null);
+        // 2. 수동 로그아웃 포함 — 20:00에 무조건 BigQuery 동기화
+        try {
+            const result = await AuthModel.syncAttendanceBQ();
+            console.log(`[20:00] BigQuery 출결 동기화 완료 (${result?.syncedCount ?? 0}건)`);
+        } catch (err) {
+            console.error('[20:00] BigQuery 동기화 실패:', err);
+        }
     }, []);
 
     const setupAutoLogoutTimer = useCallback((userData) => {
@@ -32,7 +41,7 @@ export const useAuthViewModel = () => {
 
         const now = new Date();
         const cutoff = new Date();
-        cutoff.setHours(22, 0, 0, 0);
+        cutoff.setHours(20, 0, 0, 0);
 
         if (now >= cutoff) {
             performAutoLogout(userData);

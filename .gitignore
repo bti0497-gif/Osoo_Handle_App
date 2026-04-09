@@ -3,6 +3,9 @@ logs
 *.log
 npm-debug.log*
 yarn-debug.log*
+
+# Google 서비스 계정 키 파일 (절대 커밋 금지)
+server/config/google-key.json
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*

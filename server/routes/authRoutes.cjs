@@ -1,4 +1,6 @@
 const express = require('express');
+const { syncAttendanceLogs } = require('../services/attendanceBigQueryService.cjs');
+const { getMembers, upsertMember, deleteMember, isSheetsConfigured } = require('../services/membersSheetsService.cjs');
 
 module.exports = (db) => {
     const router = express.Router();
@@ -118,6 +120,80 @@ module.exports = (db) => {
             if (ids && ids.length > 0) {
                 const placeholders = ids.map(() => '?').join(',');
                 db.prepare(`UPDATE attendance SET is_synced = 1 WHERE id IN (${placeholders})`).run(...ids);
+            }
+            res.json({ success: true });
+        } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    // 8. 출결 기록 → BigQuery 동기화
+    router.post('/sync-attendance-bq', async (req, res) => {
+        try {
+            const siteRow = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
+            const siteName = siteRow?.site_name || '';
+
+            const logs = db.prepare('SELECT * FROM attendance WHERE is_synced = 0 ORDER BY login_time ASC').all();
+            if (logs.length === 0) return res.json({ success: true, syncedCount: 0 });
+
+            const { syncedIds, errors } = await syncAttendanceLogs(logs, siteName);
+
+            if (syncedIds.length > 0) {
+                const placeholders = syncedIds.map(() => '?').join(',');
+                db.prepare(`UPDATE attendance SET is_synced = 1 WHERE id IN (${placeholders})`).run(...syncedIds);
+            }
+
+            res.json({ success: true, syncedCount: syncedIds.length, errors });
+        } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    // 9. 회원 목록 조회 (Google Sheets)
+    router.get('/members', async (req, res) => {
+        try {
+            if (!isSheetsConfigured()) {
+                // Sheets 미설정 시 로컬 DB 회원 반환
+                const members = db.prepare("SELECT * FROM members WHERE name != 'admin'").all();
+                return res.json({ success: true, members, source: 'local' });
+            }
+            const members = await getMembers();
+            res.json({ success: true, members, source: 'sheets' });
+        } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    // 10. 회원 upsert (Google Sheets)
+    router.post('/members', async (req, res) => {
+        const member = req.body;
+        try {
+            // 로컬 DB 동기화 (기존 로직 유지)
+            if (member.name !== 'admin') {
+                const existing = db.prepare('SELECT id FROM members WHERE id = ? OR name = ?').get(member.id, member.name);
+                if (existing) {
+                    db.prepare('UPDATE members SET name = ?, password = ?, role = ? WHERE id = ?').run(member.name, member.password, member.role, member.id);
+                } else {
+                    db.prepare('INSERT INTO members (id, name, password, role) VALUES (?, ?, ?, ?)').run(member.id, member.name, member.password, member.role);
+                }
+            }
+            // Google Sheets에도 저장
+            if (isSheetsConfigured()) {
+                await upsertMember(member);
+            }
+            res.json({ success: true });
+        } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    // 11. 회원 삭제 (Google Sheets)
+    router.delete('/members/:id', async (req, res) => {
+        const { id } = req.params;
+        try {
+            db.prepare('DELETE FROM members WHERE id = ?').run(id);
+            if (isSheetsConfigured()) {
+                await deleteMember(id);
             }
             res.json({ success: true });
         } catch (err) {

@@ -1,14 +1,19 @@
 const { google } = require('googleapis');
-require('dotenv').config({ path: '.env.local' });
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../../.env.local') });
+const { boardUploadsSegments } = require('./drivePathService.cjs');
 
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI
-);
-oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
+const KEY_FILE = path.join(__dirname, '../config/google-key.json');
 
-const drive = google.drive({ version: 'v3', auth: oauth2Client });
+const auth = new google.auth.GoogleAuth({
+  keyFile: KEY_FILE,
+  scopes: [
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/spreadsheets',
+  ],
+});
+
+const drive = google.drive({ version: 'v3', auth });
 
 function escapeDriveQueryValue(value) {
   return String(value || '').replace(/'/g, "\\'");
@@ -19,10 +24,9 @@ function getDriveRootFolderId() {
 }
 
 function isDriveConfigured() {
+  const fs = require('fs');
   return Boolean(
-    process.env.GOOGLE_CLIENT_ID &&
-    process.env.GOOGLE_CLIENT_SECRET &&
-    process.env.GOOGLE_REFRESH_TOKEN &&
+    fs.existsSync(KEY_FILE) &&
     getDriveRootFolderId()
   );
 }
@@ -121,10 +125,9 @@ async function uploadBufferToFolder({ folderId, fileName, buffer, mimeType }) {
 
 async function getOrCreateBoardUploadsFolder() {
   const parentFolderId = getDriveRootFolderId();
-  const folderName = 'Board_Uploads';
 
   try {
-    const folder = await getOrCreateFolder(parentFolderId, folderName);
+    const folder = await getOrCreateFolderPath(parentFolderId, boardUploadsSegments());
     return folder.id;
   } catch (error) {
     console.error('Error getting/creating Board_Uploads folder:', error);

@@ -5,6 +5,7 @@ const fs = require('fs');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const { parseAndStoreExcel, getStoredSheets, getStoredRow, getCellValue, hasStoredData, formatDate } = require('../services/excelService.cjs');
 const { normalizeBaseUrl, invalidateQntechSessionCache } = require('../services/qntechAuthService.cjs');
+const { isDriveConfigured, getDriveRootFolderId, getOrCreateFolder } = require('../services/driveService.cjs');
 const {
   ALLOWED_REPORT_TEMPLATE_NAMES,
   getCustomReportTemplatesDir,
@@ -66,7 +67,7 @@ module.exports = function (db, baseDir, appDataPath) {
   });
 
   // ── 설정 저장 ──
-  router.post('/api/settings', (req, res) => {
+  router.post('/api/settings', async (req, res) => {
     const { settings, configItems } = req.body;
     try {
       const updateTransaction = db.transaction((s, items) => {
@@ -79,7 +80,23 @@ module.exports = function (db, baseDir, appDataPath) {
         });
       });
       updateTransaction(settings, configItems);
-      res.json({ success: true, message: 'Settings saved successfully' });
+
+      // Drive가 설정돼 있으면 현장명 폴더 생성 (없으면 만들고, 있으면 그냥 pass)
+      let driveSiteFolder = null;
+      if (isDriveConfigured() && settings.siteName) {
+        try {
+          driveSiteFolder = await getOrCreateFolder(getDriveRootFolderId(), settings.siteName);
+        } catch (driveErr) {
+          console.error('[Settings] Drive 현장폴더 생성 실패:', driveErr.message);
+          // Drive 오류가 설정 저장을 막지 않도록 무시
+        }
+      }
+
+      res.json({
+        success: true,
+        message: 'Settings saved successfully',
+        ...(driveSiteFolder ? { driveSiteFolder: { id: driveSiteFolder.id, name: driveSiteFolder.name, url: driveSiteFolder.webViewLink } } : {})
+      });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 

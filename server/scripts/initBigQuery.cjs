@@ -116,13 +116,57 @@ const SCHEMAS = {
     { name: 'local_id', type: 'INTEGER', mode: 'REQUIRED' },
     { name: 'created_at', type: 'TIMESTAMP' },
     { name: 'date', type: 'DATE' },
+    { name: 'location', type: 'STRING' },
     { name: 'facility_name', type: 'STRING' },
     { name: 'content', type: 'STRING' },
-    { name: 'company', type: 'STRING' },
-    { name: 'price', type: 'INTEGER' },
     { name: 'notes', type: 'STRING' },
     { name: 'updated_at', type: 'TIMESTAMP' },
     { name: 'uploaded_at', type: 'TIMESTAMP' }
+  ],
+
+  // ── 게시판 ──────────────────────────────────────────────────────────
+  // author_role: 'admin'(중앙관리자) | 'manager'(현장관리자)
+  // target_site: '' or NULL = 전체 현장, 특정 현장명 = 해당 현장만 (관리자 작성 시)
+  // 현장관리자가 올린 글: author_site 현장 + 중앙관리자 전체에게 보임
+  // is_deleted: 소프트 삭제 (BigQuery DML 최소화)
+  posts: [
+    { name: 'id',          type: 'STRING',    mode: 'REQUIRED' },  // UUID
+    { name: 'author',      type: 'STRING',    mode: 'REQUIRED' },
+    { name: 'author_role', type: 'STRING',    mode: 'REQUIRED' },  // 'admin' | 'manager'
+    { name: 'author_site', type: 'STRING' },                        // 현장명 (관리자='CENTRAL')
+    { name: 'target_site', type: 'STRING' },                        // '' or NULL=전체, 현장명=특정
+    { name: 'title',       type: 'STRING',    mode: 'REQUIRED' },
+    { name: 'content',     type: 'STRING' },
+    { name: 'is_notice',   type: 'BOOLEAN' },
+    { name: 'attachments', type: 'STRING' },                        // JSON 배열 문자열
+    { name: 'parent_id',   type: 'STRING' },                        // 답글 원글 id
+    { name: 'is_deleted',  type: 'BOOLEAN' },
+    { name: 'created_at',  type: 'TIMESTAMP', mode: 'REQUIRED' },
+    { name: 'updated_at',  type: 'TIMESTAMP' }
+  ],
+  comments: [
+    { name: 'id',         type: 'STRING',    mode: 'REQUIRED' },
+    { name: 'post_id',    type: 'STRING',    mode: 'REQUIRED' },
+    { name: 'author',     type: 'STRING',    mode: 'REQUIRED' },
+    { name: 'content',    type: 'STRING' },
+    { name: 'is_deleted', type: 'BOOLEAN' },
+    { name: 'created_at', type: 'TIMESTAMP', mode: 'REQUIRED' }
+  ],
+
+  // ── 출결 ──────────────────────────────────────────────────────────
+  attendance: [
+    { name: 'id',                type: 'STRING',    mode: 'REQUIRED' },  // UUID
+    { name: 'site_name',         type: 'STRING' },
+    { name: 'member_id',         type: 'INTEGER',   mode: 'REQUIRED' },
+    { name: 'member_name',       type: 'STRING' },
+    { name: 'date',              type: 'DATE',      mode: 'REQUIRED' },
+    { name: 'login_time',        type: 'TIMESTAMP' },
+    { name: 'logout_time',       type: 'TIMESTAMP' },
+    { name: 'login_lat',         type: 'FLOAT' },
+    { name: 'login_lng',         type: 'FLOAT' },
+    { name: 'location_matched',  type: 'BOOLEAN' },
+    { name: 'auto_logout',       type: 'BOOLEAN' },
+    { name: 'uploaded_at',       type: 'TIMESTAMP' }
   ]
 };
 

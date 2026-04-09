@@ -236,6 +236,9 @@ const BoardView = ({ currentUser }) => {
                                                     {p.is_notice ? (
                                                         <span style={{ fontSize: '0.5625rem', fontWeight: 900, color: '#d97706', backgroundColor: '#fef3c7', padding: '1px 5px', borderRadius: '3px', flexShrink: 0 }}>공지</span>
                                                     ) : null}
+                                                    {p.target_site && isAdmin && (
+                                                        <span style={{ fontSize: '0.5625rem', fontWeight: 900, color: '#7c3aed', backgroundColor: '#ede9fe', padding: '1px 5px', borderRadius: '3px', flexShrink: 0 }}>→{p.target_site}</span>
+                                                    )}
                                                     {p.parent_id && (
                                                         <span style={{ color: '#94a3b8', fontWeight: 800, marginRight: '4px' }}>↳</span>
                                                     )}
@@ -475,6 +478,40 @@ const BoardView = ({ currentUser }) => {
                                         </label>
                                     )}
                                 </div>
+
+                                {/* 관리자 전용: 대상 현장 선택 */}
+                                {isAdmin && (
+                                    <div style={{ marginBottom: '0.75rem' }}>
+                                        <label style={{ display: 'block', fontSize: '0.6875rem', fontWeight: 800, color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>대상 현장</label>
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8125rem', fontWeight: 700, cursor: 'pointer' }}>
+                                                <input type="radio" name="target_site" value=""
+                                                    checked={!form.target_site}
+                                                    onChange={() => updateForm({ target_site: '' })} />
+                                                전체 현장
+                                            </label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8125rem', fontWeight: 700, cursor: 'pointer' }}>
+                                                <input type="radio" name="target_site" value="specific"
+                                                    checked={!!form.target_site}
+                                                    onChange={() => updateForm({ target_site: form.target_site || '' })} />
+                                                특정 현장
+                                            </label>
+                                            {!!form.target_site !== false && (
+                                                <input
+                                                    value={form.target_site}
+                                                    onChange={e => updateForm({ target_site: e.target.value })}
+                                                    placeholder="현장명 입력"
+                                                    style={{ border: '1.5px solid #e2e8f0', height: '32px', padding: '0 10px', fontSize: '0.8125rem', fontWeight: 600, outline: 'none', borderRadius: '6px', width: '160px' }}
+                                                    onFocus={e => e.target.style.borderColor = '#1e293b'}
+                                                    onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+                                                />
+                                            )}
+                                        </div>
+                                        <p style={{ fontSize: '0.625rem', color: '#94a3b8', marginTop: '4px', fontWeight: 600 }}>
+                                            * 전체: 모든 현장관리자 + 중앙관리자에게 표시 / 특정 현장: 해당 현장관리자 + 중앙관리자에게만 표시
+                                        </p>
+                                    </div>
+                                )}
 
                                 {/* 에디터 */}
                                 <div style={{ flex: 1, marginBottom: '0.75rem', minHeight: '200px' }}>

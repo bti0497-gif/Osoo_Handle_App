@@ -94,7 +94,7 @@ const applyDisplayLabels = (rows = []) => {
     });
 };
 
-export const useWaterQualityViewModel = (currentUser, { showAlert } = {}) => {
+export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
     const rangeImportPollingRef = useRef(null);
     const historyRef = useRef([]);
     const [history, setHistory] = useState([]);
@@ -328,15 +328,15 @@ export const useWaterQualityViewModel = (currentUser, { showAlert } = {}) => {
 
             if (!silent) {
                 if (importedRowCount === 0 && savedPhotoCount === 0) {
-                    showAlert?.('데이터가 없습니다.');
+                    showToast?.('데이터가 없습니다.', 'error');
                 } else {
-                    showAlert?.(`QnTECH 데이터를 저장했습니다. 값 ${importedRowCount}건, 사진 ${savedPhotoCount}건`);
+                    showToast?.(`QnTECH 데이터를 저장했습니다. 값 ${importedRowCount}건, 사진 ${savedPhotoCount}건`);
                 }
             }
             return result;
         } catch (err) {
             if (!silent) {
-                showAlert?.(`QnTECH 불러오기 실패: ${err.message}`);
+                showToast?.(`QnTECH 불러오기 실패: ${err.message}`, 'error');
             }
             throw err;
         } finally {
@@ -384,7 +384,7 @@ export const useWaterQualityViewModel = (currentUser, { showAlert } = {}) => {
             : Object.keys(sourcePendingChanges);
 
         if (changedRowKeys.length === 0) {
-            if (!silent) showAlert?.('변경 사항이 없습니다.');
+            if (!silent) showToast?.('변경 사항이 없습니다.', 'error');
             return;
         }
 
@@ -437,11 +437,11 @@ export const useWaterQualityViewModel = (currentUser, { showAlert } = {}) => {
                 if (!res.success) throw new Error(res.error);
             }
 
-            if (!silent) showAlert?.('데이터가 성공적으로 저장되었습니다.');
+            if (!silent) showToast?.('데이터가 성공적으로 저장되었습니다.');
 
             await loadReadings();
         } catch (err) {
-            if (!silent) showAlert?.(`저장 실패: ${err.message}`);
+            if (!silent) showToast?.(`저장 실패: ${err.message}`, 'error');
         } finally {
             setLoading(false);
         }

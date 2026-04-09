@@ -41,7 +41,7 @@ function hasNonEmptyBinding(bindings, keys) {
     });
 }
 
-export const useDailyLogViewModel = (currentUser, initialDate, templateName, showAlert) => {
+export const useDailyLogViewModel = (currentUser, initialDate, templateName, showToast) => {
     const today = initialDate || new Date().toISOString().split('T')[0];
     const isDailyWorkLog = templateName === DAILY_WORK_LOG_TEMPLATE;
     const expectedPhotoCountPerSheet = isDailyWorkLog ? 0 : 4;
@@ -390,10 +390,8 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         }
 
         if (alertMessage) {
-            if (showAlert) {
-                await showAlert(alertMessage, alertTitle);
-            } else {
-                window.alert(alertMessage);
+            if (showToast) {
+                showToast(alertMessage, alertTitle.includes('실패') ? 'error' : 'success');
             }
         }
     };

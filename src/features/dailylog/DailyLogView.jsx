@@ -7,7 +7,7 @@ import DailyLogStatusDashboard from './DailyLogStatusDashboard';
 import { useDailyLogViewModel } from './useDailyLogViewModel';
 
 const DailyLogView = ({ currentUser, templateName = '수질분석일지', title = '수질분석일지' }) => {
-    const { showAlert } = useDialog();
+    const { showToast } = useDialog();
     const {
         selectedDates,
         handleDateClick,
@@ -24,7 +24,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         dashboardDateRows,
         dashboardSummary,
         isDashboardLoading,
-    } = useDailyLogViewModel(currentUser, undefined, templateName, showAlert);
+    } = useDailyLogViewModel(currentUser, undefined, templateName, showToast);
     const lastAlertMessageRef = useRef('');
 
     useEffect(() => {
@@ -37,8 +37,8 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         }
 
         lastAlertMessageRef.current = manifestError;
-        showAlert(manifestError, `${title} 양식 필요`);
-    }, [manifestError, manifestErrorCode, showAlert, title]);
+        showToast(manifestError, 'error');
+    }, [manifestError, manifestErrorCode, showToast, title]);
 
     // date 포맷 지원 함수 (캘린더의 타일 비교를 위함)
     const getFormattedDateString = (date) => {
@@ -71,21 +71,11 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                                             classes.push('react-calendar__tile--active');
                                         }
                                         
-                                        if (templateName !== '일일업무일지' && activeDates && activeDates.includes(dStr)) {
-                                            classes.push('has-data-badge');
-                                        }
-                                        
                                         return classes.join(' ');
                                     }
                                     return null;
                                 }}
                                 tileContent={({ date, view }) => {
-                                    if (view === 'month') {
-                                        const dStr = getFormattedDateString(date);
-                                        if (templateName !== '일일업무일지' && activeDates && activeDates.includes(dStr)) {
-                                            return <div className="data-badge" />
-                                        }
-                                    }
                                     return null;
                                 }}
                                 formatDay={(locale, date) => date.getDate()}
