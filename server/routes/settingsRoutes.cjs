@@ -610,5 +610,74 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
+  // ── 약품 기본 입고량 조회 ──
+  router.get('/api/settings/medicine-defaults', (req, res) => {
+    try {
+      const items = db.prepare(
+        "SELECT item_name, COALESCE(default_amount, 0) AS default_amount FROM config_items WHERE category = 'medicine' AND item_name NOT LIKE '%\\_purchase' ESCAPE '\\' AND item_name NOT LIKE '%\\_usage' ESCAPE '\\' AND item_name NOT LIKE '%\\_inventory' ESCAPE '\\' ORDER BY display_order ASC"
+      ).all();
+      res.json({ success: true, items });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // ── 약품 기본 입고량 저장 ──
+  router.post('/api/settings/medicine-defaults', (req, res) => {
+    const { items } = req.body;
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, message: 'items 배열이 필요합니다.' });
+    }
+    try {
+      const stmt = db.prepare(
+        "UPDATE config_items SET default_amount = ? WHERE category = 'medicine' AND item_name = ?"
+      );
+      db.transaction((rows) => {
+        for (const { name, defaultAmount } of rows) {
+          stmt.run(Number(defaultAmount) || 0, name);
+        }
+      })(items);
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // ── 키트 기본 입고량 조회 ──
+  router.get('/api/settings/kit-defaults', (req, res) => {
+    try {
+      const BASE_KITS = ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '인산염인(PO4-P)', '알칼리도(ALK)'];
+      const rows = db.prepare(
+        "SELECT item_name, COALESCE(default_amount, 0) AS default_amount FROM config_items WHERE category = 'kit'"
+      ).all();
+      const rowMap = Object.fromEntries(rows.map(r => [r.item_name, r.default_amount]));
+      const items = BASE_KITS.map(name => ({ item_name: name, default_amount: rowMap[name] ?? 0 }));
+      res.json({ success: true, items });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // ── 키트 기본 입고량 저장 ──
+  router.post('/api/settings/kit-defaults', (req, res) => {
+    const { items } = req.body;
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, message: 'items 배열이 필요합니다.' });
+    }
+    try {
+      const stmt = db.prepare(
+        "UPDATE config_items SET default_amount = ? WHERE category = 'kit' AND item_name = ?"
+      );
+      db.transaction((rows) => {
+        for (const { name, defaultAmount } of rows) {
+          stmt.run(Number(defaultAmount) || 0, name);
+        }
+      })(items);
+      res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
   return router;
 };

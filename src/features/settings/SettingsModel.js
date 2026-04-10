@@ -44,6 +44,22 @@ export const SettingsModel = {
         return apiClient.post('/api/settings/save-flow-option', { flowOption });
     },
 
+    async getMedicineDefaults() {
+        return apiClient.get('/api/settings/medicine-defaults');
+    },
+
+    async saveMedicineDefaults(items) {
+        return apiClient.post('/api/settings/medicine-defaults', { items });
+    },
+
+    async getKitDefaults() {
+        return apiClient.get('/api/settings/kit-defaults');
+    },
+
+    async saveKitDefaults(items) {
+        return apiClient.post('/api/settings/kit-defaults', { items });
+    },
+
     async getExcelStatus() {
         return apiClient.get('/api/settings/excel-status');
     },

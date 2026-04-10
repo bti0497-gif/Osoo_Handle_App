@@ -54,15 +54,18 @@ app.use(require('./routes/locationRoutes.cjs')(BASE_DIR));
 app.use(require('./routes/excelRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use(require('./routes/dailyWorkLogRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use(require('./routes/hwpRoutes.cjs')(db, BASE_DIR, appDataPath));
+app.use(require('./routes/sludgePhotoRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use('/api/auth', require('./routes/authRoutes.cjs')(db));
 
-// --- Background Scheduler Start ---
-const syncScheduler = require('./cron/syncScheduler.cjs');
+// --- Background Scheduler (배포 빌드 전까지 비활성화) ---
+// BIGQUERY_SYNC_ENABLED=true 로 설정해야 활성화됨
 const isBigQuerySyncEnabled = process.env.BIGQUERY_SYNC_ENABLED === 'true';
 if (isBigQuerySyncEnabled) {
+  const syncScheduler = require('./cron/syncScheduler.cjs');
   syncScheduler.start();
+  console.log('[Scheduler] BigQuery 백그라운드 동기화 시작');
 } else {
-  console.log('[Scheduler] BIGQUERY_SYNC_ENABLED != true, 백그라운드 동기화는 비활성화됩니다.');
+  console.log('[Scheduler] BigQuery 동기화 비활성화 (BIGQUERY_SYNC_ENABLED != true)');
 }
 
 async function findFreePort(startPort, endPort) {

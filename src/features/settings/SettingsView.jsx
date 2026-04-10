@@ -34,6 +34,16 @@ const SettingsView = ({ currentUser }) => {
         geminiApiKey, setGeminiApiKey, geminiKeyVisible, setGeminiKeyVisible, handleSaveGeminiApiKey,
         // Flow Option
         flowOption, setFlowOption, handleSaveFlowOption,
+        // 약품 기본 입고량 모달
+        showDefaultAmountModal, setShowDefaultAmountModal,
+        defaultAmountItems, setDefaultAmountItems,
+        isSavingDefaultAmounts,
+        handleOpenDefaultAmountModal, handleSaveDefaultAmounts,
+        // 키트 기본 입고량 모달
+        showKitDefaultModal, setShowKitDefaultModal,
+        kitDefaultItems, setKitDefaultItems,
+        isSavingKitDefaults,
+        handleOpenKitDefaultModal, handleSaveKitDefaults,
     } = vm;
 
     const renderFlowSettings = () => {
@@ -1581,7 +1591,13 @@ const SettingsView = ({ currentUser }) => {
 
                 {/* Column 2: 약품항목 */}
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', paddingBottom: '0.6rem', borderBottom: '2px solid #1e293b', marginBottom: '0.75rem' }}>약품항목</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.6rem', borderBottom: '2px solid #1e293b', marginBottom: '0.75rem' }}>
+                        <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', margin: 0 }}>약품항목</h3>
+                        <button
+                            onClick={handleOpenDefaultAmountModal}
+                            style={{ fontSize: '0.625rem', fontWeight: 700, color: '#475569', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '5px', padding: '3px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                        >입고량지정</button>
+                    </div>
                     {renderItemGrid(medicineItems, 'medicine')}
                     <div style={{ display: 'flex', gap: '0.4rem', marginTop: '1rem' }}>
                         <input
@@ -1601,7 +1617,13 @@ const SettingsView = ({ currentUser }) => {
 
                 {/* Column 3: 분석장소 */}
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', paddingBottom: '0.6rem', borderBottom: '2px solid #1e293b', marginBottom: '0.75rem' }}>분석장소</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.6rem', borderBottom: '2px solid #1e293b', marginBottom: '0.75rem' }}>
+                        <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', margin: 0 }}>분석장소</h3>
+                        <button
+                            onClick={handleOpenKitDefaultModal}
+                            style={{ fontSize: '0.625rem', fontWeight: 700, color: '#475569', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '5px', padding: '3px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                        >키트량지정</button>
+                    </div>
                     {renderItemGrid(locationItems.filter(item => !(siteInfo.method === 'MBR' && item.name === '침전조')), 'location')}
                     <div style={{ display: 'flex', gap: '0.4rem', marginTop: '1rem' }}>
                         <input
@@ -1876,6 +1898,94 @@ const SettingsView = ({ currentUser }) => {
                     </div>
                     {renderImportProgress()}
                     {renderDataModal()}
+                </div>
+            )}
+
+            {/* 키트 기본 입고량 모달 */}
+            {showKitDefaultModal && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+                    <div style={{ background: '#fff', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.18)', width: '340px', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.875rem', fontWeight: 800, color: '#1e293b' }}>키트 기본 입고량 지정</span>
+                            <button onClick={() => setShowKitDefaultModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '1.1rem', lineHeight: 1 }}>✕</button>
+                        </div>
+                        <p style={{ fontSize: '0.65rem', color: '#94a3b8', margin: 0 }}>월 데이터가 없을 때 자동으로 채워지는 기본값입니다.</p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            {kitDefaultItems.map((item, idx) => (
+                                <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <span style={{ flex: 1, fontSize: '0.75rem', color: '#334155' }}>{item.name}</span>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={item.defaultAmount}
+                                        onChange={e => {
+                                            const updated = [...kitDefaultItems];
+                                            updated[idx] = { ...updated[idx], defaultAmount: e.target.value === '' ? '' : Number(e.target.value) };
+                                            setKitDefaultItems(updated);
+                                        }}
+                                        style={{ width: '72px', height: '30px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 8px', fontSize: '0.75rem', textAlign: 'right' }}
+                                    />
+                                    <span style={{ fontSize: '0.7rem', color: '#64748b', width: '20px' }}>개</span>
+                                </div>
+                            ))}
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={() => setShowKitDefaultModal(false)}
+                                style={{ padding: '6px 16px', fontSize: '0.75rem', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#f8fafc', cursor: 'pointer', color: '#475569' }}
+                            >닫기</button>
+                            <button
+                                onClick={handleSaveKitDefaults}
+                                disabled={isSavingKitDefaults}
+                                style={{ padding: '6px 16px', fontSize: '0.75rem', border: 'none', borderRadius: '6px', background: '#1e293b', color: '#fff', cursor: isSavingKitDefaults ? 'not-allowed' : 'pointer', opacity: isSavingKitDefaults ? 0.6 : 1 }}
+                            >{isSavingKitDefaults ? '저장 중...' : '저장'}</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 약품 기본 입고량 모달 */}
+            {showDefaultAmountModal && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+                    <div style={{ background: '#fff', borderRadius: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.18)', width: '340px', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '0.875rem', fontWeight: 800, color: '#1e293b' }}>약품 기본 입고량 지정</span>
+                            <button onClick={() => setShowDefaultAmountModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '1.1rem', lineHeight: 1 }}>✕</button>
+                        </div>
+                        <p style={{ fontSize: '0.65rem', color: '#94a3b8', margin: 0 }}>월 데이터가 없을 때 자동으로 채워지는 기본값입니다.</p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '280px', overflowY: 'auto' }}>
+                            {defaultAmountItems.length === 0 ? (
+                                <p style={{ fontSize: '0.75rem', color: '#94a3b8', textAlign: 'center', padding: '1rem 0' }}>약품 항목이 없습니다.</p>
+                            ) : defaultAmountItems.map((item, idx) => (
+                                <div key={item.name} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <span style={{ flex: 1, fontSize: '0.75rem', color: '#334155' }}>{item.name}</span>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={item.defaultAmount}
+                                        onChange={e => {
+                                            const updated = [...defaultAmountItems];
+                                            updated[idx] = { ...updated[idx], defaultAmount: e.target.value === '' ? '' : Number(e.target.value) };
+                                            setDefaultAmountItems(updated);
+                                        }}
+                                        style={{ width: '72px', height: '30px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0 8px', fontSize: '0.75rem', textAlign: 'right' }}
+                                    />
+                                    <span style={{ fontSize: '0.7rem', color: '#64748b', width: '20px' }}>kg</span>
+                                </div>
+                            ))}
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={() => setShowDefaultAmountModal(false)}
+                                style={{ padding: '6px 16px', fontSize: '0.75rem', border: '1px solid #cbd5e1', borderRadius: '6px', background: '#f8fafc', cursor: 'pointer', color: '#475569' }}
+                            >닫기</button>
+                            <button
+                                onClick={handleSaveDefaultAmounts}
+                                disabled={isSavingDefaultAmounts}
+                                style={{ padding: '6px 16px', fontSize: '0.75rem', border: 'none', borderRadius: '6px', background: '#1e293b', color: '#fff', cursor: isSavingDefaultAmounts ? 'not-allowed' : 'pointer', opacity: isSavingDefaultAmounts ? 0.6 : 1 }}
+                            >{isSavingDefaultAmounts ? '저장 중...' : '저장'}</button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

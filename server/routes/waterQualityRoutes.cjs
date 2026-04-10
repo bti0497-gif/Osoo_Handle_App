@@ -64,8 +64,8 @@ module.exports = function (db, baseDir) {
         INSERT INTO water_quality (
           date, measurement_group, measurement_order, source_type, source_label, qntech_project_id,
           location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss,
-          site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(date, measurement_group, location) DO UPDATE SET
           measurement_order = excluded.measurement_order,
           source_type = excluded.source_type,
@@ -79,6 +79,7 @@ module.exports = function (db, baseDir) {
           tp = COALESCE(excluded.tp, tp),
           cod = COALESCE(excluded.cod, cod),
           ss = COALESCE(excluded.ss, ss),
+          site_id = excluded.site_id,
           site_name = excluded.site_name,
           author = excluded.author,
           last_modified = excluded.last_modified,
@@ -104,6 +105,7 @@ module.exports = function (db, baseDir) {
             item.tp ?? null,
             item.cod ?? null,
             item.ss ?? null,
+            metadata.siteId,
             metadata.siteName,
             metadata.author,
             metadata.createdAt,
@@ -198,8 +200,8 @@ module.exports = function (db, baseDir) {
         INSERT INTO water_quality (
           date, measurement_group, measurement_order, source_type, source_label, qntech_project_id,
           location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss,
-          site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(date, measurement_group, location) DO UPDATE SET
           measurement_order = excluded.measurement_order,
           source_type = excluded.source_type,
@@ -213,6 +215,7 @@ module.exports = function (db, baseDir) {
           tp = COALESCE(excluded.tp, tp),
           cod = COALESCE(excluded.cod, cod),
           ss = COALESCE(excluded.ss, ss),
+          site_id = excluded.site_id,
           site_name = excluded.site_name,
           author = excluded.author,
           last_modified = excluded.last_modified,
@@ -233,6 +236,7 @@ module.exports = function (db, baseDir) {
         tp ?? null,
         cod ?? null,
         ss ?? null,
+        metadata.siteId,
         metadata.siteName,
         metadata.author,
         metadata.createdAt,

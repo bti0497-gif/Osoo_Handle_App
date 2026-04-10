@@ -706,6 +706,79 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         }
     };
 
+    // ── 약품 기본 입고량 모달 ──
+    const [showDefaultAmountModal, setShowDefaultAmountModal] = useState(false);
+    const [defaultAmountItems, setDefaultAmountItems] = useState([]);
+    const [isSavingDefaultAmounts, setIsSavingDefaultAmounts] = useState(false);
+
+    const handleOpenDefaultAmountModal = async () => {
+        try {
+            const res = await SettingsModel.getMedicineDefaults();
+            if (res.success) {
+                setDefaultAmountItems(res.items.map(i => ({ name: i.item_name, defaultAmount: i.default_amount ?? 0 })));
+            } else {
+                setDefaultAmountItems(medicineItems.filter(i => i.checked).map(i => ({ name: i.name, defaultAmount: 0 })));
+            }
+        } catch {
+            setDefaultAmountItems(medicineItems.filter(i => i.checked).map(i => ({ name: i.name, defaultAmount: 0 })));
+        }
+        setShowDefaultAmountModal(true);
+    };
+
+    const handleSaveDefaultAmounts = async () => {
+        setIsSavingDefaultAmounts(true);
+        try {
+            const res = await SettingsModel.saveMedicineDefaults(defaultAmountItems);
+            if (res.success) {
+                showAlert?.('기본 입고량이 저장되었습니다.');
+                setShowDefaultAmountModal(false);
+            } else {
+                throw new Error(res.message || '저장 실패');
+            }
+        } catch (err) {
+            showAlert?.('기본 입고량 저장 중 오류: ' + err.message);
+        } finally {
+            setIsSavingDefaultAmounts(false);
+        }
+    };
+
+    // ── 키트 기본 입고량 모달 ──
+    const BASE_KIT_NAMES = ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '인산염인(PO4-P)', '알칼리도(ALK)'];
+    const [showKitDefaultModal, setShowKitDefaultModal] = useState(false);
+    const [kitDefaultItems, setKitDefaultItems] = useState([]);
+    const [isSavingKitDefaults, setIsSavingKitDefaults] = useState(false);
+
+    const handleOpenKitDefaultModal = async () => {
+        try {
+            const res = await SettingsModel.getKitDefaults();
+            if (res.success) {
+                setKitDefaultItems(res.items.map(i => ({ name: i.item_name, defaultAmount: i.default_amount ?? 0 })));
+            } else {
+                setKitDefaultItems(BASE_KIT_NAMES.map(name => ({ name, defaultAmount: 0 })));
+            }
+        } catch {
+            setKitDefaultItems(BASE_KIT_NAMES.map(name => ({ name, defaultAmount: 0 })));
+        }
+        setShowKitDefaultModal(true);
+    };
+
+    const handleSaveKitDefaults = async () => {
+        setIsSavingKitDefaults(true);
+        try {
+            const res = await SettingsModel.saveKitDefaults(kitDefaultItems);
+            if (res.success) {
+                showAlert?.('키트 기본 입고량이 저장되었습니다.');
+                setShowKitDefaultModal(false);
+            } else {
+                throw new Error(res.message || '저장 실패');
+            }
+        } catch (err) {
+            showAlert?.('키트 기본 입고량 저장 중 오류: ' + err.message);
+        } finally {
+            setIsSavingKitDefaults(false);
+        }
+    };
+
     return {
         activeTab, setActiveTab, isLoading, hasLoadedSettings,
         siteInfo, setSiteInfo, handleSeriesChange,
@@ -739,5 +812,15 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         geminiApiKey, setGeminiApiKey, geminiKeyVisible, setGeminiKeyVisible, handleSaveGeminiApiKey,
         // Flow Option
         flowOption, setFlowOption, handleSaveFlowOption,
+        // 약품 기본 입고량 모달
+        showDefaultAmountModal, setShowDefaultAmountModal,
+        defaultAmountItems, setDefaultAmountItems,
+        isSavingDefaultAmounts,
+        handleOpenDefaultAmountModal, handleSaveDefaultAmounts,
+        // 키트 기본 입고량 모달
+        showKitDefaultModal, setShowKitDefaultModal,
+        kitDefaultItems, setKitDefaultItems,
+        isSavingKitDefaults,
+        handleOpenKitDefaultModal, handleSaveKitDefaults,
     };
 };

@@ -286,9 +286,9 @@ module.exports = function(db, baseDir, appDataPath) {
       });
 
       // 생성된 각 파일을 시스템 기본 프로그램(Excel)으로 열기
-      const { exec } = require('child_process');
+      const { openExcelFile } = require('../services/excelOpenService.cjs');
       for (const filePath of outputPaths) {
-        exec(`start "" "${filePath}"`);
+        await openExcelFile(filePath);
       }
 
       return res.json({ 

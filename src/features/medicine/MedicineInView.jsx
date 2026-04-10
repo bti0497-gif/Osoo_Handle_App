@@ -66,9 +66,9 @@ const PhotoButton = React.memo(({ onFile, hasPhoto }) => {
 
 /* ─── 미리보기 이미지 셀 ─────────────────────────────── */
 const PreviewImg = ({ url, width, height, label }) => (
-  <div style={previewCell(width, height)}>
+  <div style={previewCell(width, height, '#fff')}>
     {url
-      ? <img src={url} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      ? <img src={url} alt={label} style={{ width: '100%', height: '100%' }} />
       : <span style={{ fontSize: '10px', color: '#94a3b8' }}>{label}</span>}
   </div>
 );
@@ -132,7 +132,7 @@ export default function MedicineInView() {
               <input type="number" min={0} value={item.purchase}
                 onChange={e => updateMedicinePurchase(item.name, e.target.value)}
                 style={inp} />
-              <PhotoButton hasPhoto={!!item.photoFile}
+              <PhotoButton hasPhoto={!!(item.photoFile || item.previewUrl)}
                 onFile={f => updateMedicinePhoto(item.name, f)} />
             </div>
           ))}
@@ -143,7 +143,7 @@ export default function MedicineInView() {
         <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600, marginBottom: 8 }}>거래명세서</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '12px', color: '#334155', flex: 1 }}>사진</span>
-          <PhotoButton hasPhoto={!!tradePhotoFile} onFile={updateTradePhoto} />
+          <PhotoButton hasPhoto={!!(tradePhotoFile || tradePreviewUrl)} onFile={updateTradePhoto} />
         </div>
       </div>
     </>
@@ -168,7 +168,7 @@ export default function MedicineInView() {
               <input type="number" min={0} value={item.purchase}
                 onChange={e => updateKitPurchase(item.name, e.target.value)}
                 style={inp} />
-              <PhotoButton hasPhoto={!!item.photoFile}
+              <PhotoButton hasPhoto={!!(item.photoFile || item.previewUrl)}
                 onFile={f => updateKitPhoto(item.name, f)} />
             </div>
           ))}
@@ -195,15 +195,15 @@ export default function MedicineInView() {
           ( {mm} 월 ) &nbsp; 약품입고 사진대지
         </h3>
 
-        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <table style={{ width: '446px', borderCollapse: 'collapse', tableLayout: 'fixed', margin: '0 auto' }}>
           <colgroup>
             <col style={{ width: '90px' }} />
             <col style={{ width: '56px' }} />
-            <col />
+            <col style={{ width: '300px' }} />
           </colgroup>
           <thead>
             <tr>
-              <td style={tdH}>{dispDate}</td>
+              <td style={{ ...tdH, textAlign: 'center' }}>{dispDate}</td>
               <td colSpan={2} style={{ ...tdH, textAlign: 'center', letterSpacing: '0.2em' }}>
                 사 진 대 지
               </td>
@@ -212,31 +212,31 @@ export default function MedicineInView() {
           <tbody>
             {allMeds.map((item, idx) => (
               <tr key={item.name}>
-                <td style={{ ...td, fontWeight: 600 }}>{item.name}</td>
+                <td style={{ ...td, fontWeight: 600, textAlign: 'center' }}>{item.name}</td>
                 <td style={{ ...td, textAlign: 'center', color: '#475569' }}>
                   {item.purchase || 0}
                 </td>
                 <td style={{ ...td, padding: '4px 6px' }}>
-                  <PreviewImg url={item.previewUrl} width="100%" height={84} label={`약${idx + 1}사진`} />
+                  <PreviewImg url={item.previewUrl} width="100%" height={80} label={`약${idx + 1}사진`} />
                 </td>
               </tr>
             ))}
             {/* 추가 약품이 2개 미만이면 빈 행 */}
             {Array.from({ length: Math.max(0, 2 - extraMeds.length) }).map((_, i) => (
               <tr key={`empty_extra_${i}`}>
-                <td style={{ ...td, color: '#cbd5e1' }}>(추가약품)</td>
+                <td style={{ ...td, color: '#cbd5e1', textAlign: 'center' }}>(추가약품)</td>
                 <td style={td} />
                 <td style={{ ...td, padding: '4px 6px' }}>
-                  <div style={{ ...previewCell('100%', 84), color: '#cbd5e1', fontSize: '10px' }}>—</div>
+                  <div style={{ ...previewCell('100%', 80), color: '#cbd5e1', fontSize: '10px' }}>—</div>
                 </td>
               </tr>
             ))}
             {/* 거래명세서 */}
             <tr>
-              <td style={{ ...td, fontWeight: 600 }}>거래명세서</td>
+              <td style={{ ...td, fontWeight: 600, textAlign: 'center' }}>거래명세서</td>
               <td style={td} />
               <td style={{ ...td, padding: '4px 6px' }}>
-                <PreviewImg url={tradePreviewUrl} width="100%" height={114} label="거래사진" />
+                <PreviewImg url={tradePreviewUrl} width="100%" height={91} label="거래사진" />
               </td>
             </tr>
           </tbody>
@@ -261,13 +261,13 @@ export default function MedicineInView() {
               <div style={{ fontSize: '11px', color: '#64748b', marginBottom: 4, textAlign: 'left' }}>
                 {item.name} ({item.purchase || 0}개)
               </div>
-              <PreviewImg url={item.previewUrl} width="100%" height={165} label={`키트${idx + 1}사진`} />
+              <PreviewImg url={item.previewUrl} width="100%" height={132} label={`키트${idx + 1}사진`} />
             </div>
           ))}
           {/* 키트가 2개 미만이면 빈 셀 */}
           {Array.from({ length: Math.max(0, 2 - kitPhotos.length) }).map((_, i) => (
             <div key={`empty_kit_${i}`} style={{ width: '100%', maxWidth: 500 }}>
-              <div style={{ ...previewCell('100%', 165), color: '#cbd5e1', fontSize: '11px' }}>
+              <div style={{ ...previewCell('100%', 132), color: '#cbd5e1', fontSize: '11px' }}>
                 키트{kitPhotos.length + i + 1}사진
               </div>
             </div>
@@ -326,7 +326,7 @@ export default function MedicineInView() {
         {/* 저장 + 생성 버튼 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flexShrink: 0, marginTop: 'auto' }}>
           {rowBtn(
-            isSaving ? '저장 중...' : `${tab === 'medicine' ? '약품' : '키트'} 구매량 저장`,
+            isSaving ? '저장 중...' : `${tab === 'medicine' ? '약품' : '키트'} 입고일지 저장`,
             handleSave,
             isSaving || isExporting || isLoading,
           )}

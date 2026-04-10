@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { MedicineInModel } from './MedicineInModel';
 import { useDialog } from '../../components/common/DialogProvider';
+import { getApiBase } from '../../core/api/serverConfig.js';
 
 const currentYear = new Date().getFullYear();
 const currentMonth = new Date().getMonth() + 1;
@@ -11,6 +12,9 @@ const todayStr = () => {
   const dd = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${mm}-${dd}`;
 };
+
+/** Electron 환경에서 실제 파일 경로, 웹 환경에서는 null 반환 */
+const getFilePath = (file) => (file?.path && file.path !== '') ? file.path : null;
 
 export function useMedicineInViewModel() {
   const { showToast } = useDialog();
@@ -44,28 +48,31 @@ export function useMedicineInViewModel() {
 
       setSiteName(result.siteName || '');
 
-      // 당월 저장량이 있으면 표시, 없으면 전달 기본값, 사진은 매 세션 새로 선택
+      const apiBase = getApiBase();
+      const toAbsUrl = (url) => (url ? `${apiBase}${url}` : null);
+
+      // 당월 저장량이 있으면 표시, 없으면 전달 기본값, 없으면 기본 입고량 설정값
       setMedicineItems(
         (result.medicines || []).map(m => ({
           name: m.name,
-          purchase: m.currPurchase != null ? m.currPurchase : (m.prevPurchase ?? 0),
+          purchase: m.currPurchase != null ? m.currPurchase : (m.prevPurchase || m.defaultAmount || 0),
           photoFile: null,
-          previewUrl: m.photoUrl || null, // 로컬 저장된 사진이 있으면 자동 표시
+          previewUrl: toAbsUrl(m.photoUrl),
         }))
       );
 
       setKitItems(
         (result.kits || []).map(k => ({
           name: k.name,
-          purchase: k.currPurchase != null ? k.currPurchase : (k.prevPurchase ?? 0),
+          purchase: k.currPurchase != null ? k.currPurchase : (k.prevPurchase || k.defaultAmount || 0),
           photoFile: null,
-          previewUrl: k.photoUrl || null,
+          previewUrl: toAbsUrl(k.photoUrl),
         }))
       );
 
       // 거래명세서 사진도 자동 복원 (사진 선택 안했으면 서버 URL 사용)
       setTradePhotoFile(null);
-      setTradePreviewUrl(result.tradePhotoUrl || null);
+      setTradePreviewUrl(toAbsUrl(result.tradePhotoUrl));
     } catch (err) {
       showToast(err.message || '데이터를 불러오지 못했습니다.', 'error');
     } finally {
@@ -124,25 +131,53 @@ export function useMedicineInViewModel() {
 
     setIsSaving(true);
     try {
-      const items = targetItems.map(i => ({ name: i.name, purchase: Number(i.purchase) || 0 }));
+      const date = tab === 'medicine' ? medicineDate : kitDate;
+
+      // 사진 저장: Electron이면 file.path, 웹이면 FormData 업로드
+      const photoPathsByName = {};
+      const uploadTargets = [];
+
       if (tab === 'medicine') {
-        const result = await MedicineInModel.saveItems('medicine', medicineDate, items);
-        if (!result?.success) throw new Error(result?.error || '저장 실패');
-        showToast('약품 구매량이 저장되었습니다.');
+        medicineItems.forEach(item => {
+          if (!item.photoFile) return;
+          const fp = item.photoFile.path || null;
+          if (fp) { photoPathsByName[item.name] = fp; }
+          else { uploadTargets.push({ name: item.name, file: item.photoFile }); }
+        });
+        if (tradePhotoFile) {
+          const fp = tradePhotoFile.path || null;
+          if (fp) { photoPathsByName['거래명세서'] = fp; }
+          else { uploadTargets.push({ name: '거래명세서', file: tradePhotoFile }); }
+        }
       } else {
-        const result = await MedicineInModel.saveItems('kit', kitDate, items);
-        if (!result?.success) throw new Error(result?.error || '저장 실패');
-        showToast('키트 구매량이 저장되었습니다.');
+        kitItems.forEach(item => {
+          if (!item.photoFile) return;
+          const fp = item.photoFile.path || null;
+          if (fp) { photoPathsByName[item.name] = fp; }
+          else { uploadTargets.push({ name: item.name, file: item.photoFile }); }
+        });
       }
+
+      // 웹 모드: 파일 직접 업로드
+      for (const { name, file } of uploadTargets) {
+        const res = await MedicineInModel.uploadPhoto(date, name, file);
+        if (!res?.success) console.warn(`[사진 업로드 실패] ${name}:`, res?.error);
+      }
+
+      const items = targetItems.map(i => ({ name: i.name, purchase: Number(i.purchase) || 0 }));
+      const payload = {
+        tab, date, items,
+        ...(Object.keys(photoPathsByName).length > 0 && { photoPaths: photoPathsByName }),
+      };
+      const result = await MedicineInModel.saveItems(payload);
+      if (!result?.success) throw new Error(result?.error || '저장 실패');
+      showToast(tab === 'medicine' ? '약품 구매량이 저장되었습니다.' : '키트 구매량이 저장되었습니다.');
     } catch (err) {
       showToast(err.message || '저장에 실패했습니다.', 'error');
     } finally {
       setIsSaving(false);
     }
-  }, [tab, medicineItems, kitItems, medicineDate, kitDate, showToast]);
-
-  // 로컬 파일 경로 얻기 (Electron에서는 file.path 사용 가능)
-  const getFilePath = (file) => file?.path || null;
+  }, [tab, medicineItems, kitItems, medicineDate, kitDate, tradePhotoFile, showToast]);
 
   // 생성하기: 양쪽 모두 저장 + HWPX 생성
   const handleExport = useCallback(async () => {
@@ -150,11 +185,11 @@ export function useMedicineInViewModel() {
     try {
       // 1. 약품 구매량 저장
       const medItems = medicineItems.map(i => ({ name: i.name, purchase: Number(i.purchase) || 0 }));
-      await MedicineInModel.saveItems('medicine', medicineDate, medItems);
+      await MedicineInModel.saveItems({ tab: 'medicine', date: medicineDate, items: medItems });
 
       // 2. 키트 구매량 저장
       const kItems = kitItems.map(i => ({ name: i.name, purchase: Number(i.purchase) || 0 }));
-      await MedicineInModel.saveItems('kit', kitDate, kItems);
+      await MedicineInModel.saveItems({ tab: 'kit', date: kitDate, items: kItems });
 
       // 3. 사진 경로 수집 (Electron: file.path 사용)
       const photoPaths = {};

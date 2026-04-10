@@ -26,11 +26,11 @@ module.exports = function(db) {
       const info = db.prepare(`
         INSERT INTO facility_logs (
           date, location, facility_name, content, notes,
-          site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         date, location || '', facility_name || '', content || '', notes || '',
-        metadata.siteName, metadata.author,
+        metadata.siteId, metadata.siteName, metadata.author,
         metadata.createdAt, metadata.lastModified, metadata.isSynced
       );
       res.json({ success: true, id: info.lastInsertRowid });

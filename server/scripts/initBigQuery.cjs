@@ -47,6 +47,7 @@ async function ensureTableSchema(table, tableName, schema) {
 // 로컬 DB 컬럼 + site_name, author, local_id, created_at, updated_at, uploaded_at
 const SCHEMAS = {
   flow_readings: [
+    { name: 'site_id',  type: 'STRING' },
     { name: 'site_name', type: 'STRING', mode: 'REQUIRED' },
     { name: 'author', type: 'STRING' },
     { name: 'local_id', type: 'INTEGER', mode: 'REQUIRED' },
@@ -62,6 +63,7 @@ const SCHEMAS = {
     { name: 'uploaded_at', type: 'TIMESTAMP' }  // 서버 전송 시간
   ],
   medicine_logs: [
+    { name: 'site_id',  type: 'STRING' },
     { name: 'site_name', type: 'STRING', mode: 'REQUIRED' },
     { name: 'author', type: 'STRING' },
     { name: 'local_id', type: 'INTEGER', mode: 'REQUIRED' },
@@ -71,10 +73,12 @@ const SCHEMAS = {
     { name: 'purchase_amount', type: 'FLOAT' },
     { name: 'usage_amount', type: 'FLOAT' },
     { name: 'current_inventory', type: 'FLOAT' },
+    { name: 'photo_url', type: 'STRING' },
     { name: 'updated_at', type: 'TIMESTAMP' },
     { name: 'uploaded_at', type: 'TIMESTAMP' }
   ],
   water_quality: [
+    { name: 'site_id',  type: 'STRING' },
     { name: 'site_name', type: 'STRING', mode: 'REQUIRED' },
     { name: 'author', type: 'STRING' },
     { name: 'local_id', type: 'INTEGER', mode: 'REQUIRED' },
@@ -98,6 +102,7 @@ const SCHEMAS = {
     { name: 'uploaded_at', type: 'TIMESTAMP' }
   ],
   kit_logs: [
+    { name: 'site_id',  type: 'STRING' },
     { name: 'site_name', type: 'STRING', mode: 'REQUIRED' },
     { name: 'author', type: 'STRING' },
     { name: 'local_id', type: 'INTEGER', mode: 'REQUIRED' },
@@ -107,21 +112,25 @@ const SCHEMAS = {
     { name: 'purchase_amount', type: 'FLOAT' },
     { name: 'usage_amount', type: 'FLOAT' },
     { name: 'current_inventory', type: 'FLOAT' },
+    { name: 'photo_url', type: 'STRING' },
     { name: 'updated_at', type: 'TIMESTAMP' },
     { name: 'uploaded_at', type: 'TIMESTAMP' }
   ],
   facility_logs: [
-    { name: 'site_name', type: 'STRING', mode: 'REQUIRED' },
-    { name: 'author', type: 'STRING' },
-    { name: 'local_id', type: 'INTEGER', mode: 'REQUIRED' },
-    { name: 'created_at', type: 'TIMESTAMP' },
-    { name: 'date', type: 'DATE' },
-    { name: 'location', type: 'STRING' },
+    { name: 'site_id',       type: 'STRING' },
+    { name: 'site_name',     type: 'STRING', mode: 'REQUIRED' },
+    { name: 'author',        type: 'STRING' },
+    { name: 'local_id',      type: 'INTEGER', mode: 'REQUIRED' },
+    { name: 'created_at',    type: 'TIMESTAMP' },
+    { name: 'date',          type: 'DATE' },
+    { name: 'location',      type: 'STRING' },
     { name: 'facility_name', type: 'STRING' },
-    { name: 'content', type: 'STRING' },
-    { name: 'notes', type: 'STRING' },
-    { name: 'updated_at', type: 'TIMESTAMP' },
-    { name: 'uploaded_at', type: 'TIMESTAMP' }
+    { name: 'content',       type: 'STRING' },
+    { name: 'company',       type: 'STRING' },
+    { name: 'price',         type: 'INTEGER' },
+    { name: 'notes',         type: 'STRING' },
+    { name: 'updated_at',    type: 'TIMESTAMP' },
+    { name: 'uploaded_at',   type: 'TIMESTAMP' }
   ],
 
   // ── 게시판 ──────────────────────────────────────────────────────────

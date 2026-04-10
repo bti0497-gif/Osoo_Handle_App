@@ -24,12 +24,13 @@ module.exports = function (db) {
       const stmt = db.prepare(`
         INSERT INTO medicine_logs (
           medicine_name, date, purchase_amount, usage_amount, current_inventory,
-          site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(medicine_name, date) DO UPDATE SET
           purchase_amount = excluded.purchase_amount,
           usage_amount = excluded.usage_amount,
           current_inventory = excluded.current_inventory,
+          site_id = excluded.site_id,
           site_name = excluded.site_name,
           author = excluded.author,
           last_modified = excluded.last_modified,
@@ -45,6 +46,7 @@ module.exports = function (db) {
             item.purchase_amount || 0,
             item.usage_amount || 0,
             item.current_inventory || 0,
+            metadata.siteId,
             metadata.siteName,
             metadata.author,
             metadata.createdAt,
@@ -72,12 +74,13 @@ module.exports = function (db) {
       const info = db.prepare(`
         INSERT INTO medicine_logs (
           medicine_name, date, purchase_amount, usage_amount, current_inventory,
-          site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(medicine_name, date) DO UPDATE SET
           purchase_amount = excluded.purchase_amount,
           usage_amount = excluded.usage_amount,
           current_inventory = excluded.current_inventory,
+          site_id = excluded.site_id,
           site_name = excluded.site_name,
           author = excluded.author,
           last_modified = excluded.last_modified,
@@ -88,6 +91,7 @@ module.exports = function (db) {
         purchase_amount || 0,
         usage_amount || 0,
         current_inventory,
+        metadata.siteId,
         metadata.siteName,
         metadata.author,
         metadata.createdAt,

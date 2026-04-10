@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
-const { exec } = require('child_process');
+const { openExcelFile } = require('../services/excelOpenService.cjs');
 
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
 const { replaceHwpxPlaceholders } = require('../services/hwpPdfService.cjs');
@@ -269,10 +269,7 @@ module.exports = function (db, baseDir, appDataPath) {
       });
 
       // 서버에서 직접 파일 열기 (dev/Electron 모두 동작)
-      exec(`start "" "${hwpxPath}"`, { shell: 'cmd.exe' }, (err) => {
-        if (err) console.warn('[medicine-register] 파일 열기 실패:', err.message);
-      });
-
+      await openExcelFile(hwpxPath);
       res.json({ success: true });
     } catch (err) {
       console.error('[medicine-register export]', err);

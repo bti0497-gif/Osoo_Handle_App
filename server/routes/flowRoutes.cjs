@@ -50,14 +50,15 @@ module.exports = function (db) {
       const stmt = db.prepare(`
         INSERT INTO flow_readings (
           date, type, raw_value, calculated_flow, is_reset, is_manual, sludge_export,
-          site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(date, type) DO UPDATE SET
           raw_value = excluded.raw_value,
           calculated_flow = excluded.calculated_flow,
           is_reset = excluded.is_reset,
           is_manual = excluded.is_manual,
           sludge_export = excluded.sludge_export,
+          site_id = excluded.site_id,
           site_name = excluded.site_name,
           author = excluded.author,
           last_modified = excluded.last_modified,
@@ -78,6 +79,7 @@ module.exports = function (db) {
             is_reset ? 1 : 0,
             is_manual ? 1 : 0,
             sludgeAmount,
+            metadata.siteId,
             metadata.siteName,
             metadata.author,
             metadata.createdAt,
@@ -126,14 +128,15 @@ module.exports = function (db) {
       const info = db.prepare(`
         INSERT INTO flow_readings (
           date, type, raw_value, calculated_flow, is_reset, is_manual, sludge_export,
-          site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(date, type) DO UPDATE SET
           raw_value = excluded.raw_value,
           calculated_flow = excluded.calculated_flow,
           is_reset = excluded.is_reset,
           is_manual = excluded.is_manual,
           sludge_export = excluded.sludge_export,
+          site_id = excluded.site_id,
           site_name = excluded.site_name,
           author = excluded.author,
           last_modified = excluded.last_modified,
@@ -146,6 +149,7 @@ module.exports = function (db) {
         is_reset ? 1 : 0,
         is_manual ? 1 : 0,
         sludgeAmount,
+        metadata.siteId,
         metadata.siteName,
         metadata.author,
         metadata.createdAt,

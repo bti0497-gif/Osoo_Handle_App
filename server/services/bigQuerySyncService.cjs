@@ -1,20 +1,25 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { db } = require('../database.cjs');
 const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
 
 // 3. 현장 정보(현장명, 관리자명) 가져오기
 function getSiteInfo() {
   try {
-    const row = db.prepare('SELECT site_name, manager_name FROM app_settings WHERE id = 1').get();
+    const row = db.prepare('SELECT site_name, manager_name, site_id FROM app_settings WHERE id = 1').get();
     return {
       siteName: row ? row.site_name : 'Unknown Site',
-      authorName: row ? row.manager_name : 'Unknown Author'
+      authorName: row ? row.manager_name : 'Unknown Author',
+      siteId: row ? row.site_id : null,
     };
   } catch (e) {
     console.error('[BigQuery] Failed to get site info:', e.message);
     return {
       siteName: 'Unknown Site',
-      authorName: 'Unknown Author'
+      authorName: 'Unknown Author',
+      siteId: null,
     };
   }
 }
@@ -22,7 +27,8 @@ function getSiteInfo() {
 function getRowSiteInfo(row, defaults) {
   return {
     siteName: row.site_name || defaults.siteName,
-    authorName: row.author || defaults.authorName
+    authorName: row.author || defaults.authorName,
+    siteId: row.site_id || defaults.siteId,
   };
 }
 
@@ -40,7 +46,8 @@ function buildInsertId(tableName, row, defaults) {
 
 // 4. 테이블별 매핑 정의 (Local DB Row -> BigQuery Row)
 const TABLE_MAPPINGS = {
-  flow_readings: (row, siteName, authorName) => ({
+  flow_readings: (row, siteName, authorName, siteId) => ({
+    site_id: siteId,
     site_name: siteName,
     author: authorName,
     local_id: row.id,
@@ -55,7 +62,8 @@ const TABLE_MAPPINGS = {
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
   }),
-  medicine_logs: (row, siteName, authorName) => ({
+  medicine_logs: (row, siteName, authorName, siteId) => ({
+    site_id: siteId,
     site_name: siteName,
     author: authorName,
     local_id: row.id,
@@ -65,10 +73,12 @@ const TABLE_MAPPINGS = {
     purchase_amount: row.purchase_amount,
     usage_amount: row.usage_amount,
     current_inventory: row.current_inventory,
+    photo_url: row.photo_url || null,
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
   }),
-  water_quality: (row, siteName, authorName) => ({
+  water_quality: (row, siteName, authorName, siteId) => ({
+    site_id: siteId,
     site_name: siteName,
     author: authorName,
     local_id: row.id,
@@ -91,7 +101,8 @@ const TABLE_MAPPINGS = {
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
   }),
-  kit_logs: (row, siteName, authorName) => ({
+  kit_logs: (row, siteName, authorName, siteId) => ({
+    site_id: siteId,
     site_name: siteName,
     author: authorName,
     local_id: row.id,
@@ -101,10 +112,12 @@ const TABLE_MAPPINGS = {
     purchase_amount: row.purchase_amount,
     usage_amount: row.usage_amount,
     current_inventory: row.current_inventory,
+    photo_url: row.photo_url || null,
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
   }),
-  facility_logs: (row, siteName, authorName) => ({
+  facility_logs: (row, siteName, authorName, siteId) => ({
+    site_id: siteId,
     site_name: siteName,
     author: authorName,
     local_id: row.id,
@@ -113,6 +126,8 @@ const TABLE_MAPPINGS = {
     location: row.location,
     facility_name: row.facility_name,
     content: row.content,
+    company: row.company,
+    price: row.price,
     notes: row.notes,
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
@@ -141,22 +156,41 @@ async function syncTable(tableName) {
   const rows = db.prepare(`SELECT * FROM ${tableName} WHERE is_synced = 2`).all();
   if (rows.length === 0) return { success: true, count: 0 };
 
-  const { siteName, authorName } = getSiteInfo();
+  const { siteName, authorName, siteId } = getSiteInfo();
   
   // 5-3. 데이터 변환
   const bqRows = rows.map(row => {
-    const rowSiteInfo = getRowSiteInfo(row, { siteName, authorName });
-
-    return {
-      insertId: buildInsertId(tableName, row, { siteName, authorName }),
-      json: mapper(row, rowSiteInfo.siteName, rowSiteInfo.authorName)
-    };
+    const rowSiteInfo = getRowSiteInfo(row, { siteName, authorName, siteId });
+    return mapper(row, rowSiteInfo.siteName, rowSiteInfo.authorName, rowSiteInfo.siteId);
   });
   const rowIds = rows.map(r => r.id);
 
+  // NDJSON 임시 파일 생성
+  const tmpFile = path.join(os.tmpdir(), `bq_sync_${tableName}_${Date.now()}.ndjson`);
   try {
-    // 5-4. BigQuery 전송 (insertAll)
-    await bq.dataset(DATASET_ID).table(tableName).insert(bqRows);
+    fs.writeFileSync(tmpFile, bqRows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
+  } catch (writeErr) {
+    console.error(`[BigQuery] ${tableName} 임시 파일 쓰기 실패:`, writeErr.message);
+    const rollbackStmt = db.prepare(`UPDATE ${tableName} SET is_synced = 0 WHERE id = ?`);
+    db.transaction(() => { for (const id of rowIds) rollbackStmt.run(id); })();
+    return { success: false, error: writeErr.message };
+  }
+
+  try {
+    // 5-4. BigQuery 전송 (Load Job - 로컬 파일 업로드)
+    const [job] = await bq.dataset(DATASET_ID).table(tableName).load(
+      tmpFile,
+      { sourceFormat: 'NEWLINE_DELIMITED_JSON', writeDisposition: 'WRITE_APPEND' }
+    );
+
+    // 임시 파일 삭제
+    try { fs.unlinkSync(tmpFile); } catch (_) {}
+
+    // job 오류 확인 (job은 완료된 job metadata 객체)
+    const jobError = job && job.status && job.status.errorResult;
+    if (jobError) {
+      throw new Error(jobError.message || JSON.stringify(jobError));
+    }
 
     // 5-5. 로컬 상태 '완료' (is_synced = 1)로 업데이트
     const updateStmt = db.prepare(`UPDATE ${tableName} SET is_synced = 1 WHERE id = ?`);
@@ -168,6 +202,9 @@ async function syncTable(tableName) {
     return { success: true, count: rows.length };
 
   } catch (err) {
+    // 임시 파일 정리
+    try { fs.unlinkSync(tmpFile); } catch (_) {}
+
     // 5-6. 실패 시 로컬 상태 '대기' (is_synced = 0)로 롤백
     const rollbackStmt = db.prepare(`UPDATE ${tableName} SET is_synced = 0 WHERE id = ?`);
     db.transaction(() => {

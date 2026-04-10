@@ -25,6 +25,17 @@ input, textarea {
   -ms-user-select: text;
 }
 
+/* number input 스핀 버튼 숨김 */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 #root {
   width: 100vw;
   height: 100vh;

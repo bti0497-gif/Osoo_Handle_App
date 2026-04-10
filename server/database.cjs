@@ -1,6 +1,7 @@
 const sqlite3 = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const DEFAULT_ROAD_WEB_URL = 'https://nwpo.ex.co.kr:5002//security/login.do';
 const DEFAULT_WATER_ANALYSIS_URL = 'https://eco.qntech.co.kr';
@@ -118,6 +119,19 @@ db.exec(`
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
     is_synced INTEGER DEFAULT 0,
     UNIQUE(date, measurement_group, location)
+  );
+  CREATE TABLE IF NOT EXISTS sludge_photo_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL UNIQUE,
+    sludge_amount REAL,
+    sludge_photo_path TEXT,
+    sludge_photo_taken_at TEXT,
+    certificate_photo_path TEXT,
+    note TEXT,
+    site_name TEXT,
+    author TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_modified TEXT DEFAULT CURRENT_TIMESTAMP
   );
   CREATE TABLE IF NOT EXISTS kit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -363,6 +377,11 @@ if (!webAppCredentialCols.includes('service_url')) {
   db.prepare('ALTER TABLE web_app_credentials ADD COLUMN service_url TEXT').run();
 }
 
+const sludgeCols = db.prepare("PRAGMA table_info(sludge_photo_logs)").all().map(c => c.name);
+if (!sludgeCols.includes('sludge_photo_taken_at')) {
+  db.prepare('ALTER TABLE sludge_photo_logs ADD COLUMN sludge_photo_taken_at TEXT').run();
+}
+
 // --- Seeds ---
 db.prepare("INSERT OR IGNORE INTO app_settings (id, site_name) VALUES (1, '새 현장')").run();
 
@@ -515,6 +534,41 @@ const facilityCols = db.prepare("PRAGMA table_info(facility_logs)").all().map(c 
 if (!facilityCols.includes('location')) {
   db.prepare('ALTER TABLE facility_logs ADD COLUMN location TEXT').run();
 }
+
+// --- Config Items: default_amount 컬럼 추가 ---
+const configItemsCols = db.prepare("PRAGMA table_info(config_items)").all().map(c => c.name);
+if (!configItemsCols.includes('default_amount')) {
+  db.prepare('ALTER TABLE config_items ADD COLUMN default_amount REAL DEFAULT 0').run();
+}
+
+// --- photo_url 마이그레이션 (medicine_logs, kit_logs) ---
+const photoTables = ['medicine_logs', 'kit_logs'];
+photoTables.forEach(tableName => {
+  const tCols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
+  if (!tCols.includes('photo_url')) {
+    db.prepare(`ALTER TABLE ${tableName} ADD COLUMN photo_url TEXT`).run();
+  }
+});
+
+// --- site_id 마이그레이션 (휴게소별 고유 식별자) ---
+// app_settings 에 site_id 컬럼 추가 및 UUID 시드
+const appSettingsCols = db.prepare("PRAGMA table_info(app_settings)").all().map(c => c.name);
+if (!appSettingsCols.includes('site_id')) {
+  db.prepare('ALTER TABLE app_settings ADD COLUMN site_id TEXT').run();
+}
+db.prepare("UPDATE app_settings SET site_id = ? WHERE id = 1 AND (site_id IS NULL OR TRIM(site_id) = '')").run(crypto.randomUUID());
+
+// 5개 동기화 테이블에 site_id 추가 및 기존 데이터 백필
+const currentSiteId = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || null;
+syncTables.forEach(tableName => {
+  const tCols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
+  if (!tCols.includes('site_id')) {
+    db.prepare(`ALTER TABLE ${tableName} ADD COLUMN site_id TEXT`).run();
+    if (currentSiteId) {
+      db.prepare(`UPDATE ${tableName} SET site_id = ? WHERE site_id IS NULL`).run(currentSiteId);
+    }
+  }
+});
 
 console.log('Database migration check complete.');
 

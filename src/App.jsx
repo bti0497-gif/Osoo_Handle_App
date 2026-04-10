@@ -16,6 +16,7 @@ import StatusBar from './components/StatusBar';
 import Dashboard from './views/Dashboard';
 import { KitManagementView } from './features/kit';
 import { CertificateView } from './features/certificate';
+import { SludgePhotoView } from './features/sludge';
 
 const PlaceholderView = ({ title }) => (
     <div style={{ display: 'flex', width: '100%', height: '100%', backgroundColor: '#ffffff', padding: '1.25rem', gap: '1.25rem' }}>
@@ -107,7 +108,7 @@ function App() {
             case 'log_med_mgmt': return <MedicineRegisterView currentUser={user} />;
             case 'log_med_in': return <MedicineInView currentUser={user} />;
             case 'log_sludge_out': return <PlaceholderView title="슬러지반출관리대장" />;
-            case 'log_sludge_photo': return <PlaceholderView title="슬러지사진대지" />;
+            case 'log_sludge_photo': return <SludgePhotoView currentUser={user} />;
             case 'attendance':
                 return <AttendanceView currentUser={user} />;
             case 'members':
