@@ -1,3 +1,4 @@
+/* global module */
 /**
  * @type {import('electron-builder').Configuration}
  */

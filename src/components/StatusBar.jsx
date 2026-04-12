@@ -10,8 +10,6 @@ const StatusBar = ({ title, helpText }) => {
         return () => clearInterval(timer);
     }, []);
 
-    const loginTime = "2023-10-27 09:00:12"; // 예시 데이터
-
     return (
         <footer className="status-bar">
             <div className="status-left">

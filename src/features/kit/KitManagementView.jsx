@@ -14,7 +14,7 @@ const KitManagementView = ({ currentUser }) => {
         isSavingPurchase,
         autoSaveStatus,
         openPurchaseModal, savePurchase,
-        updateAmount, submitBatch, syncAnalysisKits, refresh, pendingChanges
+        updateAmount, syncAnalysisKits, refresh, pendingChanges
     } = useKitViewModel(currentUser, { showAlert });
 
     const [selectedDate, setSelectedDate] = useState(null);
@@ -72,8 +72,6 @@ const KitManagementView = ({ currentUser }) => {
             { id: `inventory_${type}`, type: 'inventory', label: '재고', width: 52, headerStyle: { background: '#fef3c7', color: '#92400e' } }
         ]
     }));
-
-    const hasPending = Object.keys(pendingChanges).length > 0;
 
     const handleRowSelect = (row) => {
         const isFutureRow = row.isFuture || row.date > todayStr;
@@ -156,7 +154,7 @@ const KitManagementView = ({ currentUser }) => {
         };
     };
 
-    const renderCell = (row, col, val, isCellTargeted) => {
+    const renderCell = (row, col, val) => {
         // col is a leaf column from AdvancedDataGrid: { id, type, parentId, ... }
         const kitName = col.parentId; // 키트명 (parent group id)
         if (!kitName) return val;

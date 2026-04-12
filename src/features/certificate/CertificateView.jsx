@@ -1,6 +1,6 @@
 import React from 'react';
 
-const CertificateView = ({ currentUser }) => {
+const CertificateView = () => {
     return (
         <div style={{
             width: '100%',

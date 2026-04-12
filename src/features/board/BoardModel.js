@@ -26,7 +26,7 @@ export const BoardModel = {
         return res.data;
     },
 
-    async fetchPost(id, currentUser) {
+    async fetchPost(id) {
         const res = await apiClient.get(`/api/board/posts/${id}`);
         if (!res.success) throw new Error(res.message || '게시글 로드 실패');
         return res.data;
@@ -45,7 +45,7 @@ export const BoardModel = {
         }
     },
 
-    async deletePost(id, currentUser) {
+    async deletePost(id) {
         const res = await apiClient.delete(`/api/board/posts/${id}`);
         if (!res.success) throw new Error(res.message || '삭제 실패');
         return res.data;
@@ -64,7 +64,7 @@ export const BoardModel = {
         return res.data;
     },
 
-    async deleteComment(id, currentUser) {
+    async deleteComment(id) {
         const res = await apiClient.delete(`/api/board/comments/${id}`);
         if (!res.success) throw new Error(res.message || '댓글 삭제 실패');
         return res.data;
