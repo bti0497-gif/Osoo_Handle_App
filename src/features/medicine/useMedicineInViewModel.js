@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { MedicineInModel } from './MedicineInModel';
-import { useDialog } from '../../components/common/DialogProvider';
+import { useDialog } from '../../components/common/DialogContext';
 import { getApiBase } from '../../core/api/serverConfig.js';
 
 const currentYear = new Date().getFullYear();
@@ -194,7 +194,6 @@ export function useMedicineInViewModel() {
       // 3. 사진 경로 수집 (Electron: file.path 사용)
       const photoPaths = {};
       const BASE_MED_NAMES = ['포도당', '중탄산나트륨', '팩(PAC)'];
-      const baseIdx = [0, 1, 2];
       const extraIdx = [];
       medicineItems.forEach((item, i) => {
         if (BASE_MED_NAMES.includes(item.name)) {

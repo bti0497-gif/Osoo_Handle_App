@@ -1,6 +1,6 @@
 import React from 'react';
 
-const Dashboard = ({ title = '통합 대시보드' }) => {
+const Dashboard = () => {
     return (
         <div className="panel-container justify-center items-center">
             <div className="dynamic-panel max-w-[600px] h-auto shadow-2xl border-slate-200 py-20 items-center text-center">

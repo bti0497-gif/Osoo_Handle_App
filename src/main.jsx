@@ -6,8 +6,6 @@ import { initServerConfig } from './core/api/serverConfig.js'
 
 import { DialogProvider } from './components/common/DialogProvider.jsx'
 
-console.log('Main.jsx: Root rendering started');
-
 const root = ReactDOM.createRoot(document.getElementById('root'));
 
 // 서버 포트 탐색 중 로딩 화면

@@ -1,4 +1,4 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useRef } from 'react';
 import { useMedicineInViewModel } from './useMedicineInViewModel';
 
 /* ─── 스타일 상수 ────────────────────────────────────── */

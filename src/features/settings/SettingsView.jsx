@@ -1,6 +1,6 @@
 import React from 'react';
 import { useSettingsViewModel } from './useSettingsViewModel';
-import { useDialog } from '../../components/common/DialogProvider';
+import { useDialog } from '../../components/common/DialogContext';
 
 const SettingsView = ({ currentUser }) => {
     const { showAlert, showConfirm } = useDialog();
@@ -8,7 +8,7 @@ const SettingsView = ({ currentUser }) => {
     const {
         activeTab, setActiveTab, isLoading,
         siteInfo, setSiteInfo, handleSeriesChange,
-        flowItems, medicineItems, waterItems, kitItems, locationItems,
+        flowItems, medicineItems, kitItems, locationItems,
         newFlowItem, setNewFlowItem, newMedicineItem, setNewMedicineItem, newLocationItem, setNewLocationItem,
         addItem, toggleItem,
         excelFileName, templateFileNames,
@@ -19,7 +19,7 @@ const SettingsView = ({ currentUser }) => {
         waterConfig, setWaterConfig, waterMapping, setWaterMapping,
         webAppCredentials, qntechImportSettings, passwordVisibility, urlEditability,
         excelSheets, sampleRowData,
-        excelStatus, isMetadataLoading, isPreviewLoading, isUploading,
+        excelStatus, isMetadataLoading, isPreviewLoading,
         importProgress, setImportProgress, importedData, showDataModal, setShowDataModal,
         handleSaveFlowMapping, handleSaveMedicineMapping, handleSaveKitMapping, handleSaveWaterMapping,
         updateWebAppCredentialField, togglePasswordVisibility, toggleUrlEditability, handleSaveWebAppCredentials,
@@ -28,8 +28,6 @@ const SettingsView = ({ currentUser }) => {
         alphabet,
         // Log Mapping
         LOG_TYPES, selectedLogType, setSelectedLogType,
-        logMappings, dbColumns, isLogMappingLoading,
-        addLogMapping, removeLogMapping, updateLogMapping, toggleMappingType, handleSaveLogMappings,
         // Gemini API
         geminiApiKey, setGeminiApiKey, geminiKeyVisible, setGeminiKeyVisible, handleSaveGeminiApiKey,
         // Flow Option
@@ -52,10 +50,6 @@ const SettingsView = ({ currentUser }) => {
     const renderFlowSettings = () => {
         // 활성화된 유량 항목들 (기본설정에서 체크된 항목들만)
         const activeFlows = flowItems.filter(i => i.checked);
-        const rows = [
-            { name: '날짜 (Date)', isDate: true, defaultCol: 'A' },
-            ...activeFlows.map(f => ({ name: f.name, isDate: false, defaultCol: '' }))
-        ];
 
         return (
             <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -1094,10 +1088,6 @@ const SettingsView = ({ currentUser }) => {
     };
 
     // --- 일지 매핑용 DB 컬럼 옵션 구성 ---
-    const dbColumnOptions = Object.entries(dbColumns).flatMap(([table, cols]) =>
-        cols.map(c => `${table}.${c}`)
-    );
-
     const renderLogMappingSettings = () => (
         <div style={{ display: 'flex', height: '100%', minHeight: '480px' }}>
             {/* 좌측: 일지 종류 리스트 */}

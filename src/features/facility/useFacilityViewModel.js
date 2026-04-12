@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { FacilityModel } from './FacilityModel';
 
-export const useFacilityViewModel = (currentUser, { showAlert } = {}) => {
+export const useFacilityViewModel = () => {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');

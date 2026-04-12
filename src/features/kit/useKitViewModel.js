@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { KitModel } from './KitModel';
 import { SettingsModel } from '../settings/SettingsModel';
 
@@ -15,6 +15,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
     const [isSavingPurchase, setIsSavingPurchase] = useState(false);
     const [autoSaveStatus, setAutoSaveStatus] = useState('idle');
     const pendingChangesRef = useRef({});
+    const submitBatchRef = useRef(null);
     const autoSaveTimerRef = useRef(null);
     const autoSaveStatusTimerRef = useRef(null);
     const isAutoSavingRef = useRef(false);
@@ -39,10 +40,6 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
     };
 
     useEffect(() => {
-        loadLogs();
-    }, []);
-
-    useEffect(() => {
         return () => {
             if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
             if (autoSaveStatusTimerRef.current) clearTimeout(autoSaveStatusTimerRef.current);
@@ -60,7 +57,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
         }
     };
 
-    const loadLogs = async () => {
+    const loadLogs = useCallback(async () => {
         setLoading(true);
         try {
             const today = new Date();
@@ -156,7 +153,11 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        loadLogs();
+    }, [loadLogs]);
 
     const updateAmount = (rowDate, type, field, val) => {
         const numVal = val === '' ? null : parseFloat(val);
@@ -204,7 +205,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
         });
     };
 
-    const submitBatch = async (options = {}) => {
+    const submitBatch = useCallback(async (options = {}) => {
         const { targetDates = null, silent = false } = options;
         const sourcePendingChanges = pendingChangesRef.current;
         const changedDates = Array.isArray(targetDates)
@@ -244,7 +245,11 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [loadLogs, showAlert]);
+
+    useEffect(() => {
+        submitBatchRef.current = submitBatch;
+    }, [submitBatch]);
 
     useEffect(() => {
         const hasPending = Object.keys(pendingChanges).length > 0;
@@ -256,7 +261,9 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
             isAutoSavingRef.current = true;
             setAutoSaveStatus('saving');
 
-            const result = await submitBatch({ silent: true });
+            const result = await (submitBatchRef.current
+                ? submitBatchRef.current({ silent: true })
+                : { success: false });
 
             if (result?.success) {
                 setAutoSaveStatus('saved');

@@ -1,22 +1,34 @@
-import React, { useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect } from 'react';
 import { TAB_LABELS, DEFAULT_TAB } from './core/constants';
 import { useAuthViewModel, LoginView, SyncService } from './features/auth';
-import { AttendanceView } from './features/attendance';
-import { MemberManagementView } from './features/members';
-import { FlowManagementView } from './features/flow';
-import { MedicineManagementView, MedicineRegisterView, MedicineInView } from './features/medicine';
-import { WaterQualityView } from './features/water';
-import { FacilityManagementView } from './features/facility';
-import { DailyLogView } from './features/dailylog';
-import { BoardView } from './features/board';
-import { SettingsView } from './features/settings';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import StatusBar from './components/StatusBar';
 import Dashboard from './views/Dashboard';
-import { KitManagementView } from './features/kit';
-import { CertificateView } from './features/certificate';
-import { SludgePhotoView, SludgeLedgerView } from './features/sludge';
+const AttendanceView = lazy(() => import('./features/attendance').then((module) => ({ default: module.AttendanceView })));
+const MemberManagementView = lazy(() => import('./features/members').then((module) => ({ default: module.MemberManagementView })));
+const FlowManagementView = lazy(() => import('./features/flow').then((module) => ({ default: module.FlowManagementView })));
+const MedicineManagementView = lazy(() => import('./features/medicine').then((module) => ({ default: module.MedicineManagementView })));
+const MedicineRegisterView = lazy(() => import('./features/medicine').then((module) => ({ default: module.MedicineRegisterView })));
+const MedicineInView = lazy(() => import('./features/medicine').then((module) => ({ default: module.MedicineInView })));
+const WaterQualityView = lazy(() => import('./features/water').then((module) => ({ default: module.WaterQualityView })));
+const FacilityManagementView = lazy(() => import('./features/facility').then((module) => ({ default: module.FacilityManagementView })));
+const DailyLogView = lazy(() => import('./features/dailylog').then((module) => ({ default: module.DailyLogView })));
+const BoardView = lazy(() => import('./features/board').then((module) => ({ default: module.BoardView })));
+const SettingsView = lazy(() => import('./features/settings').then((module) => ({ default: module.SettingsView })));
+const KitManagementView = lazy(() => import('./features/kit').then((module) => ({ default: module.KitManagementView })));
+const CertificateView = lazy(() => import('./features/certificate').then((module) => ({ default: module.CertificateView })));
+const SludgePhotoView = lazy(() => import('./features/sludge').then((module) => ({ default: module.SludgePhotoView })));
+const SludgeLedgerView = lazy(() => import('./features/sludge').then((module) => ({ default: module.SludgeLedgerView })));
+
+const contentLoadingFallback = (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '320px' }}>
+        <div style={{ textAlign: 'center', color: '#64748b' }}>
+            <div className="spinner" style={{ margin: '0 auto 0.75rem' }} />
+            <p style={{ margin: 0, fontSize: '0.875rem', fontWeight: 700 }}>화면 로딩 중...</p>
+        </div>
+    </div>
+);
 
 const PlaceholderView = ({ title }) => (
     <div style={{ display: 'flex', width: '100%', height: '100%', backgroundColor: '#ffffff', padding: '1.25rem', gap: '1.25rem' }}>
@@ -148,7 +160,9 @@ function App() {
                 />
 
                 <main className="main-content">
-                    {renderContent()}
+                    <Suspense fallback={contentLoadingFallback}>
+                        {renderContent()}
+                    </Suspense>
                 </main>
             </div>
 

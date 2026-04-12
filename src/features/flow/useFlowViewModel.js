@@ -1,17 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { FlowModel } from './FlowModel';
+
+const FLOW_TYPES = ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '슬러지', '전력량계'];
 
 export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(false);
     const [pendingChanges, setPendingChanges] = useState({});
     const pendingChangesRef = useRef({});
-
-    useEffect(() => {
-        loadReadings();
-    }, []);
-
-    const flowTypes = ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '슬러지', '전력량계'];
 
     const findPreviousSludgeCumulative = (rows, currentIndex, rowDate, type) => {
         const currentYear = String(rowDate || '').slice(0, 4);
@@ -35,7 +31,7 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
         return { reading: data.raw, flow: data.diff, error: data.error };
     };
 
-    const loadReadings = async () => {
+    const loadReadings = useCallback(async () => {
         setLoading(true);
         try {
             const today = new Date();
@@ -57,7 +53,7 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
                         const ds = currentDate.toISOString().split('T')[0];
                         if (!existingDates.has(ds)) {
                             const emptyRow = { date: ds };
-                            flowTypes.forEach(t => { emptyRow[t] = { raw: null, diff: null }; });
+                            FLOW_TYPES.forEach(t => { emptyRow[t] = { raw: null, diff: null }; });
                             hist.push(emptyRow);
                             existingDates.add(ds);
                         }
@@ -68,7 +64,7 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
                 // 오늘이 없으면 추가
                 if (!hist.find(h => h.date === todayStr)) {
                     const emptyRow = { date: todayStr };
-                    flowTypes.forEach(t => { emptyRow[t] = { raw: null, diff: null }; });
+                    FLOW_TYPES.forEach(t => { emptyRow[t] = { raw: null, diff: null }; });
                     hist.push(emptyRow);
                 }
 
@@ -79,7 +75,7 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
                     const ds = d.toISOString().split('T')[0];
                     if (!hist.find(h => h.date === ds)) {
                         const emptyRow = { date: ds, isFuture: true };
-                        flowTypes.forEach(t => { emptyRow[t] = { raw: null, diff: null }; });
+                        FLOW_TYPES.forEach(t => { emptyRow[t] = { raw: null, diff: null }; });
                         hist.push(emptyRow);
                     }
                 }
@@ -96,7 +92,11 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        loadReadings();
+    }, [loadReadings]);
 
     // 셀 편집: 적산값 입력 -> 누계 자동 계산
     const updateReading = (rowDate, type, rawValue) => {
@@ -241,7 +241,7 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
     return {
         history,
         loading,
-        flowTypes,
+        flowTypes: FLOW_TYPES,
         correctData,
         updateReading,
         updateManualReading,

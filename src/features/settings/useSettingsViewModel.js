@@ -120,6 +120,8 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
 
+    // 초기 설정 로드는 마운트 시 1회만 수행한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => { loadSettings(); }, []);
 
     useEffect(() => {
@@ -134,13 +136,13 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
             loadLogMappings(selectedLogType);
             loadDbColumns();
         }
-    }, [activeTab]);
+    }, [activeTab, excelStatus.sheets, excelStatus.status, selectedLogType]);
 
     useEffect(() => {
         if (activeTab === 'logMapping') {
             loadLogMappings(selectedLogType);
         }
-    }, [selectedLogType]);
+    }, [selectedLogType, activeTab]);
 
     useEffect(() => {
         if (activeTab === 'flow' && flowConfig.sheet && flowConfig.startRow)
@@ -214,7 +216,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                     try {
                         const parsed = JSON.parse(data.settings.qntech_sample_mappings);
                         restoredQntechMappings = Array.isArray(parsed) ? parsed : [];
-                    } catch (error) {
+                    } catch {
                         restoredQntechMappings = [];
                     }
                 }
@@ -297,7 +299,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
             const result = await SettingsModel.getExcelStatus();
             setExcelStatus({ status: result.status, fileName: result.fileName || null, sheets: result.sheets || [] });
             if (result.sheets) setExcelSheets(result.sheets);
-        } catch (err) {
+        } catch {
             setExcelStatus({ status: 'error', fileName: null, sheets: [] });
         } finally {
             setIsMetadataLoading(false);
@@ -309,7 +311,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         try {
             const res = await SettingsModel.getExcelPreview(sheet, row);
             setSampleRowData(res.success ? res.data : {});
-        } catch (err) { setSampleRowData({}); }
+        } catch { setSampleRowData({}); }
         finally { setIsPreviewLoading(false); }
     };
 
@@ -692,7 +694,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         try {
             const formData = new FormData();
             files.forEach((file) => formData.append('report_templates', file));
-            const result = await SettingsModel.uploadFiles(formData);
+            await SettingsModel.uploadFiles(formData);
             setTemplateFiles([]);
             setTemplateFileNames('');
             showAlert?.('선택한 양식 파일을 앱 로컬 폴더에 복사했습니다.');

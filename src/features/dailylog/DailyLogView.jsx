@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import '../../styles/calendar-custom.css';
-import { useDialog } from '../../components/common/DialogProvider';
+import { useDialog } from '../../components/common/DialogContext';
 import DailyLogStatusDashboard from './DailyLogStatusDashboard';
 import { useDailyLogViewModel } from './useDailyLogViewModel';
 
@@ -11,13 +11,11 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
     const {
         selectedDates,
         handleDateClick,
-        pages,
         isManifestLoading,
         isPreviewAssetLoading,
         isOutputProcessing,
         manifestError,
         manifestErrorCode,
-        activeDates,
         setCalendarActiveStartDate,
         handleExportExcel,
         dashboardRows,
@@ -77,7 +75,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                                     }
                                     return null;
                                 }}
-                                tileContent={({ date, view }) => {
+                                tileContent={() => {
                                     return null;
                                 }}
                                 formatDay={(locale, date) => date.getDate()}
@@ -258,20 +256,5 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         </div>
     );
 };
-
-/* Chromium date input is visually large by default, so tighten its internal segments. */
-const dailyLogDateInputStyles = `
-    .dailylog-date-field:focus-visible {
-        outline: 2px solid #60a5fa;
-        outline-offset: 2px;
-    }
-
-    .dailylog-date-field .dailylog-native-date-input {
-        position: absolute;
-        inset: 0;
-        opacity: 0;
-        cursor: pointer;
-    }
-`;
 
 export default DailyLogView;

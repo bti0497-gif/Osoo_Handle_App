@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { WaterQualityModel } from './WaterQualityModel';
 
 const WATER_FIELDS = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity', 'tn', 'tp', 'cod', 'ss'];
@@ -95,7 +95,6 @@ const applyDisplayLabels = (rows = []) => {
 };
 
 export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
-    const rangeImportPollingRef = useRef(null);
     const historyRef = useRef([]);
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -104,14 +103,6 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
     const [lastImportSummary, setLastImportSummary] = useState(null);
     const [lastRangeImportSummary, setLastRangeImportSummary] = useState(null);
     const pendingChangesRef = useRef({});
-
-    useEffect(() => {
-        loadReadings();
-    }, []);
-
-    useEffect(() => {
-        loadReadings();
-    }, []);
 
     const normalizeWaterValue = (value) => {
         if (value === null || value === undefined || value === '') return value ?? null;
@@ -132,7 +123,7 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
         setHistory(rows);
     };
 
-    const loadReadings = async () => {
+    const loadReadings = useCallback(async () => {
         setLoading(true);
         try {
             const today = new Date();
@@ -201,7 +192,11 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        loadReadings();
+    }, [loadReadings]);
 
     const updateReading = (rowKey, locName, type, val) => {
         const normalizedValue = val === '' ? null : normalizeWaterValue(val);
@@ -345,35 +340,31 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
     };
 
     const handleImportRangeFromQntech = async (startDate, endDate) => {
-        // 기존의 기간 불러오기(단일 API 호출)를 남겨두되, 
+        // 기존의 기간 불러오기(단일 API 호출)를 남겨두되,
         // 뷰에서는 handleImportFromQntech를 개별적으로 루프돌면서 호출하도록 변경됨
-        try {
-            const result = await WaterQualityModel.importRangeFromQntech(startDate, endDate);
-            if (!result?.success) {
-                throw new Error(result?.error || 'QnTECH 기간 데이터 불러오기에 실패했습니다.');
-            }
-
-            setLastRangeImportSummary({
-                startDate: result.startDate,
-                endDate: result.endDate,
-                processedDates: result.processedDates,
-                insertedRowCount: result.summary?.insertedRowCount || 0,
-                savedPhotoCount: result.summary?.savedPhotoCount || 0,
-                driveUploadedPhotoCount: result.summary?.driveUploadedPhotoCount || 0,
-                existingValueDateCount: result.summary?.existingValueDateCount || 0,
-                existingValueDates: result.existingValueDates || [],
-                insertedDates: result.insertedDates || [],
-                photoRoot: result.photoRoot,
-                driveFolderUrl: result.driveFolderUrl || '',
-                summaryRows: result.summaryRows || []
-            });
-            setLastImportSummary(null);
-
-            await loadReadings();
-            return result;
-        } catch (err) {
-            throw err;
+        const result = await WaterQualityModel.importRangeFromQntech(startDate, endDate);
+        if (!result?.success) {
+            throw new Error(result?.error || 'QnTECH 기간 데이터 불러오기에 실패했습니다.');
         }
+
+        setLastRangeImportSummary({
+            startDate: result.startDate,
+            endDate: result.endDate,
+            processedDates: result.processedDates,
+            insertedRowCount: result.summary?.insertedRowCount || 0,
+            savedPhotoCount: result.summary?.savedPhotoCount || 0,
+            driveUploadedPhotoCount: result.summary?.driveUploadedPhotoCount || 0,
+            existingValueDateCount: result.summary?.existingValueDateCount || 0,
+            existingValueDates: result.existingValueDates || [],
+            insertedDates: result.insertedDates || [],
+            photoRoot: result.photoRoot,
+            driveFolderUrl: result.driveFolderUrl || '',
+            summaryRows: result.summaryRows || []
+        });
+        setLastImportSummary(null);
+
+        await loadReadings();
+        return result;
     };
 
     const submitBatch = async (options = {}) => {

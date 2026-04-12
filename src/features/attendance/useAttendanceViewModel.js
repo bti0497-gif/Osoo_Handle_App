@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AttendanceModel } from './AttendanceModel';
 import { DriveSyncService } from '../../services/DriveSyncService';
 
@@ -13,11 +13,7 @@ export const useAttendanceViewModel = (currentUser, initialDate) => {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(false);
 
-    useEffect(() => {
-        loadAttendance();
-    }, [date]);
-
-    const loadAttendance = async () => {
+    const loadAttendance = useCallback(async () => {
         setLoading(true);
         try {
             const data = await AttendanceModel.fetchAttendance(date);
@@ -27,7 +23,11 @@ export const useAttendanceViewModel = (currentUser, initialDate) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [date]);
+
+    useEffect(() => {
+        loadAttendance();
+    }, [loadAttendance]);
 
     return {
         date,

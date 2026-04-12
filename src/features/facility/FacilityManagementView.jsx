@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useFacilityViewModel } from './useFacilityViewModel';
-import { useDialog } from '../../components/common/DialogProvider';
+import { useDialog } from '../../components/common/DialogContext';
 
 /**
  * FacilityManagementView — 고장·수리 이력 관리

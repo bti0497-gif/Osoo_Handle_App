@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useWaterQualityViewModel } from './useWaterQualityViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
-import { useDialog } from '../../components/common/DialogProvider';
+import { useDialog } from '../../components/common/DialogContext';
 import { useBatchProcess } from '../../hooks/useBatchProcess';
 import { BatchProgressDialog } from '../../components/common';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
@@ -33,12 +33,12 @@ const normalizeDisplayWaterValue = (value) => {
 
 const WaterQualityView = ({ currentUser }) => {
     const { showToast, showConfirm } = useDialog();
-    const { locationItems, config } = useSettingsViewModel();
+    const { locationItems } = useSettingsViewModel();
     const {
         history, loading,
         updateReading, submitBatch, refresh, pendingChanges,
         isImportingFromQntech,
-        handleImportFromQntech, handleImportRangeFromQntech
+        handleImportFromQntech
     } = useWaterQualityViewModel(currentUser, { showToast });
 
     const batchProcess = useBatchProcess();

@@ -77,11 +77,6 @@ export const DailyLogModel = {
             }
         }
 
-        console.log('[DailyLogModel] fetchExportExcel - URL:', url);
-        console.log('[DailyLogModel] fetchExportExcel - ranges:', ranges);
-        console.log('[DailyLogModel] fetchExportExcel - templateName:', templateName);
-        console.log('[DailyLogModel] fetchExportExcel - siteName:', siteName);
-
         // 서버에 요청 → 서버가 파일을 생성하고 시스템 Excel로 열어줌
         return apiClient.get(url);
     }

@@ -46,13 +46,6 @@ const selectStyle = {
   cursor: 'pointer',
 };
 
-const labelStyle = {
-  fontSize: '12px',
-  fontWeight: 600,
-  color: '#64748b',
-  marginBottom: '6px',
-};
-
 const headerCellStyle = {
   position: 'sticky',
   top: 0,
@@ -89,16 +82,6 @@ const firstBodyCellStyle = {
   color: '#1e293b',
 };
 
-const sectionHeaderStyle = {
-  padding: '8px 12px',
-  backgroundColor: '#f1f5f9',
-  fontSize: '11px',
-  fontWeight: 700,
-  color: '#475569',
-  letterSpacing: '0.05em',
-  textTransform: 'uppercase',
-};
-
 const fmt = (v) => {
   if (v === undefined || v === null) return '-';
   const n = Number(v);
@@ -107,7 +90,7 @@ const fmt = (v) => {
   return Number.isInteger(n) ? n.toLocaleString('ko-KR') : n.toFixed(2);
 };
 
-export default function MedicineRegisterView({ currentUser }) {
+export default function MedicineRegisterView() {
   const {
     year, setYear,
     month, setMonth,

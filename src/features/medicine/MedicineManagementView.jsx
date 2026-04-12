@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useMedicineViewModel } from './useMedicineViewModel';
-import { useDialog } from '../../components/common/DialogProvider';
+import { useDialog } from '../../components/common/DialogContext';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
 
 const MedicineManagementView = ({ currentUser }) => {
@@ -171,7 +171,7 @@ const MedicineManagementView = ({ currentUser }) => {
         };
     };
 
-    const renderCell = (row, col, val, isCellTargeted) => {
+    const renderCell = (row, col, val) => {
         // col is a leaf column from AdvancedDataGrid: { id, type, parentId, ... }
         const medicineName = col.parentId; // 약품명 (parent group id)
         if (!medicineName) return val;
@@ -218,7 +218,6 @@ const MedicineManagementView = ({ currentUser }) => {
         }
 
         // 입고/사용 셀
-        const activeBg = isPurchase ? '#dbeafe' : '#fee2e2';
         const displayVal = cellVal != null ? Number(cellVal).toLocaleString() : '';
 
         // 편집 가능 여부에 따라 노란색 배경 적용

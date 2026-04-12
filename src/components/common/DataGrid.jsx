@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 
 const DataGrid = ({
     title,
@@ -29,7 +29,6 @@ const DataGrid = ({
     width = 860
 }) => {
     const [scrollTop, setScrollTop] = useState(0);
-    const [scrollLeft, setScrollLeft] = useState(0);
     const [hoveredRowKey, setHoveredRowKey] = useState(null);
     const [hoveredColId, setHoveredColId] = useState(null);
 
@@ -39,7 +38,6 @@ const DataGrid = ({
     // Sync header scroll
     const handleBodyScroll = (e) => {
         setScrollTop(e.target.scrollTop);
-        setScrollLeft(e.target.scrollLeft);
         if (headerScrollRef.current) {
             headerScrollRef.current.scrollLeft = e.target.scrollLeft;
         }

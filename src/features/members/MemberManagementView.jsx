@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useMemberViewModel } from './useMemberViewModel';
-import { useDialog } from '../../components/common/DialogProvider';
+import { useDialog } from '../../components/common/DialogContext';
 
 const MemberManagementView = ({ currentUser, passwordOnly = false }) => {
     const { showAlert, showConfirm } = useDialog();
@@ -31,7 +31,7 @@ const MemberManagementView = ({ currentUser, passwordOnly = false }) => {
                 handleEdit(myMember);
             }
         }
-    }, [passwordOnly, currentUser, members]);
+    }, [passwordOnly, currentUser, members, handleEdit]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();

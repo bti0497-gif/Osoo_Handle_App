@@ -1,21 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 const LoginView = ({ onLogin }) => {
-    const [name, setName] = useState('');
+    const [name, setName] = useState(() => localStorage.getItem('lastLoginName') || '');
     const [pass, setPass] = useState('');
     const [error, setError] = useState('');
 
     const passRef = useRef(null);
 
     useEffect(() => {
-        const savedName = localStorage.getItem('lastLoginName');
-        if (savedName) {
-            setName(savedName);
-            if (passRef.current) {
-                passRef.current.focus();
-            }
+        if (name && passRef.current) {
+            passRef.current.focus();
         }
-    }, []);
+    }, [name]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();

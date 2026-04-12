@@ -70,7 +70,7 @@ const td = {
   whiteSpace: 'nowrap',
 };
 
-export default function SludgePhotoView({ currentUser }) {
+export default function SludgePhotoView() {
   const {
     year, month, selectedDate,
     editEntry, savedItems, activeDates,

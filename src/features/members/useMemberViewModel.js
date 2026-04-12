@@ -3,7 +3,7 @@ import { MemberModel } from './MemberModel';
 import { apiClient } from '../../core/api';
 import { SyncService } from '../auth/SyncService';
 
-export const useMemberViewModel = ({ showAlert, showConfirm } = {}) => {
+export const useMemberViewModel = ({ showAlert } = {}) => {
     const [members, setMembers] = useState([]);
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState('list');
@@ -57,7 +57,7 @@ export const useMemberViewModel = ({ showAlert, showConfirm } = {}) => {
             } else {
                 showAlert?.(data.message || '위치 정보를 가져올 수 없습니다.');
             }
-        } catch (err) {
+        } catch {
             showAlert?.('위치 서비스 연결 실패.\n서버가 실행 중인지 확인해 주세요.');
         }
     };
@@ -68,11 +68,12 @@ export const useMemberViewModel = ({ showAlert, showConfirm } = {}) => {
             return { success: false };
         }
         try {
-            const { confirmPassword, method, ...rest } = form;
+            const { method, ...rest } = form;
             const dataToSave = {
                 ...rest,
                 site_name2: method || form.site_name2
             };
+            delete dataToSave.confirmPassword;
 
             await MemberModel.saveMember(dataToSave);
 
@@ -99,11 +100,12 @@ export const useMemberViewModel = ({ showAlert, showConfirm } = {}) => {
             return { success: false };
         }
         try {
-            const { confirmPassword, method, ...rest } = form;
+            const { method, ...rest } = form;
             const dataToSave = {
                 ...rest,
                 site_name2: method || form.site_name2
             };
+            delete dataToSave.confirmPassword;
             await MemberModel.saveMember(dataToSave);
             showAlert?.('비밀번호가 변경되었습니다.');
             await loadMembers();

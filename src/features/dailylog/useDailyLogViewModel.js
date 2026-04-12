@@ -157,7 +157,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         return () => {
             isDisposed = true;
         };
-    }, [selectedDates.join(','), computedStartDate, computedEndDate, templateName, siteName]);
+    }, [selectedDates, computedStartDate, computedEndDate, templateName, siteName]);
 
     const currentPage = pages[currentPageIndex] || null;
 
@@ -185,7 +185,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
                 if (!isDisposed) {
                     setPageRenderData(result.page || null);
                 }
-            } catch (_) {
+            } catch {
                 if (!isDisposed) {
                     setPageRenderData(null);
                 }
@@ -231,7 +231,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
                                 siteName,
                             });
                             renderPage = result.page || null;
-                        } catch (_) {
+                        } catch {
                             renderPage = null;
                         }
                     }
@@ -294,7 +294,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         return () => {
             isDisposed = true;
         };
-    }, [pages, currentPage, pageRenderData, computedStartDate, computedEndDate, templateName, siteName]);
+    }, [pages, currentPage, pageRenderData, computedStartDate, computedEndDate, templateName, siteName, expectedPhotoCountPerSheet, isDailyWorkLog]);
 
     const formatFormatDateForState = (d) => {
         const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -362,12 +362,6 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
             : computedStartDate;
         let alertTitle = '';
         let alertMessage = '';
-
-        console.log('[DailyLogViewModel] handleExportExcel - Selected Dates:', sortedDates);
-        console.log('[DailyLogViewModel] handleExportExcel - Start:', computedStartDate);
-        console.log('[DailyLogViewModel] handleExportExcel - End:', computedEndDate);
-        console.log('[DailyLogViewModel] handleExportExcel - Site:', siteName);
-        console.log('[DailyLogViewModel] handleExportExcel - Range String:', dateRangeStr);
 
         try {
             setIsOutputProcessing(true);

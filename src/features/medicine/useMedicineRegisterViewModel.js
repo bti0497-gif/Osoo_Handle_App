@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { MedicineRegisterModel } from './MedicineRegisterModel';
-import { useDialog } from '../../components/common/DialogProvider';
+import { useDialog } from '../../components/common/DialogContext';
 
 const currentYear = new Date().getFullYear();
 const currentMonth = new Date().getMonth() + 1;

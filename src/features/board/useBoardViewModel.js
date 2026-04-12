@@ -71,17 +71,6 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
             // 스레드 내 정렬: 단순히 일직선이 아니라 트리 구조 유지가 필요하지만,
             // 게시판 목록 특성상 '부모 우선 + 생성일순'으로 평탄화하되
             // depth를 통해 위계를 표현함.
-            const sortedItems = t.items.sort((a, b) => {
-                const timeA = new Date(a.created_at).getTime();
-                const timeB = new Date(b.created_at).getTime();
-                // 같은 깊이면 시간순, 다른 깊이면 부모(depth가 낮은 것)가 우선
-                if (a.depth !== b.depth) {
-                    // 하지만 실제로는 부모 바로 다음에 본인의 답글들이 와야 함 (재귀적 정렬 필요)
-                    return 0; // 아래에서 재귀적으로 처리하기 위해 일단 0 반환
-                }
-                return timeA - timeB;
-            });
-
             // 재귀적 평탄화 함수
             const flatten = (parentId = null) => {
                 const children = t.items.filter(item => (item.parent_id === parentId || (!parentId && !item.parent_id && !sortedRegulars.includes(item))));
@@ -158,7 +147,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
             setSelectedPost(detail);
             setViewMode('detail');
             loadComments(post.id);
-        } catch (err) {
+        } catch {
             showAlert?.('게시글을 불러올 수 없습니다.');
         }
     };

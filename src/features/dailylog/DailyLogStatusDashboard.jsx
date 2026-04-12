@@ -1,13 +1,5 @@
 import React from 'react';
 
-const summaryCardStyle = {
-    border: '1px solid #edebe9',
-    borderRadius: '8px',
-    backgroundColor: '#ffffff',
-    padding: '14px 16px',
-    minHeight: '78px',
-};
-
 const formatNumber = (value) => new Intl.NumberFormat('ko-KR').format(Number(value || 0));
 
 function buildSummaryRows(dashboardSummary, dashboardType) {

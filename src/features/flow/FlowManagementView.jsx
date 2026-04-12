@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useFlowViewModel } from './useFlowViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
-import { useDialog } from '../../components/common/DialogProvider';
+import { useDialog } from '../../components/common/DialogContext';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
 
 const FlowManagementView = ({ currentUser }) => {

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useDialog } from './common/DialogProvider';
+import { useDialog } from './common/DialogContext';
 
 const PhotoUpload = ({ date, type, onUploadSuccess }) => {
     const { showAlert } = useDialog();

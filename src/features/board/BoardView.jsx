@@ -2,7 +2,7 @@ import React, { useState, useRef, useMemo } from 'react';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { useBoardViewModel } from './useBoardViewModel';
-import { useDialog } from '../../components/common/DialogProvider';
+import { useDialog } from '../../components/common/DialogContext';
 
 // ── 성능 최적화를 위한 댓글 입력 컴포넌트 분리 ──
 const CommentInput = ({ onSubmit, placeholder, initialValue = '', onCancel, buttonText = '등록' }) => {

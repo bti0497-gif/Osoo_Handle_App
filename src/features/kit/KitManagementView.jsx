@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useKitViewModel } from './useKitViewModel';
-import { useDialog } from '../../components/common/DialogProvider';
+import { useDialog } from '../../components/common/DialogContext';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
 
 const KitManagementView = ({ currentUser }) => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 
 const SECTION_CONFIG = [
     { key: 'nh3_n', photoKey: 'ammonia', label: 'NH₃-N(질산화)', note: '기준치 20ppm' },
@@ -54,11 +54,7 @@ const photoImageStyle = {
 };
 
 function DailyLogFixedPreview({ page, title }) {
-    const [photoLoadFailures, setPhotoLoadFailures] = useState({});
-
-    useEffect(() => {
-        setPhotoLoadFailures({});
-    }, [page?.pageKey]);
+    const [photoLoadFailureState, setPhotoLoadFailureState] = useState({ pageKey: null, failures: {} });
 
     if (!page) {
         return null;
@@ -99,7 +95,8 @@ function DailyLogFixedPreview({ page, title }) {
                     {SECTION_CONFIG.map((section, index) => {
                         const values = buildValueSlots(page.rows, section.key);
                         const photoUrl = page.photoUrls?.[section.photoKey] || '';
-                        const hasPhotoLoadFailure = Boolean(photoLoadFailures[section.photoKey]);
+                        const activeFailures = photoLoadFailureState.pageKey === page.pageKey ? photoLoadFailureState.failures : {};
+                        const hasPhotoLoadFailure = Boolean(activeFailures[section.photoKey]);
 
                         return (
                             <div
@@ -125,9 +122,12 @@ function DailyLogFixedPreview({ page, title }) {
                                                     alt={section.label}
                                                     style={photoImageStyle}
                                                     onError={() => {
-                                                        setPhotoLoadFailures((prev) => ({
-                                                            ...prev,
-                                                            [section.photoKey]: true,
+                                                        setPhotoLoadFailureState((prev) => ({
+                                                            pageKey: page.pageKey,
+                                                            failures: {
+                                                                ...(prev.pageKey === page.pageKey ? prev.failures : {}),
+                                                                [section.photoKey]: true,
+                                                            },
                                                         }));
                                                     }}
                                                 />
