@@ -84,39 +84,104 @@ function getMergedCellExtent(ws, colLetter, row) {
   return { startCol: ci, startRow: rowN, endCol: ci, endRow: rowN };
 }
 
+function ptToPx(pt) {
+  return Math.round(Number(pt || 0) * (96 / 72));
+}
+
+function _columnPx(ws, c) {
+  return Math.max(1, Math.round((ws.getColumn(c).width || 8) * 7.0));
+}
+
+function _rowPx(ws, r) {
+  return Math.max(1, Math.round((ws.getRow(r).height || 15) * (96 / 72)));
+}
+
+function pixelToCol(ws, xPx) {
+  let rem = Math.max(0, Number(xPx) || 0);
+  const maxCols = Math.max(64, ws.columnCount + 16);
+  for (let c = 1; c <= maxCols; c++) {
+    const cw = _columnPx(ws, c);
+    if (rem <= cw) return (c - 1) + (rem / cw);
+    rem -= cw;
+  }
+  return maxCols - 1;
+}
+
+function pixelToRow(ws, yPx) {
+  let rem = Math.max(0, Number(yPx) || 0);
+  const maxRows = Math.max(300, ws.rowCount + 50);
+  for (let r = 1; r <= maxRows; r++) {
+    const rh = _rowPx(ws, r);
+    if (rem <= rh) return (r - 1) + (rem / rh);
+    rem -= rh;
+  }
+  return maxRows - 1;
+}
+
 // ─── 이미지 삽입 ────────────────────────────────────────────────────────────
 
 /**
  * 로컬 파일 경로(filePath) 또는 Buffer 를 셀 범위에 리사이즈 후 삽입
+ *
+ * opts:
+ *   fitBy   : 'width' | 'height'  — 기준 축 (기본: 'height')
+ *   pct     : 0~1                 — 기준 축 비율 (기본: 0.9)
+ *   cellW   : number (px)         — 셀 폭 직접 지정 (생략 시 시트에서 계산)
+ *   cellH   : number (px)         — 셀 높이 직접 지정 (생략 시 시트에서 계산)
+ *
+ * ※ 캔버스 합성 없이 ext(픽셀 명시) + tl 분수 오프셋으로 중앙 배치
+ *    → 셀 테두리를 가리지 않음
+ *
  * @param {ExcelJS.Workbook} wb
  * @param {ExcelJS.Worksheet} ws
  * @param {{ startCol, startRow, endCol, endRow }} extent  (getMergedCellExtent 반환)
  * @param {string|Buffer} imgSource  파일 경로 or Buffer
- * @param {{ quality?: number }} [opts]
+ * @param {{ fitBy?: 'width'|'height', pct?: number, cellW?: number, cellH?: number, leftPt?: number, topPt?: number, boxWidthPt?: number, boxHeightPt?: number }} [opts]
  */
 async function insertImageToCell(wb, ws, extent, imgSource, opts = {}) {
   const sharp = require('sharp');
-  const quality = opts.quality ?? 88;
 
-  // 병합 셀 전체 픽셀 크기 계산
-  let cellW = 0;
-  for (let c = extent.startCol; c <= extent.endCol; c++) {
-    cellW += Math.round((ws.getColumn(c).width || 8) * 7.0);
-  }
-  let cellH = 0;
-  for (let r = extent.startRow; r <= extent.endRow; r++) {
-    cellH += Math.round((ws.getRow(r).height || 15) * (96 / 72));
-  }
-  cellW = Math.max(20, cellW);
-  cellH = Math.max(20, cellH);
+  // ── 1. 셀 전체 픽셀 크기 (opts로 직접 지정하거나 시트에서 계산) ──────────
+  // 엑셀 column.width 단위: "문자 폭"(≈7 px/단위), row.height 단위: pt(1pt ≈ 1.333 px)
+  const hasAbsoluteBox = opts.leftPt != null && opts.topPt != null
+    && opts.boxWidthPt != null && opts.boxHeightPt != null;
 
-  // 목표: 세로 = 셀 세로의 90%, 가로는 비율 유지 (widthPct 지정 시 가로도 제한)
-  const targetH = Math.round(cellH * 0.9) * 2;
-  const resizeOpts = { height: targetH, fit: 'inside', withoutEnlargement: false };
-  if (opts.widthPct) {
-    resizeOpts.width = Math.round(cellW * opts.widthPct) * 2;
+  let cellW = opts.cellW;
+  let cellH = opts.cellH;
+  if (hasAbsoluteBox) {
+    cellW = ptToPx(opts.boxWidthPt);
+    cellH = ptToPx(opts.boxHeightPt);
+  }
+  if (!cellW) {
+    cellW = 0;
+    for (let c = extent.startCol; c <= extent.endCol; c++)
+      cellW += Math.round((ws.getColumn(c).width || 8) * 7.0);
+    cellW = Math.max(20, cellW);
+  }
+  if (!cellH) {
+    cellH = 0;
+    for (let r = extent.startRow; r <= extent.endRow; r++)
+      cellH += Math.round((ws.getRow(r).height || 15) * (96 / 72));
+    cellH = Math.max(20, cellH);
   }
 
+  // ── 2. 리사이즈 목표 크기 결정 ──────────────────────────────────────────
+  const fitBy = opts.fitBy || (opts.widthPct != null ? 'width' : 'height');
+  const rawPct = opts.pct != null
+    ? opts.pct
+    : (fitBy === 'width' ? opts.widthPct : opts.heightPct);
+  const pct = Math.max(0.05, Math.min(1, rawPct != null ? Number(rawPct) : 0.9));
+
+  const resizeOpts = { fit: 'inside', withoutEnlargement: false };
+  if (fitBy === 'width') {
+    resizeOpts.width  = Math.round(cellW * pct);
+    resizeOpts.height = Math.round(cellH * 0.98);
+  } else {
+    resizeOpts.width  = Math.round(cellW * 0.98);
+    resizeOpts.height = Math.round(cellH * pct);
+  }
+
+  // ── 3. 이미지 리사이즈 ──────────────────────────────────────────────────
   const srcBuf = typeof imgSource === 'string' ? fs.readFileSync(imgSource) : imgSource;
   const isBmp  = srcBuf[0] === 0x42 && srcBuf[1] === 0x4D;
 
@@ -128,30 +193,38 @@ async function insertImageToCell(wb, ws, extent, imgSource, opts = {}) {
     sharpInst = sharp(srcBuf);
   }
 
-  const { data: outBuf, info } = await sharpInst
+  const { data: imgBuf, info } = await sharpInst
     .rotate()
     .resize(resizeOpts)
-    .jpeg({ quality })
+    .png()
     .toBuffer({ resolveWithObject: true });
 
-  // 실제 표시 크기 (2× 역산)
-  const imgW = info.width  / 2;
-  const imgH = info.height / 2;
+  // ── 4. 중앙 배치: 픽셀 마진 → 셀 분수 오프셋 변환 ──────────────────────
+  // ExcelJS tl: { col, row } 에서 소수점 이하는 "해당 셀 안의 비율"
+  // marginX 픽셀 / 시작 셀 폭 픽셀 = 해당 셀 내 비율
+  const marginX = Math.max(0, (cellW - info.width)  / 2);
+  const marginY = Math.max(0, (cellH - info.height) / 2);
+  let tlCol;
+  let tlRow;
+  if (hasAbsoluteBox) {
+    const absX = ptToPx(opts.leftPt) + marginX;
+    const absY = ptToPx(opts.topPt) + marginY;
+    tlCol = pixelToCol(ws, absX);
+    tlRow = pixelToRow(ws, absY);
+  } else {
+    const firstColW = _columnPx(ws, extent.startCol);
+    const firstRowH = _rowPx(ws, extent.startRow);
+    const colFrac = marginX / firstColW;
+    const rowFrac = marginY / firstRowH;
+    tlCol = extent.startCol - 1 + colFrac;
+    tlRow = extent.startRow - 1 + rowFrac;
+  }
 
-  // 셀 중앙 배치를 위한 픽셀 오프셋
-  const xOff = Math.max(0, (cellW - imgW) / 2);
-  const yOff = Math.max(0, (cellH - imgH) / 2);
-
-  // 픽셀 오프셋 → ExcelJS fractional col/row (0-based)
-  const firstColPx = Math.max(1, Math.round((ws.getColumn(extent.startCol).width || 8) * 7.0));
-  const firstRowPx = Math.max(1, Math.round((ws.getRow(extent.startRow).height   || 15) * (96 / 72)));
-  const tlCol = (extent.startCol - 1) + xOff / firstColPx;
-  const tlRow = (extent.startRow - 1) + yOff / firstRowPx;
-
-  const imageId = wb.addImage({ buffer: outBuf, extension: 'jpeg' });
+  // ── 5. 이미지 삽입 (ext로 크기 명시 → 셀 테두리 불가침) ──────────────────
+  const imageId = wb.addImage({ buffer: imgBuf, extension: 'png' });
   ws.addImage(imageId, {
-    tl:     { col: tlCol, row: tlRow },
-    ext:    { width: Math.round(imgW), height: Math.round(imgH) },
+    tl: { col: tlCol, row: tlRow },
+    ext: { width: info.width, height: info.height },
     editAs: 'oneCell',
   });
 }

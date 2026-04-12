@@ -5,7 +5,7 @@ export const MedicineRegisterModel = {
     return apiClient.get('/api/medicine-register', { year, month });
   },
 
-  async exportPdf(year, month) {
+  async exportExcel(year, month) {
     return apiClient.post('/api/medicine-register/export', { year, month });
   },
 };

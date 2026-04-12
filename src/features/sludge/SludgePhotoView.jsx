@@ -4,11 +4,6 @@ import 'react-calendar/dist/Calendar.css';
 import '../../styles/calendar-custom.css';
 import { useSludgePhotoViewModel } from './useSludgePhotoViewModel';
 
-const getTodayStr = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-
 const toDateStr = (d) => {
   const m  = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
@@ -79,7 +74,7 @@ export default function SludgePhotoView({ currentUser }) {
   const {
     year, month, selectedDate,
     editEntry, savedItems, activeDates,
-    isLoading, isSaving, isExporting, hasChanges,
+    isLoading, isSaving, isExporting, isLedgerExporting, hasChanges,
     handleCalendarMonthChange,
     handleCalendarDayClick,
     handleRowClick,
@@ -89,11 +84,10 @@ export default function SludgePhotoView({ currentUser }) {
     handleSave,
     handleDelete,
     handleExport,
+    handleLedgerExport,
   } = useSludgePhotoViewModel();
 
   const calendarValue = selectedDate ? new Date(selectedDate + 'T00:00:00') : null;
-  const todayStr = getTodayStr();
-
   // 선택된 날짜가 기존 저장 항목인지 여부
   const isSavedDate = savedItems.some(i => i.date === selectedDate);
   // 신규 입력 모드: 선택된 날짜가 있고 저장 기록이 없는 경우
@@ -117,7 +111,13 @@ export default function SludgePhotoView({ currentUser }) {
     background: '#fff',
   });
 
-  const EditForm = ({ newEntry }) => (
+  const formatTakenAt = (item) => {
+    const raw = item.sludge_photo_taken_at || (item.sludge_photo_url ? item.last_modified : null);
+    if (!raw) return '-';
+    return String(raw).slice(0, 16).replace('T', ' ');
+  };
+
+  const renderEditForm = (newEntry) => (
     <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' }}>
@@ -261,7 +261,7 @@ export default function SludgePhotoView({ currentUser }) {
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
                   type="button"
-                  onClick={() => handleCalendarDayClick(todayStr)}
+                  onClick={() => handleCalendarDayClick(selectedDate || toDateStr(new Date()))}
                   style={{
                     padding: '6px 14px',
                     borderRadius: 7,
@@ -274,6 +274,24 @@ export default function SludgePhotoView({ currentUser }) {
                   }}
                 >
                   + 새 반출 추가
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLedgerExport}
+                  disabled={isLedgerExporting || savedItems.length === 0}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 7,
+                    border: '1.5px solid #e2e8f0',
+                    background: '#fff',
+                    color: '#475569',
+                    fontWeight: 600,
+                    fontSize: 12,
+                    cursor: (isLedgerExporting || savedItems.length === 0) ? 'not-allowed' : 'pointer',
+                    opacity: (isLedgerExporting || savedItems.length === 0) ? 0.5 : 1,
+                  }}
+                >
+                  {isLedgerExporting ? '출력 중...' : '반출관리대장 출력'}
                 </button>
                 <button
                   type="button"
@@ -306,7 +324,7 @@ export default function SludgePhotoView({ currentUser }) {
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#0369a1', marginBottom: 12 }}>
                   ✚ {editEntry.date} — 신규 반출 등록
                 </div>
-                <EditForm newEntry={true} />
+                {renderEditForm(true)}
               </div>
             )}
 
@@ -365,9 +383,7 @@ export default function SludgePhotoView({ currentUser }) {
                               {item.certificate_photo_url ? '✓ 있음' : '-'}
                             </td>
                             <td style={td}>
-                              {item.sludge_photo_taken_at
-                                ? item.sludge_photo_taken_at.slice(0, 16).replace('T', ' ')
-                                : '-'}
+                              {formatTakenAt(item)}
                             </td>
                             <td style={td}>{item.note || '-'}</td>
                           </tr>
@@ -377,7 +393,7 @@ export default function SludgePhotoView({ currentUser }) {
                             <tr>
                               <td colSpan={6} style={{ padding: 0 }}>
                                 <div style={inlineFormStyle}>
-                                  <EditForm newEntry={false} />
+                                  {renderEditForm(false)}
                                 </div>
                               </td>
                             </tr>

@@ -1,6 +1,11 @@
 import { apiClient } from '../../core/api';
 
 export const SludgePhotoModel = {
+  /** 반출관리대장 월별 조회 */
+  async fetchLedgerByMonth(year, month) {
+    return apiClient.get('/api/sludge-ledger', { year, month });
+  },
+
   /** 해당 연/월의 슬러지 반출 목록 */
   async fetchByMonth(year, month) {
     return apiClient.get('/api/sludge-photos', { year, month });
@@ -21,6 +26,9 @@ export const SludgePhotoModel = {
     const apiBase = (await import('../../core/api/serverConfig.js')).getApiBase();
     const formData = new FormData();
     formData.append('photo', file);
+    if (file?.lastModified) {
+      formData.append('takenAt', new Date(file.lastModified).toISOString());
+    }
     const resp = await fetch(`${apiBase}/api/sludge-photos/upload-photo?date=${encodeURIComponent(date)}&type=${encodeURIComponent(type)}`, {
       method: 'POST',
       body: formData,
@@ -36,5 +44,10 @@ export const SludgePhotoModel = {
   /** 사진대지 엑셀 생성 후 로컬에서 열기 */
   async export(year, month) {
     return apiClient.post('/api/sludge-photos/export', { year, month });
+  },
+
+  /** 반출관리대장 엑셀 생성 후 로컬에서 열기 */
+  async exportLedger(year, month) {
+    return apiClient.post('/api/sludge-photos/export-ledger', { year, month });
   },
 };

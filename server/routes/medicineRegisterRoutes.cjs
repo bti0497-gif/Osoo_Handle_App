@@ -1,17 +1,15 @@
 const express = require('express');
 const path = require('path');
-const os = require('os');
 const fs = require('fs');
-const { openExcelFile } = require('../services/excelOpenService.cjs');
+const { parseNamedRanges, buildExcelTempPath, openExcelFile } = require('../services/excelOpenService.cjs');
 
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
-const { replaceHwpxPlaceholders } = require('../services/hwpPdfService.cjs');
 
 const router = express.Router();
 
-// 기본 3종 약품 (순서 고정 — HWPX 약1, 약2, 약3)
+// 기본 3종 약품 (순서 고정)
 const BASE_MEDICINES = ['포도당', '중탄산나트륨', '팩(PAC)'];
-// 기본 4종 키트 (순서 고정 — HWPX 키1, 키2, 키3, 키4)
+// 기본 4종 키트 (순서 고정)
 const BASE_KITS = ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '인산염인(PO4-P)', '알칼리도(ALK)'];
 
 /**
@@ -44,6 +42,101 @@ function getAggregate(db, table, nameCol, name, startDate, endDate, yearStart) {
   ).get(name, startDate, endDate)?.current_inventory ?? 0;
 
   return { purchase, usage, yearTotal, balance };
+}
+
+function formatNumber(v) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return '';
+  const n = Number(v);
+  return Number.isInteger(n) ? n : Number(n.toFixed(2));
+}
+
+async function exportMedicineRegisterXlsx({ templatePath, outputPath, year, month, siteName, medicineData, extraData, kitData, extraMedicines }) {
+  const ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(templatePath);
+
+  const ws = wb.worksheets[0];
+  if (!ws) throw new Error('약품관리대장 템플릿 시트를 찾을 수 없습니다.');
+
+  const namedMap = parseNamedRanges(wb);
+  const normalizeNamed = (s) => String(s || '')
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(/[\s\-_.()/]/g, '');
+  const normalizedNamedMap = new Map();
+  Object.entries(namedMap).forEach(([key, info]) => {
+    const nk = normalizeNamed(key);
+    if (nk && !normalizedNamedMap.has(nk)) normalizedNamedMap.set(nk, info);
+  });
+
+  const resolveNamedInfo = (name) => {
+    const exact = namedMap[name];
+    if (exact) return exact;
+    return normalizedNamedMap.get(normalizeNamed(name)) || null;
+  };
+
+  const setNamed = (name, value) => {
+    const info = resolveNamedInfo(name);
+    if (!info) return;
+    const targetSheet = wb.getWorksheet(info.sheetName) || ws;
+    targetSheet.getCell(info.address).value = value ?? '';
+  };
+  const setNamedAny = (names, value) => {
+    (names || []).forEach((name) => setNamed(name, value));
+  };
+
+  const mm = String(month).padStart(2, '0');
+  const medicineNames = [...BASE_MEDICINES, ...extraMedicines].filter(Boolean);
+
+  // 공통 헤더
+  setNamed('대장명', `${year}년 ${Number(month)}월 약품관리대장`);
+  setNamed('현장명', siteName || '');
+  setNamed('사용약품', medicineNames.length ? `(${medicineNames.join(', ')})` : '()');
+
+  // 기본 약품명/수치
+  BASE_MEDICINES.forEach((name, idx) => {
+    const i = idx + 1;
+    const row = medicineData[idx] || {};
+    setNamed(`약${i}약품명`, name);
+    setNamed(`약${i}구매`, formatNumber(row.purchase));
+    setNamed(`약${i}사용`, formatNumber(row.usage));
+    setNamed(`약${i}누계`, formatNumber(row.yearTotal));
+    setNamed(`약${i}잔량`, formatNumber(row.balance));
+  });
+
+  // 추가 약품(최대 3개)
+  for (let i = 1; i <= 3; i++) {
+    const row = extraData[i - 1] || {};
+    const hasName = Boolean(row.name);
+    setNamed(`추${i}약품명`, row.name || '');
+    setNamed(`추${i}구매`, hasName ? formatNumber(row.purchase) : '');
+    setNamed(`추${i}사용`, hasName ? formatNumber(row.usage) : '');
+    setNamed(`추${i}누계`, hasName ? formatNumber(row.yearTotal) : '');
+    setNamed(`추${i}잔량`, hasName ? formatNumber(row.balance) : '');
+  }
+
+  // 분석 시약(키트)
+  const kitNameMap = {
+    '암모니아성질소(NH3-N)': ['암모니아', '암모니아성질소', 'NH3'],
+    '질산성질소(NO3-N)': ['질산', '질산성질소', 'NO3'],
+    '인산염인(PO4-P)': ['인산', '인산염인', '인', 'PO4', 'PO4-P', 'PO4P'],
+    '알칼리도(ALK)': ['알칼리', '알칼리도', 'Alkalinity'],
+  };
+  for (const [originName, prefixes] of Object.entries(kitNameMap)) {
+    const row = kitData.find((item) => item.name === originName) || {};
+    prefixes.forEach((prefix) => {
+      setNamedAny([`${prefix}구매`], formatNumber(row.purchase));
+      setNamedAny([`${prefix}사용`], formatNumber(row.usage));
+      setNamedAny([`${prefix}누계`, `${prefix}연누계`], formatNumber(row.yearTotal));
+      setNamedAny([`${prefix}잔량`], formatNumber(row.balance));
+    });
+  }
+
+  // 일부 템플릿은 월 텍스트를 별도 named range로 둘 수 있음
+  setNamed('월', `${Number(month)}월`);
+  setNamed('기준월', `${year}.${mm}`);
+
+  await wb.xlsx.writeFile(outputPath);
 }
 
 module.exports = function (db, baseDir, appDataPath) {
@@ -127,7 +220,7 @@ module.exports = function (db, baseDir, appDataPath) {
   /**
    * POST /api/medicine-register/export
    * Body: { year, month }
-   * Returns: PDF (application/pdf)
+   * Returns: { success: true }
    */
   router.post('/api/medicine-register/export', async (req, res) => {
     try {
@@ -139,23 +232,23 @@ module.exports = function (db, baseDir, appDataPath) {
         return res.status(400).json({ success: false, error: '유효하지 않은 연월입니다.' });
       }
 
-      // 템플릿 파일 확인
-      const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, '약품관리대장', { excelOnly: false });
+      // 템플릿 파일 확인 (엑셀만 지원)
+      const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, '약품관리대장', { excelOnly: true });
       if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
         return res.status(404).json({
           success: false,
-          code: 'HWP_TEMPLATE_MISSING',
-          error: '약품관리대장 HWPX 양식을 찾을 수 없습니다.',
-          userMessage: '설정에서 약품관리대장 HWPX 파일을 업로드해 주세요.',
+          code: 'EXCEL_TEMPLATE_MISSING',
+          error: '약품관리대장 엑셀 양식을 찾을 수 없습니다.',
+          userMessage: '설정에서 약품관리대장 엑셀 파일을 업로드해 주세요.',
         });
       }
 
       const ext = path.extname(templateInfo.absolutePath).toLowerCase();
-      if (ext !== '.hwpx') {
+      if (!['.xlsx', '.xls', '.xlsm'].includes(ext)) {
         return res.status(400).json({
           success: false,
-          code: 'HWP_TEMPLATE_INVALID',
-          error: 'HWPX 파일만 지원합니다.',
+          code: 'EXCEL_TEMPLATE_INVALID',
+          error: '엑셀 파일만 지원합니다.',
         });
       }
 
@@ -192,84 +285,22 @@ module.exports = function (db, baseDir, appDataPath) {
         ({ name, ...getAggregate(db, 'kit_logs', 'kit_name', name, startDate, endDate, yearStart) })
       );
 
-      // 숫자 포맷: 0이면 빈 문자열이 아닌 "0" 표시, 소수점은 필요 시 표시
-      const fmt = (v) => (typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : String(v ?? ''));
+      const outputPath = buildExcelTempPath('osoo-medicine-register', `약품관리대장_${y}_${mm}_${Date.now()}.xlsx`);
 
-      // Placeholder → 값 매핑
-      const bindings = {
-        '{{월}}': mm,
-        '{{현장명}}': siteName,
-        '{{약품목록}}': [...BASE_MEDICINES, ...extraMedicines].filter(Boolean).join(', '),
-
-        // 기본 약품 (약1=포도당, 약2=중탄산나트륨, 약3=팩(PAC))
-        '{{약1-구매}}': fmt(medicineData[0]?.purchase),
-        '{{약1-사용}}': fmt(medicineData[0]?.usage),
-        '{{약1-연누계}}': fmt(medicineData[0]?.yearTotal),
-        '{{약1-잔량}}': fmt(medicineData[0]?.balance),
-
-        '{{약2-구매}}': fmt(medicineData[1]?.purchase),
-        '{{약2-사용}}': fmt(medicineData[1]?.usage),
-        '{{약2-연누계}}': fmt(medicineData[1]?.yearTotal),
-        '{{약2-잔량}}': fmt(medicineData[1]?.balance),
-
-        '{{약3-구매}}': fmt(medicineData[2]?.purchase),
-        '{{약3-사용}}': fmt(medicineData[2]?.usage),
-        '{{약3-연누계}}': fmt(medicineData[2]?.yearTotal),
-        '{{약3-잔량}}': fmt(medicineData[2]?.balance),
-
-        // 추가약품
-        '{{추가약품1_명}}': extraData[0]?.name || '',
-        '{{추1-구매}}': extraData[0]?.name ? fmt(extraData[0].purchase) : '',
-        '{{추1-사용}}': extraData[0]?.name ? fmt(extraData[0].usage) : '',
-        '{{추1-연누계}}': extraData[0]?.name ? fmt(extraData[0].yearTotal) : '',
-        '{{추1-잔량}}': extraData[0]?.name ? fmt(extraData[0].balance) : '',
-
-        '{{추가약품2_명}}': extraData[1]?.name || '',
-        '{{추2-구매}}': extraData[1]?.name ? fmt(extraData[1].purchase) : '',
-        '{{추2-사용}}': extraData[1]?.name ? fmt(extraData[1].usage) : '',
-        '{{추2-연누계}}': extraData[1]?.name ? fmt(extraData[1].yearTotal) : '',
-        '{{추2-잔량}}': extraData[1]?.name ? fmt(extraData[1].balance) : '',
-
-        '{{추가약품3_명}}': extraData[2]?.name || '',
-        '{{추3-구매}}': extraData[2]?.name ? fmt(extraData[2].purchase) : '',
-        '{{추3-사용}}': extraData[2]?.name ? fmt(extraData[2].usage) : '',
-        '{{추3-연누계}}': extraData[2]?.name ? fmt(extraData[2].yearTotal) : '',
-        '{{추3-잔량}}': extraData[2]?.name ? fmt(extraData[2].balance) : '',
-
-        // 키트 (키1=NH3-N, 키2=NO3-N, 키3=PO4-P, 키4=ALK)
-        '{{키1-구매}}': fmt(kitData[0]?.purchase),
-        '{{키1-사용}}': fmt(kitData[0]?.usage),
-        '{{키1-연누계}}': fmt(kitData[0]?.yearTotal),
-        '{{키1-잔량}}': fmt(kitData[0]?.balance),
-
-        '{{키2-구매}}': fmt(kitData[1]?.purchase),
-        '{{키2-사용}}': fmt(kitData[1]?.usage),
-        '{{키2-연누계}}': fmt(kitData[1]?.yearTotal),
-        '{{키2-잔량}}': fmt(kitData[1]?.balance),
-
-        '{{키3-구매}}': fmt(kitData[2]?.purchase),
-        '{{키3-사용}}': fmt(kitData[2]?.usage),
-        '{{키3-연누계}}': fmt(kitData[2]?.yearTotal),
-        '{{키3-잔량}}': fmt(kitData[2]?.balance),
-
-        '{{키4-구매}}': fmt(kitData[3]?.purchase),
-        '{{키4-사용}}': fmt(kitData[3]?.usage),
-        '{{키4-연누계}}': fmt(kitData[3]?.yearTotal),
-        '{{키4-잔량}}': fmt(kitData[3]?.balance),
-      };
-
-      const outputDir = path.join(os.tmpdir(), 'osoo-medicine-register');
-      if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-      const outputPath = path.join(outputDir, `약품관리대장_${y}_${mm}.hwpx`);
-
-      const hwpxPath = await replaceHwpxPlaceholders({
+      await exportMedicineRegisterXlsx({
         templatePath: templateInfo.absolutePath,
         outputPath,
-        bindings,
+        year: y,
+        month: m,
+        siteName,
+        medicineData,
+        extraData,
+        kitData,
+        extraMedicines,
       });
 
       // 서버에서 직접 파일 열기 (dev/Electron 모두 동작)
-      await openExcelFile(hwpxPath);
+      await openExcelFile(outputPath);
       res.json({ success: true });
     } catch (err) {
       console.error('[medicine-register export]', err);
@@ -277,7 +308,7 @@ module.exports = function (db, baseDir, appDataPath) {
         success: false,
         code: 'EXPORT_FAILED',
         error: err.message,
-        userMessage: `HWP 생성에 실패했습니다: ${err.message}`,
+        userMessage: `엑셀 생성에 실패했습니다: ${err.message}`,
       });
     }
   });

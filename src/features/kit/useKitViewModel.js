@@ -7,10 +7,46 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
     const [loading, setLoading] = useState(false);
     const [pendingChanges, setPendingChanges] = useState({});
     const [kitTypes, setKitTypes] = useState([]);
+    const [isSyncingAnalysisKits, setIsSyncingAnalysisKits] = useState(false);
+    const [lastKitSyncSummary, setLastKitSyncSummary] = useState(null);
+    const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+    const [purchaseDate, setPurchaseDate] = useState('');
+    const [purchaseItems, setPurchaseItems] = useState([]);
+    const [isSavingPurchase, setIsSavingPurchase] = useState(false);
+    const [autoSaveStatus, setAutoSaveStatus] = useState('idle');
     const pendingChangesRef = useRef({});
+    const autoSaveTimerRef = useRef(null);
+    const autoSaveStatusTimerRef = useRef(null);
+    const isAutoSavingRef = useRef(false);
+
+    const toDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    const resolveMonthRange = (baseDateText) => {
+        const today = new Date();
+        const todayStr2 = toDateStr(today);
+        if (baseDateText) {
+            // 특정 날짜가 선택된 경우 → 해당 월 범위
+            const baseDate = new Date(`${baseDateText}T00:00:00`);
+            const y = baseDate.getFullYear();
+            const m = baseDate.getMonth();
+            const monthStart = new Date(y, m, 1);
+            const monthEnd = new Date(y, m + 1, 0);
+            const end = monthEnd > today ? today : monthEnd;
+            return { startDate: toDateStr(monthStart), endDate: toDateStr(end) };
+        }
+        // 선택된 날짜 없으면 → 올해 1월 1일 ~ 오늘 전체
+        return { startDate: `${today.getFullYear()}-01-01`, endDate: todayStr2 };
+    };
 
     useEffect(() => {
         loadLogs();
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+            if (autoSaveStatusTimerRef.current) clearTimeout(autoSaveStatusTimerRef.current);
+        };
     }, []);
 
     const calculateInventory = (histArr, startIndex, type) => {
@@ -92,8 +128,8 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
                     hist.push(emptyRow);
                 }
 
-                // 미래 5일
-                for (let i = 1; i <= 5; i++) {
+                // 미래 1일
+                for (let i = 1; i <= 1; i++) {
                     const d = new Date(today);
                     d.setDate(today.getDate() + i);
                     const ds = d.toISOString().split('T')[0];
@@ -142,11 +178,8 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
             newHist[idx][type][field] = numVal;
             newHist[idx][type].error = errorMsg;
 
-            // 오늘 날짜를 수정하는 경우에만 재고 자동 계산 (과거 데이터는 수동 수정 허용)
-            const todayStr = new Date().toISOString().split('T')[0];
-            if (rowDate === todayStr) {
-                calculateInventory(newHist, idx, type);
-            }
+            // 수정한 날짜 이후의 재고 자동 재계산
+            calculateInventory(newHist, idx, type);
 
             setPendingChanges(p => {
                 const nextP = { ...p };
@@ -179,7 +212,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
             : Object.keys(sourcePendingChanges);
         if (changedDates.length === 0) {
             if (!silent) showAlert?.("변경 사항이 없습니다.");
-            return;
+            return { success: true, empty: true };
         }
 
         setLoading(true);
@@ -204,10 +237,108 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
             if (!silent) showAlert?.("데이터가 성공적으로 저장되었습니다.");
 
             await loadLogs();
+            return { success: true };
         } catch (err) {
             if (!silent) showAlert?.("저장 실패: " + err.message);
+            return { success: false, error: err };
         } finally {
             setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        const hasPending = Object.keys(pendingChanges).length > 0;
+        if (!hasPending) return;
+
+        if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = setTimeout(async () => {
+            if (isAutoSavingRef.current) return;
+            isAutoSavingRef.current = true;
+            setAutoSaveStatus('saving');
+
+            const result = await submitBatch({ silent: true });
+
+            if (result?.success) {
+                setAutoSaveStatus('saved');
+                if (autoSaveStatusTimerRef.current) clearTimeout(autoSaveStatusTimerRef.current);
+                autoSaveStatusTimerRef.current = setTimeout(() => {
+                    setAutoSaveStatus('idle');
+                }, 1200);
+            } else {
+                setAutoSaveStatus('error');
+            }
+
+            isAutoSavingRef.current = false;
+        }, 120);
+
+        return () => {
+            if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+        };
+    }, [pendingChanges]);
+
+    const openPurchaseModal = async (baseDateText) => {
+        // 설정에서 키트 기본 입고량 불러오기
+        const today = new Date();
+        const defaultDate = baseDateText || toDateStr(today);
+        try {
+            const res = await SettingsModel.getKitDefaults();
+            if (res.success) {
+                setPurchaseItems(res.items.map(i => ({ kitName: i.item_name, purchaseAmount: i.default_amount ?? 0 })));
+            } else {
+                setPurchaseItems(kitTypes.map(name => ({ kitName: name, purchaseAmount: 0 })));
+            }
+        } catch {
+            setPurchaseItems(kitTypes.map(name => ({ kitName: name, purchaseAmount: 0 })));
+        }
+        setPurchaseDate(defaultDate);
+        setShowPurchaseModal(true);
+    };
+
+    const savePurchase = async () => {
+        if (!purchaseDate) { showAlert?.('날짜를 선택하세요.'); return; }
+        setIsSavingPurchase(true);
+        try {
+            const result = await KitModel.savePurchase(purchaseDate, purchaseItems);
+            if (!result?.success) throw new Error(result?.error || '구매 저장 실패');
+            setShowPurchaseModal(false);
+            await loadLogs();
+            showAlert?.(`분석키트 구매 저장 완료 (${purchaseDate})`);
+        } catch (err) {
+            showAlert?.('분析키트 구매 저장 실패: ' + err.message);
+        } finally {
+            setIsSavingPurchase(false);
+        }
+    };
+
+    const syncAnalysisKits = async (baseDateText) => {
+        setIsSyncingAnalysisKits(true);
+        try {
+            const { startDate, endDate } = resolveMonthRange(baseDateText);
+            const result = await KitModel.syncAnalysisUsage(startDate, endDate);
+            if (!result?.success) {
+                throw new Error(result?.error || '분석키트 동기화에 실패했습니다.');
+            }
+
+            setLastKitSyncSummary({
+                startDate,
+                endDate,
+                summary: result.summary || {},
+                unsyncedDates: result.unsyncedDates || []
+            });
+
+            await loadLogs();
+            const updated = result.summary?.updatedCellCount || 0;
+            const matched = result.summary?.alreadyMatchedCellCount || 0;
+            const msg = updated > 0
+                ? `분析키트 동기화 완료: ${result.summary?.unsyncedDateCount || 0}일 신규 반영 (${updated}셀)`
+                : `분析키트 동기화 완료: 변경할 내용 없음 (${matched}셀 이미 일치)`;
+            showAlert?.(msg);
+            return result;
+        } catch (err) {
+            showAlert?.(`분석키트 동기화 실패: ${err.message}`);
+            throw err;
+        } finally {
+            setIsSyncingAnalysisKits(false);
         }
     };
 
@@ -215,8 +346,18 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
         history,
         loading,
         kitTypes,
+        isSyncingAnalysisKits,
+        lastKitSyncSummary,
+        showPurchaseModal, setShowPurchaseModal,
+        purchaseDate, setPurchaseDate,
+        purchaseItems, setPurchaseItems,
+        isSavingPurchase,
+        autoSaveStatus,
+        openPurchaseModal,
+        savePurchase,
         updateAmount,
         submitBatch,
+        syncAnalysisKits,
         refresh: loadLogs,
         pendingChanges
     };

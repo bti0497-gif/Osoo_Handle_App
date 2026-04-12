@@ -24,6 +24,11 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
     });
     // flowOption state: 'single1' (default), 'single2', or 'combined'
     const [flowOption, setFlowOption] = useState('single1');
+    const [sludgeExportSettings, setSludgeExportSettings] = useState({
+        companyName: '',
+        defaultAmount: 0
+    });
+    const [isSavingSludgeExportSettings, setIsSavingSludgeExportSettings] = useState(false);
 
     const [flowItems, setFlowItems] = useState([
         { name: '유입유량계', checked: true }, { name: '방류유량계', checked: true },
@@ -161,6 +166,12 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                 });
                 if (data.settings.excel_template_path) {
                     setExcelFileName(data.settings.excel_template_path.split(/[/\\]/).pop());
+                }
+                if (data.sludgeExportSettings) {
+                    setSludgeExportSettings({
+                        companyName: data.sludgeExportSettings.company_name || '',
+                        defaultAmount: Number(data.sludgeExportSettings.default_amount) || 0
+                    });
                 }
                 setTemplateFileNames('');
                 if (data.settings.flow_sheet) setFlowConfig({ sheet: data.settings.flow_sheet, startRow: data.settings.flow_start_row || 1, endRow: data.settings.flow_end_row || 31, dateCol: data.settings.flow_date_col || 'A' });
@@ -706,6 +717,25 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         }
     };
 
+    const handleSaveSludgeExportSettings = async () => {
+        setIsSavingSludgeExportSettings(true);
+        try {
+            const response = await SettingsModel.saveSludgeExportSettings({
+                companyName: sludgeExportSettings.companyName,
+                defaultAmount: sludgeExportSettings.defaultAmount
+            });
+            if (!response?.success) {
+                throw new Error(response?.message || '저장 실패');
+            }
+            showAlert?.('슬러지반출관리대장 기본 설정이 저장되었습니다.');
+            await loadSettings();
+        } catch (err) {
+            showAlert?.('슬러지반출관리대장 기본 설정 저장 중 오류: ' + err.message);
+        } finally {
+            setIsSavingSludgeExportSettings(false);
+        }
+    };
+
     // ── 약품 기본 입고량 모달 ──
     const [showDefaultAmountModal, setShowDefaultAmountModal] = useState(false);
     const [defaultAmountItems, setDefaultAmountItems] = useState([]);
@@ -812,6 +842,9 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         geminiApiKey, setGeminiApiKey, geminiKeyVisible, setGeminiKeyVisible, handleSaveGeminiApiKey,
         // Flow Option
         flowOption, setFlowOption, handleSaveFlowOption,
+        // Sludge Export Ledger Settings
+        sludgeExportSettings, setSludgeExportSettings,
+        isSavingSludgeExportSettings, handleSaveSludgeExportSettings,
         // 약품 기본 입고량 모달
         showDefaultAmountModal, setShowDefaultAmountModal,
         defaultAmountItems, setDefaultAmountItems,

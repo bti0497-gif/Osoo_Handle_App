@@ -60,9 +60,10 @@ module.exports = function (db, baseDir, appDataPath) {
       cleanupDisallowedReportTemplates(reportsDir);
       const reportTemplates = listReportTemplates(baseDir, appDataPath);
       const settings = db.prepare('SELECT * FROM app_settings WHERE id = 1').get();
+      const sludgeExportSettings = db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
       const configItems = db.prepare('SELECT * FROM config_items ORDER BY category, display_order').all();
       const credentials = db.prepare('SELECT service_key, service_name, service_url, user_id, password, updated_at FROM web_app_credentials ORDER BY id').all();
-      res.json({ success: true, settings, configItems, credentials, reportTemplates });
+      res.json({ success: true, settings, sludgeExportSettings, configItems, credentials, reportTemplates });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
@@ -674,6 +675,35 @@ module.exports = function (db, baseDir, appDataPath) {
         }
       })(items);
       res.json({ success: true });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // ── 슬러지 반출관리대장 기본설정 조회/저장 ──
+  router.get('/api/settings/sludge-export-settings', (req, res) => {
+    try {
+      const row = db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
+      res.json({ success: true, settings: row || { company_name: '', default_amount: 0 } });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  router.post('/api/settings/sludge-export-settings', (req, res) => {
+    const { companyName, defaultAmount } = req.body || {};
+    try {
+      db.prepare(`
+        INSERT INTO sludge_export_settings (id, company_name, default_amount, updated_at)
+        VALUES (1, ?, ?, datetime('now', 'localtime'))
+        ON CONFLICT(id) DO UPDATE SET
+          company_name = excluded.company_name,
+          default_amount = excluded.default_amount,
+          updated_at = excluded.updated_at
+      `).run(String(companyName || ''), Number(defaultAmount) || 0);
+
+      const row = db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
+      res.json({ success: true, settings: row });
     } catch (e) {
       res.status(500).json({ success: false, message: e.message });
     }

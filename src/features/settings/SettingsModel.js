@@ -44,6 +44,14 @@ export const SettingsModel = {
         return apiClient.post('/api/settings/save-flow-option', { flowOption });
     },
 
+    async getSludgeExportSettings() {
+        return apiClient.get('/api/settings/sludge-export-settings');
+    },
+
+    async saveSludgeExportSettings(payload) {
+        return apiClient.post('/api/settings/sludge-export-settings', payload);
+    },
+
     async getMedicineDefaults() {
         return apiClient.get('/api/settings/medicine-defaults');
     },

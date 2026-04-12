@@ -47,18 +47,20 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         return `${date.getFullYear()}-${mm}-${dd}`;
     };
 
+    const exportButtonLabel = templateName === '일일업무일지' ? '업무일지 출력' : '분석일지 출력';
+
     return (
         <div style={{ display: 'flex', width: '100%', height: '100%', backgroundColor: '#ffffff', padding: '1.25rem', gap: '1.25rem' }}>
             {/* 좌측 패널 (조회 조건 및 내보내기 설정) */}
-            <div style={{ width: '380px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ width: '220px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <h1 style={{ fontSize: '1.25rem', fontWeight: 900, color: '#1e293b', letterSpacing: '-0.025em', margin: 0 }}>
                     {title}
                 </h1>
 
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto' }}>
                     {/* 달력 컴포넌트 영역 */}
-                    <div>
-                        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', overflow: 'hidden', border: '1px solid #e2e8f0', padding: '8px', boxShadow: '0 1px 2px rgba(15,23,42,0.05)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'center' }}>
+                        <div style={{ width: '220px', backgroundColor: '#ffffff', borderRadius: '12px', overflow: 'hidden', border: '1px solid #e2e8f0', padding: '12px 10px', boxShadow: '0 1px 2px rgba(15,23,42,0.05)' }}>
                              <Calendar 
                                 onClickDay={(value, event) => handleDateClick(value, event)}
                                 onActiveStartDateChange={({ activeStartDate }) => setCalendarActiveStartDate(activeStartDate)}
@@ -162,7 +164,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                             transition: 'all 0.2s ease',
                             opacity: isOutputProcessing ? 0.8 : 1
                         }}>
-                            <span className="material-icons">{isOutputProcessing ? 'sync' : 'download'}</span> {title} {isOutputProcessing ? '생성 중...' : '생성하기'}
+                            <span className="material-icons">{isOutputProcessing ? 'sync' : 'download'}</span> {isOutputProcessing ? '출력 중...' : exportButtonLabel}
                         </button>
                     </div>
                 </div>
@@ -216,7 +218,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                             borderRadius: '50%',
                             animation: 'spin 0.8s linear infinite'
                         }} />
-                        엑셀 일지를 생성 중입니다. 잠시만 기다려 주세요...
+                        엑셀 일지를 출력 중입니다. 잠시만 기다려 주세요...
                     </div>
                 </div>
             )}

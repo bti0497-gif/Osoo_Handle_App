@@ -119,7 +119,7 @@ export default function MedicineRegisterView({ currentUser }) {
     error,
     interlockEnabled,
     interlockReason,
-    handleExportPdf,
+    handleExportExcel,
   } = useMedicineRegisterViewModel();
 
   const medicines = data?.medicines ?? [];
@@ -169,7 +169,7 @@ export default function MedicineRegisterView({ currentUser }) {
 
         {/* 생성하기 버튼 */}
         <button
-          onClick={handleExportPdf}
+          onClick={handleExportExcel}
           disabled={!interlockEnabled || isExporting || isLoading}
           style={{
             padding: '10px 0',

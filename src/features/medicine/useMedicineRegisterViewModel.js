@@ -34,19 +34,19 @@ export function useMedicineRegisterViewModel() {
     loadData();
   }, [loadData]);
 
-  const handleExportPdf = useCallback(async () => {
+  const handleExportExcel = useCallback(async () => {
     setIsExporting(true);
     setExportError(null);
     try {
-      const result = await MedicineRegisterModel.exportPdf(year, month);
+      const result = await MedicineRegisterModel.exportExcel(year, month);
 
       if (!result?.success) {
-        throw new Error(result?.userMessage || result?.error || 'HWP 생성 실패');
+        throw new Error(result?.userMessage || result?.error || '엑셀 생성 실패');
       }
 
-      showToast('약품관리대장이 생성되었습니다.');
+      showToast('약품관리대장 엑셀이 생성되었습니다.');
     } catch (err) {
-      showToast(err.message || 'HWP 내보내기에 실패했습니다.', 'error');
+      showToast(err.message || '엑셀 내보내기에 실패했습니다.', 'error');
     } finally {
       setIsExporting(false);
     }
@@ -72,7 +72,7 @@ export function useMedicineRegisterViewModel() {
     setExportError,
     interlockEnabled,
     interlockReason,
-    handleExportPdf,
+    handleExportExcel,
     loadData,
   };
 }

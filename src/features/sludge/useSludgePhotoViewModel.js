@@ -55,6 +55,7 @@ export function useSludgePhotoViewModel() {
   const [isLoading,   setIsLoading]   = useState(false);
   const [isSaving,    setIsSaving]    = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isLedgerExporting, setIsLedgerExporting] = useState(false);
 
   const activeDates = new Set(savedItems.map(i => i.date));
 
@@ -86,19 +87,7 @@ export function useSludgePhotoViewModel() {
 
   const handleCalendarDayClick = useCallback((dateStr) => {
     setSelectedDate(dateStr);
-    const alreadySaved = savedItems.some(i => i.date === dateStr);
-    if (!alreadySaved) {
-      SludgePhotoModel.fetchFlowAmount(dateStr).then(r => {
-        if (r?.success && r.amount != null) {
-          setEditEntry(prev =>
-            prev.date === dateStr && !prev.isSaved
-              ? { ...prev, sludge_amount: String(r.amount) }
-              : prev
-          );
-        }
-      }).catch(() => {});
-    }
-  }, [savedItems]);
+  }, []);
 
   const handleRowClick = useCallback((date) => {
     setSelectedDate(date);
@@ -191,6 +180,23 @@ export function useSludgePhotoViewModel() {
     }
   }, [year, month, savedItems, showToast]);
 
+  const handleLedgerExport = useCallback(async () => {
+    if (savedItems.length === 0) {
+      showToast('저장된 반출 기록이 없습니다.', 'warning');
+      return;
+    }
+    setIsLedgerExporting(true);
+    try {
+      const result = await SludgePhotoModel.exportLedger(year, month);
+      if (!result?.success) throw new Error(result?.error || '반출관리대장 출력 실패');
+      showToast('반출관리대장을 열었습니다.', 'success');
+    } catch (err) {
+      showToast(err.message || '반출관리대장 출력 실패', 'error');
+    } finally {
+      setIsLedgerExporting(false);
+    }
+  }, [year, month, savedItems, showToast]);
+
   const hasChanges = !editEntry.isSaved && (
     editEntry.sludge_amount !== '' ||
     editEntry.sludgePhotoFile != null ||
@@ -200,7 +206,7 @@ export function useSludgePhotoViewModel() {
   return {
     year, month, selectedDate,
     editEntry, savedItems, activeDates,
-    isLoading, isSaving, isExporting, hasChanges,
+    isLoading, isSaving, isExporting, isLedgerExporting, hasChanges,
     handleCalendarMonthChange,
     handleCalendarDayClick,
     handleRowClick,
@@ -210,5 +216,6 @@ export function useSludgePhotoViewModel() {
     handleSave,
     handleDelete,
     handleExport,
+    handleLedgerExport,
   };
 }

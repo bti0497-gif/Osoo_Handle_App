@@ -323,25 +323,13 @@ export default function MedicineInView() {
           </div>
         ) : tab === 'medicine' ? renderMedicineLeft() : renderKitLeft()}
 
-        {/* 저장 + 생성 버튼 */}
+        {/* 저장 버튼 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flexShrink: 0, marginTop: 'auto' }}>
           {rowBtn(
             isSaving ? '저장 중...' : `${tab === 'medicine' ? '약품' : '키트'} 입고일지 저장`,
             handleSave,
             isSaving || isExporting || isLoading,
           )}
-          <button
-            onClick={handleExport}
-            disabled={isExporting || isSaving || isLoading}
-            style={{
-              padding: '10px 0', borderRadius: '8px', border: 'none', fontSize: '14px',
-              fontWeight: 700, width: '100%', transition: 'background-color 0.15s',
-              backgroundColor: (!isExporting && !isSaving && !isLoading) ? '#0f172a' : '#e2e8f0',
-              color: (!isExporting && !isSaving && !isLoading) ? '#fff' : '#94a3b8',
-              cursor: (!isExporting && !isSaving && !isLoading) ? 'pointer' : 'not-allowed',
-            }}>
-            {isExporting ? '생성 중...' : '약품입고일지 생성하기'}
-          </button>
           <p style={{ fontSize: '10px', color: '#94a3b8', margin: 0, lineHeight: 1.5 }}>
             HWPX 양식이 설정에 업로드돼 있어야 합니다. 생성하기를 누르면 약품·키트 구매량이 함께 저장됩니다.
           </p>
@@ -350,14 +338,28 @@ export default function MedicineInView() {
 
       {/* ── 우측 패널 (HTML 미리보기) ── */}
       <div style={rightPanel}>
-        {siteName && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
           <p style={{ fontSize: '13px', color: '#475569', margin: 0, flexShrink: 0 }}>
             <span style={{ color: '#94a3b8', marginRight: 4 }}>현장명</span>
-            <strong style={{ color: '#0f172a', marginRight: 16 }}>{siteName}</strong>
+            <strong style={{ color: '#0f172a', marginRight: 16 }}>{siteName || '-'}</strong>
             <span style={{ color: '#94a3b8', marginRight: 4 }}>대상</span>
             <strong style={{ color: '#0f172a' }}>{year}년 {mm}월</strong>
           </p>
-        )}
+
+          <button
+            onClick={handleExport}
+            disabled={isExporting || isSaving || isLoading}
+            style={{
+              padding: '8px 14px', borderRadius: '8px', border: 'none', fontSize: '12px',
+              fontWeight: 700, transition: 'background-color 0.15s', whiteSpace: 'nowrap',
+              backgroundColor: (!isExporting && !isSaving && !isLoading) ? '#0f172a' : '#e2e8f0',
+              color: (!isExporting && !isSaving && !isLoading) ? '#fff' : '#94a3b8',
+              cursor: (!isExporting && !isSaving && !isLoading) ? 'pointer' : 'not-allowed',
+            }}
+          >
+            {isExporting ? '출력 중...' : '약품일지 출력'}
+          </button>
+        </div>
 
         <div style={{
           border: '1px solid #e2e8f0', borderRadius: '12px', backgroundColor: '#fff',

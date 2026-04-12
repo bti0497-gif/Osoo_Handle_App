@@ -53,6 +53,28 @@ function extractExifDateTime(buf) {
   return null;
 }
 
+function nowDateTimeString() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
+}
+
+function toLocalDateTimeString(d) {
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
+}
+
 /** BMP → RGB raw 픽셀 디코딩 (24/32bpp, bottom-up) */
 function decodeBmpToRgb(buf) {
   const dataOffset    = buf.readUInt32LE(10);
@@ -101,7 +123,10 @@ async function savePhotoToLocal(appDataPath, date, label, srcPath) {
     await sharp(srcBuf).rotate().jpeg({ quality: 90 }).toFile(destPath);
   }
 
-  const takenAt = isBmp ? null : extractExifDateTime(srcBuf);
+  const fileTime = toLocalDateTimeString(fs.statSync(srcPath).mtime);
+  const takenAt = isBmp
+    ? (fileTime || nowDateTimeString())
+    : (extractExifDateTime(srcBuf) || fileTime || nowDateTimeString());
   return { destPath, takenAt };
 }
 
@@ -115,6 +140,54 @@ function resolvePhotoUrl(appDataPath, date, label) {
   const filePath = path.join(appDataPath, '사진관리', '슬러지', year,
                              `${date}-${sanitizeName(label)}.jpg`);
   return fs.existsSync(filePath) ? photoUrl(date, label) : null;
+}
+
+function getMergedSludgeRows(db, start, end) {
+  const photoRows = db.prepare(
+    'SELECT * FROM sludge_photo_logs WHERE date >= ? AND date <= ? ORDER BY date ASC'
+  ).all(start, end);
+
+  const flowRows = db.prepare(
+    "SELECT date, sludge_export, raw_value, calculated_flow FROM flow_readings WHERE type = '슬러지' AND date >= ? AND date <= ? ORDER BY date ASC"
+  ).all(start, end);
+
+  const map = new Map();
+  for (const r of photoRows) {
+    map.set(String(r.date), { ...r });
+  }
+
+  for (const fr of flowRows) {
+    const date = String(fr.date || '');
+    if (!date) continue;
+    const rawAmount = fr?.sludge_export != null
+      ? fr.sludge_export
+      : (fr?.raw_value != null ? fr.raw_value : null);
+    const amount = rawAmount != null ? Number(rawAmount) : null;
+    if (!map.has(date)) {
+      // flow_readings만 있는 날짜는 실제 반출량 값이 있을 때만 표시
+      if (amount == null || !Number.isFinite(amount)) continue;
+      map.set(date, {
+        date,
+        sludge_amount: amount,
+        sludge_photo_path: null,
+        sludge_photo_taken_at: null,
+        certificate_photo_path: null,
+        note: null,
+        site_name: null,
+        author: null,
+        created_at: null,
+        last_modified: null,
+      });
+      continue;
+    }
+
+    const cur = map.get(date);
+    if ((cur.sludge_amount == null || cur.sludge_amount === '') && amount != null) {
+      cur.sludge_amount = amount;
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
 }
 
 module.exports = function (db, baseDir, appDataPath) {
@@ -131,9 +204,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const start   = `${year}-${mm}-01`;
       const lastDay = new Date(year, month, 0).getDate();
       const end     = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
-      const rows    = db.prepare(
-        'SELECT * FROM sludge_photo_logs WHERE date >= ? AND date <= ? ORDER BY date ASC'
-      ).all(start, end);
+      const rows = getMergedSludgeRows(db, start, end);
       const items = rows.map(r => ({
         ...r,
         sludge_photo_url      : resolvePhotoUrl(appDataPath, r.date, '반출'),
@@ -156,6 +227,55 @@ module.exports = function (db, baseDir, appDataPath) {
       ).get(date);
       res.json({ success: true, amount: row?.sludge_export ?? null });
     } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  /** GET /api/sludge-ledger?year=2026&month=4 */
+  router.get('/api/sludge-ledger', (req, res) => {
+    try {
+      const year = parseInt(req.query.year, 10);
+      const month = parseInt(req.query.month, 10);
+      if (!year || !month || month < 1 || month > 12) {
+        return res.status(400).json({ success: false, error: '유효하지 않은 연월입니다.' });
+      }
+
+      const mm = String(month).padStart(2, '0');
+      const start = `${year}-${mm}-01`;
+      const lastDay = new Date(year, month, 0).getDate();
+      const end = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+      const rows = getMergedSludgeRows(db, start, end).map((r) => ({
+        date: r.date,
+        sludge_amount: r.sludge_amount,
+        sludge_photo_taken_at: r.sludge_photo_taken_at,
+        note: r.note,
+        last_modified: r.last_modified,
+      }));
+
+      const appSettings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
+      const ledgerSettings = db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
+
+      const totalAmount = rows.reduce((sum, row) => {
+        const n = Number(row?.sludge_amount);
+        return Number.isFinite(n) ? sum + n : sum;
+      }, 0);
+
+      res.json({
+        success: true,
+        year,
+        month,
+        lastDay,
+        siteName: appSettings?.site_name || '',
+        companyName: ledgerSettings?.company_name || '',
+        defaultAmount: Number(ledgerSettings?.default_amount) || 0,
+        summary: {
+          records: rows.length,
+          totalAmount,
+        },
+        items: rows,
+      });
+    } catch (err) {
+      console.error('[sludge-ledger GET]', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -250,6 +370,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const destPath = path.join(destDir, fileName);
 
       const srcBuf = req.file.buffer;
+      const clientTakenAt = typeof req.body?.takenAt === 'string' ? req.body.takenAt.trim() : '';
       const isBmp  = srcBuf[0] === 0x42 && srcBuf[1] === 0x4D;
       if (isBmp) {
         const bmpRaw = decodeBmpToRgb(srcBuf);
@@ -260,8 +381,11 @@ module.exports = function (db, baseDir, appDataPath) {
       }
 
       const url     = photoUrl(date, label);
-      const takenAt = (type === 'sludge' && !isBmp) ? extractExifDateTime(srcBuf) : null;
-      const col     = type === 'certificate' ? 'certificate_photo_path' : 'sludge_photo_path';
+      const takenAt = type === 'sludge'
+        ? (isBmp
+            ? (clientTakenAt || nowDateTimeString())
+            : (extractExifDateTime(srcBuf) || clientTakenAt || nowDateTimeString()))
+        : null;
       const now     = new Date().toISOString();
 
       const existingRow = db.prepare('SELECT id FROM sludge_photo_logs WHERE date = ?').get(date);
@@ -338,9 +462,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const start   = `${year}-${mm}-01`;
       const lastDay = new Date(year, month, 0).getDate();
       const end     = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
-      const rows    = db.prepare(
-        'SELECT * FROM sludge_photo_logs WHERE date >= ? AND date <= ? ORDER BY date ASC'
-      ).all(start, end);
+      const rows = getMergedSludgeRows(db, start, end);
       const settings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
 
       const items = rows.map(r => {
@@ -351,6 +473,14 @@ module.exports = function (db, baseDir, appDataPath) {
           sludge_photo_local      : fs.existsSync(sl) ? sl : null,
           certificate_photo_local : fs.existsSync(cl) ? cl : null,
         };
+      }).sort((a, b) => {
+        const toKey = (d) => {
+          const s = String(d || '');
+          const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+          if (!m) return Number.MAX_SAFE_INTEGER;
+          return Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3]);
+        };
+        return toKey(a.date) - toKey(b.date);
       });
 
       const outputFileName = `슬러지사진대지_${year}_${mm}_${Date.now()}.xlsx`;
@@ -362,6 +492,56 @@ module.exports = function (db, baseDir, appDataPath) {
       res.json({ success: true });
     } catch (err) {
       console.error('[sludge-photos export]', err);
+      if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  /** POST /api/sludge-photos/export-ledger  body: { year, month } */
+  router.post('/api/sludge-photos/export-ledger', async (req, res) => {
+    try {
+      const { year, month } = req.body;
+      if (!year || !month) return res.status(400).json({ success: false, error: '연월 없음' });
+
+      const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
+      const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, '슬러지반출관리대장');
+      if (!templateInfo?.absolutePath) {
+        return res.status(404).json({
+          success: false,
+          error: '슬러지반출관리대장 템플릿이 없습니다. 설정에서 업로드해 주세요.',
+        });
+      }
+
+      const templatePath = templateInfo.absolutePath;
+      if (!['.xlsx', '.xls', '.xlsm'].includes(path.extname(templatePath).toLowerCase())) {
+        return res.status(400).json({ success: false, error: '엑셀 형식의 템플릿만 지원합니다.' });
+      }
+
+      const mm = String(month).padStart(2, '0');
+      const start = `${year}-${mm}-01`;
+      const lastDay = new Date(year, month, 0).getDate();
+      const end = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
+      const rows = getMergedSludgeRows(db, start, end);
+
+      const settings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
+      const ledgerSettings = db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
+      const outputFileName = `슬러지반출관리대장_${year}_${mm}_${Date.now()}.xlsx`;
+      const outputPath = buildExcelTempPath('osoo-sludge-ledger', outputFileName);
+
+      await exportSludgeLedgerXlsx({
+        templatePath,
+        outputPath,
+        year,
+        month,
+        items: rows,
+        siteName: settings?.site_name || '',
+        companyName: ledgerSettings?.company_name || '',
+        defaultAmount: Number(ledgerSettings?.default_amount) || 0,
+      });
+
+      await openExcelFile(outputPath);
+      res.json({ success: true });
+    } catch (err) {
+      console.error('[sludge-photos export-ledger]', err);
       if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -387,72 +567,362 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
   const totalSheets = Math.ceil(items.length / ITEMS_PER_SHEET) || 1;
   const templateSheet = wb.worksheets[0];
 
-  for (let si = 0; si < totalSheets; si++) {
-    let ws;
-    if (si === 0) {
-      ws = templateSheet;
-    } else {
-      ws = wb.addWorksheet(`사진대지_${si + 1}`);
-      templateSheet.eachRow({ includeEmpty: true }, (srcRow, rowNum) => {
-        const dstRow = ws.getRow(rowNum);
-        srcRow.eachCell({ includeEmpty: true }, (cell, colNum) => {
-          const dstCell = dstRow.getCell(colNum);
-          dstCell.value = cell.value;
-          dstCell.style = JSON.parse(JSON.stringify(cell.style));
-        });
-        dstRow.height = srcRow.height;
-        dstRow.commit();
-      });
-      ws.columns = templateSheet.columns.map(c => ({ width: c.width }));
+  function cloneTemplateToSheet(src, dst) {
+    const deep = (v) => JSON.parse(JSON.stringify(v || {}));
+
+    // 시트 기본 속성 복사
+    dst.properties = deep(src.properties);
+    dst.pageSetup = deep(src.pageSetup);
+    dst.headerFooter = deep(src.headerFooter);
+    dst.views = deep(src.views || []);
+    dst.state = src.state;
+
+    // 열 복사
+    dst.columns = (src.columns || []).map(c => ({
+      width: c.width,
+      hidden: c.hidden,
+      outlineLevel: c.outlineLevel,
+      style: c.style ? deep(c.style) : undefined,
+    }));
+
+    // 행 높이/행 스타일 복사
+    src.eachRow({ includeEmpty: true }, (srcRow, rowNum) => {
+      const dstRow = dst.getRow(rowNum);
+      dstRow.height = srcRow.height;
+      dstRow.hidden = srcRow.hidden;
+      dstRow.outlineLevel = srcRow.outlineLevel;
+      dstRow.style = deep(srcRow.style);
+      dstRow.commit();
+    });
+
+    // 병합 범위를 먼저 복사한 뒤 셀 스타일/값을 다시 채운다.
+    // (ExcelJS merge 처리 과정에서 일부 경계 스타일이 소실되는 케이스 방지)
+    const merges = src.model?.merges || [];
+    for (const m of merges) {
+      try { dst.mergeCells(m); } catch (_) {}
     }
 
-    function setCell(name, value) {
+    // 셀 전체 매트릭스 복사 (빈 셀 포함)
+    const maxRow = src.rowCount || 0;
+    const maxCol = src.columnCount || 0;
+    for (let r = 1; r <= maxRow; r++) {
+      for (let c = 1; c <= maxCol; c++) {
+        const srcCell = src.getCell(r, c);
+        const dstCell = dst.getCell(r, c);
+        dstCell.value = srcCell.value;
+        dstCell.style = deep(srcCell.style);
+      }
+    }
+  }
+
+  // 1) 먼저 빈 템플릿 시트를 모두 준비 (원본 변형 없이)
+  const sheets = [templateSheet];
+  for (let si = 1; si < totalSheets; si++) {
+    const ws = wb.addWorksheet(`사진대지_${si + 1}`);
+    cloneTemplateToSheet(templateSheet, ws);
+    sheets.push(ws);
+  }
+
+  // 2) 그 다음 시트별로 데이터 바인딩 (항상 현재 시트 기준)
+  for (let si = 0; si < sheets.length; si++) {
+    const ws = sheets[si];
+
+    // 양식 고정 좌표/크기(포인트 pt) — 사용자 실측값
+    const photoBoxBySlot = {
+      1: { leftPt: 81.75, topPt: 155.91, boxWidthPt: 191.33, boxHeightPt: 141.69 },
+      2: { leftPt: 81.45, topPt: 459.54, boxWidthPt: 191.33, boxHeightPt: 141.69 },
+    };
+    const certBoxBySlot = {
+      1: { leftPt: 316.44, topPt: 129.27, boxWidthPt: 94.50, boxHeightPt: 193.50 },
+      2: { leftPt: 316.59, topPt: 429.75, boxWidthPt: 94.50, boxHeightPt: 193.50 },
+    };
+
+    function setCellOnSheet(name, value) {
       const info = namedMap[name];
       if (!info) { console.warn(`[sludge export] named range 없음: ${name}`); return; }
-      const sheet = wb.getWorksheet(info.sheetName) || ws;
-      sheet.getCell(info.address).value = value;
+      ws.getCell(info.address).value = value;
     }
 
-    if (namedMap['시트명']) setCell('시트명', siteName);
+    // 이전 값 잔존 방지: 슬롯 1~2를 먼저 초기화
+    for (let n = 1; n <= ITEMS_PER_SHEET; n++) {
+      setCellOnSheet(`날짜${n}`, '');
+      setCellOnSheet(`반출량${n}`, null);
+    }
+
+    if (namedMap['시트명']) setCellOnSheet('시트명', siteName || '');
 
     const sheetItems = items.slice(si * ITEMS_PER_SHEET, (si + 1) * ITEMS_PER_SHEET);
     for (let i = 0; i < sheetItems.length; i++) {
       const item = sheetItems[i];
-      const n    = i + 1;
+      const n = i + 1;
 
-      setCell(`날짜${n}`, item.date ? item.date.replace(/-/g, '.') : '');
-      if (item.sludge_amount != null)  setCell(`반출량${n}`, Number(item.sludge_amount));
-      if (item.sludge_photo_taken_at)  setCell(`반출시간${n}`, item.sludge_photo_taken_at.slice(11, 16));
+      setCellOnSheet(`날짜${n}`, item.date ? item.date.replace(/-/g, '.') : '');
+      if (item.sludge_amount != null) setCellOnSheet(`반출량${n}`, Number(item.sludge_amount));
 
-      // 반출사진 삽입 (named range: 사진1, 사진2) — 가로도 90% 제한
+      // 반출사진 삽입: 셀 가로의 90% 기준, 비율 유지 + 중앙 정렬
       if (item.sludge_photo_local) {
         const info = namedMap[`사진${n}`];
         if (info) {
-          const sheet  = wb.getWorksheet(info.sheetName) || ws;
-          const extent = getMergedCellExtent(sheet, info.col, info.row);
+          const extent = getMergedCellExtent(ws, info.col, info.row);
           try {
-            await insertImageToCell(wb, sheet, extent, item.sludge_photo_local, { widthPct: 0.9 });
+            await insertImageToCell(wb, ws, extent, item.sludge_photo_local, {
+              fitBy: 'width',
+              pct: 1.0,
+              ...photoBoxBySlot[n],
+            });
           } catch (e) {
             console.error(`[sludge export] 사진${n} 삽입 실패:`, e.message);
           }
-        } else {
-          console.warn(`[sludge export] 사진${n} named range 없음`);
         }
       }
 
-      // 청소필증 삽입 (named range: 필증1, 필증2)
+      // 청소필증 삽입: 셀 세로의 80% 기준, 비율 유지 + 중앙 정렬
       if (item.certificate_photo_local) {
         const info = namedMap[`필증${n}`];
         if (info) {
-          const sheet  = wb.getWorksheet(info.sheetName) || ws;
-          const extent = getMergedCellExtent(sheet, info.col, info.row);
+          const extent = getMergedCellExtent(ws, info.col, info.row);
           try {
-            await insertImageToCell(wb, sheet, extent, item.certificate_photo_local);
+            await insertImageToCell(wb, ws, extent, item.certificate_photo_local, {
+              fitBy: 'height',
+              pct: 1.0,
+              ...certBoxBySlot[n],
+            });
           } catch (e) {
             console.error(`[sludge export] 필증${n} 삽입 실패:`, e.message);
           }
         }
       }
+    }
+  }
+
+  await wb.xlsx.writeFile(outputPath);
+}
+
+function _parseAddressRef(rangeRef) {
+  if (!rangeRef) return null;
+  const s = String(rangeRef).trim();
+  const m = s.match(/^(?:'([^']+)'|([^'!][^!]*))!\$?([A-Z]+)\$?(\d+)$/);
+  if (!m) return null;
+  const sheetName = (m[1] || m[2] || '').trim();
+  const col = m[3];
+  const row = parseInt(m[4], 10);
+  if (!sheetName || !col || !row) return null;
+  return { sheetName, col, row, address: `${col}${row}` };
+}
+
+function _colLabel(n) {
+  let x = Number(n);
+  let out = '';
+  while (x > 0) {
+    const m = (x - 1) % 26;
+    out = String.fromCharCode(65 + m) + out;
+    x = Math.floor((x - 1) / 26);
+  }
+  return out;
+}
+
+function _parseRangeRef(rangeRef) {
+  if (!rangeRef) return null;
+  const s = String(rangeRef).trim();
+  const m = s.match(/^(?:'([^']+)'|([^'!][^!]*))!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)$/);
+  if (!m) return null;
+  const sheetName = (m[1] || m[2] || '').trim();
+  const c1 = _colNum(m[3]);
+  const r1 = parseInt(m[4], 10);
+  const c2 = _colNum(m[5]);
+  const r2 = parseInt(m[6], 10);
+  if (!sheetName || !c1 || !c2 || !r1 || !r2) return null;
+  return {
+    sheetName,
+    startCol: Math.min(c1, c2),
+    endCol: Math.max(c1, c2),
+    startRow: Math.min(r1, r2),
+    endRow: Math.max(r1, r2),
+  };
+}
+
+function _splitRangeRefs(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return [];
+  const refs = [];
+  let token = '';
+  let inQuote = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "'") inQuote = !inQuote;
+    if (ch === ',' && !inQuote) {
+      if (token.trim()) refs.push(token.trim());
+      token = '';
+      continue;
+    }
+    token += ch;
+  }
+  if (token.trim()) refs.push(token.trim());
+  return refs;
+}
+
+function _colNum(col) {
+  let n = 0;
+  for (const c of String(col || '').toUpperCase()) n = (n * 26) + (c.charCodeAt(0) - 64);
+  return n;
+}
+
+function parseNamedRangeCells(wb, name) {
+  const model = wb.definedNames?.model;
+  const list = Array.isArray(model) ? model : [];
+  const out = [];
+
+  for (const entry of list) {
+    if (!entry || String(entry.name || '').trim() !== String(name || '').trim()) continue;
+    const ranges = Array.isArray(entry.ranges) ? entry.ranges : [entry.ranges];
+    for (const raw of ranges) {
+      for (const ref of _splitRangeRefs(raw)) {
+        const p = _parseAddressRef(ref);
+        if (p) {
+          out.push(p);
+          continue;
+        }
+
+        const rg = _parseRangeRef(ref);
+        if (rg) {
+          for (let r = rg.startRow; r <= rg.endRow; r++) {
+            for (let c = rg.startCol; c <= rg.endCol; c++) {
+              const col = _colLabel(c);
+              out.push({ sheetName: rg.sheetName, col, row: r, address: `${col}${r}` });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  out.sort((a, b) => {
+    const sa = String(a.sheetName).localeCompare(String(b.sheetName), 'ko');
+    if (sa !== 0) return sa;
+    if (a.row !== b.row) return a.row - b.row;
+    return _colNum(a.col) - _colNum(b.col);
+  });
+  return out;
+}
+
+function _toDateKey(y, m, d) {
+  const yy = Number(y);
+  const mm = Number(m);
+  const dd = Number(d);
+  if (!yy || mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+}
+
+function _resolveDateKeyFromCell(value, year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  if (value == null) return null;
+
+  // Excel 날짜 셀(Date 객체)
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return _toDateKey(value.getFullYear(), value.getMonth() + 1, value.getDate());
+  }
+
+  // 숫자만 들어온 경우: 해당 월의 day로 해석
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const day = Math.floor(value);
+    return _toDateKey(y, m, day);
+  }
+
+  const s = String(value).trim();
+  if (!s) return null;
+
+  // yyyy.mm.dd / yyyy-mm-dd / yyyy/mm/dd
+  let m1 = s.match(/(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})/);
+  if (m1) return _toDateKey(m1[1], m1[2], m1[3]);
+
+  // mm.dd / mm-dd / mm/dd
+  m1 = s.match(/^(\d{1,2})[.\/-](\d{1,2})$/);
+  if (m1) return _toDateKey(y, m1[1], m1[2]);
+
+  // dd (순수 일자 문자열)
+  m1 = s.match(/^(\d{1,2})$/);
+  if (m1) return _toDateKey(y, m, m1[1]);
+
+  return null;
+}
+
+function _toHHmm(item) {
+  const raw = item?.sludge_photo_taken_at || item?.last_modified || '';
+  if (!raw) return '';
+  return String(raw).slice(11, 16);
+}
+
+async function exportSludgeLedgerXlsx({ templatePath, outputPath, year, month, items, siteName, companyName, defaultAmount }) {
+  const ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(templatePath);
+
+  const ws = wb.worksheets[0];
+  if (!ws) throw new Error('슬러지반출관리대장 템플릿 시트를 찾을 수 없습니다.');
+
+  const namedMap = parseNamedRanges(wb);
+  const seqCells = parseNamedRangeCells(wb, '순번');
+  const dateCells = parseNamedRangeCells(wb, '날짜');
+  const companyCells = parseNamedRangeCells(wb, '업체명');
+  const timeCells = parseNamedRangeCells(wb, '시간');
+  const weightCells = parseNamedRangeCells(wb, '중량');
+  const noteCells = parseNamedRangeCells(wb, '비고');
+
+  if (namedMap['대장명']) {
+    ws.getCell(namedMap['대장명'].address).value = `${year}년 ${Number(month)}월 슬러지반출 관리대장`;
+  }
+  if (namedMap['현장명']) {
+    ws.getCell(namedMap['현장명'].address).value = siteName || '';
+  }
+
+  const daysInMonth = new Date(Number(year), Number(month), 0).getDate();
+  const mm = String(month).padStart(2, '0');
+  const rowCount = Math.max(seqCells.length, dateCells.length, companyCells.length, timeCells.length, weightCells.length, noteCells.length);
+  const byDate = new Map((items || []).map((it) => [String(it.date || ''), it]));
+
+  for (let i = 0; i < rowCount; i++) {
+    const dateInfo = dateCells[i];
+    const seqInfo = seqCells[i];
+    let dateKey = null;
+    const day = i + 1;
+    if (day <= daysInMonth) {
+      dateKey = _toDateKey(year, month, day);
+      if (seqInfo?.sheetName === ws.name) {
+        ws.getCell(seqInfo.address).value = day;
+      }
+      if (dateInfo?.sheetName === ws.name) {
+        ws.getCell(dateInfo.address).value = `${year}-${mm}-${String(day).padStart(2, '0')}`;
+      }
+    } else {
+      if (seqInfo?.sheetName === ws.name) {
+        ws.getCell(seqInfo.address).value = null;
+      }
+      if (dateInfo?.sheetName === ws.name) {
+        ws.getCell(dateInfo.address).value = '';
+      }
+    }
+
+    const item = dateKey ? byDate.get(dateKey) : null;
+
+    if (companyCells[i]?.sheetName === ws.name) {
+      ws.getCell(companyCells[i].address).value = item ? (companyName || '') : '';
+    }
+    if (timeCells[i]?.sheetName === ws.name) {
+      const t = _toHHmm(item);
+      ws.getCell(timeCells[i].address).value = t;
+    }
+    if (weightCells[i]?.sheetName === ws.name) {
+      if (!item) {
+        ws.getCell(weightCells[i].address).value = null;
+      } else if (item?.sludge_amount != null && item?.sludge_amount !== '') {
+        ws.getCell(weightCells[i].address).value = Number(item.sludge_amount);
+      } else {
+        ws.getCell(weightCells[i].address).value = Number(defaultAmount) || 0;
+      }
+    }
+    if (noteCells[i]?.sheetName === ws.name) {
+      ws.getCell(noteCells[i].address).value = item?.note || '';
     }
   }
 

@@ -133,6 +133,12 @@ db.exec(`
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS sludge_export_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    company_name TEXT,
+    default_amount REAL DEFAULT 0,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
   CREATE TABLE IF NOT EXISTS kit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kit_name TEXT NOT NULL,
@@ -381,6 +387,12 @@ const sludgeCols = db.prepare("PRAGMA table_info(sludge_photo_logs)").all().map(
 if (!sludgeCols.includes('sludge_photo_taken_at')) {
   db.prepare('ALTER TABLE sludge_photo_logs ADD COLUMN sludge_photo_taken_at TEXT').run();
 }
+
+// --- 슬러지 반출관리대장 기본설정 테이블 시드 ---
+db.prepare(`
+  INSERT OR IGNORE INTO sludge_export_settings (id, company_name, default_amount, updated_at)
+  VALUES (1, '', 0, datetime('now', 'localtime'))
+`).run();
 
 // --- Seeds ---
 db.prepare("INSERT OR IGNORE INTO app_settings (id, site_name) VALUES (1, '새 현장')").run();

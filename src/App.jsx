@@ -16,7 +16,7 @@ import StatusBar from './components/StatusBar';
 import Dashboard from './views/Dashboard';
 import { KitManagementView } from './features/kit';
 import { CertificateView } from './features/certificate';
-import { SludgePhotoView } from './features/sludge';
+import { SludgePhotoView, SludgeLedgerView } from './features/sludge';
 
 const PlaceholderView = ({ title }) => (
     <div style={{ display: 'flex', width: '100%', height: '100%', backgroundColor: '#ffffff', padding: '1.25rem', gap: '1.25rem' }}>
@@ -107,7 +107,7 @@ function App() {
             case 'log_water': return <DailyLogView key="log_water" currentUser={user} templateName="수질분석일지" title="수질분석일지" />;
             case 'log_med_mgmt': return <MedicineRegisterView currentUser={user} />;
             case 'log_med_in': return <MedicineInView currentUser={user} />;
-            case 'log_sludge_out': return <PlaceholderView title="슬러지반출관리대장" />;
+            case 'log_sludge_out': return <SludgeLedgerView currentUser={user} />;
             case 'log_sludge_photo': return <SludgePhotoView currentUser={user} />;
             case 'attendance':
                 return <AttendanceView currentUser={user} />;
@@ -125,6 +125,9 @@ function App() {
     };
 
     const getHelpText = () => {
+        if (activeTab === 'kit') {
+            return '분석키트 동기화: 수질분석(QnTECH) 건수를 사용량으로 맞춘 뒤, 미적용 날짜만 반영하여 재고를 재계산합니다.';
+        }
         if (activeTab.startsWith('log')) {
             return 'Ctrl(또는 Cmd)+클릭: 띄엄띄엄 여러 문서 선택 | Shift+클릭: 한 번에 여러 문서 범위 선택';
         }
