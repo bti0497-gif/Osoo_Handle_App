@@ -7,6 +7,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
 
 const { db, appDataPath } = require('./database.cjs');
 const { warmUpExcelPdfConverter } = require('./services/excelPdfService.cjs');
+const { triggerSync: triggerBigQuerySync } = require('./services/bigQueryTriggerService.cjs');
 
 const BASE_DIR = path.join(__dirname, '..');
 
@@ -40,6 +41,34 @@ app.get('/', (req, res) => {
 
 app.get('/api/ping', (req, res) => res.json({ ok: true }));
 
+const BIGQUERY_IMMEDIATE_SYNC_PREFIXES = [
+  '/api/flows',
+  '/api/medicines',
+  '/api/kits',
+  '/api/water-quality',
+  '/api/facility',
+  '/api/sludge-photos',
+  '/api/medicine-in',
+];
+
+app.use((req, res, next) => {
+  const method = String(req.method || '').toUpperCase();
+  const shouldWatchMethod = method === 'POST' || method === 'PUT' || method === 'DELETE';
+  const shouldWatchPath = BIGQUERY_IMMEDIATE_SYNC_PREFIXES.some((prefix) => req.path.startsWith(prefix));
+  if (!shouldWatchMethod || !shouldWatchPath) {
+    return next();
+  }
+
+  const originalEnd = res.end;
+  res.end = function wrappedEnd(...args) {
+    if (res.statusCode >= 200 && res.statusCode < 400) {
+      triggerBigQuerySync(`after-save:${method}:${req.path}`);
+    }
+    return originalEnd.apply(this, args);
+  };
+  return next();
+});
+
 app.use(require('./routes/flowRoutes.cjs')(db));
 app.use(require('./routes/medicineRoutes.cjs')(db));
 app.use(require('./routes/medicineRegisterRoutes.cjs')(db, BASE_DIR, appDataPath));
@@ -68,6 +97,8 @@ if (isBigQuerySyncEnabled) {
 } else {
   console.log('[Scheduler] BigQuery 동기화 비활성화 (BIGQUERY_SYNC_ENABLED != true)');
 }
+// 주기 동기화 대신 앱(백엔드) 시작 시 1회 동기화 시도
+triggerBigQuerySync('app-startup');
 
 async function findFreePort(startPort, endPort) {
   for (let p = startPort; p <= endPort; p++) {

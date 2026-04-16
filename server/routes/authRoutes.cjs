@@ -2,6 +2,7 @@ const express = require('express');
 const { syncAttendanceLogs } = require('../services/attendanceBigQueryService.cjs');
 const { getMembers, upsertMember, deleteMember, isSheetsConfigured } = require('../services/membersSheetsService.cjs');
 const { detectRemoteSession } = require('../services/remoteSessionDetectService.cjs');
+const { triggerSync: triggerBigQuerySync } = require('../services/bigQueryTriggerService.cjs');
 
 module.exports = (db) => {
     const router = express.Router();
@@ -200,6 +201,7 @@ module.exports = (db) => {
                     if (member) {
                         // 온라인 첫 로그인/정상 로그인 시 로컬 캐시 갱신
                         upsertLocalMember(member);
+                        triggerBigQuerySync('login-success:sheets');
                         return res.json({ success: true, member: enrichMemberWithSites(member), source: 'sheets' });
                     }
                 } catch (sheetErr) {
@@ -210,6 +212,7 @@ module.exports = (db) => {
 
             const member = db.prepare('SELECT * FROM members WHERE name = ? AND password = ?').get(name, password);
             if (member) {
+                triggerBigQuerySync('login-success:local');
                 res.json({ success: true, member: enrichMemberWithSites(member) });
             } else {
                 res.status(401).json({ success: false, message: '이름 또는 비밀번호가 일치하지 않습니다.' });
