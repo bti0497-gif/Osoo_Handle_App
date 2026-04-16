@@ -6,8 +6,8 @@ const SettingsView = ({ currentUser }) => {
     const { showAlert, showConfirm } = useDialog();
     const vm = useSettingsViewModel(currentUser, { showAlert, showConfirm });
     const {
-        activeTab, setActiveTab, isLoading,
-        siteInfo, setSiteInfo, handleSeriesChange,
+        activeTab, setActiveTab, isLoading, isAppSiteConfigured,
+        siteInfo, availableSites, selectedSiteId, isSiteListLoading, handleSiteSelection,
         flowItems, medicineItems, kitItems, locationItems,
         newFlowItem, setNewFlowItem, newMedicineItem, setNewMedicineItem, newLocationItem, setNewLocationItem,
         addItem, toggleItem,
@@ -25,13 +25,14 @@ const SettingsView = ({ currentUser }) => {
         updateWebAppCredentialField, togglePasswordVisibility, toggleUrlEditability, handleSaveWebAppCredentials,
         updateQntechImportSettingField, updateQntechSampleMapping, addQntechSampleMapping, removeQntechSampleMapping, handleSaveQntechImportSettings,
         handleApply,
+        handleCaptureSiteLocation,
         alphabet,
         // Log Mapping
         LOG_TYPES, selectedLogType, setSelectedLogType,
         // Gemini API
         geminiApiKey, setGeminiApiKey, geminiKeyVisible, setGeminiKeyVisible, handleSaveGeminiApiKey,
         // Flow Option
-        flowOption, setFlowOption, handleSaveFlowOption,
+        flowOption, setFlowOption, handleSaveFlowOption, getFlowRowsForExcelMapping,
         // Sludge Export Ledger Settings
         sludgeExportSettings, setSludgeExportSettings,
         isSavingSludgeExportSettings, handleSaveSludgeExportSettings,
@@ -47,9 +48,17 @@ const SettingsView = ({ currentUser }) => {
         handleOpenKitDefaultModal, handleSaveKitDefaults,
     } = vm;
 
+    const isSiteSelected = Boolean(selectedSiteId && siteInfo?.siteName);
+
+    React.useEffect(() => {
+        if (!isAppSiteConfigured && activeTab !== 'basic') {
+            setActiveTab('basic');
+        }
+    }, [isAppSiteConfigured, activeTab, setActiveTab]);
+
     const renderFlowSettings = () => {
-        // 활성화된 유량 항목들 (기본설정에서 체크된 항목들만)
-        const activeFlows = flowItems.filter(i => i.checked);
+        // 1계열: 체크된 검침항목만. 2계열: 반송 1·2는 매핑 행을 항상 노출(적산·누계 각각)
+        const activeFlows = getFlowRowsForExcelMapping();
 
         return (
             <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -723,14 +732,17 @@ const SettingsView = ({ currentUser }) => {
             { id: 'alkalinity', name: '알칼리도' }
         ];
 
-        // PO4-P special rule locations
+        // PO4-P는 분석장소 체크 상태와 무관하게 고정 3개 장소로 매핑
         const po4pLocations = ['유량조정조', '포기조', '방류조'];
+        const getLocationModel = (name) => locationItems.find((loc) => loc.name === name) || { name };
 
         // Determine which mapping keys are required
         let requiredKeys = [];
         waterBaseParams.forEach(param => {
-            activeLocations.forEach(loc => {
-                if (param.id === 'po4_p' && !po4pLocations.includes(loc.name)) return;
+            const paramLocations = param.id === 'po4_p'
+                ? po4pLocations.map(getLocationModel)
+                : activeLocations;
+            paramLocations.forEach(loc => {
                 // For MBR, '침전조' is already filtered out of activeLocations in SettingsView if handled correctly, but we ensure it here too via basicSettings logic
                 requiredKeys.push(`${param.name}_${loc.name}`);
             });
@@ -815,10 +827,9 @@ const SettingsView = ({ currentUser }) => {
 
                             {/* Base Parameters (Location specific) */}
                             {waterBaseParams.map((param, pIdx) => {
-                                const paramLocations = activeLocations.filter(loc => {
-                                    if (param.id === 'po4_p') return po4pLocations.includes(loc.name);
-                                    return true;
-                                });
+                                const paramLocations = param.id === 'po4_p'
+                                    ? po4pLocations.map(getLocationModel)
+                                    : activeLocations;
 
                                 return (
                                     <div key={param.id} style={{ display: 'grid', gridTemplateColumns: '120px 100px 140px 1fr', columnGap: '8px', borderBottom: pIdx < waterBaseParams.length - 1 ? '1px solid #e2e8f0' : 'none', paddingBottom: pIdx < waterBaseParams.length - 1 ? '6px' : 0, marginBottom: pIdx < waterBaseParams.length - 1 ? '6px' : 0, padding: '0 12px' }}>
@@ -896,7 +907,21 @@ const SettingsView = ({ currentUser }) => {
             padding: '0.5rem 0'
         }}>
             {items.map((item, idx) => (
-                <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }} onClick={() => type !== 'water' && toggleItem(type, idx)}>
+                <div
+                    key={idx}
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                        cursor: (!isSiteSelected || type === 'water') ? 'not-allowed' : 'pointer',
+                        opacity: isSiteSelected ? 1 : 0.65
+                    }}
+                    onClick={() => {
+                        if (!isSiteSelected) return;
+                        if (type === 'water') return;
+                        toggleItem(type, idx);
+                    }}
+                >
                     <span
                         className="material-icons"
                         style={{
@@ -1159,58 +1184,78 @@ const SettingsView = ({ currentUser }) => {
                                 유량매핑조건
                             </h3>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', whiteSpace: 'nowrap' }}>
-                                내부/외부 반송 유량 옵션
-                            </label>
-                            <select
-                                value={flowOption}
-                                onChange={(e) => setFlowOption(e.target.value)}
-                                style={{
-                                    height: '36px',
-                                    border: '1.5px solid #7dd3fc',
-                                    borderRadius: '8px',
-                                    padding: '0 12px',
-                                    fontSize: '0.8125rem',
-                                    fontWeight: 700,
-                                    color: '#0c4a6e',
-                                    backgroundColor: 'white',
-                                    cursor: 'pointer',
-                                    minWidth: '180px'
-                                }}
-                            >
-                                <option value="single1">1계열값 매핑</option>
-                                {siteInfo.series === '2계열' && (
-                                    <>
-                                        <option value="single2">2계열값 매핑</option>
-                                        <option value="combined">1+2계열값 매핑</option>
-                                    </>
-                                )}
-                            </select>
-                            <button
-                                onClick={() => handleSaveFlowOption(flowOption)}
-                                style={{
-                                    height: '36px',
-                                    padding: '0 16px',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    backgroundColor: '#0284c7',
-                                    color: 'white',
-                                    fontSize: '0.75rem',
-                                    fontWeight: 800,
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    transition: 'background-color 0.15s'
-                                }}
-                                onMouseEnter={e => e.target.style.backgroundColor = '#0369a1'}
-                                onMouseLeave={e => e.target.style.backgroundColor = '#0284c7'}
-                            >
-                                <span className="material-icons" style={{ fontSize: '14px' }}>save</span>
-                                저장
-                            </button>
-                        </div>
+                        {siteInfo.series === '2계열' ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', whiteSpace: 'nowrap' }}>
+                                    내부/외부 반송 유량 옵션
+                                </label>
+                                <select
+                                    value={flowOption}
+                                    onChange={(e) => setFlowOption(e.target.value)}
+                                    style={{
+                                        height: '36px',
+                                        border: '1.5px solid #7dd3fc',
+                                        borderRadius: '8px',
+                                        padding: '0 12px',
+                                        fontSize: '0.8125rem',
+                                        fontWeight: 700,
+                                        color: '#0c4a6e',
+                                        backgroundColor: 'white',
+                                        cursor: 'pointer',
+                                        minWidth: '180px'
+                                    }}
+                                >
+                                    <option value="">선택하세요</option>
+                                    <option value="single1">1계열값 매핑</option>
+                                    <option value="single2">2계열값 매핑</option>
+                                    <option value="combined">1+2계열값 매핑</option>
+                                </select>
+                                <button
+                                    onClick={() => handleSaveFlowOption(flowOption)}
+                                    disabled={!flowOption}
+                                    style={{
+                                        height: '36px',
+                                        padding: '0 16px',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        backgroundColor: flowOption ? '#0284c7' : '#94a3b8',
+                                        color: 'white',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 800,
+                                        cursor: flowOption ? 'pointer' : 'not-allowed',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        transition: 'background-color 0.15s'
+                                    }}
+                                    onMouseEnter={e => {
+                                        if (flowOption) e.target.style.backgroundColor = '#0369a1';
+                                    }}
+                                    onMouseLeave={e => {
+                                        e.target.style.backgroundColor = flowOption ? '#0284c7' : '#94a3b8';
+                                    }}
+                                >
+                                    <span className="material-icons" style={{ fontSize: '14px' }}>save</span>
+                                    저장
+                                </button>
+                            </div>
+                        ) : (
+                            <div style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                backgroundColor: '#e0f2fe',
+                                border: '1px solid #bae6fd',
+                                borderRadius: '9999px',
+                                padding: '6px 12px',
+                                width: 'fit-content'
+                            }}>
+                                <span className="material-icons" style={{ fontSize: '16px', color: '#0369a1' }}>check_circle</span>
+                                <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#0c4a6e' }}>
+                                    1계열 기본값(1계열값 매핑) 자동 적용
+                                </span>
+                            </div>
+                        )}
                         <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 600 }}>
                             {siteInfo.series === '2계열'
                                 ? '2계열 현장입니다. 내부/외부 반송 유량의 매핑 방식을 선택하세요.'
@@ -1586,82 +1631,122 @@ const SettingsView = ({ currentUser }) => {
             {/* 상단 섹션: 2x2 Grid */}
             <div style={{
                 display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
+                gridTemplateColumns: '1.45fr 0.75fr 0.6fr 0.6fr auto',
                 gap: '1.25rem',
                 backgroundColor: '#f8fafc',
                 padding: '1.5rem',
                 borderRadius: '12px',
                 border: '1px solid #e2e8f0'
             }}>
+                <div>
+                    <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px', textTransform: 'uppercase' }}>
+                        현장명
+                    </label>
+                    <select
+                        value={selectedSiteId}
+                        onChange={(e) => handleSiteSelection(e.target.value)}
+                        disabled={isSiteListLoading}
+                        style={{
+                            width: '100%',
+                            border: '1.5px solid #cbd5e1',
+                            height: '40px',
+                            padding: '0 12px',
+                            fontWeight: 700,
+                            color: selectedSiteId ? '#1e293b' : '#94a3b8',
+                            borderRadius: '8px',
+                            outline: 'none',
+                            boxSizing: 'border-box',
+                            backgroundColor: 'white',
+                            fontSize: '0.8125rem'
+                        }}
+                    >
+                        <option value="">{isSiteListLoading ? '현장 목록 불러오는 중...' : '현장을 선택하세요'}</option>
+                        {availableSites.map((site) => (
+                            <option key={site.id} value={site.id}>{site.site_name}</option>
+                        ))}
+                    </select>
+                </div>
                 {[
-                    { label: '현장명', key: 'siteName', type: 'text' },
-                    { label: '관리자명', key: 'managerName', type: 'text' },
-                    { label: '공법', key: 'method', type: 'select', options: ['A2O', 'MBR'] },
-                    { label: '계열수', key: 'series', type: 'select', options: ['1계열', '2계열'] }
+                    { label: '관리자명', key: 'managerName', placeholder: '현장 선택 후 자동 바인딩됩니다.' },
+                    { label: '공법', key: 'method', placeholder: '현장 선택 후 자동 바인딩됩니다.' },
+                    { label: '계열수', key: 'series', placeholder: '현장 선택 후 자동 바인딩됩니다.' }
                 ].map((item) => (
                     <div key={item.key}>
                         <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px', textTransform: 'uppercase' }}>
                             {item.label}
                         </label>
-                        {item.type === 'select' ? (
-                            <select
-                                value={siteInfo[item.key]}
-                                onChange={(e) => {
-                                    if (item.key === 'series') {
-                                        handleSeriesChange(e.target.value);
-                                    } else {
-                                        setSiteInfo({ ...siteInfo, [item.key]: e.target.value });
-                                    }
-                                }}
-                                style={{
-                                    width: '100%',
-                                    border: '1.5px solid #cbd5e1',
-                                    height: '40px',
-                                    padding: '0 12px',
-                                    fontWeight: 700,
-                                    color: '#1e293b',
-                                    borderRadius: '8px',
-                                    outline: 'none',
-                                    boxSizing: 'border-box',
-                                    backgroundColor: 'white',
-                                    fontSize: '0.8125rem'
-                                }}
-                            >
-                                {item.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                            </select>
-                        ) : (
-                            <input
-                                type="text"
-                                value={siteInfo[item.key]}
-                                onChange={(e) => setSiteInfo({ ...siteInfo, [item.key]: e.target.value })}
-                                style={{
-                                    width: '100%',
-                                    border: '1.5px solid #cbd5e1',
-                                    height: '40px',
-                                    padding: '0 12px',
-                                    fontWeight: 700,
-                                    color: '#1e293b',
-                                    borderRadius: '8px',
-                                    outline: 'none',
-                                    boxSizing: 'border-box',
-                                    transition: 'all 0.2s',
-                                    fontSize: '0.8125rem'
-                                }}
-                            />
-                        )}
+                        <input
+                            type="text"
+                            value={siteInfo[item.key] || ''}
+                            readOnly
+                            placeholder={item.placeholder}
+                            style={{
+                                width: '100%',
+                                border: '1.5px solid #cbd5e1',
+                                height: '40px',
+                                padding: '0 12px',
+                                fontWeight: 700,
+                                color: siteInfo[item.key] ? '#1e293b' : '#94a3b8',
+                                borderRadius: '8px',
+                                outline: 'none',
+                                boxSizing: 'border-box',
+                                transition: 'all 0.2s',
+                                fontSize: '0.8125rem',
+                                backgroundColor: '#f8fafc'
+                            }}
+                        />
                     </div>
                 ))}
+                <div>
+                    <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px', textTransform: 'uppercase' }}>
+                        위치추적
+                    </label>
+                    <button
+                        type="button"
+                        onClick={handleCaptureSiteLocation}
+                        disabled={!isSiteSelected}
+                        style={{
+                            width: '100%',
+                            height: '40px',
+                            border: '1.5px solid #0ea5e9',
+                            borderRadius: '8px',
+                            backgroundColor: isSiteSelected ? '#e0f2fe' : '#f1f5f9',
+                            color: isSiteSelected ? '#0c4a6e' : '#94a3b8',
+                            fontSize: '0.78rem',
+                            fontWeight: 800,
+                            cursor: isSiteSelected ? 'pointer' : 'not-allowed',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '6px'
+                        }}
+                    >
+                        <span className="material-icons" style={{ fontSize: '16px' }}>my_location</span>
+                        위치확인
+                    </button>
+                    <div style={{ marginTop: '6px', fontSize: '0.66rem', fontWeight: 700, color: '#64748b', lineHeight: 1.35 }}>
+                        {siteInfo?.targetLat != null && siteInfo?.targetLng != null
+                            ? `위도 ${Number(siteInfo.targetLat).toFixed(6)} / 경도 ${Number(siteInfo.targetLng).toFixed(6)}`
+                            : '아직 저장된 위치가 없습니다.'}
+                    </div>
+                </div>
             </div>
 
-            {/* 중간 섹션: 4 Columns */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '1.25rem' }}>
-                {/* Column 1: 검침항목 */}
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', paddingBottom: '0.6rem', borderBottom: '2px solid #1e293b', marginBottom: '0.75rem' }}>검침항목</h3>
-                    {renderItemGrid(flowItems, 'flow')}
-                    <div style={{ display: 'flex', gap: '0.4rem', marginTop: '1rem' }}>
+            {/* 중간 섹션: 항목 관리 위젯 */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid #e2e8f0', borderRadius: '12px', backgroundColor: '#ffffff', boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.8rem 0.9rem', borderBottom: '1px solid #e2e8f0', backgroundColor: '#f8fafc', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' }}>
+                        <h3 style={{ fontSize: '0.78rem', fontWeight: 900, color: '#1e293b', margin: 0 }}>검침항목 위젯</h3>
+                        <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#475569', background: '#e2e8f0', borderRadius: '9999px', padding: '2px 8px' }}>
+                            {flowItems.filter((item) => item.checked).length}/{flowItems.length}
+                        </span>
+                    </div>
+                    <div style={{ padding: '0.7rem 0.9rem', minHeight: '180px' }}>
+                        {renderItemGrid(flowItems, 'flow')}
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.4rem', padding: '0.7rem 0.9rem 0.9rem', borderTop: '1px solid #f1f5f9' }}>
                         <input
-                            placeholder="항목 추가..."
+                            placeholder="검침 항목 추가..."
                             value={newFlowItem}
                             onChange={(e) => setNewFlowItem(e.target.value)}
                             style={{ flex: 1, border: '1px solid #cbd5e1', height: '34px', padding: '0 10px', borderRadius: '6px', fontSize: '0.75rem' }}
@@ -1669,25 +1754,34 @@ const SettingsView = ({ currentUser }) => {
                         <button
                             onClick={() => addItem('flow')}
                             style={{ width: '34px', height: '34px', backgroundColor: '#1e293b', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            title="검침 항목 추가"
                         >
                             <span className="material-icons" style={{ fontSize: '18px' }}>add</span>
                         </button>
                     </div>
                 </div>
 
-                {/* Column 2: 약품항목 */}
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.6rem', borderBottom: '2px solid #1e293b', marginBottom: '0.75rem' }}>
-                        <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', margin: 0 }}>약품항목</h3>
-                        <button
-                            onClick={handleOpenDefaultAmountModal}
-                            style={{ fontSize: '0.625rem', fontWeight: 700, color: '#475569', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '5px', padding: '3px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                        >입고량지정</button>
+                <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid #e2e8f0', borderRadius: '12px', backgroundColor: '#ffffff', boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.8rem 0.9rem', borderBottom: '1px solid #e2e8f0', backgroundColor: '#f8fafc', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' }}>
+                        <h3 style={{ fontSize: '0.78rem', fontWeight: 900, color: '#1e293b', margin: 0 }}>약품항목 위젯</h3>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                            <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#475569', background: '#e2e8f0', borderRadius: '9999px', padding: '2px 8px' }}>
+                                {medicineItems.filter((item) => item.checked).length}/{medicineItems.length}
+                            </span>
+                            <button
+                                onClick={handleOpenDefaultAmountModal}
+                                style={{ fontSize: '0.625rem', fontWeight: 700, color: '#475569', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '5px', padding: '3px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                            >
+                                입고량지정
+                            </button>
+                        </div>
                     </div>
-                    {renderItemGrid(medicineItems, 'medicine')}
-                    <div style={{ display: 'flex', gap: '0.4rem', marginTop: '1rem' }}>
+                    <div style={{ padding: '0.7rem 0.9rem', minHeight: '180px' }}>
+                        {renderItemGrid(medicineItems, 'medicine')}
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.4rem', padding: '0.7rem 0.9rem 0.9rem', borderTop: '1px solid #f1f5f9' }}>
                         <input
-                            placeholder="항목 추가..."
+                            placeholder="약품 항목 추가..."
                             value={newMedicineItem}
                             onChange={(e) => setNewMedicineItem(e.target.value)}
                             style={{ flex: 1, border: '1px solid #cbd5e1', height: '34px', padding: '0 10px', borderRadius: '6px', fontSize: '0.75rem' }}
@@ -1695,25 +1789,34 @@ const SettingsView = ({ currentUser }) => {
                         <button
                             onClick={() => addItem('medicine')}
                             style={{ width: '34px', height: '34px', backgroundColor: '#1e293b', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            title="약품 항목 추가"
                         >
                             <span className="material-icons" style={{ fontSize: '18px' }}>add</span>
                         </button>
                     </div>
                 </div>
 
-                {/* Column 3: 분석장소 */}
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.6rem', borderBottom: '2px solid #1e293b', marginBottom: '0.75rem' }}>
-                        <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: '#1e293b', margin: 0 }}>분석장소</h3>
-                        <button
-                            onClick={handleOpenKitDefaultModal}
-                            style={{ fontSize: '0.625rem', fontWeight: 700, color: '#475569', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '5px', padding: '3px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                        >키트량지정</button>
+                <div style={{ display: 'flex', flexDirection: 'column', border: '1px solid #e2e8f0', borderRadius: '12px', backgroundColor: '#ffffff', boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.8rem 0.9rem', borderBottom: '1px solid #e2e8f0', backgroundColor: '#f8fafc', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' }}>
+                        <h3 style={{ fontSize: '0.78rem', fontWeight: 900, color: '#1e293b', margin: 0 }}>분석장소 위젯</h3>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                            <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#475569', background: '#e2e8f0', borderRadius: '9999px', padding: '2px 8px' }}>
+                                {locationItems.filter((item) => item.checked).length}/{locationItems.length}
+                            </span>
+                            <button
+                                onClick={handleOpenKitDefaultModal}
+                                style={{ fontSize: '0.625rem', fontWeight: 700, color: '#475569', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '5px', padding: '3px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                            >
+                                키트량지정
+                            </button>
+                        </div>
                     </div>
-                    {renderItemGrid(locationItems.filter(item => !(siteInfo.method === 'MBR' && item.name === '침전조')), 'location')}
-                    <div style={{ display: 'flex', gap: '0.4rem', marginTop: '1rem' }}>
+                    <div style={{ padding: '0.7rem 0.9rem', minHeight: '180px' }}>
+                        {renderItemGrid(locationItems, 'location')}
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.4rem', padding: '0.7rem 0.9rem 0.9rem', borderTop: '1px solid #f1f5f9' }}>
                         <input
-                            placeholder="장소 추가..."
+                            placeholder="분석 장소 추가..."
                             value={newLocationItem}
                             onChange={(e) => setNewLocationItem(e.target.value)}
                             style={{ flex: 1, border: '1px solid #cbd5e1', height: '34px', padding: '0 10px', borderRadius: '6px', fontSize: '0.75rem' }}
@@ -1721,6 +1824,7 @@ const SettingsView = ({ currentUser }) => {
                         <button
                             onClick={() => addItem('location')}
                             style={{ width: '34px', height: '34px', backgroundColor: '#1e293b', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            title="분석 장소 추가"
                         >
                             <span className="material-icons" style={{ fontSize: '18px' }}>add</span>
                         </button>
@@ -1894,16 +1998,17 @@ const SettingsView = ({ currentUser }) => {
                 {/* 오른쪽: 설정 저장 버튼 */}
                 <button
                     onClick={handleApply}
+                    disabled={!isSiteSelected}
                     style={{
                         width: '180px',
                         height: '112px', // 두 개의 입력창 높이 + 갭에 맞춰 조정
-                        backgroundColor: '#1e293b',
+                        backgroundColor: isSiteSelected ? '#1e293b' : '#94a3b8',
                         color: 'white',
                         border: 'none',
                         borderRadius: '12px',
                         fontSize: '0.9375rem',
                         fontWeight: 900,
-                        cursor: 'pointer',
+                        cursor: isSiteSelected ? 'pointer' : 'not-allowed',
                         boxShadow: '0 4px 10px -2px rgba(30,41,59,0.2)',
                         transition: 'all 0.15s',
                         display: 'flex',
@@ -1913,8 +2018,13 @@ const SettingsView = ({ currentUser }) => {
                         gap: '8px',
                         flexShrink: 0
                     }}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#0f172a'}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = '#1e293b'}
+                    onMouseEnter={e => {
+                        if (!isSiteSelected) return;
+                        e.currentTarget.style.backgroundColor = '#0f172a';
+                    }}
+                    onMouseLeave={e => {
+                        e.currentTarget.style.backgroundColor = isSiteSelected ? '#1e293b' : '#94a3b8';
+                    }}
                 >
                     <span className="material-icons" style={{ fontSize: '24px' }}>save</span>
                     설정 저장하기
@@ -1950,10 +2060,17 @@ const SettingsView = ({ currentUser }) => {
                             { id: 'kit', label: '키트설정' },
                             { id: 'logMapping', label: '일지설정' },
                             { id: 'webapp', label: '웹/앱설정' }
-                        ].map((tab) => (
+                        ].map((tab) => {
+                            const isLockedTab = tab.id !== 'basic' && !isAppSiteConfigured;
+                            return (
                             <button
                                 key={tab.id}
-                                onClick={() => setActiveTab(tab.id)}
+                                onClick={() => {
+                                    if (isLockedTab) return;
+                                    setActiveTab(tab.id);
+                                }}
+                                disabled={isLockedTab}
+                                title={isLockedTab ? '기본설정에서 현장 선택 후 저장하면 활성화됩니다.' : ''}
                                 style={{
                                     flex: 1,
                                     height: '56px',
@@ -1961,15 +2078,16 @@ const SettingsView = ({ currentUser }) => {
                                     background: 'none',
                                     fontSize: '0.875rem',
                                     fontWeight: activeTab === tab.id ? 900 : 700,
-                                    color: activeTab === tab.id ? '#1e293b' : '#94a3b8',
+                                    color: isLockedTab ? '#cbd5e1' : (activeTab === tab.id ? '#1e293b' : '#94a3b8'),
                                     borderBottom: activeTab === tab.id ? '2.5px solid #1e293b' : '2.5px solid transparent',
-                                    cursor: 'pointer',
+                                    cursor: isLockedTab ? 'not-allowed' : 'pointer',
                                     transition: 'all 0.2s'
                                 }}
                             >
                                 {tab.label}
                             </button>
-                        ))}
+                            );
+                        })}
                     </div>
 
                     {/* 콘텐츠 영역 */}

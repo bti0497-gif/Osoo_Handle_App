@@ -55,6 +55,7 @@ app.use(require('./routes/excelRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use(require('./routes/dailyWorkLogRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use(require('./routes/hwpRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use(require('./routes/sludgePhotoRoutes.cjs')(db, BASE_DIR, appDataPath));
+app.use(require('./routes/certificateRoutes.cjs')());
 app.use('/api/auth', require('./routes/authRoutes.cjs')(db));
 
 // --- Background Scheduler (배포 빌드 전까지 비활성화) ---

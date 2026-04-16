@@ -11,7 +11,6 @@ const {
 const {
   sanitize,
   waterAnalysisPhotoSegments,
-  waterAnalysisPhotoName,
 } = require('./drivePathService.cjs');
 
 const TARGET_PHOTO_ITEMS = ['암모니아성 질소', '질산성 질소', '오르토 인산염', '알칼리도'];
@@ -81,7 +80,20 @@ function resolvePhotoRoot(baseDir, configuredPhotoRoot) {
 function buildPhotoDirectory(photoRoot, date) {
   const year = date.slice(0, 4);
   const month = date.slice(5, 7);
-  return path.join(photoRoot, year, month, date);
+  return path.join(photoRoot, year, month, '데이타불러오기');
+}
+
+function toImportDateStamp(date) {
+  // 요청 기준: yyyyddmm
+  const y = String(date || '').slice(0, 4);
+  const m = String(date || '').slice(5, 7);
+  const d = String(date || '').slice(8, 10);
+  return `${y}${d}${m}`;
+}
+
+function sanitizeItemForFileName(itemName) {
+  const cleaned = sanitize(itemName || '').replace(/\s+/g, '');
+  return cleaned || '분석항목';
 }
 
 async function downloadPhoto(baseUrl, cookieJar, filePathValue) {
@@ -110,7 +122,7 @@ async function downloadPhoto(baseUrl, cookieJar, filePathValue) {
   };
 }
 
-async function saveProjectPhotos({ baseUrl, cookieJar, projects, date, baseDir, configuredPhotoRoot, siteName }) {
+async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseDir, configuredPhotoRoot, siteName }) {
   const photoRoot = resolvePhotoRoot(baseDir, configuredPhotoRoot);
   const photoDir = buildPhotoDirectory(photoRoot, date);
   ensureDirectory(photoDir);
@@ -133,16 +145,40 @@ async function saveProjectPhotos({ baseUrl, cookieJar, projects, date, baseDir, 
     }
   });
 
+  const findRowIdByProjectStmt = db.prepare(`
+    SELECT id
+    FROM water_quality
+    WHERE date = ? AND qntech_project_id = ?
+    ORDER BY measurement_order ASC, id ASC
+    LIMIT 1
+  `);
+  const findAnyQntechRowIdStmt = db.prepare(`
+    SELECT id
+    FROM water_quality
+    WHERE date = ? AND source_type = 'qntech'
+    ORDER BY measurement_order ASC, id ASC
+    LIMIT 1
+  `);
+
   const savedPhotos = [];
   const driveUploadedPhotos = [];
   const usedFileNames = new Map();
+  const stamp = toImportDateStamp(date);
   for (const file of selectedFiles) {
     const downloaded = await downloadPhoto(baseUrl, cookieJar, file.filePath);
     const ext = pickExtension(file.filePath, downloaded.contentType);
-    const duplicateIndex = usedFileNames.get(`${file.sourceLabel}|${file.itemName}`) || 0;
-    usedFileNames.set(`${file.sourceLabel}|${file.itemName}`, duplicateIndex + 1);
+    const rowId = file.projectId
+      ? (findRowIdByProjectStmt.get(date, file.projectId)?.id || null)
+      : null;
+    const fallbackRowId = findAnyQntechRowIdStmt.get(date)?.id || null;
+    const finalRowId = rowId || fallbackRowId || 0;
+    const itemToken = sanitizeItemForFileName(file.itemName);
 
-    const readableName = waterAnalysisPhotoName(date, file.itemName, file.sourceLabel, ext, duplicateIndex);
+    const key = `${finalRowId}|${itemToken}`;
+    const duplicateIndex = usedFileNames.get(key) || 0;
+    usedFileNames.set(key, duplicateIndex + 1);
+    const duplicateSuffix = duplicateIndex > 0 ? `_${duplicateIndex}` : '';
+    const readableName = `${finalRowId}_${stamp}_${itemToken}${duplicateSuffix}${ext.toLowerCase()}`;
     const targetPath = path.join(photoDir, readableName);
     fs.writeFileSync(targetPath, downloaded.body);
 

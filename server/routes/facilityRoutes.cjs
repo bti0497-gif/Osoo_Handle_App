@@ -5,13 +5,21 @@ const router = express.Router();
 module.exports = function(db) {
   // 전체 목록 조회 (검색, 최신순)
   router.get('/api/facilities', (req, res) => {
-    const { q } = req.query;
+    const { q, site_id } = req.query;
     let sql = 'SELECT * FROM facility_logs';
     let params = [];
+    const whereParts = [];
+    if (site_id) {
+      whereParts.push('site_id = ?');
+      params.push(String(site_id));
+    }
     if (q && q.trim()) {
-      sql += ' WHERE (location LIKE ? OR facility_name LIKE ? OR content LIKE ? OR notes LIKE ?)';
+      whereParts.push('(location LIKE ? OR facility_name LIKE ? OR content LIKE ? OR notes LIKE ?)');
       const like = `%${q.trim()}%`;
-      params = [like, like, like, like];
+      params.push(like, like, like, like);
+    }
+    if (whereParts.length > 0) {
+      sql += ` WHERE ${whereParts.join(' AND ')}`;
     }
     sql += ' ORDER BY date DESC, id DESC';
     const rows = db.prepare(sql).all(...params);
@@ -22,7 +30,7 @@ module.exports = function(db) {
   router.post('/api/facilities', (req, res) => {
     const { date, location, facility_name, content, notes } = req.body;
     try {
-      const metadata = getCurrentRecordMetadata(db);
+      const metadata = getCurrentRecordMetadata(db, req.body);
       const info = db.prepare(`
         INSERT INTO facility_logs (
           date, location, facility_name, content, notes,

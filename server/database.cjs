@@ -217,12 +217,41 @@ db.exec(`
     name TEXT NOT NULL UNIQUE,
     password TEXT NOT NULL,
     role TEXT DEFAULT 'user',
+    site_name1 TEXT,
+    phone TEXT,
+    target_lat REAL,
+    target_lng REAL,
+    radius_m REAL DEFAULT 500,
+    notes TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS sites (
+    id TEXT PRIMARY KEY,
+    site_name TEXT NOT NULL UNIQUE,
+    manager_name TEXT,
+    method TEXT,
+    series TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS member_sites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id TEXT NOT NULL,
+    site_id TEXT NOT NULL,
+    is_primary INTEGER DEFAULT 0,
+    can_manage INTEGER DEFAULT 1,
+    is_bidirectional INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(member_id, site_id)
   );
   CREATE TABLE IF NOT EXISTS attendance (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     member_id TEXT NOT NULL,
     member_name TEXT NOT NULL,
+    site_id TEXT,
+    site_name TEXT,
     date DATE NOT NULL,
     login_time DATETIME,
     logout_time DATETIME,
@@ -231,6 +260,9 @@ db.exec(`
     logout_lat REAL,
     logout_lng REAL,
     location_matched BOOLEAN DEFAULT 0,
+    remote_session_detected BOOLEAN DEFAULT 0,
+    remote_session_type TEXT,
+    remote_session_evidence TEXT,
     auto_logout BOOLEAN DEFAULT 0,
     is_synced BOOLEAN DEFAULT 0
   );
@@ -243,6 +275,12 @@ if (!attendanceCols.includes('member_id')) {
 }
 if (!attendanceCols.includes('member_name')) {
   db.prepare('ALTER TABLE attendance ADD COLUMN member_name TEXT').run();
+}
+if (!attendanceCols.includes('site_id')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN site_id TEXT').run();
+}
+if (!attendanceCols.includes('site_name')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN site_name TEXT').run();
 }
 if (!attendanceCols.includes('login_lat')) {
   db.prepare('ALTER TABLE attendance ADD COLUMN login_lat REAL').run();
@@ -259,11 +297,35 @@ if (!attendanceCols.includes('logout_lng')) {
 if (!attendanceCols.includes('location_matched')) {
   db.prepare('ALTER TABLE attendance ADD COLUMN location_matched BOOLEAN DEFAULT 0').run();
 }
+if (!attendanceCols.includes('remote_session_detected')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN remote_session_detected BOOLEAN DEFAULT 0').run();
+}
+if (!attendanceCols.includes('remote_session_type')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN remote_session_type TEXT').run();
+}
+if (!attendanceCols.includes('remote_session_evidence')) {
+  db.prepare('ALTER TABLE attendance ADD COLUMN remote_session_evidence TEXT').run();
+}
 if (!attendanceCols.includes('auto_logout')) {
   db.prepare('ALTER TABLE attendance ADD COLUMN auto_logout BOOLEAN DEFAULT 0').run();
 }
 if (!attendanceCols.includes('is_synced')) {
   db.prepare('ALTER TABLE attendance ADD COLUMN is_synced BOOLEAN DEFAULT 0').run();
+}
+
+const membersCols = db.prepare("PRAGMA table_info(members)").all().map(c => c.name);
+if (!membersCols.includes('site_name1')) db.prepare('ALTER TABLE members ADD COLUMN site_name1 TEXT').run();
+if (!membersCols.includes('phone')) db.prepare('ALTER TABLE members ADD COLUMN phone TEXT').run();
+if (!membersCols.includes('target_lat')) db.prepare('ALTER TABLE members ADD COLUMN target_lat REAL').run();
+if (!membersCols.includes('target_lng')) db.prepare('ALTER TABLE members ADD COLUMN target_lng REAL').run();
+if (!membersCols.includes('radius_m')) db.prepare('ALTER TABLE members ADD COLUMN radius_m REAL DEFAULT 500').run();
+if (!membersCols.includes('notes')) db.prepare('ALTER TABLE members ADD COLUMN notes TEXT').run();
+if (!membersCols.includes('updated_at')) db.prepare('ALTER TABLE members ADD COLUMN updated_at TEXT').run();
+db.prepare("UPDATE members SET radius_m = COALESCE(radius_m, 500), updated_at = COALESCE(updated_at, datetime('now', 'localtime'))").run();
+
+const sludgePhotoCols = db.prepare("PRAGMA table_info(sludge_photo_logs)").all().map(c => c.name);
+if (!sludgePhotoCols.includes('site_id')) {
+  db.prepare('ALTER TABLE sludge_photo_logs ADD COLUMN site_id TEXT').run();
 }
 const waterCols = db.prepare("PRAGMA table_info(water_quality)").all().map(c => c.name);
 ['tn', 'tp', 'cod', 'ss'].forEach(col => {
@@ -413,6 +475,7 @@ migrateLegacyQntechPhotoRoot(db);
 
 db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('road_web', '도로공사 웹페이지 설정', ?, '', '')").run(DEFAULT_ROAD_WEB_URL);
 db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('water_analysis_app', '수질분석 앱 설정', ?, '', '')").run(DEFAULT_WATER_ANALYSIS_URL);
+db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('gemini_api', 'Gemini API 키', '', '', '')").run();
 
 db.prepare(`
   UPDATE web_app_credentials
@@ -424,6 +487,13 @@ db.prepare(`
   WHERE service_key IN ('road_web', 'water_analysis_app')
     AND (service_url IS NULL OR TRIM(service_url) = '')
 `).run(DEFAULT_ROAD_WEB_URL, DEFAULT_WATER_ANALYSIS_URL);
+
+db.prepare(`
+  UPDATE web_app_credentials
+  SET user_id = COALESCE(user_id, ''),
+      password = COALESCE(password, '')
+  WHERE service_key IN ('road_web', 'water_analysis_app', 'gemini_api')
+`).run();
 
 if (db.prepare("SELECT count(*) as count FROM config_items WHERE category = 'kit'").get().count === 0) {
   const kitStmt = db.prepare('INSERT INTO config_items (category, item_name, is_active, display_order) VALUES (?, ?, ?, ?)');
@@ -541,6 +611,15 @@ if (!attendanceSyncCols.includes('last_modified')) {
   db.prepare("UPDATE attendance SET last_modified = datetime('now', 'localtime') WHERE last_modified IS NULL").run();
 }
 
+// --- 현장/회원 기준 테이블 인덱스 및 백필 ---
+db.prepare('CREATE INDEX IF NOT EXISTS idx_sites_active_name ON sites (is_active, site_name)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_member_sites_member ON member_sites (member_id)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_member_sites_site ON member_sites (site_id)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_member_sites_primary ON member_sites (member_id, is_primary)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_attendance_site_date ON attendance (site_id, date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_attendance_member_date ON attendance (member_id, date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_sludge_photo_logs_site_date ON sludge_photo_logs (site_id, date)').run();
+
 // --- Facility Logs: location 컬럼 추가 ---
 const facilityCols = db.prepare("PRAGMA table_info(facility_logs)").all().map(c => c.name);
 if (!facilityCols.includes('location')) {
@@ -570,6 +649,25 @@ if (!appSettingsCols.includes('site_id')) {
 }
 db.prepare("UPDATE app_settings SET site_id = ? WHERE id = 1 AND (site_id IS NULL OR TRIM(site_id) = '')").run(crypto.randomUUID());
 
+// app_settings의 기본 현장 정보 → sites 테이블 마이그레이션 (site_id 설정 후)
+const settingsSeed = db.prepare('SELECT site_id, site_name, manager_name, method, series FROM app_settings WHERE id = 1').get();
+if (settingsSeed?.site_id) {
+  db.prepare(`
+    INSERT INTO sites (id, site_name, manager_name, method, series, is_active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 1, datetime('now', 'localtime'), datetime('now', 'localtime'))
+    ON CONFLICT(id) DO UPDATE SET
+      site_name = excluded.site_name,
+      manager_name = excluded.manager_name,
+      method = excluded.method,
+      series = excluded.series,
+      updated_at = datetime('now', 'localtime')
+  `).run(settingsSeed.site_id, settingsSeed.site_name || '새 현장', settingsSeed.manager_name || '관리자', settingsSeed.method || 'A2O', settingsSeed.series || '1계열');
+
+  db.prepare('UPDATE attendance SET site_id = COALESCE(site_id, ?)').run(settingsSeed.site_id);
+  db.prepare('UPDATE attendance SET site_name = COALESCE(NULLIF(site_name, \'\'), ?)').run(settingsSeed.site_name || '새 현장');
+  db.prepare('UPDATE sludge_photo_logs SET site_id = COALESCE(site_id, ?)').run(settingsSeed.site_id);
+}
+
 // 5개 동기화 테이블에 site_id 추가 및 기존 데이터 백필
 const currentSiteId = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || null;
 syncTables.forEach(tableName => {
@@ -581,6 +679,24 @@ syncTables.forEach(tableName => {
     }
   }
 });
+
+// 로그성 테이블 site_id + date 조회 인덱스 (다중현장 전환 대비)
+db.prepare('CREATE INDEX IF NOT EXISTS idx_flow_readings_site_date ON flow_readings (site_id, date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_medicine_logs_site_date ON medicine_logs (site_id, date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_water_quality_site_date ON water_quality (site_id, date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_kit_logs_site_date ON kit_logs (site_id, date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_facility_logs_site_date ON facility_logs (site_id, date)').run();
+
+// site_id 백필: 기존 데이터가 있으면 app_settings.site_id로 채움
+if (currentSiteId) {
+  db.prepare('UPDATE flow_readings SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
+  db.prepare('UPDATE medicine_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
+  db.prepare('UPDATE water_quality SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
+  db.prepare('UPDATE kit_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
+  db.prepare('UPDATE facility_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
+  db.prepare('UPDATE sludge_photo_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
+  db.prepare('UPDATE attendance SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
+}
 
 console.log('Database migration check complete.');
 

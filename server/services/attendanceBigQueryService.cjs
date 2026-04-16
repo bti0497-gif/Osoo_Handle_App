@@ -16,27 +16,36 @@ const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs')
 /**
  * 출결 로그 배치 동기화
  * @param {Array}  logs      SQLite attendance 레코드 배열
- * @param {string} siteName  현장명 (app_settings.site_name)
+ * @param {{siteId?: string, siteName?: string}} siteMeta  현장 정보
  * @returns {{ syncedIds: number[], errors: string[] }}
  */
-async function syncAttendanceLogs(logs, siteName) {
+async function syncAttendanceLogs(logs, siteMeta = {}) {
   const bq = getBigQueryClient();
   if (!bq) return { syncedIds: [], errors: ['BigQuery 클라이언트 초기화 실패'] };
   if (!logs || logs.length === 0) return { syncedIds: [], errors: [] };
+
+  const siteName = String(siteMeta.siteName || '');
+  const siteId = siteMeta.siteId ? String(siteMeta.siteId) : null;
 
   const now = new Date().toISOString();
   const rows = logs.map(log => ({
     json: {
       id:               String(log.id),
+      site_id:          log.site_id ? String(log.site_id) : siteId,
       site_name:        siteName || '',
-      member_id:        Number(log.member_id),
+      member_id:        String(log.member_id),
       member_name:      log.member_name  || '',
       date:             log.date         || '',
       login_time:       log.login_time   || null,
       logout_time:      log.logout_time  || null,
       login_lat:        log.login_lat    != null ? Number(log.login_lat)  : null,
       login_lng:        log.login_lng    != null ? Number(log.login_lng)  : null,
+      logout_lat:       log.logout_lat   != null ? Number(log.logout_lat) : null,
+      logout_lng:       log.logout_lng   != null ? Number(log.logout_lng) : null,
       location_matched: Boolean(log.location_matched),
+      remote_session_detected: Boolean(log.remote_session_detected),
+      remote_session_type: log.remote_session_type || 'local',
+      remote_session_evidence: log.remote_session_evidence || '',
       auto_logout:      Boolean(log.auto_logout),
       uploaded_at:      now
     },
@@ -49,7 +58,7 @@ async function syncAttendanceLogs(logs, siteName) {
   const errors = [];
 
   try {
-    await bq.dataset(DATASET_ID).table('attendance').insert(rows);
+    await bq.dataset(DATASET_ID).table('attendance').insert(rows, { ignoreUnknownValues: true });
     syncedIds.push(...logs.map(l => l.id));
   } catch (err) {
     const msg = err.errors ? JSON.stringify(err.errors) : err.message;

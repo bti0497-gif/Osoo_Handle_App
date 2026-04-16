@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 
 const LoginView = ({ onLogin }) => {
     const [name, setName] = useState(() => localStorage.getItem('lastLoginName') || '');
@@ -6,12 +6,6 @@ const LoginView = ({ onLogin }) => {
     const [error, setError] = useState('');
 
     const passRef = useRef(null);
-
-    useEffect(() => {
-        if (name && passRef.current) {
-            passRef.current.focus();
-        }
-    }, [name]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -43,6 +37,12 @@ const LoginView = ({ onLogin }) => {
                             placeholder="이름"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && passRef.current) {
+                                    e.preventDefault();
+                                    passRef.current.focus();
+                                }
+                            }}
                             required
                         />
                     </div>

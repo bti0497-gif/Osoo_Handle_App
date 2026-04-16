@@ -1,12 +1,87 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AuthModel } from './AuthModel';
 import { apiClient } from '../../core/api';
+import { ADMIN_ROLES, FIELD_WORKER_AUTO_LOGOUT_HOUR_KST } from '../../core/constants';
+
+function isFieldWorker(member) {
+    return !ADMIN_ROLES.includes(String(member?.role || 'user'));
+}
+
+/** 한국 시간 기준 자동 퇴근 시각이 되었는지 */
+function isKstAtOrPastAutoLogoutHour(date = new Date()) {
+    const hourStr = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Seoul',
+        hour: '2-digit',
+        hour12: false,
+    }).format(date);
+    const hour = parseInt(hourStr, 10);
+    return hour >= FIELD_WORKER_AUTO_LOGOUT_HOUR_KST;
+}
+
+/** 지금부터 한국 시간 당일 자동 퇴근 시각까지 남은 ms (이미 지났으면 0 이하) */
+function msUntilKstTodayAutoLogout(now = new Date()) {
+    const d = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).format(now);
+    const h = String(FIELD_WORKER_AUTO_LOGOUT_HOUR_KST).padStart(2, '0');
+    const deadline = Date.parse(`${d}T${h}:00:00+09:00`);
+    return deadline - now.getTime();
+}
+
+/**
+ * 당일 한국 시간 기준 자동 퇴근 대상인지: 지금이 기준 시각 이후이고,
+ * 출근 시각이 오늘(한국)이며 그날 기준 시각 이전에 출근한 미종료 세션
+ */
+function shouldForceEodLogoutForOpenSession(loginTimeIso) {
+    if (!loginTimeIso) return false;
+    const login = new Date(loginTimeIso);
+    const now = new Date();
+    if (!isKstAtOrPastAutoLogoutHour(now)) return false;
+
+    const loginDateKst = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).format(login);
+    const todayKst = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).format(now);
+    if (loginDateKst !== todayKst) return false;
+
+    const loginHour = parseInt(
+        new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Seoul',
+            hour: '2-digit',
+            hour12: false,
+        }).format(login),
+        10
+    );
+    const loginMin = parseInt(
+        new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Seoul',
+            minute: '2-digit',
+        }).format(login),
+        10
+    );
+    const loginMinutes = loginHour * 60 + loginMin;
+    const cutoffMinutes = FIELD_WORKER_AUTO_LOGOUT_HOUR_KST * 60;
+    return loginMinutes < cutoffMinutes;
+}
 
 export const useAuthViewModel = () => {
     const [user, setUser] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const autoLogoutTimerRef = useRef(null);
     const restoringRef = useRef(false);
+    const userRef = useRef(null);
+    const autoLogoutInProgressRef = useRef(false);
 
     const clearAutoLogoutTimer = useCallback(() => {
         if (autoLogoutTimerRef.current) {
@@ -15,46 +90,56 @@ export const useAuthViewModel = () => {
         }
     }, []);
 
+    useEffect(() => {
+        userRef.current = user;
+    }, [user]);
+
     const performAutoLogout = useCallback(async (userData) => {
-        // 1. 아직 로그인 중이면 자동 퇴근 처리
-        if (userData) {
+        if (autoLogoutInProgressRef.current) return;
+        if (!userData || !isFieldWorker(userData)) return;
+
+        autoLogoutInProgressRef.current = true;
+        try {
             try {
-                console.log(`[자동 로그아웃] ${userData.name} - 20:00 자동 퇴근 처리`);
+                console.log(
+                    `[자동 로그아웃] ${userData.name} - 한국 시간 ${FIELD_WORKER_AUTO_LOGOUT_HOUR_KST}:00 자동 퇴근 처리`
+                );
                 await AuthModel.recordLogout(userData, true);
             } catch (err) {
-                console.error("Auto logout failed:", err);
+                console.error('Auto logout failed:', err);
             }
             AuthModel.clearSession();
             setUser(null);
-        }
-        // 2. 수동 로그아웃 포함 — 20:00에 무조건 BigQuery 동기화
-        try {
-            const result = await AuthModel.syncAttendanceBQ();
-            console.log(`[20:00] BigQuery 출결 동기화 완료 (${result?.syncedCount ?? 0}건)`);
-        } catch (err) {
-            console.error('[20:00] BigQuery 동기화 실패:', err);
+            try {
+                const result = await AuthModel.syncAttendanceBQ();
+                console.log(`[자동 퇴근] BigQuery 출결 동기화 완료 (${result?.syncedCount ?? 0}건)`);
+            } catch (err) {
+                console.error('[자동 퇴근] BigQuery 동기화 실패:', err);
+            }
+        } finally {
+            autoLogoutInProgressRef.current = false;
         }
     }, []);
 
-    const setupAutoLogoutTimer = useCallback((userData) => {
-        clearAutoLogoutTimer();
+    const setupAutoLogoutTimer = useCallback(
+        (userData) => {
+            clearAutoLogoutTimer();
+            if (!userData || !isFieldWorker(userData)) return;
 
-        const now = new Date();
-        const cutoff = new Date();
-        cutoff.setHours(20, 0, 0, 0);
+            const msLeft = msUntilKstTodayAutoLogout();
+            if (msLeft <= 0) {
+                return;
+            }
 
-        if (now >= cutoff) {
-            performAutoLogout(userData);
-            return;
-        }
+            const mins = Math.round(msLeft / 1000 / 60);
+            console.log(`자동 로그아웃까지(한국 ${FIELD_WORKER_AUTO_LOGOUT_HOUR_KST}:00) 약 ${mins}분 남음`);
 
-        const msUntilCutoff = cutoff.getTime() - now.getTime();
-        console.log(`자동 로그아웃까지 ${Math.round(msUntilCutoff / 1000 / 60)}분 남음`);
-
-        autoLogoutTimerRef.current = setTimeout(() => {
-            performAutoLogout(userData);
-        }, msUntilCutoff);
-    }, [clearAutoLogoutTimer, performAutoLogout]);
+            autoLogoutTimerRef.current = setTimeout(() => {
+                performAutoLogout(userData);
+            }, msLeft);
+        },
+        [clearAutoLogoutTimer, performAutoLogout]
+    );
 
     useEffect(() => {
         const restoreSession = async () => {
@@ -64,27 +149,41 @@ export const useAuthViewModel = () => {
             try {
                 const savedUser = AuthModel.loadSession();
                 if (!savedUser || !savedUser.id) {
-                    setIsLoading(false);
                     return;
                 }
 
                 const freshData = await AuthModel.localLogin(savedUser.name, savedUser.password);
                 if (!freshData) {
                     AuthModel.clearSession();
-                    setIsLoading(false);
                     return;
                 }
 
                 const activeSession = await AuthModel.findActiveSession(freshData.id);
+                const field = isFieldWorker(freshData);
+
+                if (field && activeSession && shouldForceEodLogoutForOpenSession(activeSession.login_time)) {
+                    try {
+                        await AuthModel.recordLogout(freshData, true);
+                    } catch (err) {
+                        console.error('[세션 복원] 자동 퇴근 처리 실패:', err);
+                    }
+                    try {
+                        await AuthModel.syncAttendanceBQ();
+                    } catch (err) {
+                        console.error('[세션 복원] BigQuery 동기화 실패:', err);
+                    }
+                    AuthModel.clearSession();
+                    return;
+                }
 
                 const restoredUser = {
                     ...freshData,
                     isRemote: savedUser.isRemote ?? false,
                     loginLat: savedUser.loginLat ?? null,
-                    loginLng: savedUser.loginLng ?? null
+                    loginLng: savedUser.loginLng ?? null,
                 };
 
-                if (!activeSession) {
+                if (field && !activeSession) {
                     try {
                         const coords = await getCurrentCoords();
                         const lat = coords?.latitude || null;
@@ -95,17 +194,20 @@ export const useAuthViewModel = () => {
                         restoredUser.loginLat = lat;
                         restoredUser.loginLng = lng;
                     } catch (attErr) {
-                        console.warn("세션 복원 중 출석 기록 실패:", attErr.message);
+                        console.warn('세션 복원 중 출석 기록 실패:', attErr.message);
                     }
                 }
 
                 AuthModel.saveSession(restoredUser);
                 setUser(restoredUser);
-                setupAutoLogoutTimer(restoredUser);
+                if (field) {
+                    setupAutoLogoutTimer(restoredUser);
+                }
             } catch (err) {
-                console.error("세션 복원 실패:", err);
+                console.error('세션 복원 실패:', err);
                 AuthModel.clearSession();
             } finally {
+                restoringRef.current = false;
                 setIsLoading(false);
             }
         };
@@ -113,6 +215,29 @@ export const useAuthViewModel = () => {
         restoreSession();
         return () => clearAutoLogoutTimer();
     }, [setupAutoLogoutTimer, clearAutoLogoutTimer]);
+
+    /** 절전 등으로 20시 타이머를 놓친 경우 — 당일 20시 이전 출근·미퇴근만 보정 */
+    useEffect(() => {
+        if (!user || !isFieldWorker(user)) return undefined;
+
+        const tick = async () => {
+            const u = userRef.current;
+            if (!u || !isFieldWorker(u)) return;
+            if (!isKstAtOrPastAutoLogoutHour()) return;
+            try {
+                const session = await AuthModel.findActiveSession(u.id);
+                if (session?.logout_time != null) return;
+                if (shouldForceEodLogoutForOpenSession(session?.login_time)) {
+                    performAutoLogout(u);
+                }
+            } catch (e) {
+                console.warn('[자동 로그아웃] 세션 확인 실패:', e);
+            }
+        };
+
+        const id = setInterval(tick, 60 * 1000);
+        return () => clearInterval(id);
+    }, [user, performAutoLogout]);
 
     const login = async (name, password) => {
         setIsLoading(true);
@@ -125,46 +250,91 @@ export const useAuthViewModel = () => {
             }
 
             if (userData) {
-                const loginLat = currentCoords?.latitude || null;
-                const loginLng = currentCoords?.longitude || null;
-                const locationMatched = checkLocationMatched(userData, currentCoords);
+                const field = isFieldWorker(userData);
 
-                try {
-                    await AuthModel.recordAttendance(userData, loginLat, loginLng, locationMatched);
-                } catch (attErr) {
-                    console.warn("출석 기록 실패 (로그인은 계속 진행):", attErr.message);
+                if (field) {
+                    const loginLat = currentCoords?.latitude || null;
+                    const loginLng = currentCoords?.longitude || null;
+                    const locationMatched = checkLocationMatched(userData, currentCoords);
+
+                    try {
+                        await AuthModel.recordAttendance(userData, loginLat, loginLng, locationMatched);
+                    } catch (attErr) {
+                        console.warn('출석 기록 실패 (로그인은 계속 진행):', attErr.message);
+                    }
+
+                    const enrichedUser = { ...userData, isRemote: !locationMatched, loginLat, loginLng };
+
+                    AuthModel.saveSession(enrichedUser);
+                    setUser(enrichedUser);
+                    setupAutoLogoutTimer(enrichedUser);
+
+                    setIsLoading(false);
+                    return { success: true, user: enrichedUser, locationMatched };
                 }
 
-                const enrichedUser = { ...userData, isRemote: !locationMatched, loginLat, loginLng };
-
-                AuthModel.saveSession(enrichedUser);
-                setUser(enrichedUser);
-                setupAutoLogoutTimer(enrichedUser);
+                AuthModel.saveSession(userData);
+                setUser(userData);
 
                 setIsLoading(false);
-                return { success: true, user: enrichedUser, locationMatched };
+                return { success: true, user: userData, locationMatched: true };
             }
 
             setIsLoading(false);
             return { success: false, message: '이름 또는 비밀번호가 올바르지 않습니다.' };
         } catch (err) {
-            console.error("Login Error:", err);
+            console.error('Login Error:', err);
             setIsLoading(false);
             return { success: false, message: '서버 연결 실패: ' + err.message };
         }
     };
 
     const logout = async () => {
-        if (user) {
+        const u = user;
+        if (u) {
             try {
                 clearAutoLogoutTimer();
-                await AuthModel.recordLogout(user, false);
+                if (isFieldWorker(u)) {
+                    await AuthModel.recordLogout(u, false);
+                }
             } catch (err) {
-                console.error("Logout sync failed:", err);
+                console.error('Logout sync failed:', err);
             }
         }
         AuthModel.clearSession();
         setUser(null);
+
+        if (u && isFieldWorker(u)) {
+            try {
+                const result = await AuthModel.syncAttendanceBQ();
+                console.log(`[퇴근] BigQuery 출결 동기화 (${result?.syncedCount ?? 0}건)`);
+            } catch (err) {
+                console.error('[퇴근] BigQuery 동기화 실패:', err);
+            }
+        }
+    };
+
+    const switchActiveSite = async (siteId) => {
+        try {
+            const result = await AuthModel.switchActiveSite(siteId);
+            const nextSiteId = result?.site?.id || siteId;
+            const nextSiteName = result?.site?.site_name || '';
+
+            setUser((prev) => {
+                if (!prev) return prev;
+                const updated = {
+                    ...prev,
+                    site_id: nextSiteId,
+                    site_name1: nextSiteName,
+                };
+                AuthModel.saveSession(updated);
+                return updated;
+            });
+
+            return { success: true, site: result?.site || null };
+        } catch (err) {
+            return { success: false, message: err.message || '현장 전환 실패' };
+        }
     };
 
     return {
@@ -172,7 +342,8 @@ export const useAuthViewModel = () => {
         isAuthenticated: !!user,
         isLoading,
         login,
-        logout
+        logout,
+        switchActiveSite,
     };
 };
 
@@ -191,10 +362,10 @@ async function getCurrentCoords() {
 function checkLocationMatched(userData, currentCoords) {
     if (!userData.target_lat || !userData.target_lng || !currentCoords) return false;
     const R = 6371e3;
-    const φ1 = currentCoords.latitude * Math.PI / 180;
-    const φ2 = userData.target_lat * Math.PI / 180;
-    const Δφ = (userData.target_lat - currentCoords.latitude) * Math.PI / 180;
-    const Δλ = (userData.target_lng - currentCoords.longitude) * Math.PI / 180;
+    const φ1 = (currentCoords.latitude * Math.PI) / 180;
+    const φ2 = (userData.target_lat * Math.PI) / 180;
+    const Δφ = ((userData.target_lat - currentCoords.latitude) * Math.PI) / 180;
+    const Δλ = ((userData.target_lng - currentCoords.longitude) * Math.PI) / 180;
     const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
     const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return dist <= (userData.radius_m || 500);

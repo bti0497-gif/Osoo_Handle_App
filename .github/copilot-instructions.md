@@ -5,7 +5,7 @@
 ## 프로젝트 구조
 
 - **프론트엔드 기능**: `src/features/{name}/` (Model + ViewModel + View)
-- **공통 인프라**: `src/core/api/` (apiClient, supabaseClient, serverConfig)
+- **공통 인프라**: `src/core/api/` (apiClient, serverConfig)
 - **상수**: `src/core/constants/index.js`
 - **백엔드 라우트**: `server/routes/{name}Routes.cjs`
 - **Electron**: `electron/` (main, preload, updater)
@@ -17,20 +17,12 @@
 // 로컬 서버 API — 반드시 apiClient 사용
 import { apiClient } from '../../core/api';
 const data = await apiClient.get('/api/endpoint', { param: value });
-
-// Supabase — 반드시 싱글톤 사용
-import { supabase } from '../../core/api';
-const { data } = await supabase.from('table').select('*');
 ```
 
 ### 금지 패턴
 ```javascript
 // ❌ fetch 직접 호출
 const res = await fetch('http://localhost:8901/api/...');
-
-// ❌ Supabase 클라이언트 개별 생성
-import { createClient } from '@supabase/supabase-js';
-const supabase = createClient(url, key);
 
 // ❌ View에서 직접 API 호출
 const MyView = () => {

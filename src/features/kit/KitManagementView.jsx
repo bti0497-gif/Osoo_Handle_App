@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useKitViewModel } from './useKitViewModel';
 import { useDialog } from '../../components/common/DialogContext';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
+import { ADVANCED_DATAGRID_READ_ONLY_PROPS } from '../../components/common/advancedDataGridPresets';
 
 const KitManagementView = ({ currentUser }) => {
     const { showAlert } = useDialog();
@@ -23,6 +24,8 @@ const KitManagementView = ({ currentUser }) => {
     const [activeInput, setActiveInput] = useState(null);
     const [localValue, setLocalValue] = useState(null);
     const [isCellSelecting, setIsCellSelecting] = useState(false);
+    const didInitTodaySelectRef = useRef(false);
+    const didInitTodayScrollRef = useRef(false);
 
     const todayStr = new Date().toISOString().split('T')[0];
     const syncBaseDate = selectedDate || todayStr;
@@ -30,6 +33,19 @@ const KitManagementView = ({ currentUser }) => {
     const closeEditMode = () => {
         setDoubleClickedCell(null);
     };
+
+    useEffect(() => {
+        if (didInitTodaySelectRef.current) return;
+        if (!history.some((row) => row.date === todayStr)) return;
+        setSelectedDate(todayStr);
+        didInitTodaySelectRef.current = true;
+    }, [history, todayStr]);
+
+    useEffect(() => {
+        if (!didInitTodayScrollRef.current && history.length > 0) {
+            didInitTodayScrollRef.current = true;
+        }
+    }, [history.length]);
 
     useEffect(() => {
         const handleEsc = (e) => {
@@ -72,6 +88,7 @@ const KitManagementView = ({ currentUser }) => {
             { id: `inventory_${type}`, type: 'inventory', label: '재고', width: 52, headerStyle: { background: '#fef3c7', color: '#92400e' } }
         ]
     }));
+    const lastLeafColId = gridCols[gridCols.length - 1]?.subCols?.[2]?.id || null;
 
     const handleRowSelect = (row) => {
         const isFutureRow = row.isFuture || row.date > todayStr;
@@ -131,12 +148,16 @@ const KitManagementView = ({ currentUser }) => {
     const getRowStyle = (row, isSelected, isHovered) => {
         const isToday = row.date === todayStr;
         const isFuture = row.isFuture || row.date > todayStr;
+        const isRowSelected = selectedDate === row.date || isSelected;
 
         let bg = 'transparent';
         let opacity = 1;
+        let boxShadow;
 
-        if (isSelected) {
-            bg = '#fef3c7';
+        if (isRowSelected) {
+            bg = '#fffdf0';
+            // 행 본문 영역 상/하 외곽선 (좌/우는 rowHeader + 마지막 셀에서 닫는다)
+            boxShadow = 'inset 0 2px 0 #f59e0b, inset 0 -2px 0 #f59e0b';
         } else if (isToday) {
             bg = '#eff6ff';
         } else if (isFuture) {
@@ -147,6 +168,7 @@ const KitManagementView = ({ currentUser }) => {
 
         return {
             background: bg !== 'transparent' ? bg : undefined,
+            boxShadow,
             opacity,
             pointerEvents: isFuture ? 'none' : 'auto',
             cursor: isFuture ? 'default' : 'pointer',
@@ -166,7 +188,9 @@ const KitManagementView = ({ currentUser }) => {
         const isFuture = row.isFuture || row.date > todayStr;
 
         const isCellDoubleClicked = doubleClickedCell?.date === row.date && doubleClickedCell?.colId === col.id;
+        const isRowSelected = selectedDate === row.date;
         const isReadOnly = isFuture || !isCellDoubleClicked;
+        const rowOutlineColor = '#f59e0b';
 
         const isActive = activeInput?.date === row.date && activeInput?.colId === kitName && activeInput?.type === subType;
 
@@ -190,6 +214,9 @@ const KitManagementView = ({ currentUser }) => {
                     display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
                     boxSizing: 'border-box',
                     borderLeft: '1px solid #e2e8f0',
+                    borderTop: isRowSelected ? `2px solid ${rowOutlineColor}` : undefined,
+                    borderBottom: isRowSelected ? `2px solid ${rowOutlineColor}` : undefined,
+                    borderRight: isRowSelected && col.id === lastLeafColId ? `2px solid ${rowOutlineColor}` : undefined,
                     outline: isUsageCellSelected ? '2px solid #22c55e' : 'none',
                     pointerEvents: isFuture ? 'none' : 'auto',
                     opacity: isFuture ? 0.6 : 1
@@ -210,7 +237,9 @@ const KitManagementView = ({ currentUser }) => {
 
         // 편집 가능할 때만 노란색
         const cellBg = errorMsg ? '#fee2e2'
-            : (isCellDoubleClicked ? '#fef08a' : (isFuture ? '#f5f5f5' : 'transparent'));
+            : (isCellDoubleClicked
+                ? '#fef08a'
+                : (isFuture ? '#f5f5f5' : (isRowSelected ? '#fff7cc' : 'transparent')));
 
         return (
             <div style={{
@@ -219,6 +248,9 @@ const KitManagementView = ({ currentUser }) => {
                 background: cellBg,
                 display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
                 boxSizing: 'border-box',
+                borderTop: isRowSelected ? `2px solid ${rowOutlineColor}` : undefined,
+                borderBottom: isRowSelected ? `2px solid ${rowOutlineColor}` : undefined,
+                borderRight: isRowSelected && col.id === lastLeafColId ? `2px solid ${rowOutlineColor}` : undefined,
                 outline: isUsageCellSelected ? '2px solid #22c55e' : 'none',
                 pointerEvents: isFuture ? 'none' : 'auto',
                 opacity: isFuture ? 0.6 : 1
@@ -290,8 +322,12 @@ const KitManagementView = ({ currentUser }) => {
             <div style={{
                 width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontWeight: isToday ? 900 : 800, fontSize: 10.5,
-                color: isToday ? '#1d4ed8' : isFuture ? '#a0aec0' : '#475569',
-                background: isSelected ? '#e2e8f0' : isToday ? '#dbeafe' : '#f8fafc',
+                color: isSelected ? '#9a3412' : isToday ? '#1d4ed8' : isFuture ? '#a0aec0' : '#475569',
+                background: isSelected ? '#fde68a' : isToday ? '#dbeafe' : '#f8fafc',
+                borderLeft: isSelected ? '2px solid #f59e0b' : '1px solid transparent',
+                borderTop: isSelected ? '2px solid #f59e0b' : '1px solid transparent',
+                borderBottom: isSelected ? '2px solid #f59e0b' : '1px solid transparent',
+                borderRight: isSelected ? '1px solid transparent' : '1px solid transparent',
                 pointerEvents: isFuture ? 'none' : 'auto',
                 cursor: isFuture ? 'default' : 'pointer'
             }}>
@@ -309,18 +345,18 @@ const KitManagementView = ({ currentUser }) => {
             borderRight: '1px solid #e2e8f0',
         }}>
             <AdvancedDataGrid
+                {...ADVANCED_DATAGRID_READ_ONLY_PROPS}
                 title="분석키트 구매/사용/재고 관리"
                 description="셀 더블클릭으로만 구매/사용을 수정하며, 재고는 수정일 이후 자동 재계산됩니다."
                 columns={gridCols}
                 data={history}
                 keyField="date"
-                scrollToKey={todayStr}
+                scrollToKey={didInitTodayScrollRef.current ? null : todayStr}
                 width={calculatedWidth}
                 height={300}
 
                 showBottomBar={false}
                 selectionMode="row"
-                enableEditing={false}
                 contextMenu={false}
                 rowHeaderWidth={84}
                 rowHeaderLabel="날짜"

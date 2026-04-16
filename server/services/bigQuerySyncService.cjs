@@ -25,6 +25,8 @@ function getSiteInfo() {
 }
 
 function getRowSiteInfo(row, defaults) {
+  // TODO(site-id): 차기 다중현장 전환 시 activeSiteId 컨텍스트를 받아
+  // row.site_id가 비어있는 legacy 데이터도 site 단위로 강제 분리 전송한다.
   return {
     siteName: row.site_name || defaults.siteName,
     authorName: row.author || defaults.authorName,

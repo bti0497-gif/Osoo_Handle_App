@@ -2,10 +2,14 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
+const { ensureSiteMemberTables, upsertSiteMemberSnapshot } = require('../services/siteMemberBigQueryService.cjs');
 const { parseAndStoreExcel, getStoredSheets, getStoredRow, getCellValue, hasStoredData, formatDate } = require('../services/excelService.cjs');
 const { normalizeBaseUrl, invalidateQntechSessionCache } = require('../services/qntechAuthService.cjs');
 const { isDriveConfigured, getDriveRootFolderId, getOrCreateFolder } = require('../services/driveService.cjs');
+const { isSheetsConfigured: isSitesSheetsConfigured, getSites: getSitesFromSheets, upsertSite: upsertSiteToSheets, deleteSite: deleteSiteFromSheets } = require('../services/sitesSheetsService.cjs');
+const { isSheetsConfigured: isMembersSheetsConfigured, upsertMember: upsertMemberToSheets } = require('../services/membersSheetsService.cjs');
 const {
   ALLOWED_REPORT_TEMPLATE_NAMES,
   getCustomReportTemplatesDir,
@@ -14,6 +18,11 @@ const {
   syncBundledTemplatesToAppData,
 } = require('../services/reportTemplateService.cjs');
 const router = express.Router();
+
+// 기본 정책: 회원/현장 마스터는 중앙에서 직접 관리하므로 앱의 외부 동기화는 비활성
+const ENABLE_SITE_SYNC_TO_SHEETS = process.env.ENABLE_SITE_SYNC_TO_SHEETS === 'true';
+const ENABLE_INITIAL_SYNC_TO_SHEETS = process.env.ENABLE_INITIAL_SYNC_TO_SHEETS === 'true';
+const ENABLE_SITE_MEMBER_BIGQUERY_SYNC = process.env.ENABLE_SITE_MEMBER_BIGQUERY_SYNC === 'true';
 
 let importProgress = { current: 0, total: 0, status: 'idle', result: null };
 
@@ -38,8 +47,44 @@ module.exports = function (db, baseDir, appDataPath) {
   const defaultQntechPhotoRoot = path.join(appDataPath, '사진관리', '수질분석');
   const reportsDir = getCustomReportTemplatesDir(appDataPath);
   const excelOriginalsDir = path.join(appDataPath, 'templates', 'excel-originals');
+  const siteStorageRoot = path.join(appDataPath, 'storage-sites');
+  if (!fs.existsSync(siteStorageRoot)) fs.mkdirSync(siteStorageRoot, { recursive: true });
   if (!fs.existsSync(excelOriginalsDir)) fs.mkdirSync(excelOriginalsDir, { recursive: true });
   syncBundledTemplatesToAppData(baseDir, appDataPath);
+
+  const upsertLocalSite = (site) => {
+    if (!site?.id || !site?.site_name) {
+      return;
+    }
+    const normalizedSiteName = String(site.site_name || '').trim();
+    const existingByName = db.prepare('SELECT id FROM sites WHERE site_name = ? LIMIT 1').get(normalizedSiteName);
+    const localId = String(existingByName?.id || site.id);
+
+    db.prepare(`
+      INSERT INTO sites (id, site_name, manager_name, method, series, is_active, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+      ON CONFLICT(id) DO UPDATE SET
+        site_name = excluded.site_name,
+        manager_name = excluded.manager_name,
+        method = excluded.method,
+        series = excluded.series,
+        is_active = excluded.is_active,
+        updated_at = datetime('now', 'localtime')
+    `).run(
+      localId,
+      normalizedSiteName,
+      String(site.manager_name || '').trim(),
+      String(site.method || 'A2O').trim(),
+      String(site.series || '1계열').trim(),
+      site.is_active === 0 ? 0 : 1
+    );
+  };
+
+  const syncLocalSites = db.transaction((sites) => {
+    for (const site of sites || []) {
+      upsertLocalSite(site);
+    }
+  });
 
   const reportStorage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, file.fieldname === 'excel_original' ? excelOriginalsDir : reportsDir),
@@ -72,7 +117,20 @@ module.exports = function (db, baseDir, appDataPath) {
     const { settings, configItems } = req.body;
     try {
       const updateTransaction = db.transaction((s, items) => {
-        db.prepare('UPDATE app_settings SET site_name = ?, manager_name = ?, method = ?, series = ? WHERE id = 1').run(s.siteName, s.managerName, s.method, s.series);
+        db.prepare(`
+          UPDATE app_settings
+          SET site_name = ?, manager_name = ?, method = ?, series = ?,
+              target_lat = COALESCE(?, target_lat),
+              target_lng = COALESCE(?, target_lng)
+          WHERE id = 1
+        `).run(
+          s.siteName,
+          s.managerName,
+          s.method,
+          s.series,
+          s.targetLat ?? null,
+          s.targetLng ?? null
+        );
         const updateConfig = db.prepare('UPDATE config_items SET is_active = ? WHERE category = ? AND item_name = ?');
         const insertConfig = db.prepare('INSERT OR IGNORE INTO config_items (category, item_name, is_active, display_order) VALUES (?, ?, ?, ?)');
         items.forEach((item, idx) => {
@@ -82,13 +140,61 @@ module.exports = function (db, baseDir, appDataPath) {
       });
       updateTransaction(settings, configItems);
 
-      // Drive가 설정돼 있으면 현장명 폴더 생성 (없으면 만들고, 있으면 그냥 pass)
+      const savedSeries = String(settings.series || '').trim() || '1계열';
+      if (savedSeries === '2계열') {
+        db.prepare(`
+          UPDATE app_settings SET flow_option = CASE
+            WHEN flow_option IS NULL OR TRIM(flow_option) = '' THEN 'combined'
+            ELSE flow_option
+          END WHERE id = 1
+        `).run();
+      } else {
+        db.prepare(`UPDATE app_settings SET flow_option = 'single1' WHERE id = 1`).run();
+      }
+
+      // Drive가 설정돼 있으면 현장 폴더 + 기본 하위 폴더를 생성한다.
       let driveSiteFolder = null;
-      if (isDriveConfigured() && settings.siteName) {
+      let driveSubFolders = [];
+      let localSiteFolder = null;
+      let localSubFolders = [];
+      const defaultSubFolderNames = [
+        '게시판첨부파일',
+        '약품입고일지_사진',
+        '슬러지사진대장_사진',
+        '수질분석_데이타불러오기_사진',
+        '성적서',
+      ];
+
+      const currentSiteId = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || '';
+      const folderNameBySite = String(settings.siteName || '').trim() || String(currentSiteId || '').trim();
+
+      // 로컬(AppData)도 동일한 기본 폴더 세트를 항상 보장한다.
+      if (folderNameBySite) {
+        const localSitePath = path.join(siteStorageRoot, folderNameBySite);
+        fs.mkdirSync(localSitePath, { recursive: true });
+        localSiteFolder = { name: folderNameBySite, path: localSitePath };
+        for (const folderName of defaultSubFolderNames) {
+          const childPath = path.join(localSitePath, folderName);
+          fs.mkdirSync(childPath, { recursive: true });
+          localSubFolders.push({ name: folderName, path: childPath });
+        }
+      }
+
+      if (isDriveConfigured()) {
         try {
-          driveSiteFolder = await getOrCreateFolder(getDriveRootFolderId(), settings.siteName);
+          if (folderNameBySite) {
+            driveSiteFolder = await getOrCreateFolder(getDriveRootFolderId(), folderNameBySite);
+            for (const folderName of defaultSubFolderNames) {
+              const child = await getOrCreateFolder(driveSiteFolder.id, folderName);
+              driveSubFolders.push({
+                id: child.id,
+                name: child.name,
+                url: child.webViewLink,
+              });
+            }
+          }
         } catch (driveErr) {
-          console.error('[Settings] Drive 현장폴더 생성 실패:', driveErr.message);
+          console.error('[Settings] Drive 현장/기본폴더 생성 실패:', driveErr.message);
           // Drive 오류가 설정 저장을 막지 않도록 무시
         }
       }
@@ -96,9 +202,353 @@ module.exports = function (db, baseDir, appDataPath) {
       res.json({
         success: true,
         message: 'Settings saved successfully',
-        ...(driveSiteFolder ? { driveSiteFolder: { id: driveSiteFolder.id, name: driveSiteFolder.name, url: driveSiteFolder.webViewLink } } : {})
+        ...(localSiteFolder ? { localSiteFolder } : {}),
+        ...(localSubFolders.length > 0 ? { localSubFolders } : {}),
+        ...(driveSiteFolder ? { driveSiteFolder: { id: driveSiteFolder.id, name: driveSiteFolder.name, url: driveSiteFolder.webViewLink } } : {}),
+        ...(driveSubFolders.length > 0 ? { driveSubFolders } : {})
       });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+  });
+
+  // ── 기본설정 현장 위치 저장 (즉시 저장) ──
+  router.post('/api/settings/site-location', (req, res) => {
+    const { targetLat, targetLng } = req.body || {};
+    const lat = Number(targetLat);
+    const lng = Number(targetLng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ success: false, message: '유효한 위도/경도 값이 필요합니다.' });
+    }
+    try {
+      db.prepare('UPDATE app_settings SET target_lat = ?, target_lng = ? WHERE id = 1').run(lat, lng);
+      res.json({ success: true, targetLat: lat, targetLng: lng });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // ── 현장 목록 조회 ──
+  router.get('/api/settings/sites', async (req, res) => {
+    try {
+      if (!isSitesSheetsConfigured()) {
+        return res.status(400).json({ success: false, message: 'Google Sheets이 설정되지 않았습니다. (GOOGLE_MEMBERS_SHEET_ID)' });
+      }
+      const sheetSites = await getSitesFromSheets();
+      const sites = sheetSites
+        .filter((site) => site.is_active !== 0)
+        .map((site) => ({
+          id: site.id,
+          site_name: site.site_name,
+          manager_name: site.manager_name,
+          method: site.method,
+          series: site.series,
+          is_active: site.is_active
+        }));
+      const current = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get();
+      const fallbackSite = sites.find((site) => String(site.id) === String(current?.site_id)) || sites[0] || null;
+
+      if (fallbackSite && String(current?.site_id || '') !== String(fallbackSite.id)) {
+        const series = String(fallbackSite.series || '').trim() || '1계열';
+        const prev = db.prepare('SELECT flow_option FROM app_settings WHERE id = 1').get();
+        const prevOpt = prev?.flow_option != null ? String(prev.flow_option).trim() : '';
+        let flowOption = prevOpt;
+        if (series === '2계열') {
+          if (!flowOption) flowOption = 'combined';
+        } else {
+          flowOption = 'single1';
+        }
+        db.prepare(`
+          UPDATE app_settings
+          SET site_id = ?, site_name = ?, manager_name = ?, method = ?, series = ?, flow_option = ?
+          WHERE id = 1
+        `).run(
+          fallbackSite.id,
+          fallbackSite.site_name || '',
+          fallbackSite.manager_name || '',
+          fallbackSite.method || 'A2O',
+          series,
+          flowOption
+        );
+      }
+
+      res.json({ success: true, sites, currentSiteId: fallbackSite?.id || null, source: 'sheets' });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // ── 현장 추가/수정 ──
+  router.post('/api/settings/sites', async (req, res) => {
+    const { siteName, managerName, method, series, isActive, siteId } = req.body || {};
+    if (!siteName) {
+      return res.status(400).json({ success: false, message: 'siteName이 필요합니다.' });
+    }
+
+    try {
+      const id = String(siteId || crypto.randomUUID());
+      if (!isSitesSheetsConfigured()) {
+        return res.status(400).json({ success: false, message: 'Google Sheets이 설정되지 않았습니다. (GOOGLE_MEMBERS_SHEET_ID)' });
+      }
+      const site = {
+        id,
+        site_name: String(siteName).trim(),
+        manager_name: String(managerName || '').trim(),
+        method: String(method || 'A2O').trim(),
+        series: String(series || '1계열').trim(),
+        is_active: isActive === false ? 0 : 1
+      };
+      await upsertSiteToSheets(site);
+
+      res.json({ success: true, site });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // ── 현장 삭제(비활성) ──
+  router.delete('/api/settings/sites/:siteId', async (req, res) => {
+    const siteId = String(req.params.siteId || '').trim();
+    if (!siteId) {
+      return res.status(400).json({ success: false, message: 'siteId가 필요합니다.' });
+    }
+
+    try {
+      if (!isSitesSheetsConfigured()) {
+        return res.status(400).json({ success: false, message: 'Google Sheets이 설정되지 않았습니다. (GOOGLE_MEMBERS_SHEET_ID)' });
+      }
+      const sheetSites = await getSitesFromSheets();
+      const target = sheetSites.find((site) => String(site.id) === String(siteId) && site.is_active !== 0);
+      if (!target) {
+        return res.status(404).json({ success: false, message: '대상 현장을 찾을 수 없습니다.' });
+      }
+
+      await deleteSiteFromSheets(siteId);
+
+      db.transaction(() => {
+        db.prepare(`
+          UPDATE sites
+          SET is_active = 0, updated_at = datetime('now', 'localtime')
+          WHERE id = ?
+        `).run(siteId);
+
+        const current = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get();
+        if (current?.site_id === siteId) {
+          const fallback = db.prepare(`
+            SELECT id, site_name, manager_name, method, series
+            FROM sites
+            WHERE is_active = 1
+            ORDER BY COALESCE(created_at, updated_at, '') ASC, id ASC
+            LIMIT 1
+          `).get();
+
+          db.prepare(`
+            UPDATE app_settings
+            SET site_id = ?, site_name = ?, manager_name = ?, method = ?, series = ?
+            WHERE id = 1
+          `).run(
+            fallback?.id || null,
+            fallback?.site_name || '',
+            fallback?.manager_name || '',
+            fallback?.method || 'A2O',
+            fallback?.series || '1계열'
+          );
+        }
+      })();
+
+      res.json({ success: true, deletedSiteId: siteId });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // ── 현재 로컬 현장 선택 ──
+  router.post('/api/settings/select-site', async (req, res) => {
+    const { siteId } = req.body || {};
+    if (!siteId) {
+      return res.status(400).json({ success: false, message: 'siteId가 필요합니다.' });
+    }
+
+    try {
+      let site = null;
+      if (!isSitesSheetsConfigured()) {
+        return res.status(400).json({ success: false, message: 'Google Sheets이 설정되지 않았습니다. (GOOGLE_MEMBERS_SHEET_ID)' });
+      }
+      if (isSitesSheetsConfigured()) {
+        const sheetSites = await getSitesFromSheets();
+        const matched = sheetSites.find((item) => String(item.id) === String(siteId) && item.is_active !== 0);
+        if (matched) {
+          site = {
+            id: matched.id,
+            site_name: matched.site_name,
+            manager_name: matched.manager_name,
+            method: matched.method,
+            series: matched.series
+          };
+        }
+      }
+
+      if (!site) {
+        return res.status(404).json({ success: false, message: '대상 현장을 찾을 수 없습니다.' });
+      }
+
+      const series = String(site.series || '').trim() || '1계열';
+      const prev = db.prepare('SELECT flow_option FROM app_settings WHERE id = 1').get();
+      const prevOpt = prev?.flow_option != null ? String(prev.flow_option).trim() : '';
+      let flowOption = prevOpt;
+      if (series === '2계열') {
+        if (!flowOption) flowOption = 'combined';
+      } else {
+        flowOption = 'single1';
+      }
+
+      db.prepare(`
+        UPDATE app_settings
+        SET site_id = ?, site_name = ?, manager_name = ?, method = ?, series = ?, flow_option = ?
+        WHERE id = 1
+      `).run(site.id, site.site_name || '', site.manager_name || '', site.method || 'A2O', series, flowOption);
+
+      res.json({ success: true, site });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // ── 현장/회원 동시 저장 (로컬 + BigQuery 준비) ──
+  router.post('/api/settings/bootstrap-site-member', async (req, res) => {
+    const { site, member, link, syncToBigQuery } = req.body || {};
+
+    if (!site?.siteName || !member?.name || !member?.password) {
+      return res.status(400).json({ success: false, message: '현장명, 회원명, 비밀번호는 필수입니다.' });
+    }
+
+    try {
+      const appSetting = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get();
+      const siteId = String(site?.id || appSetting?.site_id || crypto.randomUUID());
+      const memberId = String(member.id || crypto.randomUUID());
+      const now = new Date().toISOString();
+
+      db.transaction(() => {
+        const bootSeries = String(site.series || '1계열').trim() || '1계열';
+        const bootFlowOpt = bootSeries === '2계열' ? 'combined' : 'single1';
+        db.prepare(`
+          UPDATE app_settings
+          SET site_id = ?, site_name = ?, manager_name = ?, method = ?, series = ?, flow_option = ?
+          WHERE id = 1
+        `).run(
+          siteId,
+          String(site.siteName || '').trim(),
+          String(site.managerName || '').trim(),
+          String(site.method || 'A2O').trim(),
+          bootSeries,
+          bootFlowOpt
+        );
+
+        db.prepare(`
+          INSERT INTO sites (id, site_name, manager_name, method, series, is_active, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 1, datetime('now', 'localtime'), datetime('now', 'localtime'))
+          ON CONFLICT(id) DO UPDATE SET
+            site_name = excluded.site_name,
+            manager_name = excluded.manager_name,
+            method = excluded.method,
+            series = excluded.series,
+            updated_at = datetime('now', 'localtime')
+        `).run(
+          siteId,
+          String(site.siteName || '').trim(),
+          String(site.managerName || '').trim(),
+          String(site.method || 'A2O').trim(),
+          String(site.series || '1계열').trim()
+        );
+
+        db.prepare(`
+          INSERT INTO members (
+            id, name, password, role, phone, target_lat, target_lng, radius_m, notes, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            password = excluded.password,
+            role = excluded.role,
+            phone = excluded.phone,
+            target_lat = excluded.target_lat,
+            target_lng = excluded.target_lng,
+            radius_m = excluded.radius_m,
+            notes = excluded.notes,
+            updated_at = datetime('now', 'localtime')
+        `).run(
+          memberId,
+          String(member.name || '').trim(),
+          String(member.password || ''),
+          String(member.role || 'admin'),
+          String(member.phone || '').trim(),
+          member.target_lat != null && member.target_lat !== '' ? Number(member.target_lat) : null,
+          member.target_lng != null && member.target_lng !== '' ? Number(member.target_lng) : null,
+          member.radius_m != null && member.radius_m !== '' ? Number(member.radius_m) : 500,
+          String(member.notes || '').trim()
+        );
+
+        db.prepare(`
+          INSERT INTO member_sites (member_id, site_id, is_primary, can_manage, is_bidirectional, created_at)
+          VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))
+          ON CONFLICT(member_id, site_id) DO UPDATE SET
+            is_primary = excluded.is_primary,
+            can_manage = excluded.can_manage,
+            is_bidirectional = excluded.is_bidirectional
+        `).run(
+          memberId,
+          siteId,
+          link?.isPrimary ? 1 : 0,
+          link?.canManage === false ? 0 : 1,
+          link?.isBidirectional ? 1 : 0
+        );
+
+        if (link?.isPrimary) {
+          db.prepare('UPDATE member_sites SET is_primary = 0 WHERE member_id = ? AND site_id != ?').run(memberId, siteId);
+        }
+      })();
+
+      let bigQuery = { success: false, message: '동기화 비활성화(ENABLE_SITE_MEMBER_BIGQUERY_SYNC != true)' };
+      if (ENABLE_SITE_MEMBER_BIGQUERY_SYNC && syncToBigQuery === true) {
+        await ensureSiteMemberTables();
+        bigQuery = await upsertSiteMemberSnapshot({
+          site: {
+            id: siteId,
+            site_name: String(site.siteName || '').trim(),
+            manager_name: String(site.managerName || '').trim(),
+            method: String(site.method || 'A2O').trim(),
+            series: String(site.series || '1계열').trim(),
+            is_active: 1,
+            updated_at: now
+          },
+          member: {
+            id: memberId,
+            name: String(member.name || '').trim(),
+            role: String(member.role || 'admin'),
+            phone: String(member.phone || '').trim(),
+            target_lat: member.target_lat != null && member.target_lat !== '' ? Number(member.target_lat) : null,
+            target_lng: member.target_lng != null && member.target_lng !== '' ? Number(member.target_lng) : null,
+            radius_m: member.radius_m != null && member.radius_m !== '' ? Number(member.radius_m) : 500,
+            notes: String(member.notes || '').trim(),
+            updated_at: now
+          },
+          link: {
+            member_id: memberId,
+            site_id: siteId,
+            is_primary: Boolean(link?.isPrimary),
+            can_manage: link?.canManage === false ? false : true,
+            is_bidirectional: Boolean(link?.isBidirectional),
+            updated_at: now
+          }
+        });
+      }
+
+      res.json({
+        success: true,
+        siteId,
+        memberId,
+        bigQuery
+      });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
   });
 
   // ── 유량 매핑 옵션 저장 ──
@@ -240,7 +690,20 @@ module.exports = function (db, baseDir, appDataPath) {
       db.prepare('DELETE FROM flow_readings').run();
       console.log('[FlowMapping] Cleared all flow_readings for clean re-import');
 
-      const insertReading = db.prepare('INSERT INTO flow_readings (date, type, raw_value, calculated_flow) VALUES (?, ?, ?, ?) ON CONFLICT(date, type) DO UPDATE SET raw_value = COALESCE(excluded.raw_value, raw_value), calculated_flow = COALESCE(excluded.calculated_flow, calculated_flow)');
+      const metadata = getCurrentRecordMetadata(db, config || {});
+      const insertReading = db.prepare(`
+        INSERT INTO flow_readings (
+          date, type, raw_value, calculated_flow, site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(date, type) DO UPDATE SET
+          raw_value = COALESCE(excluded.raw_value, raw_value),
+          calculated_flow = COALESCE(excluded.calculated_flow, calculated_flow),
+          site_id = excluded.site_id,
+          site_name = excluded.site_name,
+          author = excluded.author,
+          last_modified = excluded.last_modified,
+          is_synced = excluded.is_synced
+      `);
       const importedData = [];
 
       // mapping에서 _raw/_flow 키만 파싱하여 유량계별 컬럼 매핑 구성
@@ -276,7 +739,18 @@ module.exports = function (db, baseDir, appDataPath) {
             }
 
             if (rawValue !== null || calcFlow !== null) {
-              insertReading.run(formatted, itemName, rawValue, calcFlow);
+              insertReading.run(
+                formatted,
+                itemName,
+                rawValue,
+                calcFlow,
+                metadata.siteId,
+                metadata.siteName,
+                metadata.author,
+                metadata.createdAt,
+                metadata.lastModified,
+                metadata.isSynced
+              );
               if (rawValue !== null) rowResults[`${itemName}_적산`] = rawValue;
               if (calcFlow !== null) rowResults[`${itemName}_누계`] = calcFlow;
             }
@@ -323,7 +797,21 @@ module.exports = function (db, baseDir, appDataPath) {
         kits[name][field] = mapping[key];
       });
 
-      const insertKit = db.prepare('INSERT INTO kit_logs (kit_name, date, purchase_amount, usage_amount, current_inventory) VALUES (?, ?, ?, ?, ?) ON CONFLICT(kit_name, date) DO UPDATE SET purchase_amount = excluded.purchase_amount, usage_amount = excluded.usage_amount, current_inventory = excluded.current_inventory');
+      const metadata = getCurrentRecordMetadata(db, config || {});
+      const insertKit = db.prepare(`
+        INSERT INTO kit_logs (
+          kit_name, date, purchase_amount, usage_amount, current_inventory, site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(kit_name, date) DO UPDATE SET
+          purchase_amount = excluded.purchase_amount,
+          usage_amount = excluded.usage_amount,
+          current_inventory = excluded.current_inventory,
+          site_id = excluded.site_id,
+          site_name = excluded.site_name,
+          author = excluded.author,
+          last_modified = excluded.last_modified,
+          is_synced = excluded.is_synced
+      `);
       const importedData = [];
 
       db.transaction(() => {
@@ -340,7 +828,19 @@ module.exports = function (db, baseDir, appDataPath) {
             const usage = isNaN(rawU) ? 0 : Math.round(rawU * 10) / 10;
             const inventory = isNaN(rawI) ? 0 : Math.round(rawI * 10) / 10;
             if (purchase || usage || inventory) {
-              insertKit.run(kitName, formatted, purchase, usage, inventory);
+              insertKit.run(
+                kitName,
+                formatted,
+                purchase,
+                usage,
+                inventory,
+                metadata.siteId,
+                metadata.siteName,
+                metadata.author,
+                metadata.createdAt,
+                metadata.lastModified,
+                metadata.isSynced
+              );
               rowResults[`${kitName}_구매`] = purchase;
               rowResults[`${kitName}_사용`] = usage;
               rowResults[`${kitName}_재고`] = inventory;
@@ -385,7 +885,21 @@ module.exports = function (db, baseDir, appDataPath) {
         medicines[name][field] = mapping[key];
       });
 
-      const insertMed = db.prepare('INSERT INTO medicine_logs (medicine_name, date, purchase_amount, usage_amount, current_inventory) VALUES (?, ?, ?, ?, ?) ON CONFLICT(medicine_name, date) DO UPDATE SET purchase_amount = excluded.purchase_amount, usage_amount = excluded.usage_amount, current_inventory = excluded.current_inventory');
+      const metadata = getCurrentRecordMetadata(db, config || {});
+      const insertMed = db.prepare(`
+        INSERT INTO medicine_logs (
+          medicine_name, date, purchase_amount, usage_amount, current_inventory, site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(medicine_name, date) DO UPDATE SET
+          purchase_amount = excluded.purchase_amount,
+          usage_amount = excluded.usage_amount,
+          current_inventory = excluded.current_inventory,
+          site_id = excluded.site_id,
+          site_name = excluded.site_name,
+          author = excluded.author,
+          last_modified = excluded.last_modified,
+          is_synced = excluded.is_synced
+      `);
       const importedData = [];
 
       db.transaction(() => {
@@ -402,7 +916,19 @@ module.exports = function (db, baseDir, appDataPath) {
             const usage = isNaN(rawU) ? 0 : Math.round(rawU * 10) / 10;
             const inventory = isNaN(rawI) ? 0 : Math.round(rawI * 10) / 10;
             if (purchase || usage || inventory) {
-              insertMed.run(medName, formatted, purchase, usage, inventory);
+              insertMed.run(
+                medName,
+                formatted,
+                purchase,
+                usage,
+                inventory,
+                metadata.siteId,
+                metadata.siteName,
+                metadata.author,
+                metadata.createdAt,
+                metadata.lastModified,
+                metadata.isSynced
+              );
               rowResults[`${medName}_구매`] = purchase;
               rowResults[`${medName}_사용`] = usage;
               rowResults[`${medName}_재고`] = inventory;
@@ -464,12 +990,17 @@ module.exports = function (db, baseDir, appDataPath) {
 
       const insertWater = db.prepare(`
         INSERT INTO water_quality (
-          date, measurement_group, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss,
-          site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+          date, measurement_group, measurement_order, source_type, source_label,
+          location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss,
+          site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
         ON CONFLICT(date, measurement_group, location) DO UPDATE SET 
+          measurement_order = excluded.measurement_order,
+          source_type = excluded.source_type,
+          source_label = excluded.source_label,
           nh3_n = excluded.nh3_n, no3_n = excluded.no3_n, 
           po4_p = excluded.po4_p, alkalinity = excluded.alkalinity,
+          site_id = excluded.site_id,
           site_name = excluded.site_name,
           author = excluded.author,
           last_modified = excluded.last_modified,
@@ -479,18 +1010,53 @@ module.exports = function (db, baseDir, appDataPath) {
       const importedData = [];
 
       db.transaction(() => {
-        const metadata = getCurrentRecordMetadata(db);
+        const metadata = getCurrentRecordMetadata(db, config || {});
+        // TODO(site-id): 다중현장 전환 시 date + site_id 범위로 정리하도록 변경
+        const deleteImportedByDate = db.prepare("DELETE FROM water_quality WHERE date = ? AND (source_type = 'excel' OR measurement_group = '')");
+        const cleanedDates = new Set();
+        const dateOrderCounter = new Map();
+
         for (let r = startRow; r <= endRow; r++) {
           const dateStr = getCellValue(db, sheet, r, dateCol);
           const formatted = formatDate(dateStr) || dateStr;
           if (!formatted) { importProgress.current++; continue; }
 
-          const rowResults = { date: formatted };
+          if (!cleanedDates.has(formatted)) {
+            deleteImportedByDate.run(formatted);
+            cleanedDates.add(formatted);
+          }
+
+          const nextOrder = (dateOrderCounter.get(formatted) || 0) + 1;
+          dateOrderCounter.set(formatted, nextOrder);
+          const measurementGroup = `excel:${formatted}:${String(nextOrder).padStart(3, '0')}`;
+
+          const rowResults = { date: formatted, measurement_group: measurementGroup };
 
           // Default location if no locations are mapped (fallback to '기본')
           if (Object.keys(locations).length === 0) {
-            insertWater.run(formatted, '', '기본', null, null, null, null, null, null, null, null, metadata.siteName, metadata.author, metadata.createdAt, metadata.lastModified, metadata.isSynced);
-            importedData.push({ date: formatted, location: '기본' });
+            insertWater.run(
+              formatted,
+              measurementGroup,
+              nextOrder,
+              'excel',
+              sheet,
+              '기본',
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              metadata.siteId,
+              metadata.siteName,
+              metadata.author,
+              metadata.createdAt,
+              metadata.lastModified,
+              metadata.isSynced
+            );
+            importedData.push({ date: formatted, measurement_group: measurementGroup, location: '기본' });
           } else {
             Object.entries(locations).forEach(([locName, cols]) => {
               const vals = { nh3_n: null, no3_n: null, po4_p: null, alkalinity: null };
@@ -503,7 +1069,28 @@ module.exports = function (db, baseDir, appDataPath) {
               });
 
               // tn, tp, cod, ss는 키트 분석 항목이 아니므로 null로 저장
-              insertWater.run(formatted, '', locName, vals.nh3_n, vals.no3_n, vals.po4_p, vals.alkalinity, null, null, null, null, metadata.siteName, metadata.author, metadata.createdAt, metadata.lastModified, metadata.isSynced);
+              insertWater.run(
+                formatted,
+                measurementGroup,
+                nextOrder,
+                'excel',
+                sheet,
+                locName,
+                vals.nh3_n,
+                vals.no3_n,
+                vals.po4_p,
+                vals.alkalinity,
+                null,
+                null,
+                null,
+                null,
+                metadata.siteId,
+                metadata.siteName,
+                metadata.author,
+                metadata.createdAt,
+                metadata.lastModified,
+                metadata.isSynced
+              );
 
               rowResults[`${locName}_nh3_n`] = vals.nh3_n;
             });
@@ -633,12 +1220,38 @@ module.exports = function (db, baseDir, appDataPath) {
       const stmt = db.prepare(
         "UPDATE config_items SET default_amount = ? WHERE category = 'medicine' AND item_name = ?"
       );
-      db.transaction((rows) => {
-        for (const { name, defaultAmount } of rows) {
-          stmt.run(Number(defaultAmount) || 0, name);
+      const rows = items.filter((it) => it && String(it.name ?? '').trim());
+      let totalChanges = 0;
+      db.transaction((list) => {
+        for (const it of list) {
+          const name = String(it.name ?? '').trim();
+          if (!name) continue;
+          const raw = it.defaultAmount ?? it.default_amount ?? 0;
+          const amt = Number(raw);
+          const safeAmt = Number.isFinite(amt) ? amt : 0;
+          totalChanges += stmt.run(safeAmt, name).changes;
         }
-      })(items);
-      res.json({ success: true });
+      })(rows);
+
+      if (rows.length > 0 && totalChanges === 0) {
+        return res.json({
+          success: false,
+          message:
+            'DB의 약품 항목과 이름이 하나도 맞지 않아 저장되지 않았습니다. 설정 > 약품 탭에서 약품 목록을 먼저 적용 저장한 뒤, 기본 입고량을 다시 저장해 주세요.',
+          updatedCount: 0,
+        });
+      }
+
+      const skipped = rows.length - totalChanges;
+      res.json({
+        success: true,
+        updatedCount: totalChanges,
+        ...(skipped > 0
+          ? {
+              warning: `${skipped}개 항목은 config_items 약품명과 일치하지 않아 반영되지 않았습니다.`,
+            }
+          : {}),
+      });
     } catch (e) {
       res.status(500).json({ success: false, message: e.message });
     }
@@ -669,12 +1282,38 @@ module.exports = function (db, baseDir, appDataPath) {
       const stmt = db.prepare(
         "UPDATE config_items SET default_amount = ? WHERE category = 'kit' AND item_name = ?"
       );
-      db.transaction((rows) => {
-        for (const { name, defaultAmount } of rows) {
-          stmt.run(Number(defaultAmount) || 0, name);
+      const rows = items.filter((it) => it && String(it.name ?? '').trim());
+      let totalChanges = 0;
+      db.transaction((list) => {
+        for (const it of list) {
+          const name = String(it.name ?? '').trim();
+          if (!name) continue;
+          const raw = it.defaultAmount ?? it.default_amount ?? 0;
+          const amt = Number(raw);
+          const safeAmt = Number.isFinite(amt) ? amt : 0;
+          totalChanges += stmt.run(safeAmt, name).changes;
         }
-      })(items);
-      res.json({ success: true });
+      })(rows);
+
+      if (rows.length > 0 && totalChanges === 0) {
+        return res.json({
+          success: false,
+          message:
+            'DB의 키트 항목과 이름이 하나도 맞지 않아 저장되지 않았습니다. 설정 > 키트 탭에서 키트 목록을 먼저 적용 저장한 뒤 다시 시도해 주세요.',
+          updatedCount: 0,
+        });
+      }
+
+      const skipped = rows.length - totalChanges;
+      res.json({
+        success: true,
+        updatedCount: totalChanges,
+        ...(skipped > 0
+          ? {
+              warning: `${skipped}개 항목은 config_items 키트명과 일치하지 않아 반영되지 않았습니다.`,
+            }
+          : {}),
+      });
     } catch (e) {
       res.status(500).json({ success: false, message: e.message });
     }
@@ -704,6 +1343,78 @@ module.exports = function (db, baseDir, appDataPath) {
 
       const row = db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
       res.json({ success: true, settings: row });
+    } catch (e) {
+      res.status(500).json({ success: false, message: e.message });
+    }
+  });
+
+  // ── 초기 동기화: 로컬 DB의 모든 회원/현장 → Google Sheets ──
+  router.post('/api/settings/sync-initial-to-sheets', async (req, res) => {
+    try {
+      if (!ENABLE_INITIAL_SYNC_TO_SHEETS) {
+        return res.status(403).json({
+          success: false,
+          message: '초기 동기화 기능이 비활성화되어 있습니다. (ENABLE_INITIAL_SYNC_TO_SHEETS != true)'
+        });
+      }
+
+      if (!isMembersSheetsConfigured()) {
+        return res.status(400).json({ success: false, message: 'Google Sheets이 설정되지 않았습니다. (GOOGLE_MEMBERS_SHEET_ID)' });
+      }
+
+      const members = db.prepare('SELECT * FROM members').all();
+      const sites = db.prepare('SELECT * FROM sites WHERE is_active = 1').all();
+
+      let memberCount = 0;
+      let siteCount = 0;
+      const errors = [];
+
+      // 회원 동기화
+      for (const member of members) {
+        try {
+          await upsertMemberToSheets({
+            id: member.id,
+            name: member.name,
+            password: member.password,
+            role: member.role,
+            site_name1: member.site_name1,
+            phone: member.phone,
+            target_lat: member.target_lat,
+            target_lng: member.target_lng,
+            radius_m: member.radius_m,
+            notes: member.notes
+          });
+          memberCount++;
+        } catch (err) {
+          errors.push(`회원 동기화 실패 (${member.name}): ${err.message}`);
+        }
+      }
+
+      // 현장 동기화
+      for (const site of sites) {
+        try {
+          await upsertSiteToSheets({
+            id: site.id,
+            site_name: site.site_name,
+            manager_name: site.manager_name,
+            method: site.method,
+            series: site.series,
+            is_active: site.is_active
+          });
+          siteCount++;
+        } catch (err) {
+          errors.push(`현장 동기화 실패 (${site.site_name}): ${err.message}`);
+        }
+      }
+
+      res.json({
+        success: errors.length === 0,
+        message: errors.length === 0 ? '초기 동기화 완료' : '초기 동기화 일부 실패',
+        memberCount,
+        siteCount,
+        totalCount: memberCount + siteCount,
+        errors: errors.length > 0 ? errors : null
+      });
     } catch (e) {
       res.status(500).json({ success: false, message: e.message });
     }

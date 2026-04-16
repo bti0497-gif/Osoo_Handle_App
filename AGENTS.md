@@ -10,7 +10,6 @@
 - **앱**: 오수처리장 관리 앱 (Osoo Handle App)
 - **프론트엔드**: React 19 + Vite (MVVM 아키텍처)
 - **백엔드**: Express + better-sqlite3 (로컬 서버)
-- **클라우드**: Supabase (인증, 출석, 게시판, 회원)
 - **패키징**: Electron + electron-builder (Windows 설치파일)
 - **자동 업데이트**: electron-updater + GitHub Releases
 - **서버 안정성**: start.cjs 워치독 (자동 재시작)
@@ -38,7 +37,7 @@
 │
 ├── src/
 │   ├── core/               ← 공통 인프라 (절대 구조 변경 금지)
-│   │   ├── api/            ← apiClient.js, supabaseClient.js, serverConfig.js
+│   │   ├── api/            ← apiClient.js, serverConfig.js
 │   │   └── constants/      ← index.js (메뉴, 탭, 역할 상수)
 │   │
 │   ├── features/           ← 기능 모듈 (아래 패턴 준수)
@@ -67,8 +66,7 @@
 ### Model (데이터 레이어)
 - 파일명: `{Name}Model.js`
 - 역할: API 호출만 담당
-- API 클라이언트: `import { apiClient } from '../../core/api'` (로컬)
-- Supabase: `import { supabase } from '../../core/api'` (클라우드)
+- API 클라이언트: `import { apiClient } from '../../core/api'` (로컬 Express)
 - **금지**: fetch() 직접 호출, 비즈니스 로직
 
 ### ViewModel (비즈니스 로직)
@@ -104,7 +102,6 @@
 - `server.cjs` (루트)에 로직 추가
 - `src/models/`, `src/viewmodels/` 같은 flat 구조로 파일 생성
 - View 안에서 직접 fetch() 호출
-- 각 파일에서 Supabase 클라이언트 개별 생성
 - `index.css`에 직접 스타일 작성
 - `start.cjs` 수정
 - `/api/ping` 엔드포인트 제거 또는 변경
@@ -132,7 +129,6 @@
 | 프론트엔드 | React 19 + Vite 7 | SWC 플러그인 |
 | 상태관리 | React Hooks (useState/useEffect) | 외부 라이브러리 없음 |
 | HTTP 클라이언트 | `src/core/api/apiClient.js` | 자동 재연결, 에러 핸들링 |
-| 클라우드 DB | Supabase | `src/core/api/supabaseClient.js` 싱글톤 |
 | 로컬 DB | better-sqlite3 | `server/database.cjs` |
 | 서버 | Express 5 | `server/index.cjs` |
 | 포트 탐색 | 8901~8950 자동 | serverConfig.js ↔ server/index.cjs |

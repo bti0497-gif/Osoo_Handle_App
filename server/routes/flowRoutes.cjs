@@ -14,16 +14,86 @@ module.exports = function (db) {
     return currentYear ? previousCumulative + (sludgeExport ?? 0) : (sludgeExport ?? 0);
   }
 
+  function recalculateFlowTypeCascade(dbConn, type, metadata) {
+    const rows = dbConn.prepare(`
+      SELECT id, date, raw_value, sludge_export
+      FROM flow_readings
+      WHERE type = ?
+      ORDER BY date ASC, id ASC
+    `).all(type);
+
+    const updateStmt = dbConn.prepare(`
+      UPDATE flow_readings
+      SET calculated_flow = ?,
+          site_id = ?,
+          site_name = ?,
+          author = ?,
+          last_modified = ?,
+          is_synced = ?
+      WHERE id = ?
+    `);
+
+    let prevRaw = null;
+    let prevSludgeYear = null;
+    let prevSludgeCumulative = 0;
+
+    for (const row of rows) {
+      const rawNum = row.raw_value == null ? null : Number(row.raw_value);
+      const hasRaw = rawNum != null && Number.isFinite(rawNum);
+      let flow = null;
+
+      if (type === '슬러지') {
+        const sludgeRaw = row.sludge_export ?? row.raw_value;
+        const sludgeNum = sludgeRaw == null ? null : Number(sludgeRaw);
+        const hasSludge = sludgeNum != null && Number.isFinite(sludgeNum);
+        if (hasSludge) {
+          const y = String(row.date || '').slice(0, 4);
+          if (y !== prevSludgeYear) {
+            prevSludgeYear = y;
+            prevSludgeCumulative = 0;
+          }
+          flow = Math.round((prevSludgeCumulative + sludgeNum) * 10) / 10;
+          prevSludgeCumulative = flow;
+        }
+      } else if (hasRaw) {
+        if (prevRaw != null && Number.isFinite(prevRaw)) {
+          flow = Math.round((rawNum - prevRaw) * 10) / 10;
+        }
+        prevRaw = rawNum;
+      }
+
+      updateStmt.run(
+        flow,
+        metadata.siteId,
+        metadata.siteName,
+        metadata.author,
+        metadata.lastModified,
+        metadata.isSynced,
+        row.id
+      );
+    }
+  }
+
   router.get('/api/flows', (req, res) => {
-    const { date } = req.query;
-    const flows = db.prepare('SELECT * FROM flow_readings WHERE date = ?').all(date);
+    const { date, site_id } = req.query;
+    const sql = site_id
+      ? 'SELECT * FROM flow_readings WHERE date = ? AND site_id = ?'
+      : 'SELECT * FROM flow_readings WHERE date = ?';
+    const flows = site_id
+      ? db.prepare(sql).all(date, String(site_id))
+      : db.prepare(sql).all(date);
     res.json(flows);
   });
 
   router.get('/api/flows/history', (req, res) => {
     try {
-      const dates = db.prepare('SELECT DISTINCT date FROM flow_readings ORDER BY date ASC').all();
-      const allReadings = db.prepare('SELECT * FROM flow_readings ORDER BY date ASC, type ASC').all();
+      const { site_id } = req.query;
+      const dates = site_id
+        ? db.prepare('SELECT DISTINCT date FROM flow_readings WHERE site_id = ? ORDER BY date ASC').all(String(site_id))
+        : db.prepare('SELECT DISTINCT date FROM flow_readings ORDER BY date ASC').all();
+      const allReadings = site_id
+        ? db.prepare('SELECT * FROM flow_readings WHERE site_id = ? ORDER BY date ASC, type ASC').all(String(site_id))
+        : db.prepare('SELECT * FROM flow_readings ORDER BY date ASC, type ASC').all();
 
       const history = dates.map(d => {
         const row = { date: d.date };
@@ -65,8 +135,8 @@ module.exports = function (db) {
           is_synced = excluded.is_synced
       `);
 
+      const metadata = getCurrentRecordMetadata(db, req.body);
       const insertMany = db.transaction((rows) => {
-        const metadata = getCurrentRecordMetadata(db);
         for (const item of rows) {
           const { type, raw_value, calculated_flow, sludge_export, is_reset, is_manual } = item;
           const sludgeAmount = type === '슬러지' ? (sludge_export ?? raw_value ?? null) : null;
@@ -91,6 +161,12 @@ module.exports = function (db) {
       });
 
       insertMany(items);
+      const touchedTypes = new Set(items.map((it) => it.type).filter(Boolean));
+      db.transaction(() => {
+        for (const type of touchedTypes) {
+          recalculateFlowTypeCascade(db, type, metadata);
+        }
+      })();
 
       res.json({ success: true, results });
     } catch (err) {
@@ -102,7 +178,7 @@ module.exports = function (db) {
   router.post('/api/flows', (req, res) => {
     const { date, type, raw_value, is_reset, is_manual, manual_flow, sludge_export } = req.body;
     try {
-      const metadata = getCurrentRecordMetadata(db);
+      const metadata = getCurrentRecordMetadata(db, req.body);
       const prevReading = db.prepare('SELECT raw_value, calculated_flow, date FROM flow_readings WHERE type = ? AND date < ? ORDER BY date DESC LIMIT 1').get(type, date);
 
       // 보정 로직 동일 적용
@@ -156,6 +232,9 @@ module.exports = function (db) {
         metadata.lastModified,
         metadata.isSynced
       );
+      db.transaction(() => {
+        recalculateFlowTypeCascade(db, type, metadata);
+      })();
       res.json({ success: true, id: info.lastInsertRowid });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });

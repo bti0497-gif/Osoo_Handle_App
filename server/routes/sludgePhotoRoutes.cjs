@@ -10,12 +10,54 @@ const {
   buildExcelTempPath,
   openExcelFile,
 } = require('../services/excelOpenService.cjs');
+const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 function sanitizeName(name) {
   return String(name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
+}
+
+function toDateStamp(date) {
+  return String(date || '').replace(/-/g, '').slice(0, 8);
+}
+
+function getSludgePhotoDir(appDataPath, date) {
+  const year = String(date || '').slice(0, 4);
+  return path.join(appDataPath, '사진관리', '슬러지', year);
+}
+
+function listSludgeSequenceFiles(appDataPath, date) {
+  const dir = getSludgePhotoDir(appDataPath, date);
+  if (!fs.existsSync(dir)) return [];
+  const stamp = toDateStamp(date);
+  const re = new RegExp(`^${stamp}-슬러지(\\d+)\\.jpg$`);
+  const files = [];
+  for (const fileName of fs.readdirSync(dir)) {
+    const m = String(fileName).match(re);
+    if (!m) continue;
+    files.push({ fileName, index: Number(m[1]) || 0 });
+  }
+  files.sort((a, b) => a.index - b.index);
+  return files;
+}
+
+function resolveLatestSludgePhotoInfo(appDataPath, date) {
+  const dir = getSludgePhotoDir(appDataPath, date);
+  const files = listSludgeSequenceFiles(appDataPath, date);
+  if (files.length === 0) return null;
+  const last = files[files.length - 1];
+  return {
+    fileName: last.fileName,
+    index: last.index,
+    filePath: path.join(dir, last.fileName),
+    url: `/사진관리/슬러지/${String(date).slice(0, 4)}/${last.fileName}`,
+  };
+}
+
+function buildCertificateFileName(date) {
+  return `${toDateStamp(date)}-청소필증.jpg`;
 }
 
 /**
@@ -109,8 +151,12 @@ async function savePhotoToLocal(appDataPath, date, label, srcPath) {
   const sharp    = require('sharp');
   const srcBuf   = fs.readFileSync(srcPath);
   const year     = String(date).slice(0, 4);
-  const fileName = `${date}-${sanitizeName(label)}.jpg`;
-  const destDir  = path.join(appDataPath, '사진관리', '슬러지', year);
+  const stamp    = toDateStamp(date);
+  const isSludge = label === '반출';
+  const fileName = isSludge
+    ? `${stamp}-슬러지${(resolveLatestSludgePhotoInfo(appDataPath, date)?.index || 0) + 1}.jpg`
+    : buildCertificateFileName(date);
+  const destDir  = getSludgePhotoDir(appDataPath, date);
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   const destPath = path.join(destDir, fileName);
 
@@ -132,14 +178,28 @@ async function savePhotoToLocal(appDataPath, date, label, srcPath) {
 
 function photoUrl(date, label) {
   const year = String(date).slice(0, 4);
-  return `/사진관리/슬러지/${year}/${date}-${sanitizeName(label)}.jpg`;
+  if (label === '반출') {
+    const stamp = toDateStamp(date);
+    return `/사진관리/슬러지/${year}/${stamp}-슬러지1.jpg`;
+  }
+  return `/사진관리/슬러지/${year}/${buildCertificateFileName(date)}`;
 }
 
 function resolvePhotoUrl(appDataPath, date, label) {
-  const year     = String(date).slice(0, 4);
-  const filePath = path.join(appDataPath, '사진관리', '슬러지', year,
-                             `${date}-${sanitizeName(label)}.jpg`);
-  return fs.existsSync(filePath) ? photoUrl(date, label) : null;
+  if (label === '반출') {
+    return resolveLatestSludgePhotoInfo(appDataPath, date)?.url || null;
+  }
+  const year = String(date).slice(0, 4);
+  const filePath = path.join(getSludgePhotoDir(appDataPath, date), buildCertificateFileName(date));
+  return fs.existsSync(filePath) ? `/사진관리/슬러지/${year}/${buildCertificateFileName(date)}` : null;
+}
+
+function resolveLocalPathFromUrl(appDataPath, url) {
+  const raw = String(url || '').trim();
+  if (!raw.startsWith('/사진관리/슬러지/')) return null;
+  const relative = raw.replace(/^\/사진관리\/슬러지\//, '');
+  const candidate = path.join(appDataPath, '사진관리', '슬러지', relative);
+  return fs.existsSync(candidate) ? candidate : null;
 }
 
 function getMergedSludgeRows(db, start, end) {
@@ -286,9 +346,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const { date, sludge_amount, sludge_photo_path, certificate_photo_path, note } = req.body;
       if (!date) return res.status(400).json({ success: false, error: '날짜가 없습니다.' });
 
-      const settings = db.prepare('SELECT site_name, manager_name FROM app_settings WHERE id = 1').get();
-      const siteName = settings?.site_name    || '';
-      const author   = settings?.manager_name || '';
+      const metadata = getCurrentRecordMetadata(db, req.body);
 
       const { takenAt: newTakenAt } = await savePhotoToLocal(appDataPath, date, '반출', sludge_photo_path);
       await savePhotoToLocal(appDataPath, date, '청소필증', certificate_photo_path);
@@ -306,14 +364,15 @@ module.exports = function (db, baseDir, appDataPath) {
       db.prepare(`
         INSERT INTO sludge_photo_logs
           (date, sludge_amount, sludge_photo_path, sludge_photo_taken_at,
-           certificate_photo_path, note, site_name, author, created_at, last_modified)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           certificate_photo_path, note, site_id, site_name, author, created_at, last_modified)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(date) DO UPDATE SET
           sludge_amount          = excluded.sludge_amount,
           sludge_photo_path      = excluded.sludge_photo_path,
           sludge_photo_taken_at  = excluded.sludge_photo_taken_at,
           certificate_photo_path = excluded.certificate_photo_path,
           note                   = excluded.note,
+          site_id                = excluded.site_id,
           site_name              = excluded.site_name,
           author                 = excluded.author,
           last_modified          = excluded.last_modified
@@ -321,7 +380,7 @@ module.exports = function (db, baseDir, appDataPath) {
         date,
         sludge_amount != null ? Number(sludge_amount) : null,
         sludgeUrl, finalTakenAt, certUrl,
-        note || null, siteName, author, now, now
+        note || null, metadata.siteId, metadata.siteName, metadata.author, now, now
       );
 
       // flow_readings 동기화
@@ -336,9 +395,9 @@ module.exports = function (db, baseDir, appDataPath) {
         } else {
           db.prepare(`
             INSERT INTO flow_readings
-              (date, type, sludge_export, site_name, author, created_at, last_modified, is_synced)
-            VALUES (?, '슬러지', ?, ?, ?, ?, ?, 0)
-          `).run(date, Number(sludge_amount), siteName, author, now, now);
+              (date, type, sludge_export, site_id, site_name, author, created_at, last_modified, is_synced)
+            VALUES (?, '슬러지', ?, ?, ?, ?, ?, ?, 0)
+          `).run(date, Number(sludge_amount), metadata.siteId, metadata.siteName, metadata.author, now, now);
         }
       }
 
@@ -364,8 +423,12 @@ module.exports = function (db, baseDir, appDataPath) {
       const label    = type === 'certificate' ? '청소필증' : '반출';
       const sharp    = require('sharp');
       const year     = String(date).slice(0, 4);
-      const fileName = `${date}-${sanitizeName(label)}.jpg`;
-      const destDir  = path.join(appDataPath, '사진관리', '슬러지', year);
+      const stamp    = toDateStamp(date);
+      const isSludge = label === '반출';
+      const fileName = isSludge
+        ? `${stamp}-슬러지${(resolveLatestSludgePhotoInfo(appDataPath, date)?.index || 0) + 1}.jpg`
+        : buildCertificateFileName(date);
+      const destDir  = getSludgePhotoDir(appDataPath, date);
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       const destPath = path.join(destDir, fileName);
 
@@ -380,7 +443,9 @@ module.exports = function (db, baseDir, appDataPath) {
         await sharp(srcBuf).rotate().jpeg({ quality: 90 }).toFile(destPath);
       }
 
-      const url     = photoUrl(date, label);
+      const url     = label === '반출'
+        ? `/사진관리/슬러지/${year}/${fileName}`
+        : `/사진관리/슬러지/${year}/${buildCertificateFileName(date)}`;
       const takenAt = type === 'sludge'
         ? (isBmp
             ? (clientTakenAt || nowDateTimeString())
@@ -400,18 +465,18 @@ module.exports = function (db, baseDir, appDataPath) {
           ).run(url, now, date);
         }
       } else {
-        const s = db.prepare('SELECT site_name, manager_name FROM app_settings WHERE id = 1').get();
+        const metadata = getCurrentRecordMetadata(db, req.body);
         db.prepare(`
           INSERT INTO sludge_photo_logs
             (date, sludge_photo_path, sludge_photo_taken_at, certificate_photo_path,
-             site_name, author, created_at, last_modified)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             site_id, site_name, author, created_at, last_modified)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           date,
           type === 'sludge'       ? url : null,
           type === 'sludge'       ? takenAt : null,
           type === 'certificate'  ? url : null,
-          s?.site_name || '', s?.manager_name || '', now, now
+          metadata.siteId, metadata.siteName, metadata.author, now, now
         );
       }
 
@@ -427,9 +492,18 @@ module.exports = function (db, baseDir, appDataPath) {
     try {
       const { date } = req.params;
       const year = String(date).slice(0, 4);
-      for (const label of ['반출', '청소필증']) {
-        const fp = path.join(appDataPath, '사진관리', '슬러지', year, `${date}-${sanitizeName(label)}.jpg`);
-        if (fs.existsSync(fp)) fs.unlinkSync(fp);
+      const sludgeDir = getSludgePhotoDir(appDataPath, date);
+      const stamp = toDateStamp(date);
+      if (fs.existsSync(sludgeDir)) {
+        const re = new RegExp(`^${stamp}-슬러지\\d+\\.jpg$`);
+        for (const fileName of fs.readdirSync(sludgeDir)) {
+          if (re.test(String(fileName))) {
+            const fp = path.join(sludgeDir, fileName);
+            if (fs.existsSync(fp)) fs.unlinkSync(fp);
+          }
+        }
+        const cert = path.join(sludgeDir, buildCertificateFileName(date));
+        if (fs.existsSync(cert)) fs.unlinkSync(cert);
       }
       db.prepare('DELETE FROM sludge_photo_logs WHERE date = ?').run(date);
       res.json({ success: true });
@@ -466,12 +540,12 @@ module.exports = function (db, baseDir, appDataPath) {
       const settings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
 
       const items = rows.map(r => {
-        const sl = path.join(appDataPath, '사진관리', '슬러지', String(year), `${r.date}-반출.jpg`);
-        const cl = path.join(appDataPath, '사진관리', '슬러지', String(year), `${r.date}-청소필증.jpg`);
+        const sl = resolveLocalPathFromUrl(appDataPath, r.sludge_photo_path);
+        const cl = resolveLocalPathFromUrl(appDataPath, r.certificate_photo_path);
         return {
           ...r,
-          sludge_photo_local      : fs.existsSync(sl) ? sl : null,
-          certificate_photo_local : fs.existsSync(cl) ? cl : null,
+          sludge_photo_local      : sl && fs.existsSync(sl) ? sl : null,
+          certificate_photo_local : cl && fs.existsSync(cl) ? cl : null,
         };
       }).sort((a, b) => {
         const toKey = (d) => {

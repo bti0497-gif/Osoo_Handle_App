@@ -1,33 +1,52 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useFlowViewModel } from './useFlowViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogContext';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
+import { ADVANCED_DATAGRID_READ_ONLY_PROPS } from '../../components/common/advancedDataGridPresets';
+import { getTodayKST } from '../../core/constants';
 
 const FlowManagementView = ({ currentUser }) => {
     const { showAlert, showConfirm } = useDialog();
     const { flowItems } = useSettingsViewModel();
+    const flowMeterTypes = useMemo(() => {
+        const names = flowItems.filter((i) => i.checked).map((i) => i.name);
+        return names.length > 0 ? names : null;
+    }, [flowItems]);
     const {
         history, loading, correctData,
         updateReading, updateManualReading, submitBatch, refresh, pendingChanges
-    } = useFlowViewModel(currentUser, { showAlert });
+    } = useFlowViewModel(currentUser, { showAlert, flowTypes: flowMeterTypes });
 
     const [selectedDate, setSelectedDate] = useState(null);
     const [isManualEditMode, setIsManualEditMode] = useState(false);
-    const [doubleClickedCell, setDoubleClickedCell] = useState(null); // { date, colId }
+    const [doubleClickedCell, setDoubleClickedCell] = useState(null); // { date, colId } — 과거 행 셀 단위 편집
     const [activeInput, setActiveInput] = useState(null); // { date, colId, type }
     const [localValue, setLocalValue] = useState(null);
     const [isElecReverse, setIsElecReverse] = useState(() => localStorage.getItem('flowElecReverse') === 'true');
-    const [todaySaved, setTodaySaved] = useState(false); // 오늘 날짜 저장 완료 여부
     const closeModeAfterBlurRef = useRef(false);
+    const didInitTodaySelectRef = useRef(false);
+    const didInitTodayScrollRef = useRef(false);
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getTodayKST();
 
-    const closeEditMode = () => {
+    const closeEditMode = useCallback(() => {
         setIsManualEditMode(false);
         setDoubleClickedCell(null);
-        setSelectedDate(null);
-    };
+    }, []);
+
+    useEffect(() => {
+        if (didInitTodaySelectRef.current) return;
+        if (!history.some((row) => row.date === todayStr)) return;
+        setSelectedDate(todayStr);
+        didInitTodaySelectRef.current = true;
+    }, [history, todayStr]);
+
+    useEffect(() => {
+        if (!didInitTodayScrollRef.current && history.length > 0) {
+            didInitTodayScrollRef.current = true;
+        }
+    }, [history.length]);
 
     // ESC 키로 수동 편집 모드 종료
     useEffect(() => {
@@ -49,7 +68,7 @@ const FlowManagementView = ({ currentUser }) => {
         };
         window.addEventListener('keydown', handleEsc);
         return () => window.removeEventListener('keydown', handleEsc);
-    }, [activeInput, isManualEditMode, doubleClickedCell]);
+    }, [activeInput, isManualEditMode, doubleClickedCell, closeEditMode]);
 
     const activeFlows = flowItems.filter(i => i.checked);
     const hasPending = Object.keys(pendingChanges).length > 0;
@@ -59,10 +78,12 @@ const FlowManagementView = ({ currentUser }) => {
         '방류유량계': '#047857',
         '내부반송유량계': '#b45309',
         '외부반송유량계': '#4338ca',
-        '내부반송유량계2': '#9a3412', // for 2-series
-        '외부반송유량계2': '#3730a3', // for 2-series
+        '내부반송유량계1': '#b45309',
+        '내부반송유량계2': '#9a3412',
+        '외부반송유량계1': '#4338ca',
+        '외부반송유량계2': '#3730a3',
         '슬러지': '#57534e',
-        '전력량계': '#0e7490'
+        '전력량계': '#0e7490',
     };
 
     const gridCols = activeFlows.map(c => {
@@ -83,7 +104,15 @@ const FlowManagementView = ({ currentUser }) => {
 
     const handleRowSelect = (row) => {
         if (row.isFuture || row.date > todayStr) return;
+        setDoubleClickedCell(null);
         if (isManualEditMode && selectedDate === row.date) return;
+        setSelectedDate(row.date);
+    };
+
+    const handleCellDoubleClick = (row, col) => {
+        if (row.isFuture || row.date > todayStr) return;
+        if (row.date === todayStr) return;
+        setDoubleClickedCell({ date: row.date, colId: col?.id || null });
         setSelectedDate(row.date);
     };
 
@@ -101,15 +130,6 @@ const FlowManagementView = ({ currentUser }) => {
         localStorage.setItem('flowElecReverse', 'false');
     };
 
-    const handleCellDoubleClick = (row, col) => {
-        if (row.isFuture) return;
-        // 오늘 날짜이고 아직 저장 전이면 이미 편집 가능하므로 더블클릭 불필요
-        if (row.date === todayStr && !todaySaved) return;
-        // 과거 날짜 또는 저장 후 오늘 날짜: 해당 셀만 편집 가능
-        setDoubleClickedCell({ date: row.date, colId: col?.id || null });
-        setSelectedDate(row.date);
-    };
-
     const extraActions = (
         <>
             {/* 전력량 누계 계산 체크박스 */}
@@ -117,7 +137,7 @@ const FlowManagementView = ({ currentUser }) => {
                 <input type="checkbox" checked={isElecReverse} onChange={e => { void handleElecReverseToggle(e.target.checked); }} style={{ accentColor: '#0e7490' }} />
                 전력량 누계 계산
             </label>
-            {selectedDate && !isManualEditMode && (
+            {selectedDate && !isManualEditMode && selectedDate <= todayStr && !history.find(h => h.date === selectedDate)?.isFuture && (
                 <button
                     onClick={() => setIsManualEditMode(true)}
                     disabled={history.find(h => h.date === selectedDate)?.isFuture}
@@ -151,7 +171,6 @@ const FlowManagementView = ({ currentUser }) => {
     const handleSave = async () => {
         await submitBatch();
         closeEditMode();
-        setTodaySaved(true); // 저장 후 오늘 날짜도 읽기전용
     };
 
     const renderCell = (row, col, val) => {
@@ -184,12 +203,11 @@ const FlowManagementView = ({ currentUser }) => {
         const isToday = row.date === todayStr;
         const isFuture = row.isFuture || row.date > todayStr;
         const isManual = isSelected && isManualEditMode;
-        // 더블클릭은 해당 셀만 편집 가능 (셀 단위 체크)
         const isCellDoubleClicked = doubleClickedCell?.date === row.date && doubleClickedCell?.colId === col.id;
-        // 전력량 역계산 모드: 누계를 입력하면 적산 자동계산 (오늘 날짜이고 저장 전에만)
-        const isElecRev = isElecReverse && flowName === '전력량계' && isToday && !todaySaved;
+        // 전력량 역계산 모드: 누계를 입력하면 적산 자동계산 (오늘만)
+        const isElecRev = isElecReverse && flowName === '전력량계' && isToday;
 
-        const isReadOnly = (isFuture || row.date !== todayStr || todaySaved) && !isManual && !isCellDoubleClicked;
+        const isReadOnly = (isFuture || (row.date !== todayStr && !isManual && !isCellDoubleClicked));
 
         const isRawActive = activeInput?.date === row.date && activeInput?.colId === flowName && activeInput?.type === 'raw';
         const isDiffActive = activeInput?.date === row.date && activeInput?.colId === flowName && activeInput?.type === 'diff';
@@ -261,7 +279,7 @@ const FlowManagementView = ({ currentUser }) => {
         if (subType === 'raw') {
             const displayVal = d.reading != null ? Number(d.reading).toLocaleString() : '';
             return (
-                <div style={{ position: 'absolute', inset: 0, padding: '0 4px', background: d.error ? '#fee2e2' : ((!isReadOnly && (isManual || isCellDoubleClicked || (isToday && !todaySaved))) ? '#fef08a' : (isFuture ? '#f5f5f5' : 'transparent')), display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box', pointerEvents: 'none' }} title={d.error || ''}>
+                <div style={{ position: 'absolute', inset: 0, padding: '0 4px', background: d.error ? '#fee2e2' : ((!isReadOnly && (isManual || isCellDoubleClicked || isToday)) ? '#fef08a' : (isFuture ? '#f5f5f5' : 'transparent')), display: 'flex', alignItems: 'center', justifyContent: 'flex-end', boxSizing: 'border-box', pointerEvents: 'none' }} title={d.error || ''}>
                     {isReadOnly ? (
                         <span style={{ fontWeight: 700, fontSize: 11, color: d.error ? '#dc2626' : (changed ? '#1d4ed8' : '#1e293b') }}>
                             {displayVal}
@@ -269,7 +287,7 @@ const FlowManagementView = ({ currentUser }) => {
                     ) : (
                         <input
                             type="text"
-                            autoFocus={isCellDoubleClicked}
+                            autoFocus={!!isCellDoubleClicked}
                             style={{
                                 width: '100%', height: '100%', outline: 'none',
                                 textAlign: 'right', fontWeight: 700, fontSize: 11,
@@ -290,7 +308,7 @@ const FlowManagementView = ({ currentUser }) => {
                                     e.currentTarget.blur();
                                 }
                             }}
-                            onFocus={e => {
+                            onFocus={(e) => {
                                 setActiveInput({ date: row.date, colId: flowName, type: 'raw' });
                                 setLocalValue(d.reading != null ? String(d.reading) : '');
                                 if (!isCellDoubleClicked) e.target.select();
@@ -302,14 +320,13 @@ const FlowManagementView = ({ currentUser }) => {
                                 }
                                 setActiveInput(null);
                                 setLocalValue(null);
-                                // 더블클릭 셀 편집 후 blur 시 자동 저장 및 수동모드 해제
                                 if (isCellDoubleClicked) {
                                     setDoubleClickedCell(null);
-                                    await submitBatch({ targetDates: [row.date], silent: true });
+                                    await submitBatch({ silent: true });
                                 }
                                 if (closeModeAfterBlurRef.current) {
                                     closeModeAfterBlurRef.current = false;
-                                    await submitBatch({ targetDates: [row.date], silent: true });
+                                    await submitBatch({ silent: true });
                                     closeEditMode();
                                 }
                             }}
@@ -332,7 +349,7 @@ const FlowManagementView = ({ currentUser }) => {
                     {isManual || isCellDoubleClicked ? (
                         <input
                             type="text"
-                            autoFocus={isCellDoubleClicked}
+                            autoFocus={!!isCellDoubleClicked && subType === 'diff'}
                             style={{
                                 width: '100%', height: '100%', outline: 'none', border: 'none',
                                 textAlign: 'right', fontWeight: 700, fontSize: 10.5,
@@ -352,7 +369,7 @@ const FlowManagementView = ({ currentUser }) => {
                                     e.currentTarget.blur();
                                 }
                             }}
-                            onFocus={e => {
+                            onFocus={(e) => {
                                 setActiveInput({ date: row.date, colId: flowName, type: 'diff' });
                                 setLocalValue(d.flow != null ? String(d.flow) : '');
                                 if (!isCellDoubleClicked) e.target.select();
@@ -361,14 +378,13 @@ const FlowManagementView = ({ currentUser }) => {
                                 if (isDiffActive && localValue !== null) updateManualReading(row.date, flowName, 'diff', localValue);
                                 setActiveInput(null);
                                 setLocalValue(null);
-                                // 더블클릭 셀 편집 후 blur 시 자동 저장 및 수동모드 해제
                                 if (isCellDoubleClicked) {
                                     setDoubleClickedCell(null);
-                                    await submitBatch({ targetDates: [row.date], silent: true });
+                                    await submitBatch({ silent: true });
                                 }
                                 if (closeModeAfterBlurRef.current) {
                                     closeModeAfterBlurRef.current = false;
-                                    await submitBatch({ targetDates: [row.date], silent: true });
+                                    await submitBatch({ silent: true });
                                     closeEditMode();
                                 }
                             }}
@@ -379,10 +395,11 @@ const FlowManagementView = ({ currentUser }) => {
         }
     };
 
-    const getRowStyle = (row, isSelected, isHovered) => {
+    const getRowStyle = (row, _gridRowSelected, isHovered) => {
         const isToday = row.date === todayStr;
         const isFuture = row.isFuture || row.date > todayStr;
         const isEditingMode = isManualEditMode;
+        const isSelected = selectedDate === row.date;
 
         let bg = 'transparent';
         let opacity = 1;
@@ -427,42 +444,37 @@ const FlowManagementView = ({ currentUser }) => {
     };
 
     return (
-        <div style={{
-            display: 'flex', flexDirection: 'column',
-            height: '100%', width: calculatedWidth,
-            backgroundColor: '#FFFFFF',
-            borderRight: '1px solid #e2e8f0', // 오른쪽 경계선만 추가
-        }}>
-            <AdvancedDataGrid
-                title="유량 검침값 등록"
-                description="노란색 셀에 검침(적산) 수치를 입력하면 누계가 자동 계산됩니다."
-                columns={gridCols}
-                data={history}
-                keyField="date"
-                scrollToKey={todayStr}
-                width={calculatedWidth}
-                height={400}
-                rowHeaderWidth={84}
-                rowHeaderLabel="날짜"
-                showBottomBar={false}
-                selectionMode="row"
-                enableEditing={false}
-                contextMenu={false}
-                onRowSelect={handleRowSelect}
-                onCellDoubleClick={(row, col) => handleCellDoubleClick(row, col)}
-                getRowStyle={getRowStyle}
-                renderRowHeader={(item) => renderRowHeader(item)}
-                renderCell={renderCell}
-                onRefresh={refresh}
-            />
+        <div className="flow-management-view">
+            <div className="flow-management-view__grid-scroll">
+                <div style={{ minWidth: calculatedWidth, width: 'max-content' }}>
+                    <AdvancedDataGrid
+                        {...ADVANCED_DATAGRID_READ_ONLY_PROPS}
+                        title="유량 검침값 등록"
+                        description="오늘 행이 자동 선택됩니다. 오늘은 적산에 검침값을 넣으면 누계가 자동 계산되고, 과거는 행 선택 후 「수동으로 수정」또는 셀 더블클릭으로 고칠 수 있습니다. 과거 적산을 바꾸면 그날부터 이후 누계가 연쇄 재계산됩니다."
+                        columns={gridCols}
+                        data={history}
+                        keyField="date"
+                        scrollToKey={didInitTodayScrollRef.current ? null : todayStr}
+                        width={calculatedWidth}
+                        height={400}
+                        rowHeaderWidth={84}
+                        rowHeaderLabel="날짜"
+                        showBottomBar={false}
+                        selectionMode="row"
+                        contextMenu={false}
+                        onRowSelect={handleRowSelect}
+                        onCellDoubleClick={(row, col) => handleCellDoubleClick(row, col)}
+                        getRowStyle={getRowStyle}
+                        renderRowHeader={(item) => renderRowHeader(item)}
+                        renderCell={renderCell}
+                        onRefresh={refresh}
+                    />
+                </div>
+            </div>
 
-            {/* 가운데 여유 공간 (판넬 내부) */}
-            <div style={{ flex: 1 }} />
-
-            {/* 하단 버튼 바 (판넬 내부 하단) */}
-            <div style={{
+            <div className="flow-management-view__footer" style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '12px 20px', borderTop: '1px solid #e2e8f0', flexShrink: 0,
+                padding: '12px 20px', border: '1px solid #e2e8f0', borderRadius: '10px',
                 backgroundColor: '#FAFAFA'
             }}>
                 <span style={{ fontSize: 12, color: '#94A3B8', fontWeight: 500 }}>{history.length} records</span>

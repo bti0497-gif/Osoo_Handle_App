@@ -14,6 +14,12 @@ import AdvancedDataGrid from './components/common/AdvancedDataGrid';
 
 // 방법 2: index.js 통해 import
 import { AdvancedDataGrid } from './components/common';
+
+// 편집 모드 프리셋 (이 저장소 전용 — advancedDataGridPresets.js)
+import {
+  ADVANCED_DATAGRID_READ_ONLY_PROPS,
+  getLockedRowEditGridProps,
+} from './components/common/advancedDataGridPresets';
 ```
 
 ### 의존성
@@ -68,6 +74,51 @@ function App() {
     />
   );
 }
+```
+
+---
+
+## 🧭 이 프로젝트에서 권장하는 사용 패턴 (프리셋)
+
+같은 `AdvancedDataGrid`라도 **내장 셀 편집**을 쓰는지, **커스텀 셀(`renderCell`)만** 쓰는지에 따라 넘겨야 할 props가 다릅니다. 아래 프리셋으로 통일하면 화면마다 편집 동작이 어긋나지 않습니다.
+
+| 상황 | 사용법 | 예시 화면 |
+|------|--------|-----------|
+| **내장 편집 끄기** — 숫자/입력은 `renderCell`·모달·더블클릭으로만 처리 | `<AdvancedDataGrid {...ADVANCED_DATAGRID_READ_ONLY_PROPS} ... />` | 약품·유량·수질·키트 관리 |
+| **한 행만 잠금 편집** — 행 추가/수정 후 그 행만 클릭·입력, 나머지 행은 막음 | `getLockedRowEditGridProps(active, editRowKey)` 결과를 spread 한 뒤 `isCellEditable`, `onCellChange`, `renderCellEditor` 필수 연결 | 회원/현장 → 현장관리 |
+
+**잠금 행 편집 시 주의**
+
+- `renderCellEditor`에서 **텍스트 열은 `return null`** 로 두어 기본 `<input>`을 쓰세요. `null`이 아닌 빈 Fragment만 반환하면 입력창이 안 뜹니다.
+- 드롭다운 등 커스텀 에디터는 `options.onChange`로 `editingCell.tempValue`와 동기화하세요.
+- `editableRowKey` / `editModeLockedRowKey`는 같은 값(편집 중인 행의 `keyField` 값)으로 맞춥니다.
+
+```jsx
+import { ADVANCED_DATAGRID_READ_ONLY_PROPS } from './advancedDataGridPresets';
+
+<AdvancedDataGrid
+  {...ADVANCED_DATAGRID_READ_ONLY_PROPS}
+  columns={gridCols}
+  data={history}
+  renderCell={renderCell}
+  onCellDoubleClick={handleCellDoubleClick}
+/>
+```
+
+```jsx
+import { getLockedRowEditGridProps } from './advancedDataGridPresets';
+
+const editProps = useMemo(
+  () => getLockedRowEditGridProps(isEditing, editingRowKey),
+  [isEditing, editingRowKey]
+);
+
+<AdvancedDataGrid
+  {...editProps}
+  isCellEditable={(row, col) => /* 편집 행·열만 true */}
+  onCellChange={(row, colId, value) => /* 상위 state 반영 */}
+  renderCellEditor={...}
+/>
 ```
 
 ---
@@ -133,7 +184,9 @@ function App() {
 |------|------|---------|------|
 | `selectionMode` | `string` | `'cell'` | 선택 모드: `'cell'` \| `'row'` |
 | `enableEditing` | `boolean` | `true` | 셀 편집 활성화 |
-| `editableRowKey` | `any` | `null` | 특정 행만 편집 허용 (keyField 값) |
+| `editableRowKey` | `any` | `null` | 특정 행만 편집 허용 (keyField 값과 일치하는 행만) |
+| `editModeLockedRowKey` | `any` | `null` | 설정 시 해당 행 **외** 셀 클릭·행 헤더 등 상호작용 차단(잠금 행 편집) |
+| `blockInteractionOutsideRow` | `boolean` | `false` | `true`이면 잠금 행이 아닌 영역 포인터 차단 |
 | `isCellEditable` | `function` | `undefined` | `(row, col) => boolean` — 셀별 편집 가능 여부 |
 | `tabNavigation` | `boolean` | `true` | Tab/Shift+Tab 네비게이션 |
 | `enableClipboard` | `boolean` | `true` | Ctrl+C/V 클립보드 기능 |
@@ -141,6 +194,7 @@ function App() {
 | `highlightSelectionRow` | `boolean` | `true` | 활성 셀 기준 같은 행 하이라이트 여부 |
 | `highlightSelectionColumn` | `boolean` | `true` | 활성 셀 기준 같은 열 하이라이트 여부 |
 | `startEditOnDoubleClick` | `boolean` | `true` | 더블클릭 시 편집 시작 여부 |
+| `startEditOnSingleClick` | `boolean` | `false` | 싱글 클릭만으로 편집 시작(잠금 행 편집과 함께 켜는 경우 많음) |
 | `startEditOnEnter` | `boolean` | `true` | Enter 입력 시 편집 시작 여부 |
 | `startEditOnTyping` | `boolean` | `true` | 문자 타이핑으로 편집 시작 여부 |
 | `typingEditMode` | `string` | `'overwrite'` | 타이핑 편집 시작 모드: `'overwrite'` \| `'append'` |
@@ -165,6 +219,7 @@ function App() {
 | `onRowSelect` | `(row) => void` | 행 선택 시 |
 | `onColumnSelect` | `(colId) => void` | 칼럼 선택 시 |
 | `onSort` | `({ colId, direction }) => void` | 정렬 변경 시 |
+| `onCellDoubleClick` | `(row, col) => void` | 셀 더블클릭 시(내장 편집과 별개로 호출 가능) |
 | `onSave` | `() => void` | 저장 버튼 클릭 시 |
 | `onRefresh` | `() => void` | 새로고침 버튼 클릭 시 |
 
@@ -184,7 +239,13 @@ function App() {
 | `renderRowHeader` | `(index, row) => ReactNode` | 행 헤더 커스텀 렌더링 |
 | `renderCell` | `(row, col, value) => ReactNode` | 셀 커스텀 렌더링 |
 | `renderCellDisplay` | `(row, col, value, isSelected) => ReactNode` | 표시 전용 셀 렌더러 |
-| `renderCellEditor` | `(row, col, value, editorApi) => ReactNode` | 편집 중 셀 에디터 렌더러 |
+| `renderCellEditor` | `(row, col, value, editorApi) => ReactNode` | 편집 중 셀 에디터. **텍스트는 `null` 반환 시 기본 input** |
+
+### Navigation
+
+| Prop | Type | Default | 설명 |
+|------|------|---------|------|
+| `scrollToKey` | `any` | `null` | `keyField`가 이 값인 행으로 스크롤(예: 오늘 날짜 행) |
 
 ### Theme (테마)
 
@@ -388,9 +449,10 @@ const columns = [
 
 ```
 src/components/common/
-├── AdvancedDataGrid.jsx    # 메인 컴포넌트 (단일 파일, 외부 의존성 없음)
-├── AdvancedDataGrid.md     # 이 문서
-└── index.js                # export { AdvancedDataGrid }
+├── AdvancedDataGrid.jsx          # 메인 컴포넌트 (순수 React)
+├── AdvancedDataGrid.md           # 이 문서 (API + 사용 가이드)
+├── advancedDataGridPresets.js    # 읽기 전용 / 잠금 행 편집 프리셋 (이 앱 공통)
+└── index.js                      # AdvancedDataGrid + 프리셋 export
 ```
 
 ---

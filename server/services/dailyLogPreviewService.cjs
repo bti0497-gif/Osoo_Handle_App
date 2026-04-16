@@ -286,26 +286,56 @@ function getDatePhotoDirectory(baseDir, configuredPhotoRoot, date) {
   return path.join(photoRoot, date.slice(0, 4), date.slice(5, 7), date);
 }
 
+function getImportPhotoDirectory(baseDir, configuredPhotoRoot, date) {
+  const photoRoot = resolvePhotoRoot(baseDir, configuredPhotoRoot);
+  return path.join(photoRoot, date.slice(0, 4), date.slice(5, 7), '데이타불러오기');
+}
+
+function buildImportDateStamp(date) {
+  const y = String(date || '').slice(0, 4);
+  const m = String(date || '').slice(5, 7);
+  const d = String(date || '').slice(8, 10);
+  return `${y}${d}${m}`;
+}
+
 function listPhotoFiles(baseDir, configuredPhotoRoot, date) {
-  const photoDir = getDatePhotoDirectory(baseDir, configuredPhotoRoot, date);
-  console.log(`[Photo] Listing files in: ${photoDir}`);
-  if (!fs.existsSync(photoDir)) {
-    console.log(`[Photo] Directory does not exist: ${photoDir}`);
-    return [];
+  const legacyDir = getDatePhotoDirectory(baseDir, configuredPhotoRoot, date);
+  const importDir = getImportPhotoDirectory(baseDir, configuredPhotoRoot, date);
+  const importStamp = buildImportDateStamp(date);
+
+  const candidates = [
+    { dir: importDir, filterByStamp: true },
+    { dir: legacyDir, filterByStamp: false },
+  ];
+
+  let files = [];
+  for (const candidate of candidates) {
+    console.log(`[Photo] Listing files in: ${candidate.dir}`);
+    if (!fs.existsSync(candidate.dir)) {
+      console.log(`[Photo] Directory does not exist: ${candidate.dir}`);
+      continue;
+    }
+
+    files = fs.readdirSync(candidate.dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .filter((entry) => {
+        if (!candidate.filterByStamp) return true;
+        return String(entry.name).includes(`_${importStamp}_`);
+      })
+      .map((entry) => {
+        const absolutePath = path.join(candidate.dir, entry.name);
+        const stat = fs.statSync(absolutePath);
+        return {
+          fileName: entry.name,
+          absolutePath,
+          normalizedName: normalizeKey(entry.name),
+          lastModifiedMs: stat.mtimeMs
+        };
+      });
+
+    if (files.length > 0) break;
   }
 
-  const files = fs.readdirSync(photoDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => {
-      const absolutePath = path.join(photoDir, entry.name);
-      const stat = fs.statSync(absolutePath);
-      return {
-        fileName: entry.name,
-        absolutePath,
-        normalizedName: normalizeKey(entry.name),
-        lastModifiedMs: stat.mtimeMs
-      };
-    });
   console.log(`[Photo] Found ${files.length} files for ${date}`);
   return files;
 }

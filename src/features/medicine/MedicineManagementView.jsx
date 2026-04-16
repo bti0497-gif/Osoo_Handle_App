@@ -2,12 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useMedicineViewModel } from './useMedicineViewModel';
 import { useDialog } from '../../components/common/DialogContext';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
+import { ADVANCED_DATAGRID_READ_ONLY_PROPS } from '../../components/common/advancedDataGridPresets';
 
 const MedicineManagementView = ({ currentUser }) => {
     const { showAlert } = useDialog();
     const {
         history, loading, medicineTypes,
-        updateAmount, submitBatch, refresh, pendingChanges
+        updateAmount, submitBatch, refresh, pendingChanges,
     } = useMedicineViewModel(currentUser, { showAlert });
 
     const [selectedDate, setSelectedDate] = useState(null);
@@ -17,6 +18,8 @@ const MedicineManagementView = ({ currentUser }) => {
     const [localValue, setLocalValue] = useState(null);
     const [todaySaved, setTodaySaved] = useState(false);
     const closeModeAfterBlurRef = useRef(false);
+    const didInitTodaySelectRef = useRef(false);
+    const didInitTodayScrollRef = useRef(false);
 
     const todayStr = new Date().toISOString().split('T')[0];
 
@@ -25,6 +28,19 @@ const MedicineManagementView = ({ currentUser }) => {
         setDoubleClickedCell(null);
         setSelectedDate(null);
     };
+
+    useEffect(() => {
+        if (didInitTodaySelectRef.current) return;
+        if (!history.some((row) => row.date === todayStr)) return;
+        setSelectedDate(todayStr);
+        didInitTodaySelectRef.current = true;
+    }, [history, todayStr]);
+
+    useEffect(() => {
+        if (!didInitTodayScrollRef.current && history.length > 0) {
+            didInitTodayScrollRef.current = true;
+        }
+    }, [history.length]);
 
     useEffect(() => {
         const handleEsc = (e) => {
@@ -292,7 +308,6 @@ const MedicineManagementView = ({ currentUser }) => {
         );
     };
 
-
     const renderRowHeader = (row) => {
         const isToday = row.date === todayStr;
         const isFuture = row.isFuture || row.date > todayStr;
@@ -312,6 +327,7 @@ const MedicineManagementView = ({ currentUser }) => {
     };
 
     return (
+        <>
         <div style={{
             display: 'flex', flexDirection: 'column',
             height: '100%', width: calculatedWidth,
@@ -319,18 +335,18 @@ const MedicineManagementView = ({ currentUser }) => {
             borderRight: '1px solid #e2e8f0',
         }}>
             <AdvancedDataGrid
+                {...ADVANCED_DATAGRID_READ_ONLY_PROPS}
                 title="약품 입고/사용/재고 관리"
                 description="파란색/빨간색 셀을 클릭하여 입고량/사용량을 입력하면 재고가 자동 누적 계산됩니다."
                 columns={gridCols}
                 data={history}
                 keyField="date"
-                scrollToKey={todayStr}
+                scrollToKey={didInitTodayScrollRef.current ? null : todayStr}
                 width={calculatedWidth}
                 height={400}
 
                 showBottomBar={false}
                 selectionMode="row"
-                enableEditing={false}
                 contextMenu={false}
                 rowHeaderWidth={84}
                 rowHeaderLabel="날짜"
@@ -374,6 +390,7 @@ const MedicineManagementView = ({ currentUser }) => {
                 </div>
             </div>
         </div>
+        </>
     );
 };
 

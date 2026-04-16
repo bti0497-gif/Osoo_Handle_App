@@ -43,8 +43,8 @@ module.exports = {
   },
   publish: {
     provider: 'github',
-    owner: '',
-    repo: '',
+    owner: 'bti0497-gif',
+    repo: 'Osoo_Handle_App',
     releaseType: 'release',
   },
 };

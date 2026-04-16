@@ -5,6 +5,7 @@ import { useDialog } from '../../components/common/DialogContext';
 import { useBatchProcess } from '../../hooks/useBatchProcess';
 import { BatchProgressDialog } from '../../components/common';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
+import { ADVANCED_DATAGRID_READ_ONLY_PROPS } from '../../components/common/advancedDataGridPresets';
 const formatLocalDate = (date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -52,6 +53,8 @@ const WaterQualityView = ({ currentUser }) => {
     const [rangeStartDate, setRangeStartDate] = useState(formatLocalDate(new Date()));
     const [rangeEndDate, setRangeEndDate] = useState(formatLocalDate(new Date()));
     const closeModeAfterBlurRef = useRef(false);
+    const didInitTodaySelectRef = useRef(false);
+    const didInitTodayScrollRef = useRef(false);
 
     const todayStr = new Date().toISOString().split('T')[0];
 
@@ -60,6 +63,20 @@ const WaterQualityView = ({ currentUser }) => {
         setDoubleClickedCell(null);
         setSelectedRowKey(null);
     };
+
+    useEffect(() => {
+        if (didInitTodaySelectRef.current) return;
+        const todayRow = history.find((row) => row.date === todayStr);
+        if (!todayRow?.rowKey) return;
+        setSelectedRowKey(todayRow.rowKey);
+        didInitTodaySelectRef.current = true;
+    }, [history, todayStr]);
+
+    useEffect(() => {
+        if (!didInitTodayScrollRef.current && history.length > 0) {
+            didInitTodayScrollRef.current = true;
+        }
+    }, [history.length]);
 
     useEffect(() => {
         const handleEsc = (e) => {
@@ -420,18 +437,18 @@ const WaterQualityView = ({ currentUser }) => {
             borderRight: '1px solid #e2e8f0',
         }}>
             <AdvancedDataGrid
+                {...ADVANCED_DATAGRID_READ_ONLY_PROPS}
                 title="수질 분석 데이터 등록"
                 description="노란색 셀을 클릭하여 분석 수치를 입력하세요. (과거 데이터를 수정하려면 해당 행을 클릭하세요)"
                 columns={gridCols}
                 data={history}
                 keyField="rowKey"
-                scrollToKey={scrollKey}
+                scrollToKey={didInitTodayScrollRef.current ? null : scrollKey}
                 width={calculatedWidth}
                 height={400}
 
                 showBottomBar={false}
                 selectionMode="row"
-                enableEditing={false}
                 contextMenu={false}
                 rowHeaderWidth={84}
                 rowHeaderLabel="날짜"
@@ -506,7 +523,7 @@ const WaterQualityView = ({ currentUser }) => {
                             }}
                         >
                             <span className="material-icons" style={{ fontSize: 14 }}>cloud_download</span>
-                            {(isImportingFromQntech || batchProcess.isProcessing) ? '가져오는 중...' : 'QnTECH 가져오기'}
+                            {(isImportingFromQntech || batchProcess.isProcessing) ? '불러오는 중...' : '데이타불러오기'}
                         </button>
                     </div>
                 </div>

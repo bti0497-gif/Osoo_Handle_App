@@ -167,6 +167,7 @@ async function importQntechWaterPhotos(db, baseDir, date) {
   const context = await fetchProjectsForDate(db, date);
   const photoSetting = db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
   const photoResult = await saveProjectPhotos({
+    db,
     baseUrl: context.client.baseUrl,
     cookieJar: context.client.cookieJar,
     projects: context.projects,
@@ -192,7 +193,9 @@ async function importQntechWaterAll(db, baseDir, date) {
   const mapped = mapProjectsToWaterRows(context.projects, activeLocations, configuredSampleMappings, {
     fallbackDate: context.date
   });
+  const persistResult = persistWaterRows(db, mapped.importedRows);
   const photoResult = await saveProjectPhotos({
+    db,
     baseUrl: context.client.baseUrl,
     cookieJar: context.client.cookieJar,
     projects: context.projects,
@@ -217,7 +220,8 @@ async function importQntechWaterAll(db, baseDir, date) {
     driveFolderId: photoResult.driveFolderId,
     driveFolderUrl: photoResult.driveFolderUrl,
     summary: {
-      importedRowCount: mapped.importedRows.length,
+      importedRowCount: persistResult.upsertedRowCount,
+      insertedRowCount: persistResult.insertedRowCount,
       savedPhotoCount: photoResult.savedPhotos.length,
       driveUploadedPhotoCount: photoResult.driveUploadedPhotos.length
     }
@@ -268,6 +272,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
     const hadExistingValues = persistResult.upsertedRowCount > insertedRowCount;
 
     const photoResult = await saveProjectPhotos({
+      db,
       baseUrl: context.client.baseUrl,
       cookieJar: context.client.cookieJar,
       projects: context.projects,

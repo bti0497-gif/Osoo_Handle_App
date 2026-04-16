@@ -4,7 +4,7 @@ import { useAuthViewModel, LoginView, SyncService } from './features/auth';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import StatusBar from './components/StatusBar';
-import Dashboard from './views/Dashboard';
+import { DashboardView } from './features/dashboard';
 const AttendanceView = lazy(() => import('./features/attendance').then((module) => ({ default: module.AttendanceView })));
 const MemberManagementView = lazy(() => import('./features/members').then((module) => ({ default: module.MemberManagementView })));
 const FlowManagementView = lazy(() => import('./features/flow').then((module) => ({ default: module.FlowManagementView })));
@@ -130,9 +130,9 @@ function App() {
             case 'board':
                 return <BoardView currentUser={user} />;
             case 'dashboard':
-                return <Dashboard title="통합 대시보드" />;
+                return <DashboardView currentUser={user} />;
             case 'settings': return <SettingsView currentUser={user} />;
-            default: return <Dashboard title="통합 대시보드" />;
+            default: return <DashboardView currentUser={user} />;
         }
     };
 
@@ -160,9 +160,11 @@ function App() {
                 />
 
                 <main className="main-content">
-                    <Suspense fallback={contentLoadingFallback}>
-                        {renderContent()}
-                    </Suspense>
+                    <div className="main-content-workspace">
+                        <Suspense fallback={contentLoadingFallback}>
+                            {renderContent()}
+                        </Suspense>
+                    </div>
                 </main>
             </div>
 

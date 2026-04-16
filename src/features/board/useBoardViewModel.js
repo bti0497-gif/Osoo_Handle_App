@@ -1,6 +1,37 @@
 import { useState, useEffect, useCallback } from 'react';
 import { BoardModel } from './BoardModel';
 
+const toTimestampMs = (value) => {
+    if (!value) return 0;
+
+    if (value instanceof Date) {
+        const ms = value.getTime();
+        return Number.isNaN(ms) ? 0 : ms;
+    }
+
+    if (typeof value === 'string' || typeof value === 'number') {
+        const ms = new Date(value).getTime();
+        return Number.isNaN(ms) ? 0 : ms;
+    }
+
+    if (typeof value === 'object') {
+        if (typeof value.value === 'string' || typeof value.value === 'number') {
+            const ms = new Date(value.value).getTime();
+            return Number.isNaN(ms) ? 0 : ms;
+        }
+        if (typeof value.timestampValue === 'string') {
+            const ms = new Date(value.timestampValue).getTime();
+            return Number.isNaN(ms) ? 0 : ms;
+        }
+        if (typeof value.seconds === 'number') {
+            const nanos = typeof value.nanos === 'number' ? value.nanos : 0;
+            return value.seconds * 1000 + Math.floor(nanos / 1_000_000);
+        }
+    }
+
+    return 0;
+};
+
 export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) => {
     const [posts, setPosts] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -58,7 +89,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
         const threadList = Object.keys(threads).map(rootId => {
             const thread = threads[rootId];
             const lastActivity = thread.items.reduce((max, curr) => {
-                const currTime = new Date(curr.created_at).getTime();
+                const currTime = toTimestampMs(curr.created_at);
                 return currTime > max ? currTime : max;
             }, 0);
             return { rootId, items: thread.items, lastActivity };
@@ -74,7 +105,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
             // 재귀적 평탄화 함수
             const flatten = (parentId = null) => {
                 const children = t.items.filter(item => (item.parent_id === parentId || (!parentId && !item.parent_id && !sortedRegulars.includes(item))));
-                children.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                children.sort((a, b) => toTimestampMs(a.created_at) - toTimestampMs(b.created_at));
                 children.forEach(child => {
                     if (!sortedRegulars.includes(child)) {
                         sortedRegulars.push(child);
@@ -208,9 +239,9 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
     };
 
     // File upload
-    const uploadFile = async (file) => {
+    const uploadFile = async (file, options = {}) => {
         try {
-            return await BoardModel.uploadFile(file);
+            return await BoardModel.uploadFile(file, options);
         } catch (err) {
             console.error('File Upload Error:', err);
             showAlert?.('파일 업로드 실패: ' + err.message);

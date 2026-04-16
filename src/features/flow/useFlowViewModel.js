@@ -1,9 +1,118 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { FlowModel } from './FlowModel';
+import { getTodayKST } from '../../core/constants';
 
-const FLOW_TYPES = ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '슬러지', '전력량계'];
+/** 설정 검침항목 위젯과 맞추기 전 1계열 기본(위젯에서 flowTypes 미전달 시) */
+const DEFAULT_FLOW_TYPES = ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '슬러지', '전력량계'];
 
-export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
+/**
+ * 해당 유량 종류에 대해 startIdx 행부터 아래로 적산(raw)은 유지한 채 누계(diff)를 연쇄 재계산한다.
+ * @returns {Map<string, { raw, diff, error, isManual }>} date → 해당 type의 pending 스냅샷
+ */
+function cascadeRecalculateType(newHist, startIdx, type, correctData, findPreviousSludgeCumulative, isManualAtStart) {
+    const pendingByDate = new Map();
+
+    for (let j = startIdx; j < newHist.length; j += 1) {
+        const row = newHist[j];
+        const prevCell = newHist[j][type] || {};
+        let raw = prevCell.raw != null ? Number(prevCell.raw) : null;
+        if (raw !== null && Number.isNaN(raw)) raw = null;
+
+        let flow = null;
+        let errorMsg = null;
+
+        if (type === '슬러지') {
+            if (raw !== null && !Number.isNaN(raw)) {
+                const previousCumulative = findPreviousSludgeCumulative(newHist, j, row.date, type);
+                flow = Math.round((previousCumulative + raw) * 10) / 10;
+                if (raw > 10000) errorMsg = '입력값이 정상 범위를 초과합니다.';
+                else if (raw < 0) errorMsg = '반출량은 음수일 수 없습니다.';
+            }
+        } else if (raw !== null && !Number.isNaN(raw)) {
+            let prevReading = null;
+            for (let i = j - 1; i >= 0; i -= 1) {
+                const c = correctData(newHist[i][type]);
+                if (c.reading !== null && c.reading !== undefined) {
+                    prevReading = c.reading;
+                    break;
+                }
+            }
+            if (prevReading !== null) {
+                flow = Math.round((raw - prevReading) * 10) / 10;
+                if (raw < prevReading) errorMsg = '전일 검침값보다 작습니다.';
+                else if (flow > 5000000) errorMsg = '입력값이 비정상적으로 큽니다.';
+            }
+        }
+
+        newHist[j] = {
+            ...newHist[j],
+            [type]: {
+                ...prevCell,
+                raw,
+                diff: flow,
+                error: errorMsg,
+                isChanged: true,
+                isUserInput: j === startIdx,
+            },
+        };
+
+        const isManual = j === startIdx && isManualAtStart;
+        pendingByDate.set(row.date, {
+            raw,
+            diff: flow,
+            error: errorMsg,
+            isManual,
+        });
+    }
+
+    return pendingByDate;
+}
+
+/**
+ * DB에 남아 있는 1계열 type명(내부반송유량계 등)을 2계열 UI 컬럼 키(…1)로 끌어와 같은 날짜 행에서 보이게 한다.
+ * 이미 …1 행에 값이 있으면 덮어쓰지 않는다. flowTypes에 레거시 이름이 그대로 있으면(1계열 UI) 병합하지 않는다.
+ */
+function mergeLegacyFlowKeysForDisplay(rows, flowTypes) {
+    if (!Array.isArray(rows) || !Array.isArray(flowTypes) || flowTypes.length === 0) {
+        return rows;
+    }
+    const types = new Set(flowTypes);
+    const legacyPairs = [
+        { legacy: '내부반송유량계', modern: '내부반송유량계1' },
+        { legacy: '외부반송유량계', modern: '외부반송유량계1' },
+    ];
+
+    const cellHasData = (cell) => cell && (cell.raw != null || cell.diff != null);
+
+    return rows.map((row) => {
+        let touched = false;
+        const out = { ...row };
+        for (const { legacy, modern } of legacyPairs) {
+            if (!types.has(modern)) continue;
+            if (types.has(legacy)) continue;
+            const leg = row[legacy];
+            const mod = row[modern];
+            if (!cellHasData(leg)) continue;
+            if (cellHasData(mod)) continue;
+            out[modern] = { ...leg };
+            touched = true;
+        }
+        return touched ? out : row;
+    });
+}
+
+export const useFlowViewModel = (currentUser, { showAlert, flowTypes: flowTypesProp } = {}) => {
+    /** 부모가 매 렌더마다 새 배열을 넘겨도, 검침 타입 목록이 같으면 동일 키 → 히스토리 재조회 1회로 제한 */
+    const flowTypesKey = useMemo(() => {
+        if (!Array.isArray(flowTypesProp) || flowTypesProp.length === 0) return '';
+        return flowTypesProp.join('|');
+    }, [flowTypesProp]);
+
+    const flowTypesResolved = useMemo(() => {
+        if (!flowTypesKey) return DEFAULT_FLOW_TYPES.slice();
+        return flowTypesKey.split('|');
+    }, [flowTypesKey]);
+
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(false);
     const [pendingChanges, setPendingChanges] = useState({});
@@ -34,8 +143,8 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
     const loadReadings = useCallback(async () => {
         setLoading(true);
         try {
-            const today = new Date();
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStr = getTodayKST();
+            const todayAnchor = new Date(`${todayStr}T12:00:00`);
 
             const historyData = await FlowModel.fetchHistory();
             if (historyData.success) {
@@ -45,15 +154,14 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
                 // 전체 기간(첫 데이터 ~ 오늘)의 빈 날짜 채우기
                 if (hist.length > 0) {
                     const firstDateStr = hist[0].date > todayStr ? todayStr : hist[0].date;
-                    let currentDate = new Date(firstDateStr);
-                    const todayDate = new Date(todayStr);
+                    let currentDate = new Date(`${firstDateStr}T12:00:00`);
                     const existingDates = new Set(hist.map(h => h.date));
 
-                    while (currentDate < todayDate) {
+                    while (currentDate < todayAnchor) {
                         const ds = currentDate.toISOString().split('T')[0];
                         if (!existingDates.has(ds)) {
                             const emptyRow = { date: ds };
-                            FLOW_TYPES.forEach(t => { emptyRow[t] = { raw: null, diff: null }; });
+                            flowTypesResolved.forEach((t) => { emptyRow[t] = { raw: null, diff: null }; });
                             hist.push(emptyRow);
                             existingDates.add(ds);
                         }
@@ -64,18 +172,18 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
                 // 오늘이 없으면 추가
                 if (!hist.find(h => h.date === todayStr)) {
                     const emptyRow = { date: todayStr };
-                    FLOW_TYPES.forEach(t => { emptyRow[t] = { raw: null, diff: null }; });
+                    flowTypesResolved.forEach((t) => { emptyRow[t] = { raw: null, diff: null }; });
                     hist.push(emptyRow);
                 }
 
                 // 미래 5일 추가
                 for (let i = 1; i <= 5; i++) {
-                    const d = new Date(today);
-                    d.setDate(today.getDate() + i);
+                    const d = new Date(todayAnchor);
+                    d.setDate(todayAnchor.getDate() + i);
                     const ds = d.toISOString().split('T')[0];
                     if (!hist.find(h => h.date === ds)) {
                         const emptyRow = { date: ds, isFuture: true };
-                        FLOW_TYPES.forEach(t => { emptyRow[t] = { raw: null, diff: null }; });
+                        flowTypesResolved.forEach((t) => { emptyRow[t] = { raw: null, diff: null }; });
                         hist.push(emptyRow);
                     }
                 }
@@ -83,7 +191,9 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
                 // 빈 날짜들을 맨 뒤에 push했으므로 최종적으로 정렬
                 hist.sort((a, b) => a.date.localeCompare(b.date));
 
-                setHistory(hist);
+                const histMerged = mergeLegacyFlowKeysForDisplay(hist, flowTypesResolved);
+
+                setHistory(histMerged);
                 setPendingChanges({});
                 pendingChangesRef.current = {};
             }
@@ -92,79 +202,69 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [flowTypesResolved]);
 
     useEffect(() => {
         loadReadings();
     }, [loadReadings]);
 
-    // 셀 편집: 적산값 입력 -> 누계 자동 계산
+    // 셀 편집: 적산값 입력 -> 당일 누계 + 이후 날짜 연쇄 재계산
     const updateReading = (rowDate, type, rawValue) => {
-        const numRaw = rawValue === '' ? null : parseFloat(rawValue);
+        const parsed = rawValue === '' ? null : parseFloat(rawValue);
+        const numRaw = parsed !== null && Number.isFinite(parsed) ? parsed : null;
+        let pendingByDate = null;
 
-        setHistory(prev => {
-            const newHist = prev.map(r => ({ ...r }));
-            const idx = newHist.findIndex(h => h.date === rowDate);
+        setHistory((prev) => {
+            const newHist = prev.map((r) => ({ ...r }));
+            const idx = newHist.findIndex((h) => h.date === rowDate);
             if (idx === -1) return prev;
 
-            // 전일 적산값 찾기
-            let prevReading = null;
-            for (let i = idx - 1; i >= 0; i--) {
-                const c = correctData(newHist[i][type]);
-                if (c.reading !== null) {
-                    prevReading = c.reading;
-                    break;
-                }
-            }
-
-            let flow = null;
-            let errorMsg = null;
-
-            if (type === '슬러지') {
-                if (numRaw !== null) {
-                    const previousCumulative = findPreviousSludgeCumulative(newHist, idx, rowDate, type);
-                    flow = Math.round((previousCumulative + numRaw) * 10) / 10;
-
-                    if (numRaw > 10000) {
-                        errorMsg = '입력값이 정상 범위를 초과합니다.';
-                    } else if (numRaw < 0) {
-                        errorMsg = '반출량은 음수일 수 없습니다.';
-                    }
-                }
-            } else if (numRaw !== null && prevReading !== null) {
-                flow = Math.round((numRaw - prevReading) * 10) / 10;
-                if (numRaw < prevReading) {
-                    errorMsg = "전일 검침값보다 작습니다.";
-                } else if (flow > 5000000) {
-                    errorMsg = "입력값이 비정상적으로 큽니다.";
-                }
-            }
-
+            const prevCell = newHist[idx][type] || {};
             newHist[idx] = {
                 ...newHist[idx],
-                [type]: { raw: numRaw, diff: flow, isChanged: true, isUserInput: true, error: errorMsg }
+                [type]: {
+                    ...prevCell,
+                    raw: numRaw,
+                    diff: prevCell.diff,
+                    isChanged: true,
+                    isUserInput: true,
+                    error: prevCell.error,
+                },
             };
 
-            // pending 기록
-            setPendingChanges(p => {
-                const nextPending = {
-                    ...p,
-                    [rowDate]: { ...p[rowDate], [type]: { raw: numRaw, diff: flow, error: errorMsg } }
-                };
-                pendingChangesRef.current = nextPending;
-                return nextPending;
-            });
+            pendingByDate = cascadeRecalculateType(
+                newHist,
+                idx,
+                type,
+                correctData,
+                findPreviousSludgeCumulative,
+                false
+            );
 
             return newHist;
         });
+
+        if (pendingByDate) {
+            setPendingChanges((p) => {
+                const nextPending = { ...p };
+                for (const [date, snap] of pendingByDate.entries()) {
+                    nextPending[date] = { ...(p[date] || {}), [type]: snap };
+                }
+                pendingChangesRef.current = nextPending;
+                return nextPending;
+            });
+        }
     };
 
-    // 셀 편집: 수동 수정 모드 (적산, 누계 개별 입력, 검증/계산 생략)
+    // 셀 편집: 수동 수정 모드 (적산·누계 개별 입력). 적산(raw) 변경 시 이후 날짜 누계 연쇄 재계산.
     const updateManualReading = (rowDate, type, field, val) => {
         const numVal = val === '' ? null : parseFloat(val);
-        setHistory(prev => {
-            const newHist = [...prev];
-            const idx = newHist.findIndex(h => h.date === rowDate);
+        let pendingByDate = null;
+        let manualDiffSnap = null;
+
+        setHistory((prev) => {
+            const newHist = prev.map((r) => ({ ...r }));
+            const idx = newHist.findIndex((h) => h.date === rowDate);
             if (idx === -1) return prev;
 
             const currentCell = newHist[idx][type] || {};
@@ -173,27 +273,64 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
                 [field]: numVal,
                 isChanged: true,
                 isUserInput: true,
-                error: null // 수동 모드에선 에러 리셋
+                error: field === 'raw' ? null : currentCell.error,
             };
 
             newHist[idx] = { ...newHist[idx], [type]: newCell };
 
-            setPendingChanges(p => {
+            if (field === 'raw') {
+                pendingByDate = cascadeRecalculateType(
+                    newHist,
+                    idx,
+                    type,
+                    correctData,
+                    findPreviousSludgeCumulative,
+                    true
+                );
+            } else {
+                const c = newHist[idx][type] || {};
+                manualDiffSnap = { raw: c.raw, diff: c.diff };
+            }
+
+            return newHist;
+        });
+
+        if (field === 'raw' && pendingByDate) {
+            setPendingChanges((p) => {
+                const nextPending = { ...p };
+                for (const [date, snap] of pendingByDate.entries()) {
+                    const prevRow = p[date] || {};
+                    const prevType = prevRow[type] || {};
+                    nextPending[date] = {
+                        ...prevRow,
+                        [type]: {
+                            ...prevType,
+                            ...snap,
+                            isManual: date === rowDate,
+                        },
+                    };
+                }
+                pendingChangesRef.current = nextPending;
+                return nextPending;
+            });
+        } else if (field !== 'raw' && manualDiffSnap) {
+            setPendingChanges((p) => {
                 const rowChanges = p[rowDate] || {};
-                const typeChanges = rowChanges[type] || { raw: currentCell.raw, diff: currentCell.diff };
+                const typeChanges = rowChanges[type] || {
+                    raw: manualDiffSnap.raw,
+                    diff: manualDiffSnap.diff,
+                };
                 const nextPending = {
                     ...p,
                     [rowDate]: {
                         ...rowChanges,
-                        [type]: { ...typeChanges, [field]: numVal, isManual: true }
-                    }
+                        [type]: { ...typeChanges, [field]: numVal, isManual: true },
+                    },
                 };
                 pendingChangesRef.current = nextPending;
                 return nextPending;
             });
-
-            return newHist;
-        });
+        }
     };
 
     // 일괄 저장
@@ -241,7 +378,7 @@ export const useFlowViewModel = (currentUser, { showAlert } = {}) => {
     return {
         history,
         loading,
-        flowTypes: FLOW_TYPES,
+        flowTypes: flowTypesResolved,
         correctData,
         updateReading,
         updateManualReading,

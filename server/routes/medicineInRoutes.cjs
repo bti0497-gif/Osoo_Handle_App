@@ -24,7 +24,7 @@ function sanitizeName(name) {
 /**
  * {appDataPath}/사진관리/약품입고/{year}/ 를 스캔해서
  * 약품명/키트명 → { url, localPath, date } 맵을 반환
- * 파일명 패턴: {YYYY-MM-DD}-{약품명}.ext
+ * 파일명 패턴: {YYYYMMDD}+{약품명}.ext
  * 같은 약품명이 여러 날짜에 있으면 가장 최근 것을 사용
  */
 function scanMedicinePhotos(appDataPath, year, mm) {
@@ -41,8 +41,8 @@ function scanMedicinePhotos(appDataPath, year, mm) {
     const ext = path.extname(file).toLowerCase();
     if (!IMAGE_EXTS.has(ext)) continue;
     const nameWithoutExt = path.basename(file, ext);
-    // 파일명 패턴: {YYYY-MM-DD}-{약품명}
-    const dateMatch = nameWithoutExt.match(/^(\d{4})-(\d{2})-(\d{2})-(.+)$/);
+    // 파일명 패턴: {YYYYMMDD}+{약품명}
+    const dateMatch = nameWithoutExt.match(/^(\d{4})(\d{2})(\d{2})\+(.+)$/);
     if (!dateMatch) continue;
     const [, y, m, d, rawName] = dateMatch;
     // 해당 연월 파일만 (mm가 null이면 전체)
@@ -61,13 +61,14 @@ function scanMedicinePhotos(appDataPath, year, mm) {
 
 /**
  * 사진 파일을 로컬 디렉토리에 JPG로 변환 저장
- * {appDataPath}/사진관리/약품입고/{year}/{date}-{약품명}.jpg
+ * {appDataPath}/사진관리/약품입고/{year}/{yyyymmdd}+{약품명}.jpg
  */
 async function savePhotoToLocal(appDataPath, year, mm, date, medicineName, srcPath) {
   if (!srcPath || !fs.existsSync(srcPath)) return null;
   const sharp = require('sharp');
   const srcBuf = fs.readFileSync(srcPath);
-  const fileName = `${date}-${sanitizeName(medicineName)}.jpg`;
+  const yyyymmdd = String(date || '').replace(/-/g, '').slice(0, 8);
+  const fileName = `${yyyymmdd}+${sanitizeName(medicineName)}.jpg`;
   const destDir = path.join(appDataPath, '사진관리', '약품입고', String(year));
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   const destPath = path.join(destDir, fileName);
@@ -201,7 +202,7 @@ module.exports = function (db, baseDir, appDataPath) {
         return res.status(400).json({ success: false, error: '유효하지 않은 요청입니다.' });
       }
 
-      const metadata = getCurrentRecordMetadata(db);
+      const metadata = getCurrentRecordMetadata(db, req.body);
 
       if (tab === 'medicine') {
         const stmt = db.prepare(`
@@ -280,7 +281,8 @@ module.exports = function (db, baseDir, appDataPath) {
       }
       const yearStr = date.split('-')[0];
       const sharp = require('sharp');
-      const fileName = `${date}-${sanitizeName(medicineName)}.jpg`;
+      const yyyymmdd = String(date || '').replace(/-/g, '').slice(0, 8);
+      const fileName = `${yyyymmdd}+${sanitizeName(medicineName)}.jpg`;
       const destDir = path.join(appDataPath, '사진관리', '약품입고', yearStr);
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       const destPath = path.join(destDir, fileName);

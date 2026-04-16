@@ -13,6 +13,32 @@ module.exports = function(baseDir) {
   const boardUpload = multer({ dest: uploadDir, limits: { fileSize: 50 * 1024 * 1024 } });
   const imageUpload = multer({ storage: multer.memoryStorage() });
 
+  const sanitizeName = (name) => String(name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
+  const toDateStamp = (value) => {
+    const d = value ? new Date(value) : new Date();
+    if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    return d.toISOString().slice(0, 10).replace(/-/g, '');
+  };
+  const buildBoardFileName = (boardId, date, originalName) => {
+    const ext = path.extname(originalName || '') || '';
+    const base = path.basename(originalName || `file${ext}`, ext);
+    const safeBase = sanitizeName(base) || 'file';
+    const safeBoardId = sanitizeName(boardId || 'draft');
+    const stamp = toDateStamp(date);
+    return `${safeBoardId}_${stamp}_${safeBase}${ext.toLowerCase()}`;
+  };
+  const ensureUniquePath = (dir, fileName) => {
+    const ext = path.extname(fileName);
+    const base = fileName.slice(0, fileName.length - ext.length);
+    let idx = 0;
+    let candidate = path.join(dir, fileName);
+    while (fs.existsSync(candidate)) {
+      idx += 1;
+      candidate = path.join(dir, `${base}_${idx}${ext}`);
+    }
+    return candidate;
+  };
+
   router.post('/api/upload', boardUpload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ success: false, message: '파일이 없습니다.' });
 
@@ -24,7 +50,13 @@ module.exports = function(baseDir) {
       }
     } catch (e) { console.error("Filename decoding error:", e); }
 
-    const filePath = req.file.path;
+    const boardId = String(req.body?.boardId || req.body?.postId || 'draft').trim();
+    const date = req.body?.date || req.body?.createdAt || null;
+    const renamedFileName = buildBoardFileName(boardId, date, originalName);
+    const targetLocalPath = ensureUniquePath(uploadDir, renamedFileName);
+    fs.renameSync(req.file.path, targetLocalPath);
+    const filePath = targetLocalPath;
+    const localUrl = `/uploads/${path.basename(filePath)}`;
     try {
       const folderId = await getOrCreateBoardUploadsFolder();
       const driveRes = await drive.files.create({
@@ -36,12 +68,29 @@ module.exports = function(baseDir) {
         fileId: driveRes.data.id,
         requestBody: { role: 'reader', type: 'anyone' }
       });
-      fs.unlinkSync(filePath);
-      res.json({ success: true, url: driveRes.data.webViewLink, originalName, size: req.file.size });
+      res.json({
+        success: true,
+        url: driveRes.data.webViewLink,
+        driveUrl: driveRes.data.webViewLink,
+        localUrl,
+        uploadedToDrive: true,
+        originalName,
+        storedName: path.basename(filePath),
+        size: req.file.size
+      });
     } catch (error) {
       console.error('Google Drive upload error:', error);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      res.status(500).json({ success: false, message: '구글 드라이브 업로드 실패: ' + error.message });
+      // 정책: 로컬 저장을 우선 보장하고, Drive 업로드 실패 시에도 로컬 URL로 계속 사용 가능
+      res.json({
+        success: true,
+        url: localUrl,
+        localUrl,
+        uploadedToDrive: false,
+        originalName,
+        storedName: path.basename(filePath),
+        size: req.file.size,
+        message: '로컬 저장은 완료되었고, Drive 업로드는 실패했습니다: ' + error.message
+      });
     }
   });
 

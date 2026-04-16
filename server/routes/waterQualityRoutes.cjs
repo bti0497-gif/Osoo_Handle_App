@@ -38,14 +38,19 @@ module.exports = function (db, baseDir) {
   };
 
   router.get('/api/water-quality', (req, res) => {
-    const { date } = req.query;
-    const logs = db.prepare('SELECT * FROM water_quality WHERE date = ? ORDER BY measurement_order ASC, created_at ASC, id ASC, location ASC').all(date);
+    const { date, site_id } = req.query;
+    const logs = site_id
+      ? db.prepare('SELECT * FROM water_quality WHERE date = ? AND site_id = ? ORDER BY measurement_order ASC, created_at ASC, id ASC, location ASC').all(date, String(site_id))
+      : db.prepare('SELECT * FROM water_quality WHERE date = ? ORDER BY measurement_order ASC, created_at ASC, id ASC, location ASC').all(date);
     res.json(logs);
   });
 
   router.get('/api/water-quality/history', (req, res) => {
     try {
-      const allRecords = db.prepare('SELECT * FROM water_quality ORDER BY date ASC, measurement_order ASC, created_at ASC, id ASC, location ASC').all();
+      const { site_id } = req.query;
+      const allRecords = site_id
+        ? db.prepare('SELECT * FROM water_quality WHERE site_id = ? ORDER BY date ASC, measurement_order ASC, created_at ASC, id ASC, location ASC').all(String(site_id))
+        : db.prepare('SELECT * FROM water_quality ORDER BY date ASC, measurement_order ASC, created_at ASC, id ASC, location ASC').all();
       res.json({ success: true, history: allRecords });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message, error: err.message });
@@ -59,7 +64,7 @@ module.exports = function (db, baseDir) {
   router.post('/api/water-quality/bulk', (req, res) => {
     const { items } = req.body;
     try {
-      const metadata = getCurrentRecordMetadata(db);
+      const metadata = getCurrentRecordMetadata(db, req.body);
       const stmt = db.prepare(`
         INSERT INTO water_quality (
           date, measurement_group, measurement_order, source_type, source_label, qntech_project_id,
@@ -194,7 +199,7 @@ module.exports = function (db, baseDir) {
   router.post('/api/water-quality', (req, res) => {
     const { date, location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss } = req.body;
     try {
-      const metadata = getCurrentRecordMetadata(db);
+      const metadata = getCurrentRecordMetadata(db, req.body);
       const measurementGroup = normalizeMeasurementGroup(req.body);
       const info = db.prepare(`
         INSERT INTO water_quality (

@@ -144,6 +144,15 @@ function getSiteSettings(db) {
   return db.prepare('SELECT site_name, manager_name, method, series, flow_option FROM app_settings WHERE id = 1').get() || {};
 }
 
+/** flow_option이 비어 있으면: 2계열 → combined(1+2), 그 외 → single1 */
+function resolveFlowOption(settings) {
+  const raw = settings.flow_option != null ? String(settings.flow_option).trim() : '';
+  if (raw) return raw;
+  const series = String(settings.series || '').trim();
+  if (series === '2계열') return 'combined';
+  return 'single1';
+}
+
 function getActiveConfigItems(db, category) {
   return db.prepare("SELECT * FROM config_items WHERE category = ? AND is_active = 1 ORDER BY display_order ASC").all(category);
 }
@@ -353,7 +362,7 @@ function findKitNameByKeyword(db, keyword) {
  */
 function buildBindingsForDate(db, date) {
   const settings = getSiteSettings(db);
-  const flowOption = settings.flow_option || 'single1';
+  const flowOption = resolveFlowOption(settings);
   const flows = getFlowReadings(db, date);
   const prevFlows = getFlowReadingsForPrevDate(db, date);
   const medicines = getMedicineLogs(db, date);

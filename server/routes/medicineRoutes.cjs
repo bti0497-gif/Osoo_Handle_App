@@ -2,16 +2,55 @@ const express = require('express');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const router = express.Router();
 
+function recalculateMedicineInventory(db, medicineName, metadata) {
+  const rows = db.prepare(`
+    SELECT id, COALESCE(purchase_amount, 0) AS purchase_amount, COALESCE(usage_amount, 0) AS usage_amount
+    FROM medicine_logs
+    WHERE medicine_name = ?
+    ORDER BY date ASC, id ASC
+  `).all(medicineName);
+
+  const updateStmt = db.prepare(`
+    UPDATE medicine_logs
+    SET current_inventory = ?,
+        site_id = ?,
+        site_name = ?,
+        author = ?,
+        last_modified = ?,
+        is_synced = ?
+    WHERE id = ?
+  `);
+
+  let runningInventory = 0;
+  rows.forEach((row) => {
+    runningInventory = Math.round((runningInventory + Number(row.purchase_amount || 0) - Number(row.usage_amount || 0)) * 10) / 10;
+    updateStmt.run(
+      runningInventory,
+      metadata.siteId,
+      metadata.siteName,
+      metadata.author,
+      metadata.lastModified,
+      metadata.isSynced,
+      row.id
+    );
+  });
+}
+
 module.exports = function (db) {
   router.get('/api/medicines', (req, res) => {
-    const { date } = req.query;
-    const logs = db.prepare('SELECT * FROM medicine_logs WHERE date = ?').all(date);
+    const { date, site_id } = req.query;
+    const logs = site_id
+      ? db.prepare('SELECT * FROM medicine_logs WHERE date = ? AND site_id = ?').all(date, String(site_id))
+      : db.prepare('SELECT * FROM medicine_logs WHERE date = ?').all(date);
     res.json(logs);
   });
 
   router.get('/api/medicines/history', (req, res) => {
     try {
-      const allRecords = db.prepare('SELECT * FROM medicine_logs ORDER BY date ASC').all();
+      const { site_id } = req.query;
+      const allRecords = site_id
+        ? db.prepare('SELECT * FROM medicine_logs WHERE site_id = ? ORDER BY date ASC').all(String(site_id))
+        : db.prepare('SELECT * FROM medicine_logs ORDER BY date ASC').all();
       res.json({ success: true, history: allRecords });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
@@ -37,8 +76,8 @@ module.exports = function (db) {
           is_synced = excluded.is_synced
       `);
 
+      const metadata = getCurrentRecordMetadata(db, req.body);
       const insertMany = db.transaction((rows) => {
-        const metadata = getCurrentRecordMetadata(db);
         for (const item of rows) {
           stmt.run(
             item.medicine_name,
@@ -57,7 +96,77 @@ module.exports = function (db) {
       });
 
       insertMany(items);
+
+      const touchedNames = new Set(items.map((it) => it.medicine_name).filter(Boolean));
+      db.transaction(() => {
+        for (const medicineName of touchedNames) {
+          recalculateMedicineInventory(db, medicineName, metadata);
+        }
+      })();
+
       res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  /** 특정 날짜에 약품별 입고량 일괄 반영 후 재고 연쇄 재계산 (키트 /api/kits/purchase 와 동일 패턴) */
+  router.post('/api/medicines/purchase', (req, res) => {
+    try {
+      const { date, items } = req.body;
+      if (!date || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ success: false, error: '날짜와 항목이 필요합니다.' });
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
+        return res.status(400).json({ success: false, error: '날짜 형식이 올바르지 않습니다.' });
+      }
+
+      const metadata = getCurrentRecordMetadata(db, req.body);
+      const upsertStmt = db.prepare(`
+        INSERT INTO medicine_logs (
+          medicine_name, date, purchase_amount, usage_amount, current_inventory,
+          site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(medicine_name, date) DO UPDATE SET
+          purchase_amount = excluded.purchase_amount,
+          site_id = excluded.site_id,
+          site_name = excluded.site_name,
+          author = excluded.author,
+          last_modified = excluded.last_modified,
+          is_synced = excluded.is_synced
+      `);
+
+      const affected = new Set();
+
+      // 입고 upsert만 먼저 커밋한 뒤 재고 재계산을 별 트랜잭션으로 수행한다.
+      // (동일 트랜잭션 안에서 INSERT 직후 SELECT가 최신 purchase를 못 읽는 환경을 피함)
+      db.transaction(() => {
+        for (const item of items) {
+          const name = item.medicineName;
+          if (!name) continue;
+          const amount = Number(item.purchaseAmount ?? 0);
+          upsertStmt.run(
+            name,
+            date,
+            amount,
+            metadata.siteId,
+            metadata.siteName,
+            metadata.author,
+            metadata.createdAt,
+            metadata.lastModified,
+            metadata.isSynced
+          );
+          affected.add(name);
+        }
+      })();
+
+      db.transaction(() => {
+        for (const medicineName of affected) {
+          recalculateMedicineInventory(db, medicineName, metadata);
+        }
+      })();
+
+      res.json({ success: true, date, savedCount: affected.size });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -66,7 +175,7 @@ module.exports = function (db) {
   router.post('/api/medicines', (req, res) => {
     const { medicine_name, date, purchase_amount, usage_amount } = req.body;
     try {
-      const metadata = getCurrentRecordMetadata(db);
+      const metadata = getCurrentRecordMetadata(db, req.body);
       const prevLog = db.prepare('SELECT current_inventory FROM medicine_logs WHERE medicine_name = ? AND date < ? ORDER BY date DESC LIMIT 1').get(medicine_name, date);
       const startInventory = prevLog ? prevLog.current_inventory : 0;
       const current_inventory = startInventory + (purchase_amount || 0) - (usage_amount || 0);

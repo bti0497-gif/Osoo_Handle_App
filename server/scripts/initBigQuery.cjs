@@ -165,17 +165,54 @@ const SCHEMAS = {
   // ── 출결 ──────────────────────────────────────────────────────────
   attendance: [
     { name: 'id',                type: 'STRING',    mode: 'REQUIRED' },  // UUID
+    { name: 'site_id',           type: 'STRING' },
     { name: 'site_name',         type: 'STRING' },
-    { name: 'member_id',         type: 'INTEGER',   mode: 'REQUIRED' },
+    { name: 'member_id',         type: 'STRING',    mode: 'REQUIRED' },
     { name: 'member_name',       type: 'STRING' },
     { name: 'date',              type: 'DATE',      mode: 'REQUIRED' },
     { name: 'login_time',        type: 'TIMESTAMP' },
     { name: 'logout_time',       type: 'TIMESTAMP' },
     { name: 'login_lat',         type: 'FLOAT' },
     { name: 'login_lng',         type: 'FLOAT' },
+    { name: 'logout_lat',        type: 'FLOAT' },
+    { name: 'logout_lng',        type: 'FLOAT' },
     { name: 'location_matched',  type: 'BOOLEAN' },
+    { name: 'remote_session_detected', type: 'BOOLEAN' },
+    { name: 'remote_session_type', type: 'STRING' },
+    { name: 'remote_session_evidence', type: 'STRING' },
     { name: 'auto_logout',       type: 'BOOLEAN' },
     { name: 'uploaded_at',       type: 'TIMESTAMP' }
+  ],
+  sites: [
+    { name: 'id',           type: 'STRING',    mode: 'REQUIRED' },
+    { name: 'site_name',    type: 'STRING' },
+    { name: 'manager_name', type: 'STRING' },
+    { name: 'method',       type: 'STRING' },
+    { name: 'series',       type: 'STRING' },
+    { name: 'is_active',    type: 'BOOLEAN' },
+    { name: 'updated_at',   type: 'TIMESTAMP' },
+    { name: 'uploaded_at',  type: 'TIMESTAMP' }
+  ],
+  members: [
+    { name: 'id',          type: 'STRING',    mode: 'REQUIRED' },
+    { name: 'name',        type: 'STRING' },
+    { name: 'role',        type: 'STRING' },
+    { name: 'phone',       type: 'STRING' },
+    { name: 'target_lat',  type: 'FLOAT' },
+    { name: 'target_lng',  type: 'FLOAT' },
+    { name: 'radius_m',    type: 'FLOAT' },
+    { name: 'notes',       type: 'STRING' },
+    { name: 'updated_at',  type: 'TIMESTAMP' },
+    { name: 'uploaded_at', type: 'TIMESTAMP' }
+  ],
+  member_sites: [
+    { name: 'member_id',       type: 'STRING',    mode: 'REQUIRED' },
+    { name: 'site_id',         type: 'STRING',    mode: 'REQUIRED' },
+    { name: 'is_primary',      type: 'BOOLEAN' },
+    { name: 'can_manage',      type: 'BOOLEAN' },
+    { name: 'is_bidirectional',type: 'BOOLEAN' },
+    { name: 'updated_at',      type: 'TIMESTAMP' },
+    { name: 'uploaded_at',     type: 'TIMESTAMP' }
   ]
 };
 

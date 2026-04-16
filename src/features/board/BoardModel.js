@@ -70,9 +70,11 @@ export const BoardModel = {
         return res.data;
     },
 
-    async uploadFile(file) {
+    async uploadFile(file, { boardId = null, date = null } = {}) {
         const formData = new FormData();
         formData.append('file', file);
+        if (boardId) formData.append('boardId', String(boardId));
+        if (date) formData.append('date', String(date));
         return apiClient.upload('/api/upload', formData);
     }
 };

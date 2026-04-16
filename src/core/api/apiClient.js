@@ -31,7 +31,12 @@ async function request(endpoint, options = {}) {
     if (raw) return response;
 
     const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
+    const isJsonContentType = contentType && contentType.includes('application/json');
+    if (!isJsonContentType) {
+      const textSnippet = await response
+        .text()
+        .then((t) => t.slice(0, 400).replace(/\s+/g, ' ').trim())
+        .catch(() => '');
       // JSON이 아닌 응답(404 HTML 등)이 오면 포트가 바뀌었을 가능성이 큼
       await rediscoverServer();
       if (!_hasRetried) {
@@ -40,10 +45,14 @@ async function request(endpoint, options = {}) {
           _hasRetried: true,
         });
       }
-      throw new ApiError(
-        '서버 응답 형식이 올바르지 않습니다. 서버 재탐색을 시도했습니다. 잠시 후 다시 시도해 주세요.',
-        response.status
-      );
+      let hint =
+        '서버 응답 형식이 올바르지 않습니다. 서버 재탐색을 시도했습니다. 잠시 후 다시 시도해 주세요.';
+      if (textSnippet.includes('Cannot POST') || textSnippet.includes('cannot post')) {
+        hint = `백엔드에 해당 API가 없습니다(Cannot POST). 코드 반영 후 npm run dev:all 등으로 서버를 재시작했는지 확인해 주세요. (${endpoint})`;
+      } else if (textSnippet.includes('Cannot GET') || textSnippet.includes('cannot get')) {
+        hint = `요청 경로를 서버가 찾지 못했습니다. 백엔드 재시작 또는 연결 URL을 확인해 주세요. (${endpoint})`;
+      }
+      throw new ApiError(hint, response.status);
     }
 
     const data = await response.json();

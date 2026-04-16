@@ -38,8 +38,7 @@ export const MENUS = [
       { id: 'log_water', label: '수질분석일지' },
       { id: 'log_med_mgmt', label: '약품관리대장' },
       { id: 'log_med_in', label: '약품입고일지' },
-      { id: 'log_sludge_photo', label: '슬러지사진대지' },
-      { id: 'log_sludge_out', label: '슬러지반출관리대장' }
+      { id: 'log_sludge_photo', label: '슬러지사진대지' }
     ]
   },
   { id: 'board', label: '소통게시판', icon: 'forum' },
@@ -76,6 +75,9 @@ export const TAB_LABELS = {
 export const DEFAULT_TAB = 'dashboard';
 
 export const ADMIN_ROLES = ['admin', 'group_admin'];
+
+/** 현장근무자(user) 자동 퇴근·강제 로그아웃 기준 시각 (한국 시간, 시 단위) */
+export const FIELD_WORKER_AUTO_LOGOUT_HOUR_KST = 20;
 
 export const getTodayKST = () => {
   const kstDate = new Date(new Date().getTime() + (9 * 60 * 60 * 1000));

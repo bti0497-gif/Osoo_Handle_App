@@ -9,6 +9,10 @@ export const MedicineModel = {
         return apiClient.post('/api/medicines/bulk', { items });
     },
 
+    async savePurchase(date, items) {
+        return apiClient.post('/api/medicines/purchase', { date, items });
+    },
+
     async fetchLogs(date) {
         return apiClient.get('/api/medicines', { date });
     },

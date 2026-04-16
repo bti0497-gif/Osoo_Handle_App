@@ -151,10 +151,12 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
             newHist[idx][type][field] = numVal;
             newHist[idx][type].error = errorMsg;
 
-            // 오늘 날짜를 수정하는 경우에만 재고 자동 계산 (과거 데이터는 수동 수정 허용)
-            const todayStr = new Date().toISOString().split('T')[0];
-            if (rowDate === todayStr) {
+            // 입고·사용 변경 시 해당일부터 재고 연쇄 재계산 (키트 그리드와 동일)
+            // 재고 칸만 직접 수정한 경우: 해당일 값은 유지하고 다음날부터만 연쇄
+            if (field === 'purchase' || field === 'usage') {
                 calculateInventory(newHist, idx, type);
+            } else if (field === 'inventory' && idx + 1 < newHist.length) {
+                calculateInventory(newHist, idx + 1, type);
             }
 
             setPendingChanges(p => {
@@ -230,6 +232,6 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
         updateAmount,
         submitBatch,
         refresh: loadLogs,
-        pendingChanges
+        pendingChanges,
     };
 };

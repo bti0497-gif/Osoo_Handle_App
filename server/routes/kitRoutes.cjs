@@ -88,7 +88,10 @@ function recalculateKitInventory(db, kitName, metadata) {
 module.exports = function (db) {
     router.get('/api/kits/history', (req, res) => {
         try {
-            const allRecords = db.prepare('SELECT * FROM kit_logs ORDER BY date ASC').all();
+            const { site_id } = req.query;
+            const allRecords = site_id
+                ? db.prepare('SELECT * FROM kit_logs WHERE site_id = ? ORDER BY date ASC').all(String(site_id))
+                : db.prepare('SELECT * FROM kit_logs ORDER BY date ASC').all();
             res.json({ success: true, history: allRecords });
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
@@ -114,8 +117,8 @@ module.exports = function (db) {
                     is_synced = excluded.is_synced
             `);
 
+            const metadata = getCurrentRecordMetadata(db, req.body);
             const insertMany = db.transaction((rows) => {
-                const metadata = getCurrentRecordMetadata(db);
                 for (const item of rows) {
                     stmt.run(
                         item.kit_name,
@@ -134,6 +137,14 @@ module.exports = function (db) {
             });
 
             insertMany(items);
+
+            const touchedKits = new Set(items.map((it) => it.kit_name).filter(Boolean));
+            db.transaction(() => {
+                for (const kitName of touchedKits) {
+                    recalculateKitInventory(db, kitName, metadata);
+                }
+            })();
+
             res.json({ success: true });
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
@@ -151,7 +162,7 @@ module.exports = function (db) {
                 return res.status(400).json({ success: false, error: '날짜 형식이 올바르지 않습니다.' });
             }
 
-            const metadata = getCurrentRecordMetadata(db);
+            const metadata = getCurrentRecordMetadata(db, req.body);
             const upsertStmt = db.prepare(`
                 INSERT INTO kit_logs (
                     kit_name, date, purchase_amount, usage_amount, current_inventory,
@@ -170,17 +181,22 @@ module.exports = function (db) {
 
             db.transaction(() => {
                 for (const item of items) {
+                    const kitName = item.kitName;
+                    if (!kitName) continue;
                     const amount = Number(item.purchaseAmount ?? 0);
                     upsertStmt.run(
-                        item.kitName, date, amount,
+                        kitName, date, amount,
                         metadata.siteId, metadata.siteName, metadata.author,
                         metadata.createdAt, metadata.lastModified, metadata.isSynced
                     );
-                    affectedKits.add(item.kitName);
+                    affectedKits.add(kitName);
                 }
-                affectedKits.forEach((kitName) => {
+            })();
+
+            db.transaction(() => {
+                for (const kitName of affectedKits) {
                     recalculateKitInventory(db, kitName, metadata);
-                });
+                }
             })();
 
             res.json({ success: true, date, savedKitCount: affectedKits.size });
@@ -204,7 +220,7 @@ module.exports = function (db) {
             }
 
             const expectedByDate = aggregateExpectedUsageByDate(db, startDate, endDate);
-            const metadata = getCurrentRecordMetadata(db);
+            const metadata = getCurrentRecordMetadata(db, req.body);
             const unsyncedDates = new Set();
             const changedKits = new Set();
             let updatedCellCount = 0;

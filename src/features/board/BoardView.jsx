@@ -66,6 +66,16 @@ const BoardView = ({ currentUser }) => {
 
     const isAdmin = currentUser?.role === 'admin';
     const isAuthor = (authorName) => currentUser?.name === authorName;
+    const resolveAttachmentHref = (attachment) => {
+        const rawUrl = String(attachment?.url || '').trim();
+        const fileName = String(attachment?.name || 'download').trim() || 'download';
+        if (!rawUrl) return '#';
+        // 로컬 저장 URL은 다운로드 API를 거치며 원본 파일명으로 내려받는다.
+        if (rawUrl.startsWith('/uploads/')) {
+            return `/api/download?url=${encodeURIComponent(rawUrl)}&name=${encodeURIComponent(fileName)}`;
+        }
+        return rawUrl;
+    };
 
     // Quill modules
     const quillModules = useMemo(() => ({
@@ -102,7 +112,10 @@ const BoardView = ({ currentUser }) => {
             return;
         }
 
-        const result = await uploadFile(file);
+        const result = await uploadFile(file, {
+            boardId: form.id || 'draft',
+            date: new Date().toISOString(),
+        });
         if (result) {
             const current = form.attachments ? JSON.parse(form.attachments) : [];
             current.push({ url: result.url, name: result.originalName, size: result.size });
@@ -126,9 +139,40 @@ const BoardView = ({ currentUser }) => {
         setReplyTo(null);
     };
 
+    const parseBoardDate = (value) => {
+        if (!value) return null;
+
+        if (value instanceof Date) {
+            return Number.isNaN(value.getTime()) ? null : value;
+        }
+
+        if (typeof value === 'string' || typeof value === 'number') {
+            const d = new Date(value);
+            return Number.isNaN(d.getTime()) ? null : d;
+        }
+
+        if (typeof value === 'object') {
+            if (typeof value.value === 'string' || typeof value.value === 'number') {
+                const d = new Date(value.value);
+                return Number.isNaN(d.getTime()) ? null : d;
+            }
+            if (typeof value.timestampValue === 'string') {
+                const d = new Date(value.timestampValue);
+                return Number.isNaN(d.getTime()) ? null : d;
+            }
+            if (typeof value.seconds === 'number') {
+                const millis = value.seconds * 1000 + Math.floor((typeof value.nanos === 'number' ? value.nanos : 0) / 1_000_000);
+                const d = new Date(millis);
+                return Number.isNaN(d.getTime()) ? null : d;
+            }
+        }
+
+        return null;
+    };
+
     const formatDate = (dateStr) => {
-        if (!dateStr) return '-';
-        const d = new Date(dateStr);
+        const d = parseBoardDate(dateStr);
+        if (!d) return '-';
         const month = String(d.getMonth() + 1).padStart(2, '0');
         const day = String(d.getDate()).padStart(2, '0');
         const hour = String(d.getHours()).padStart(2, '0');
@@ -137,8 +181,9 @@ const BoardView = ({ currentUser }) => {
     };
 
     const formatFullDate = (dateStr) => {
-        if (!dateStr) return '-';
-        return new Date(dateStr).toLocaleString('ko-KR', {
+        const d = parseBoardDate(dateStr);
+        if (!d) return '-';
+        return d.toLocaleString('ko-KR', {
             year: 'numeric', month: '2-digit', day: '2-digit',
             hour: '2-digit', minute: '2-digit'
         });
@@ -336,7 +381,7 @@ const BoardView = ({ currentUser }) => {
                                 <div style={{ marginTop: '1.25rem', borderTop: '1px solid #e2e8f0', paddingTop: '0.75rem' }}>
                                     <div style={{ fontSize: '0.6875rem', fontWeight: 800, color: '#94a3b8', marginBottom: '6px', textTransform: 'uppercase' }}>첨부파일</div>
                                     {getAttachments(selectedPost.attachments).map((att, i) => (
-                                        <a key={i} href={att.url} target="_blank" rel="noopener noreferrer"
+                                        <a key={i} href={resolveAttachmentHref(att)} target="_blank" rel="noopener noreferrer"
                                             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', marginBottom: '4px', textDecoration: 'none', fontSize: '0.75rem', color: '#475569', fontWeight: 600 }}>
                                             <span className="material-icons" style={{ fontSize: '14px', color: '#94a3b8' }}>attach_file</span>
                                             {att.name} <span style={{ color: '#94a3b8' }}>({formatFileSize(att.size)})</span>

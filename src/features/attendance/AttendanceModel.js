@@ -1,19 +1,16 @@
-import { supabase } from '../../core/api';
+import { apiClient } from '../../core/api';
 
 export const AttendanceModel = {
     async fetchAttendance(date) {
-        const { data, error } = await supabase
-            .from('attendance')
-            .select('*')
-            .eq('date', date)
-            .order('login_time', { ascending: false });
-
-        if (error) throw new Error('Failed to fetch attendance logs: ' + error.message);
-
-        return data.map(log => ({
+        const res = await apiClient.get('/api/auth/attendance', { date });
+        if (!res?.success) {
+            throw new Error(res?.error || '출결 기록을 불러오지 못했습니다.');
+        }
+        const rows = Array.isArray(res.logs) ? res.logs : [];
+        return rows.map((log) => ({
             ...log,
             member_name: log.member_name || log.name,
-            is_remote: !log.location_matched
+            is_remote: !log.location_matched,
         }));
     }
 };

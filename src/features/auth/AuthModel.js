@@ -94,6 +94,22 @@ export const AuthModel = {
         }
     },
 
+    async switchActiveSite(siteId) {
+        try {
+            const res = await fetch(`${getApiBase()}/api/settings/select-site`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ siteId })
+            });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.message || '현장 전환 실패');
+            return data;
+        } catch (e) {
+            console.error('[AuthModel] 현장 전환 오류:', e);
+            throw e;
+        }
+    },
+
     saveSession(userData) {
         try {
             const session = {
