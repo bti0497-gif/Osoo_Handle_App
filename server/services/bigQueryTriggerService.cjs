@@ -5,6 +5,11 @@ let hasPending = false;
 let lastReason = '';
 
 async function runSync(reason = 'manual') {
+  const isEnabled = String(process.env.BIGQUERY_SYNC_ENABLED || 'true') === 'true';
+  if (!isEnabled) {
+    return { queued: false, skipped: true, reason: 'BIGQUERY_SYNC_ENABLED=false' };
+  }
+
   if (isSyncing) {
     hasPending = true;
     lastReason = reason;

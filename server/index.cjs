@@ -87,18 +87,26 @@ app.use(require('./routes/sludgePhotoRoutes.cjs')(db, BASE_DIR, appDataPath));
 app.use(require('./routes/certificateRoutes.cjs')());
 app.use('/api/auth', require('./routes/authRoutes.cjs')(db));
 
-// --- Background Scheduler (배포 빌드 전까지 비활성화) ---
-// BIGQUERY_SYNC_ENABLED=true 로 설정해야 활성화됨
-const isBigQuerySyncEnabled = process.env.BIGQUERY_SYNC_ENABLED === 'true';
-if (isBigQuerySyncEnabled) {
+// --- BigQuery 동기화 정책 ---
+// BIGQUERY_SYNC_ENABLED: 미설정 시 true(안전 기본값)
+// BIGQUERY_SYNC_SCHEDULER: true 일 때만 주기 스케줄러 사용 (기본 false)
+const isBigQuerySyncEnabled = String(process.env.BIGQUERY_SYNC_ENABLED || 'true') === 'true';
+const isBigQuerySchedulerEnabled = String(process.env.BIGQUERY_SYNC_SCHEDULER || 'false') === 'true';
+if (isBigQuerySyncEnabled && isBigQuerySchedulerEnabled) {
   const syncScheduler = require('./cron/syncScheduler.cjs');
   syncScheduler.start();
   console.log('[Scheduler] BigQuery 백그라운드 동기화 시작');
 } else {
-  console.log('[Scheduler] BigQuery 동기화 비활성화 (BIGQUERY_SYNC_ENABLED != true)');
+  if (!isBigQuerySyncEnabled) {
+    console.log('[Scheduler] BigQuery 동기화 비활성화 (BIGQUERY_SYNC_ENABLED=false)');
+  } else {
+    console.log('[Scheduler] 주기 동기화 비활성화 (BIGQUERY_SYNC_SCHEDULER != true) - 1회 트리거 모드 사용');
+  }
 }
-// 주기 동기화 대신 앱(백엔드) 시작 시 1회 동기화 시도
-triggerBigQuerySync('app-startup');
+// 앱(백엔드) 시작 시 1회 동기화 시도
+if (isBigQuerySyncEnabled) {
+  triggerBigQuerySync('app-startup');
+}
 
 async function findFreePort(startPort, endPort) {
   for (let p = startPort; p <= endPort; p++) {
