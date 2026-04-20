@@ -28,16 +28,44 @@ function getSludgePhotoDir(appDataPath, date) {
   return path.join(appDataPath, '사진관리', '슬러지', year);
 }
 
+function parseSludgePhotoFileName(fileName, date) {
+  const stamp = toDateStamp(date);
+  const dateHyphen = String(date || '').slice(0, 10);
+  const normalized = String(fileName || '').trim();
+
+  // 최신 포맷: YYYYMMDD-슬러지N.jpg
+  let m = normalized.match(new RegExp(`^${stamp}-슬러지(\\d+)\\.jpg$`));
+  if (m) {
+    return { kind: 'sludge', index: Number(m[1]) || 0 };
+  }
+
+  // 레거시 포맷: YYYY-MM-DD-슬러지N.jpg
+  m = normalized.match(new RegExp(`^${dateHyphen}-슬러지(\\d+)\\.jpg$`));
+  if (m) {
+    return { kind: 'sludge', index: Number(m[1]) || 0 };
+  }
+
+  // 레거시 단일 포맷: YYYY-MM-DD-반출.jpg
+  if (normalized === `${dateHyphen}-반출.jpg`) {
+    return { kind: 'sludge', index: 1 };
+  }
+
+  // 최신/레거시 청소필증
+  if (normalized === `${stamp}-청소필증.jpg` || normalized === `${dateHyphen}-청소필증.jpg`) {
+    return { kind: 'certificate', index: 0 };
+  }
+
+  return null;
+}
+
 function listSludgeSequenceFiles(appDataPath, date) {
   const dir = getSludgePhotoDir(appDataPath, date);
   if (!fs.existsSync(dir)) return [];
-  const stamp = toDateStamp(date);
-  const re = new RegExp(`^${stamp}-슬러지(\\d+)\\.jpg$`);
   const files = [];
   for (const fileName of fs.readdirSync(dir)) {
-    const m = String(fileName).match(re);
-    if (!m) continue;
-    files.push({ fileName, index: Number(m[1]) || 0 });
+    const parsed = parseSludgePhotoFileName(fileName, date);
+    if (!parsed || parsed.kind !== 'sludge') continue;
+    files.push({ fileName, index: parsed.index || 0 });
   }
   files.sort((a, b) => a.index - b.index);
   return files;
@@ -190,8 +218,16 @@ function resolvePhotoUrl(appDataPath, date, label) {
     return resolveLatestSludgePhotoInfo(appDataPath, date)?.url || null;
   }
   const year = String(date).slice(0, 4);
-  const filePath = path.join(getSludgePhotoDir(appDataPath, date), buildCertificateFileName(date));
-  return fs.existsSync(filePath) ? `/사진관리/슬러지/${year}/${buildCertificateFileName(date)}` : null;
+  const hyphenName = `${String(date || '').slice(0, 10)}-청소필증.jpg`;
+  const stampName = buildCertificateFileName(date);
+  const candidates = [hyphenName, stampName];
+  for (const fileName of candidates) {
+    const filePath = path.join(getSludgePhotoDir(appDataPath, date), fileName);
+    if (fs.existsSync(filePath)) {
+      return `/사진관리/슬러지/${year}/${fileName}`;
+    }
+  }
+  return null;
 }
 
 function resolveLocalPathFromUrl(appDataPath, url) {

@@ -132,6 +132,36 @@ const SCHEMAS = {
     { name: 'updated_at',    type: 'TIMESTAMP' },
     { name: 'uploaded_at',   type: 'TIMESTAMP' }
   ],
+  certificate_water_quality: [
+    { name: 'certificate_category',      type: 'STRING' },
+    { name: 'certificate_file_name',     type: 'STRING' },
+    { name: 'certificate_original_file_name', type: 'STRING' },
+    { name: 'drive_file_id',             type: 'STRING' },
+    { name: 'drive_web_view_link',       type: 'STRING' },
+    { name: 'site_id',                 type: 'STRING' },
+    { name: 'site_name',               type: 'STRING' },
+    { name: 'site_name_raw',           type: 'STRING' },
+    { name: 'local_id',                type: 'INTEGER', mode: 'REQUIRED' },
+    { name: 'report_date',             type: 'DATE', mode: 'REQUIRED' },
+    { name: 'ss',                      type: 'FLOAT' },
+    { name: 'bod',                     type: 'FLOAT' },
+    { name: 'tn',                      type: 'FLOAT' },
+    { name: 'tp',                      type: 'FLOAT' },
+    { name: 'total_coliform',          type: 'FLOAT' },
+    { name: 'mlss',                    type: 'FLOAT' },
+    { name: 'do',                      type: 'FLOAT' },
+    { name: 'ph',                      type: 'FLOAT' },
+    { name: 'source_pdf_name',         type: 'STRING' },
+    { name: 'source_page_index',       type: 'INTEGER' },
+    { name: 'ai_confidence',           type: 'FLOAT' },
+    { name: 'site_match_confidence',   type: 'FLOAT' },
+    { name: 'manual_review_required',  type: 'BOOLEAN' },
+    { name: 'warnings_json',           type: 'STRING' },
+    { name: 'source_payload_json',     type: 'STRING' },
+    { name: 'created_at',              type: 'TIMESTAMP' },
+    { name: 'updated_at',              type: 'TIMESTAMP' },
+    { name: 'uploaded_at',             type: 'TIMESTAMP' }
+  ],
 
   // ── 게시판 ──────────────────────────────────────────────────────────
   // author_role: 'admin'(중앙관리자) | 'manager'(현장관리자)

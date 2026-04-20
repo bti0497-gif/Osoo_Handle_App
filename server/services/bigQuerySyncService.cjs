@@ -46,6 +46,30 @@ function buildInsertId(tableName, row, defaults) {
   return crypto.createHash('sha1').update(basis).digest('hex');
 }
 
+function parseJsonObject(text) {
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(String(text));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function extractCertificateFileMeta(row) {
+  const payload = parseJsonObject(row.source_payload_json);
+  const fileMeta = payload && typeof payload.certificate_file === 'object'
+    ? payload.certificate_file
+    : {};
+  return {
+    certificate_category: fileMeta.category || null,
+    certificate_file_name: fileMeta.file_name || null,
+    certificate_original_file_name: fileMeta.original_file_name || null,
+    drive_file_id: fileMeta.drive_file_id || null,
+    drive_web_view_link: fileMeta.drive_web_view_link || null,
+  };
+}
+
 // 4. 테이블별 매핑 정의 (Local DB Row -> BigQuery Row)
 const TABLE_MAPPINGS = {
   flow_readings: (row, siteName, authorName, siteId) => ({
@@ -131,6 +155,32 @@ const TABLE_MAPPINGS = {
     company: row.company,
     price: row.price,
     notes: row.notes,
+    updated_at: row.last_modified,
+    uploaded_at: new Date().toISOString()
+  }),
+  certificate_water_quality: (row, siteName, _authorName, siteId) => ({
+    ...extractCertificateFileMeta(row),
+    site_id: row.site_id || siteId,
+    site_name: row.site_name || siteName,
+    site_name_raw: row.site_name_raw || null,
+    local_id: row.id,
+    report_date: row.report_date,
+    ss: row.ss,
+    bod: row.bod,
+    tn: row.tn,
+    tp: row.tp,
+    total_coliform: row.total_coliform,
+    mlss: row.mlss,
+    do: row.do,
+    ph: row.ph,
+    source_pdf_name: row.source_pdf_name || null,
+    source_page_index: row.source_page_index ?? null,
+    ai_confidence: row.ai_confidence ?? null,
+    site_match_confidence: row.site_match_confidence ?? null,
+    manual_review_required: Boolean(row.manual_review_required),
+    warnings_json: row.warnings_json || null,
+    source_payload_json: row.source_payload_json || null,
+    created_at: row.created_at,
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
   })

@@ -120,11 +120,8 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
         }
 
         try {
-            let url = selectedRecord.downloadUrl;
-            if (!url) {
-                const info = await CertificateModel.getDownloadInfo(selectedRecord.id);
-                url = info?.downloadUrl || info?.download_url || '';
-            }
+            const info = await CertificateModel.getDownloadInfo(selectedRecord.id);
+            const url = info?.downloadUrl || info?.download_url || selectedRecord.downloadUrl || '';
             if (!url) {
                 showAlert?.('다운로드 링크를 찾을 수 없습니다.');
                 return;
@@ -133,6 +130,38 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
         } catch (err) {
             console.error(err);
             showAlert?.('다운로드 처리 중 오류가 발생했습니다.');
+        }
+    };
+
+    const handlePrint = async () => {
+        if (!selectedRecord) {
+            showAlert?.('인쇄할 성적서를 선택해 주세요.');
+            return;
+        }
+
+        try {
+            const info = await CertificateModel.getDownloadInfo(selectedRecord.id);
+            const url = info?.downloadUrl || info?.download_url || selectedRecord.downloadUrl || '';
+            if (!url) {
+                showAlert?.('인쇄 링크를 찾을 수 없습니다.');
+                return;
+            }
+            const printWindow = window.open(url, '_blank', 'noopener,noreferrer');
+            if (!printWindow) {
+                showAlert?.('브라우저 팝업이 차단되어 인쇄 창을 열 수 없습니다.');
+                return;
+            }
+            printWindow.focus();
+            setTimeout(() => {
+                try {
+                    printWindow.print();
+                } catch (_) {
+                    // PDF 뷰어 정책상 자동 print가 막히면 사용자가 창에서 직접 인쇄한다.
+                }
+            }, 800);
+        } catch (err) {
+            console.error(err);
+            showAlert?.('인쇄 처리 중 오류가 발생했습니다.');
         }
     };
 
@@ -149,5 +178,6 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
         openFileDialog,
         handleUploadFiles,
         handleDownload,
+        handlePrint,
     };
 };

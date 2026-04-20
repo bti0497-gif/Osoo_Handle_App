@@ -1,19 +1,85 @@
 const { google } = require('googleapis');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '../../.env.local') });
 const { boardUploadsSegments } = require('./drivePathService.cjs');
 
 const KEY_FILE = path.join(__dirname, '../config/google-key.json');
+const WORKSPACE_ROOT = path.join(__dirname, '../..');
+const OAUTH_SCOPES = [
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/spreadsheets',
+];
 
-const auth = new google.auth.GoogleAuth({
-  keyFile: KEY_FILE,
-  scopes: [
-    'https://www.googleapis.com/auth/drive',
-    'https://www.googleapis.com/auth/spreadsheets',
-  ],
-});
+function findOAuthClientSecretFile() {
+  try {
+    const files = fs.readdirSync(WORKSPACE_ROOT);
+    const match = files.find((name) => /^client_secret_.*\.json$/i.test(String(name || '').trim()));
+    return match ? path.join(WORKSPACE_ROOT, match) : '';
+  } catch (_) {
+    return '';
+  }
+}
 
-const drive = google.drive({ version: 'v3', auth });
+function loadOAuthClientConfig() {
+  const envClientId = String(process.env.GOOGLE_CLIENT_ID || '').trim();
+  const envClientSecret = String(process.env.GOOGLE_CLIENT_SECRET || '').trim();
+  const envRedirectUri = String(process.env.GOOGLE_REDIRECT_URI || '').trim();
+
+  if (envClientId && envClientSecret) {
+    return {
+      clientId: envClientId,
+      clientSecret: envClientSecret,
+      redirectUri: envRedirectUri || 'http://localhost'
+    };
+  }
+
+  const fallbackFile = findOAuthClientSecretFile();
+  if (!fallbackFile || !fs.existsSync(fallbackFile)) {
+    return null;
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(fallbackFile, 'utf8'));
+    const installed = raw.installed || raw.web || {};
+    const redirectUris = Array.isArray(installed.redirect_uris) ? installed.redirect_uris : [];
+    const clientId = String(installed.client_id || '').trim();
+    const clientSecret = String(installed.client_secret || '').trim();
+    const redirectUri = String(envRedirectUri || redirectUris[0] || 'http://localhost').trim();
+    if (!clientId || !clientSecret) return null;
+    return { clientId, clientSecret, redirectUri };
+  } catch (_) {
+    return null;
+  }
+}
+
+function createDriveAuth() {
+  const refreshToken = String(process.env.GOOGLE_REFRESH_TOKEN || '').trim();
+  const oauthClient = loadOAuthClientConfig();
+  if (oauthClient && refreshToken) {
+    const oauth2 = new google.auth.OAuth2(
+      oauthClient.clientId,
+      oauthClient.clientSecret,
+      oauthClient.redirectUri
+    );
+    oauth2.setCredentials({ refresh_token: refreshToken });
+    return { auth: oauth2, mode: 'oauth' };
+  }
+
+  const serviceAccountReady = fs.existsSync(KEY_FILE);
+  if (serviceAccountReady) {
+    const saAuth = new google.auth.GoogleAuth({
+      keyFile: KEY_FILE,
+      scopes: OAUTH_SCOPES,
+    });
+    return { auth: saAuth, mode: 'service_account' };
+  }
+
+  return { auth: null, mode: 'none' };
+}
+
+const { auth, mode: driveAuthMode } = createDriveAuth();
+const drive = auth ? google.drive({ version: 'v3', auth }) : null;
 
 function escapeDriveQueryValue(value) {
   return String(value || '').replace(/'/g, "\\'");
@@ -24,14 +90,14 @@ function getDriveRootFolderId() {
 }
 
 function isDriveConfigured() {
-  const fs = require('fs');
   return Boolean(
-    fs.existsSync(KEY_FILE) &&
+    drive &&
     getDriveRootFolderId()
   );
 }
 
 async function getOrCreateFolder(parentFolderId, folderName) {
+  if (!drive) throw new Error('Google Drive 인증 정보가 설정되지 않았습니다.');
   const normalizedParentId = String(parentFolderId || '').trim();
   const normalizedName = String(folderName || '').trim();
   if (!normalizedParentId) throw new Error('Google Drive parent folder ID가 비어 있습니다.');
@@ -69,6 +135,7 @@ async function getOrCreateFolder(parentFolderId, folderName) {
 }
 
 async function findFileInFolder(parentFolderId, fileName) {
+  if (!drive) return null;
   const normalizedParentId = String(parentFolderId || '').trim();
   const normalizedName = String(fileName || '').trim();
   if (!normalizedParentId || !normalizedName) return null;
@@ -100,6 +167,7 @@ async function getOrCreateFolderPath(rootFolderId, segments = []) {
 }
 
 async function uploadBufferToFolder({ folderId, fileName, buffer, mimeType }) {
+  if (!drive) throw new Error('Google Drive 인증 정보가 설정되지 않았습니다.');
   if (!folderId) throw new Error('Google Drive folder ID가 필요합니다.');
   if (!fileName) throw new Error('Google Drive file name이 필요합니다.');
 
@@ -137,6 +205,7 @@ async function getOrCreateBoardUploadsFolder() {
 
 module.exports = {
   drive,
+  driveAuthMode,
   isDriveConfigured,
   getDriveRootFolderId,
   getOrCreateFolder,

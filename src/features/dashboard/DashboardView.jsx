@@ -36,9 +36,9 @@ const DashboardView = ({ currentUser }) => {
     }, [isFlowWidgetOpen]);
 
     return (
-        <div style={{ width: '100%', height: '100%', backgroundColor: '#ffffff', padding: '1.25rem' }}>
-            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: 0 }}>
-                <div style={{ width: 'min(90vw, calc(100vw - 290px))', maxWidth: '100%', alignSelf: 'flex-start' }}>
+        <div className="dashboard-view">
+            <div className="dashboard-view__stack">
+                <div className="dashboard-view__widget-wrap">
                     <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, backgroundColor: '#ffffff' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0.55rem 0.25rem' }}>
                             <span style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 800 }}>
@@ -84,10 +84,10 @@ const DashboardView = ({ currentUser }) => {
                     </div>
                 </div>
 
-                <div style={{ width: 'min(90vw, calc(100vw - 290px))', maxWidth: '100%', alignSelf: 'flex-start' }}>
+                <div className="dashboard-view__widget-wrap">
                     <WaterQualityWidget rows={waterWidgetRows} summary={waterSummary} />
                 </div>
-                <div style={{ width: 'min(90vw, calc(100vw - 290px))', maxWidth: '100%', alignSelf: 'flex-start' }}>
+                <div className="dashboard-view__widget-wrap">
                     <InventoryLevelWidget medicineRows={medicineRows} kitRows={kitRows} />
                 </div>
             </div>

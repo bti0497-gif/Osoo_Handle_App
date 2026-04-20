@@ -167,6 +167,31 @@ db.exec(`
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
     is_synced INTEGER DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS certificate_water_quality (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_date DATE NOT NULL,
+    site_id TEXT,
+    site_name TEXT,
+    site_name_raw TEXT,
+    ss REAL,
+    bod REAL,
+    tn REAL,
+    tp REAL,
+    total_coliform REAL,
+    mlss REAL,
+    do REAL,
+    ph REAL,
+    source_pdf_name TEXT,
+    source_page_index INTEGER,
+    ai_confidence REAL,
+    site_match_confidence REAL,
+    manual_review_required INTEGER DEFAULT 0,
+    warnings_json TEXT,
+    source_payload_json TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+    is_synced INTEGER DEFAULT 0
+  );
   CREATE TABLE IF NOT EXISTS app_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     site_name TEXT,
@@ -686,6 +711,7 @@ db.prepare('CREATE INDEX IF NOT EXISTS idx_medicine_logs_site_date ON medicine_l
 db.prepare('CREATE INDEX IF NOT EXISTS idx_water_quality_site_date ON water_quality (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_kit_logs_site_date ON kit_logs (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_facility_logs_site_date ON facility_logs (site_id, date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_certificate_wq_site_date ON certificate_water_quality (site_id, report_date)').run();
 
 // site_id 백필: 기존 데이터가 있으면 app_settings.site_id로 채움
 if (currentSiteId) {

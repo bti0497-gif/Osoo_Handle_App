@@ -8,6 +8,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
 const { db, appDataPath } = require('./database.cjs');
 const { warmUpExcelPdfConverter } = require('./services/excelPdfService.cjs');
 const { triggerSync: triggerBigQuerySync } = require('./services/bigQueryTriggerService.cjs');
+const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
 
 const BASE_DIR = path.join(__dirname, '..');
 
@@ -141,6 +142,15 @@ function startListening(actualPort) {
     warmUpExcelPdfConverter(appDataPath).catch((error) => {
       console.warn(`[Excel PDF Warmup Error] ${error.message}`);
     });
+    normalizeLegacyPhotoFiles(appDataPath)
+      .then((result) => {
+        if (result.totalConverted > 0) {
+          console.log(`[Photo Normalize] 총 ${result.totalConverted}개 표준화 완료 (약품: ${result.medicineConverted}, 슬러지: ${result.sludgeConverted})`);
+        }
+      })
+      .catch((error) => {
+        console.warn(`[Photo Normalize Error] ${error.message}`);
+      });
   });
   server.on('error', (err) => { console.error('[Server Error]', err.message); });
 }
@@ -157,6 +167,15 @@ if (process.env.ELECTRON === '1') {
     warmUpExcelPdfConverter(appDataPath).catch((error) => {
       console.warn(`[Excel PDF Warmup Error] ${error.message}`);
     });
+    normalizeLegacyPhotoFiles(appDataPath)
+      .then((result) => {
+        if (result.totalConverted > 0) {
+          console.log(`[Photo Normalize] 총 ${result.totalConverted}개 표준화 완료 (약품: ${result.medicineConverted}, 슬러지: ${result.sludgeConverted})`);
+        }
+      })
+      .catch((error) => {
+        console.warn(`[Photo Normalize Error] ${error.message}`);
+      });
   });
 
   server.on('error', (err) => {

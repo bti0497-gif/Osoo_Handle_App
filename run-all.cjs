@@ -130,7 +130,9 @@ function bindChildExit(childProcess, label) {
 async function startAll() {
     await cleanupExistingDevProcesses();
 
-    backend = spawnCommand(process.execPath, ['start.cjs'], {
+    // 개발환경에서는 run-all 자체가 프로세스 생명주기를 관리하므로
+    // 워치독(start.cjs) 대신 실제 서버 엔트리포인트를 직접 실행한다.
+    backend = spawnCommand('node', ['server.cjs'], {
         env: { ...process.env },
     });
     frontend = spawnCommand(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'dev'], {

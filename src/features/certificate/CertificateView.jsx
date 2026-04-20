@@ -37,6 +37,7 @@ const CertificateView = ({ currentUser }) => {
         openFileDialog,
         handleUploadFiles,
         handleDownload,
+        handlePrint,
     } = useCertificateViewModel(currentUser, { showToast, showAlert });
 
     return (
@@ -184,6 +185,24 @@ const CertificateView = ({ currentUser }) => {
                         }}
                     >
                         다운받기
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handlePrint}
+                        disabled={!selectedId}
+                        style={{
+                            height: '34px',
+                            minWidth: '80px',
+                            borderRadius: '8px',
+                            border: '1px solid #cbd5e1',
+                            background: selectedId ? '#ffffff' : '#f8fafc',
+                            color: selectedId ? '#334155' : '#94a3b8',
+                            fontWeight: 800,
+                            fontSize: '12px',
+                            cursor: selectedId ? 'pointer' : 'default',
+                        }}
+                    >
+                        인쇄
                     </button>
                     {isPrivileged && (
                         <button

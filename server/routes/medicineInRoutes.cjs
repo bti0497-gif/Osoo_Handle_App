@@ -21,6 +21,33 @@ function sanitizeName(name) {
   return String(name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
 }
 
+function parseMedicinePhotoFileName(fileName) {
+  const base = String(fileName || '').trim();
+  const ext = path.extname(base).toLowerCase();
+  if (!IMAGE_EXTS.has(ext)) return null;
+  const stem = path.basename(base, ext);
+
+  // 최신 포맷: YYYYMMDD+약품명
+  let m = stem.match(/^(\d{4})(\d{2})(\d{2})\+(.+)$/);
+  if (m) {
+    return { y: m[1], m: m[2], d: m[3], rawName: m[4] };
+  }
+
+  // 레거시 포맷: YYYY-MM-DD-약품명
+  m = stem.match(/^(\d{4})-(\d{2})-(\d{2})-(.+)$/);
+  if (m) {
+    return { y: m[1], m: m[2], d: m[3], rawName: m[4] };
+  }
+
+  // 레거시 포맷: YYYY.MM.DD.-약품명
+  m = stem.match(/^(\d{4})\.(\d{2})\.(\d{2})\.-(.+)$/);
+  if (m) {
+    return { y: m[1], m: m[2], d: m[3], rawName: m[4] };
+  }
+
+  return null;
+}
+
 /**
  * {appDataPath}/사진관리/약품입고/{year}/ 를 스캔해서
  * 약품명/키트명 → { url, localPath, date } 맵을 반환
@@ -38,13 +65,9 @@ function scanMedicinePhotos(appDataPath, year, mm) {
   const mmPrefix = mm + '-'; // '04-'
 
   for (const file of files) {
-    const ext = path.extname(file).toLowerCase();
-    if (!IMAGE_EXTS.has(ext)) continue;
-    const nameWithoutExt = path.basename(file, ext);
-    // 파일명 패턴: {YYYYMMDD}+{약품명}
-    const dateMatch = nameWithoutExt.match(/^(\d{4})(\d{2})(\d{2})\+(.+)$/);
-    if (!dateMatch) continue;
-    const [, y, m, d, rawName] = dateMatch;
+    const parsed = parseMedicinePhotoFileName(file);
+    if (!parsed) continue;
+    const { y, m, d, rawName } = parsed;
     // 해당 연월 파일만 (mm가 null이면 전체)
     if (mm && m !== mm) continue;
     const date = `${y}-${m}-${d}`;

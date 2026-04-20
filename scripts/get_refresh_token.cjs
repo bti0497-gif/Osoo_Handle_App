@@ -9,10 +9,55 @@ require('dotenv').config({ path: require('path').join(__dirname, '../.env.local'
 const { google } = require('googleapis');
 const http = require('http');
 const url = require('url');
+const fs = require('fs');
+const path = require('path');
 
-const CLIENT_ID     = process.env.GOOGLE_CLIENT_ID;
-const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const REDIRECT_URI  = 'http://localhost:8900/api/auth/callback/google';
+function findOAuthClientSecretFile() {
+  try {
+    const rootDir = path.join(__dirname, '..');
+    const files = fs.readdirSync(rootDir);
+    const match = files.find((name) => /^client_secret_.*\.json$/i.test(String(name || '').trim()));
+    return match ? path.join(rootDir, match) : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function loadOAuthClientConfig() {
+  const envClientId = String(process.env.GOOGLE_CLIENT_ID || '').trim();
+  const envClientSecret = String(process.env.GOOGLE_CLIENT_SECRET || '').trim();
+  const envRedirectUri = String(process.env.GOOGLE_REDIRECT_URI || '').trim();
+  if (envClientId && envClientSecret) {
+    return {
+      clientId: envClientId,
+      clientSecret: envClientSecret,
+      redirectUri: envRedirectUri || 'http://localhost'
+    };
+  }
+
+  const secretFile = findOAuthClientSecretFile();
+  if (!secretFile || !fs.existsSync(secretFile)) return null;
+  const raw = JSON.parse(fs.readFileSync(secretFile, 'utf8'));
+  const installed = raw.installed || raw.web || {};
+  const redirectUris = Array.isArray(installed.redirect_uris) ? installed.redirect_uris : [];
+  const clientId = String(installed.client_id || '').trim();
+  const clientSecret = String(installed.client_secret || '').trim();
+  const redirectUri = String(envRedirectUri || redirectUris[0] || 'http://localhost').trim();
+  if (!clientId || !clientSecret) return null;
+  return { clientId, clientSecret, redirectUri };
+}
+
+const oauthClientConfig = loadOAuthClientConfig();
+if (!oauthClientConfig) {
+  console.error('OAuth 클라이언트 정보를 찾지 못했습니다. .env.local 또는 client_secret_*.json 파일을 확인하세요.');
+  process.exit(1);
+}
+
+const CLIENT_ID = oauthClientConfig.clientId;
+const CLIENT_SECRET = oauthClientConfig.clientSecret;
+const REDIRECT_URI = oauthClientConfig.redirectUri;
+const REDIRECT_PATH = new URL(REDIRECT_URI).pathname || '/';
+const LISTEN_PORT = Number(new URL(REDIRECT_URI).port || 80);
 
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.file',
@@ -32,10 +77,10 @@ console.log('아래 URL을 브라우저에서 열고 bti0497@gmail.com 계정으
 console.log(authUrl);
 console.log('\n인증 완료 후 자동으로 토큰을 출력합니다...\n');
 
-// 임시 로컬 서버 (포트 8900)
+// 임시 로컬 서버
 const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
-  if (!parsed.pathname.includes('/api/auth/callback/google')) {
+  if (!String(parsed.pathname || '').startsWith(REDIRECT_PATH)) {
     res.end('무시');
     return;
   }
@@ -62,6 +107,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(8900, () => {
-  console.log('로컬 서버 대기 중 (포트 8900)...');
+server.listen(LISTEN_PORT, () => {
+  console.log(`로컬 서버 대기 중 (포트 ${LISTEN_PORT})...`);
 });

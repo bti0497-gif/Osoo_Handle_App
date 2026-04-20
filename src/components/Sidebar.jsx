@@ -91,9 +91,7 @@ const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword, onS
                         </button>
                         {menu.children && expandedMenus.includes(menu.id) && (
                             <div className="nav-submenu-container">
-                                {menu.children
-                                    .filter(sub => sub.id !== 'certificate')
-                                    .map(sub => (
+                                {menu.children.map(sub => (
                                     <button
                                         key={sub.id}
                                         className={`nav-submenu-item ${activeTab === sub.id ? 'active' : ''}`}
