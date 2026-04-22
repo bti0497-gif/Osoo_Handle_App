@@ -1,11 +1,24 @@
 import React, { useState, useRef } from 'react';
+import { useEffect } from 'react';
 
-const LoginView = ({ onLogin }) => {
-    const [name, setName] = useState(() => localStorage.getItem('lastLoginName') || '');
+const LoginView = ({ onLogin, loginHintName = '' }) => {
+    const [name, setName] = useState(() => String(loginHintName || localStorage.getItem('lastLoginName') || '').trim());
     const [pass, setPass] = useState('');
     const [error, setError] = useState('');
 
     const passRef = useRef(null);
+
+    useEffect(() => {
+        const nextName = String(loginHintName || '').trim();
+        if (!nextName) return;
+        setName(nextName);
+        setPass('');
+        setError('');
+        const timer = setTimeout(() => {
+            passRef.current?.focus();
+        }, 0);
+        return () => clearTimeout(timer);
+    }, [loginHintName]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -58,6 +71,7 @@ const LoginView = ({ onLogin }) => {
                             value={pass}
                             onChange={(e) => setPass(e.target.value)}
                             ref={passRef}
+                            autoFocus
                             required
                         />
                     </div>

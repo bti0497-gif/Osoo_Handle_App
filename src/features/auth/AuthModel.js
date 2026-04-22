@@ -3,6 +3,18 @@ import { getApiBase } from '../../core/api/serverConfig';
 const SESSION_KEY = 'osoo_user_session';
 
 export const AuthModel = {
+    async getLoginHint() {
+        try {
+            const res = await fetch(`${getApiBase()}/api/auth/login-hint`);
+            const data = await res.json();
+            if (!data.success) return '';
+            return String(data.name || '').trim();
+        } catch (e) {
+            console.warn('로그인 힌트 조회 실패:', e);
+            return '';
+        }
+    },
+
     async localLogin(name, password) {
         try {
             const res = await fetch(`${getApiBase()}/api/auth/local-login`, {

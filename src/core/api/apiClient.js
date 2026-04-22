@@ -91,13 +91,13 @@ async function request(endpoint, options = {}) {
 }
 
 export const apiClient = {
-  async get(endpoint, params = {}) {
+  async get(endpoint, params = {}, options = {}) {
     const query = Object.entries(params)
       .filter(([, v]) => v !== undefined && v !== null)
       .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
       .join('&');
     const url = query ? `${endpoint}?${query}` : endpoint;
-    return request(url);
+    return request(url, { method: 'GET', ...options });
   },
 
   async post(endpoint, body, options = {}) {

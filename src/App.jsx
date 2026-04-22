@@ -67,7 +67,7 @@ const PlaceholderView = ({ title }) => (
 );
 
 function App() {
-    const { user, isAuthenticated, isLoading, login, logout } = useAuthViewModel();
+    const { user, loginHintName, isAuthenticated, isLoading, login, logout } = useAuthViewModel();
     const [activeTab, setActiveTab] = useState(DEFAULT_TAB);
 
     useEffect(() => {
@@ -94,7 +94,7 @@ function App() {
     }
 
     if (!isAuthenticated) {
-        return <LoginView onLogin={login} />;
+        return <LoginView onLogin={login} loginHintName={loginHintName} />;
     }
 
     const handleUpdatePassword = () => {

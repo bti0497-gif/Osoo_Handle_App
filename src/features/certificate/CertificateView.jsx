@@ -1,5 +1,6 @@
 import React from 'react';
 import { useDialog } from '../../components/common/DialogContext';
+import { BatchProgressDialog } from '../../components/common/BatchProgressDialog';
 import { useCertificateViewModel } from './useCertificateViewModel';
 
 const headerWrapStyle = {
@@ -32,12 +33,21 @@ const CertificateView = ({ currentUser }) => {
         setSelectedId,
         selectedSite,
         setSelectedSite,
+        selectedYear,
+        setSelectedYear,
+        selectedMonth,
+        setSelectedMonth,
+        yearOptions,
+        monthOptions,
+        moveMonth,
         siteOptions,
         fileInputRef,
         openFileDialog,
         handleUploadFiles,
         handleDownload,
         handlePrint,
+        batchProcess,
+        selectedRecord,
     } = useCertificateViewModel(currentUser, { showToast, showAlert });
 
     return (
@@ -55,7 +65,7 @@ const CertificateView = ({ currentUser }) => {
             <input
                 ref={fileInputRef}
                 type="file"
-                accept="application/pdf"
+                accept=".zip,application/zip"
                 multiple
                 style={{ display: 'none' }}
                 onChange={handleUploadFiles}
@@ -92,7 +102,7 @@ const CertificateView = ({ currentUser }) => {
             }}>
                 <div style={{
                     display: 'grid',
-                    gridTemplateColumns: '2fr 1fr 1fr',
+                    gridTemplateColumns: '1fr',
                     borderBottom: '1px solid #e2e8f0',
                     background: '#f8fafc',
                     fontSize: '12px',
@@ -100,9 +110,7 @@ const CertificateView = ({ currentUser }) => {
                     color: '#475569',
                     padding: '10px 12px',
                 }}>
-                    <div>파일명 / 현장</div>
-                    <div>채취일</div>
-                    <div>발행일</div>
+                    <div>파일명</div>
                 </div>
 
                 <div style={{ overflowY: 'auto', flex: 1 }}>
@@ -134,7 +142,7 @@ const CertificateView = ({ currentUser }) => {
                                         borderBottom: '1px solid #f1f5f9',
                                         padding: '10px 12px',
                                         display: 'grid',
-                                        gridTemplateColumns: '2fr 1fr 1fr',
+                                        gridTemplateColumns: '1fr',
                                         textAlign: 'left',
                                         cursor: 'pointer',
                                         fontSize: '12px',
@@ -143,10 +151,7 @@ const CertificateView = ({ currentUser }) => {
                                 >
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                         <span style={{ fontWeight: 700 }}>{item.fileName}</span>
-                                        <span style={{ color: '#64748b', fontSize: '11px' }}>{item.siteName}</span>
                                     </div>
-                                    <div style={{ color: '#334155' }}>{item.sampledAt}</div>
-                                    <div style={{ color: '#334155' }}>{item.issuedAt}</div>
                                 </button>
                             );
                         })
@@ -162,26 +167,82 @@ const CertificateView = ({ currentUser }) => {
                 justifyContent: 'space-between',
                 gap: '8px',
             }}>
-                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 700 }}>
-                    {isPrivileged
-                        ? '중앙/최고관리자는 현장별 조회 및 성적서 업로드가 가능합니다.'
-                        : '현장관리자는 본인 현장 성적서만 열람/다운로드할 수 있습니다.'}
+                <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                        type="button"
+                        onClick={() => moveMonth(-1)}
+                        style={{
+                            width: '30px',
+                            height: '30px',
+                            borderRadius: '8px',
+                            border: '1px solid #cbd5e1',
+                            background: '#ffffff',
+                            color: '#334155',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                        }}
+                        aria-label="이전 달"
+                    >
+                        <span className="material-icons" style={{ fontSize: '18px' }}>chevron_left</span>
+                    </button>
+
+                    <select
+                        value={selectedYear}
+                        onChange={(e) => setSelectedYear(Number(e.target.value))}
+                        style={{ ...selectStyle, minWidth: '96px' }}
+                    >
+                        {yearOptions.map((y) => (
+                            <option key={y} value={y}>{y}년</option>
+                        ))}
+                    </select>
+
+                    <select
+                        value={selectedMonth}
+                        onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                        style={{ ...selectStyle, minWidth: '88px' }}
+                    >
+                        {monthOptions.map((m) => (
+                            <option key={m} value={m}>{m}월</option>
+                        ))}
+                    </select>
+
+                    <button
+                        type="button"
+                        onClick={() => moveMonth(1)}
+                        style={{
+                            width: '30px',
+                            height: '30px',
+                            borderRadius: '8px',
+                            border: '1px solid #cbd5e1',
+                            background: '#ffffff',
+                            color: '#334155',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                        }}
+                        aria-label="다음 달"
+                    >
+                        <span className="material-icons" style={{ fontSize: '18px' }}>chevron_right</span>
+                    </button>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
                     <button
                         type="button"
                         onClick={handleDownload}
-                        disabled={!selectedId}
+                        disabled={!selectedRecord?.downloadUrl}
                         style={{
                             height: '34px',
                             minWidth: '96px',
                             borderRadius: '8px',
                             border: '1px solid #cbd5e1',
-                            background: selectedId ? '#ffffff' : '#f8fafc',
-                            color: selectedId ? '#334155' : '#94a3b8',
+                            background: selectedRecord?.downloadUrl ? '#ffffff' : '#f8fafc',
+                            color: selectedRecord?.downloadUrl ? '#334155' : '#94a3b8',
                             fontWeight: 800,
                             fontSize: '12px',
-                            cursor: selectedId ? 'pointer' : 'default',
+                            cursor: selectedRecord?.downloadUrl ? 'pointer' : 'default',
                         }}
                     >
                         다운받기
@@ -189,17 +250,17 @@ const CertificateView = ({ currentUser }) => {
                     <button
                         type="button"
                         onClick={handlePrint}
-                        disabled={!selectedId}
+                        disabled={!selectedRecord?.downloadUrl}
                         style={{
                             height: '34px',
                             minWidth: '80px',
                             borderRadius: '8px',
                             border: '1px solid #cbd5e1',
-                            background: selectedId ? '#ffffff' : '#f8fafc',
-                            color: selectedId ? '#334155' : '#94a3b8',
+                            background: selectedRecord?.downloadUrl ? '#ffffff' : '#f8fafc',
+                            color: selectedRecord?.downloadUrl ? '#334155' : '#94a3b8',
                             fontWeight: 800,
                             fontSize: '12px',
-                            cursor: selectedId ? 'pointer' : 'default',
+                            cursor: selectedRecord?.downloadUrl ? 'pointer' : 'default',
                         }}
                     >
                         인쇄
@@ -220,11 +281,21 @@ const CertificateView = ({ currentUser }) => {
                                 cursor: 'pointer',
                             }}
                         >
-                            성적서 올리기
+                            추출 ZIP 업로드
                         </button>
                     )}
                 </div>
             </div>
+
+            <BatchProgressDialog
+                isOpen={batchProcess.tasks.length > 0}
+                title="성적서 ZIP 일괄 업로드"
+                tasks={batchProcess.tasks}
+                progress={batchProcess.progress}
+                isProcessing={batchProcess.isProcessing}
+                isFinished={batchProcess.isFinished}
+                onClose={() => batchProcess.resetBatch()}
+            />
         </div>
     );
 };

@@ -3,6 +3,7 @@ const { syncAttendanceLogs } = require('../services/attendanceBigQueryService.cj
 const { getMembers, upsertMember, deleteMember, isSheetsConfigured } = require('../services/membersSheetsService.cjs');
 const { detectRemoteSession } = require('../services/remoteSessionDetectService.cjs');
 const { triggerSync: triggerBigQuerySync } = require('../services/bigQueryTriggerService.cjs');
+const { syncRecentCertificateCacheForSite } = require('../services/certificateCacheSyncService.cjs');
 
 module.exports = (db) => {
     const router = express.Router();
@@ -170,8 +171,29 @@ module.exports = (db) => {
         }];
     };
 
+    const getManagedSitesByManagerName = (member) => {
+        const memberName = String(member?.name || '').trim();
+        if (!memberName) return [];
+        const rows = db.prepare(`
+            SELECT id, site_name, manager_name
+            FROM sites
+            WHERE COALESCE(is_active, 1) = 1
+              AND manager_name = ?
+            ORDER BY site_name ASC
+        `).all(memberName);
+        return rows.map((row, idx) => ({
+            id: row.id,
+            site_name: row.site_name,
+            manager_name: row.manager_name || '',
+            is_primary: idx === 0
+        }));
+    };
+
     const enrichMemberWithSites = (member) => {
-        const managedSites = getManagedSitesForMember(member);
+        let managedSites = getManagedSitesForMember(member);
+        if (managedSites.length === 0 && String(member?.role || 'user') === 'user') {
+            managedSites = getManagedSitesByManagerName(member);
+        }
         const currentSiteId = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || null;
 
         let activeSite = null;
@@ -190,6 +212,38 @@ module.exports = (db) => {
         };
     };
 
+    const resolveLoginHintName = () => {
+        const settings = db.prepare('SELECT site_name, manager_name FROM app_settings WHERE id = 1').get() || {};
+        const managerName = String(settings.manager_name || '').trim();
+        const siteName = String(settings.site_name || '').trim();
+
+        if (managerName) {
+            const exact = db.prepare('SELECT name FROM members WHERE name = ? LIMIT 1').get(managerName);
+            if (exact?.name) return String(exact.name);
+        }
+
+        if (siteName) {
+            const bySite = db.prepare(`
+                SELECT name
+                FROM members
+                WHERE role = 'user'
+                  AND REPLACE(COALESCE(site_name1, ''), ' ', '') LIKE '%' || REPLACE(?, ' ', '') || '%'
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+            `).get(siteName);
+            if (bySite?.name) return String(bySite.name);
+        }
+
+        const fallback = db.prepare(`
+            SELECT name
+            FROM members
+            WHERE role = 'user'
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+        `).get();
+        return String(fallback?.name || '').trim();
+    };
+
     // 1. 로컬 로그인
     router.post('/local-login', async (req, res) => {
         const { name, password } = req.body;
@@ -201,6 +255,15 @@ module.exports = (db) => {
                     if (member) {
                         // 온라인 첫 로그인/정상 로그인 시 로컬 캐시 갱신
                         upsertLocalMember(member);
+                        try {
+                            await syncRecentCertificateCacheForSite({
+                                db,
+                                siteName: member.site_name1,
+                                months: 2,
+                            });
+                        } catch (syncErr) {
+                            console.warn('[auth/local-login] 성적서 캐시 동기화 실패(sheets):', syncErr.message);
+                        }
                         triggerBigQuerySync('login-success:sheets');
                         return res.json({ success: true, member: enrichMemberWithSites(member), source: 'sheets' });
                     }
@@ -212,6 +275,15 @@ module.exports = (db) => {
 
             const member = db.prepare('SELECT * FROM members WHERE name = ? AND password = ?').get(name, password);
             if (member) {
+                try {
+                    await syncRecentCertificateCacheForSite({
+                        db,
+                        siteName: member.site_name1,
+                        months: 2,
+                    });
+                } catch (syncErr) {
+                    console.warn('[auth/local-login] 성적서 캐시 동기화 실패(local):', syncErr.message);
+                }
                 triggerBigQuerySync('login-success:local');
                 res.json({ success: true, member: enrichMemberWithSites(member) });
             } else {
@@ -219,6 +291,16 @@ module.exports = (db) => {
             }
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    // 로그인 화면 기본값(현장관리자 이름) 제공
+    router.get('/login-hint', (req, res) => {
+        try {
+            const name = resolveLoginHintName();
+            return res.json({ success: true, name });
+        } catch (err) {
+            return res.status(500).json({ success: false, error: err.message });
         }
     });
 

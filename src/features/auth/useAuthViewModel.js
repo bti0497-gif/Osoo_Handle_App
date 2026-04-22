@@ -78,6 +78,7 @@ function shouldForceEodLogoutForOpenSession(loginTimeIso) {
 export const useAuthViewModel = () => {
     const [user, setUser] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [loginHintName, setLoginHintName] = useState('');
     const autoLogoutTimerRef = useRef(null);
     const restoringRef = useRef(false);
     const userRef = useRef(null);
@@ -88,6 +89,11 @@ export const useAuthViewModel = () => {
             clearTimeout(autoLogoutTimerRef.current);
             autoLogoutTimerRef.current = null;
         }
+    }, []);
+
+    const refreshLoginHint = useCallback(async () => {
+        const hint = await AuthModel.getLoginHint();
+        setLoginHintName(String(hint || '').trim());
     }, []);
 
     useEffect(() => {
@@ -207,6 +213,9 @@ export const useAuthViewModel = () => {
                 console.error('세션 복원 실패:', err);
                 AuthModel.clearSession();
             } finally {
+                if (!userRef.current) {
+                    await refreshLoginHint();
+                }
                 restoringRef.current = false;
                 setIsLoading(false);
             }
@@ -214,7 +223,7 @@ export const useAuthViewModel = () => {
 
         restoreSession();
         return () => clearAutoLogoutTimer();
-    }, [setupAutoLogoutTimer, clearAutoLogoutTimer]);
+    }, [setupAutoLogoutTimer, clearAutoLogoutTimer, refreshLoginHint]);
 
     /** 절전 등으로 20시 타이머를 놓친 경우 — 당일 20시 이전 출근·미퇴근만 보정 */
     useEffect(() => {
@@ -303,6 +312,7 @@ export const useAuthViewModel = () => {
         }
         AuthModel.clearSession();
         setUser(null);
+        await refreshLoginHint();
 
         if (u && isFieldWorker(u)) {
             try {
@@ -339,6 +349,7 @@ export const useAuthViewModel = () => {
 
     return {
         user,
+        loginHintName,
         isAuthenticated: !!user,
         isLoading,
         login,
