@@ -7,6 +7,8 @@ module.exports = {
   productName: 'Osoo Handle App',
   npmRebuild: false,
   nodeGypRebuild: false,
+  /** NSIS installSection.nsh 에서 SetDetailsPrint none 제거(상세 로그 표시). `scripts/patch-nsis-install-section.cjs` */
+  beforePack: './scripts/patch-nsis-install-section.cjs',
   directories: {
     output: 'release',
     buildResources: 'build',
@@ -23,6 +25,12 @@ module.exports = {
     'package.json',
     '.env.local',
   ],
+  asarUnpack: [
+    'server.cjs',
+    'server/**/*',
+    'node_modules/**/*',
+    '.env.local',
+  ],
   extraResources: [
     { from: 'templates', to: 'templates' },
     { from: 'scripts', to: 'scripts' },
@@ -32,10 +40,12 @@ module.exports = {
       { target: 'nsis', arch: ['x64'] },
     ],
     icon: 'public/icon.ico',
+    compression: 'store',
   },
   nsis: {
     oneClick: false,
     allowToChangeInstallationDirectory: true,
+    include: 'electron/installer.nsh',
     installerIcon: 'public/icon.ico',
     uninstallerIcon: 'public/icon.ico',
     installerHeaderIcon: 'public/icon.ico',
@@ -45,8 +55,8 @@ module.exports = {
   },
   publish: {
     provider: 'github',
-    owner: '',
-    repo: '',
+    owner: 'bti0497-gif',
+    repo: 'Osoo_Handle_App',
     releaseType: 'release',
   },
 };

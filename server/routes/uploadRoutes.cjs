@@ -6,8 +6,8 @@ const fs = require('fs');
 const { drive, getOrCreateBoardUploadsFolder } = require('../services/driveService.cjs');
 const router = express.Router();
 
-module.exports = function(baseDir) {
-  const uploadDir = path.join(baseDir, 'uploads');
+module.exports = function(appDataPath) {
+  const uploadDir = path.join(appDataPath, 'uploads');
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
   const boardUpload = multer({ dest: uploadDir, limits: { fileSize: 50 * 1024 * 1024 } });
@@ -108,7 +108,7 @@ module.exports = function(baseDir) {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const date = req.body.date || new Date().toISOString().split('T')[0];
     const type = req.body.type || 'misc';
-    const targetDir = path.join(baseDir, 'resources', 'images', date);
+    const targetDir = path.join(appDataPath, 'resources', 'images', date);
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
     const fileName = `${type}_${Date.now()}.jpg`;

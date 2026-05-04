@@ -13,7 +13,7 @@
     "server": "node server.cjs",
     "start": "node start.cjs",
     "electron:dev": "npm run build && electron .",
-    "electron:build": "npm run build && electron-builder --config electron-builder.config.js",
+    "electron:build": "npm run build && electron-builder --config electron-builder.config.cjs",
     "electron:publish": "npm run build && electron-builder --config electron-builder.config.js --publish always"
   },
   "dependencies": {

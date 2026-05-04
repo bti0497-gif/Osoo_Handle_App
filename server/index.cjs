@@ -4,20 +4,29 @@ const fs = require('fs');
 const net = require('net');
 const cors = require('cors');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
-
-const { db, appDataPath } = require('./database.cjs');
-const { warmUpExcelPdfConverter } = require('./services/excelPdfService.cjs');
-const { triggerSync: triggerBigQuerySync } = require('./services/bigQueryTriggerService.cjs');
-const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
+const routeRegistry = require('./routeRegistry.cjs');
 
 const BASE_DIR = path.join(__dirname, '..');
+const IS_MINIMAL_BUILD = String(process.env.OSOO_MINIMAL_BUILD || '0') === '1';
+
+function resolveAppDataPathForPort() {
+  return path.join(process.env.APPDATA, 'Osoo_Handle_App');
+}
+
+function writePortFileEarly(port) {
+  try {
+    const dir = resolveAppDataPathForPort();
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'server.port'), String(port), 'utf8');
+  } catch (e) {
+    console.warn('[Server] server.port 기록 실패:', e.message);
+  }
+}
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use('/uploads', express.static(path.join(BASE_DIR, 'uploads')));
-app.use('/사진관리', express.static(path.join(appDataPath, '사진관리')));
 
 process.on('uncaughtException', (err) => {
   console.error('[UncaughtException]', err.message);
@@ -40,73 +49,193 @@ app.get('/', (req, res) => {
   `);
 });
 
-app.get('/api/ping', (req, res) => res.json({ ok: true }));
+app.get('/api/ping', (req, res) => res.json({
+  ok: true,
+  app: 'osoo-handle-app',
+  serverToken: process.env.OSOO_SERVER_TOKEN || null,
+}));
 
-const BIGQUERY_IMMEDIATE_SYNC_PREFIXES = [
-  '/api/flows',
-  '/api/medicines',
-  '/api/kits',
-  '/api/water-quality',
-  '/api/facility',
-  '/api/sludge-photos',
-  '/api/medicine-in',
-];
+const isBigQuerySyncEnabled = String(process.env.BIGQUERY_SYNC_ENABLED || 'true') === 'true';
+const isBigQuerySchedulerEnabled = String(process.env.BIGQUERY_SYNC_SCHEDULER || 'true') === 'true';
 
-app.use((req, res, next) => {
-  const method = String(req.method || '').toUpperCase();
-  const shouldWatchMethod = method === 'POST' || method === 'PUT' || method === 'DELETE';
-  const shouldWatchPath = BIGQUERY_IMMEDIATE_SYNC_PREFIXES.some((prefix) => req.path.startsWith(prefix));
-  if (!shouldWatchMethod || !shouldWatchPath) {
-    return next();
+let postStartupTasksScheduled = false;
+let postStartupCtx = null;
+
+/**
+ * makeLazy — 첫 HTTP 요청 시 모듈을 로드하는 Lazy Loader
+ * 에러 발생 시 'error' 상태를 저장하여 무한 재시도를 방지합니다.
+ */
+function makeLazy(modulePath, ...args) {
+  let router = null;
+  let loadError = null;
+  return (req, res, next) => {
+    if (loadError) {
+      return res.status(500).json({ ok: false, error: `Module previously failed: ${modulePath}: ${loadError}` });
+    }
+    if (!router) {
+      try {
+        router = require(modulePath)(...args);
+      } catch (e) {
+        loadError = e.message;
+        console.error(`[Lazy] Tier2 로드 실패 ${modulePath}:`, e.message);
+        return res.status(500).json({ ok: false, error: `Module load failed: ${modulePath}: ${e.message}` });
+      }
+    }
+    router(req, res, next);
+  };
+}
+
+/**
+ * resolveArgs — routeRegistry의 args 문자열 배열을 실제 ctx 값으로 매핑합니다.
+ */
+function resolveArgs(argNames, ctx) {
+  return argNames.map(name => {
+    if (name === 'db') return ctx.db;
+    if (name === 'appDataPath') return ctx.appDataPath;
+    if (name === 'BASE_DIR') return ctx.BASE_DIR;
+    return name;
+  });
+}
+
+function schedulePostStartupTasks() {
+  if (postStartupTasksScheduled || !postStartupCtx) return;
+  postStartupTasksScheduled = true;
+
+  const { appDataPath, warmUpExcelPdfConverter, triggerBigQuerySync, normalizeLegacyPhotoFiles } = postStartupCtx;
+
+  if (isBigQuerySyncEnabled) {
+    setTimeout(() => {
+      triggerBigQuerySync('app-startup-delayed');
+    }, 20_000);
   }
 
-  const originalEnd = res.end;
-  res.end = function wrappedEnd(...args) {
-    if (res.statusCode >= 200 && res.statusCode < 400) {
-      triggerBigQuerySync(`after-save:${method}:${req.path}`);
-    }
-    return originalEnd.apply(this, args);
-  };
-  return next();
-});
+  setTimeout(() => {
+    warmUpExcelPdfConverter(appDataPath).catch((error) => {
+      console.warn(`[Excel PDF Warmup Error] ${error.message}`);
+    });
+  }, 30_000);
 
-app.use(require('./routes/flowRoutes.cjs')(db));
-app.use(require('./routes/medicineRoutes.cjs')(db));
-app.use(require('./routes/medicineRegisterRoutes.cjs')(db, BASE_DIR, appDataPath));
-app.use(require('./routes/medicineInRoutes.cjs')(db, BASE_DIR, appDataPath));
-app.use(require('./routes/waterQualityRoutes.cjs')(db, BASE_DIR));
-app.use(require('./routes/kitRoutes.cjs')(db));
-app.use(require('./routes/facilityRoutes.cjs')(db));
-app.use(require('./routes/settingsRoutes.cjs')(db, BASE_DIR, appDataPath));
-app.use(require('./routes/boardRoutes.cjs')());
-app.use(require('./routes/uploadRoutes.cjs')(BASE_DIR));
-app.use(require('./routes/locationRoutes.cjs')(BASE_DIR));
-app.use(require('./routes/excelRoutes.cjs')(db, BASE_DIR, appDataPath));
-app.use(require('./routes/dailyWorkLogRoutes.cjs')(db, BASE_DIR, appDataPath));
-app.use(require('./routes/hwpRoutes.cjs')(db, BASE_DIR, appDataPath));
-app.use(require('./routes/sludgePhotoRoutes.cjs')(db, BASE_DIR, appDataPath));
-app.use(require('./routes/certificateRoutes.cjs')());
-app.use('/api/auth', require('./routes/authRoutes.cjs')(db));
-
-// --- BigQuery 동기화 정책 ---
-// BIGQUERY_SYNC_ENABLED: 미설정 시 true(안전 기본값)
-// BIGQUERY_SYNC_SCHEDULER: true 일 때만 주기 스케줄러 사용 (기본 false)
-const isBigQuerySyncEnabled = String(process.env.BIGQUERY_SYNC_ENABLED || 'true') === 'true';
-const isBigQuerySchedulerEnabled = String(process.env.BIGQUERY_SYNC_SCHEDULER || 'false') === 'true';
-if (isBigQuerySyncEnabled && isBigQuerySchedulerEnabled) {
-  const syncScheduler = require('./cron/syncScheduler.cjs');
-  syncScheduler.start();
-  console.log('[Scheduler] BigQuery 백그라운드 동기화 시작');
-} else {
-  if (!isBigQuerySyncEnabled) {
-    console.log('[Scheduler] BigQuery 동기화 비활성화 (BIGQUERY_SYNC_ENABLED=false)');
-  } else {
-    console.log('[Scheduler] 주기 동기화 비활성화 (BIGQUERY_SYNC_SCHEDULER != true) - 1회 트리거 모드 사용');
+  if (String(process.env.PHOTO_NORMALIZE_ON_STARTUP || 'false') === 'true') {
+    setTimeout(() => {
+      normalizeLegacyPhotoFiles(appDataPath)
+        .then((result) => {
+          if (result.totalConverted > 0) {
+            console.log(`[Photo Normalize] 총 ${result.totalConverted}개 표준화 완료 (약품: ${result.medicineConverted}, 슬러지: ${result.sludgeConverted})`);
+          }
+        })
+        .catch((error) => {
+          console.warn(`[Photo Normalize Error] ${error.message}`);
+        });
+    }, 45_000);
   }
 }
-// 앱(백엔드) 시작 시 1회 동기화 시도
-if (isBigQuerySyncEnabled) {
-  triggerBigQuerySync('app-startup');
+
+function registerLazyApplication() {
+  const { db, appDataPath } = require('./database.cjs');
+  const { warmUpExcelPdfConverter } = require('./services/excelPdfService.cjs');
+  const { triggerSync: triggerBigQuerySync } = require('./services/bigQueryTriggerService.cjs');
+  const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
+  const ctx = { db, appDataPath, BASE_DIR };
+
+  // --- Tier 0: 즉시 등록 (registry 기반) ---
+  for (const entry of routeRegistry.filter(r => r.tier === 0)) {
+    const router = require(entry.module)(...resolveArgs(entry.args, ctx));
+    app.use(entry.path, router);
+  }
+
+  if (IS_MINIMAL_BUILD) {
+    console.log('[Server] minimal build mode: auth routes only');
+    return { appDataPath, warmUpExcelPdfConverter, triggerBigQuerySync, normalizeLegacyPhotoFiles };
+  }
+
+  // --- Static file serving ---
+  app.use('/uploads', express.static(path.join(appDataPath, 'uploads')));
+  app.use('/사진관리', express.static(path.join(appDataPath, '사진관리')));
+
+  // --- BigQuery 감시 prefix: registry에서 자동 추출 ---
+  const BIGQUERY_IMMEDIATE_SYNC_PREFIXES = routeRegistry
+    .filter(r => r.watch)
+    .map(r => r.path);
+
+  // --- BigQuery 감시 미들웨어 ---
+  app.use((req, res, next) => {
+    const method = String(req.method || '').toUpperCase();
+    const shouldWatchMethod = method === 'POST' || method === 'PUT' || method === 'DELETE';
+    const shouldWatchPath = BIGQUERY_IMMEDIATE_SYNC_PREFIXES.some((prefix) => req.path.startsWith(prefix));
+    if (!shouldWatchMethod || !shouldWatchPath) return next();
+    const originalEnd = res.end;
+    res.end = function wrappedEnd(...args) {
+      if (res.statusCode >= 200 && res.statusCode < 400) {
+        triggerBigQuerySync(`after-save:${method}:${req.path}`);
+      }
+      return originalEnd.apply(this, args);
+    };
+    return next();
+  });
+
+  // --- Tier 1: registry 기반 lazy wrapper 등록 ---
+  const tier1Entries = routeRegistry.filter(r => r.tier === 1);
+  const tier1RouterRefs = {};
+  for (const entry of tier1Entries) {
+    tier1RouterRefs[entry.path] = null;
+    app.use(entry.path, (req, res, next) => {
+      if (!tier1RouterRefs[entry.path]) {
+        try {
+          tier1RouterRefs[entry.path] = require(entry.module)(...resolveArgs(entry.args, ctx));
+        } catch (e) {
+          console.error(`[Lazy] Tier1 로드 실패 ${entry.path}:`, e.message);
+          tier1RouterRefs[entry.path] = 'error';
+          return res.status(500).json({ ok: false, error: `Module load failed: ${entry.path}` });
+        }
+      }
+      if (tier1RouterRefs[entry.path] === 'error') {
+        return res.status(500).json({ ok: false, error: `Module previously failed: ${entry.path}` });
+      }
+      tier1RouterRefs[entry.path](req, res, next);
+    });
+  }
+
+  // --- Tier 2: registry 기반 makeLazy 등록 ---
+  for (const entry of routeRegistry.filter(r => r.tier === 2)) {
+    app.use(entry.path, makeLazy(entry.module, ...resolveArgs(entry.args, ctx)));
+  }
+
+  // --- BigQuery 스케줄러 ---
+  function startBigQueryScheduler() {
+    if (isBigQuerySyncEnabled && isBigQuerySchedulerEnabled) {
+      const syncScheduler = require('./cron/syncScheduler.cjs');
+      syncScheduler.start();
+      console.log('[Scheduler] BigQuery 백그라운드 동기화 시작');
+    } else if (!isBigQuerySyncEnabled) {
+      console.log('[Scheduler] BigQuery 동기화 비활성화 (BIGQUERY_SYNC_ENABLED=false)');
+    } else {
+      console.log('[Scheduler] 주기 동기화 비활성화 (BIGQUERY_SYNC_SCHEDULER=false) - 저장/시작/로그아웃 트리거 모드 사용');
+    }
+  }
+
+  // --- /api/preload-trigger: registry 기반 자동화 ---
+  app.post('/api/preload-trigger', (req, res) => {
+    res.json({ ok: true });
+    setImmediate(() => {
+      let i = 0;
+      function loadNext() {
+        if (i >= tier1Entries.length) { startBigQueryScheduler(); return; }
+        const entry = tier1Entries[i++];
+        if (!tier1RouterRefs[entry.path]) {
+          try {
+            tier1RouterRefs[entry.path] = require(entry.module)(...resolveArgs(entry.args, ctx));
+          } catch (e) {
+            console.error(`[Preload] Tier1 로드 실패 ${entry.path}:`, e.message);
+            tier1RouterRefs[entry.path] = 'error';
+          }
+        }
+        setTimeout(loadNext, 200);
+      }
+      loadNext();
+    });
+  });
+
+  return { appDataPath, warmUpExcelPdfConverter, triggerBigQuerySync, normalizeLegacyPhotoFiles };
 }
 
 async function findFreePort(startPort, endPort) {
@@ -122,35 +251,32 @@ async function findFreePort(startPort, endPort) {
   return startPort;
 }
 
-const API_PORT_MIN = (Number(process.env.VITE_PORT) || 8900) + 1;
-const API_PORT_MAX = API_PORT_MIN + 50;
+const API_PORT_MIN = Number(process.env.OSOO_API_PORT_MIN) || 18731;
+const API_PORT_MAX = Number(process.env.OSOO_API_PORT_MAX) || 18734;
 
-function writePortFile(port) {
-  const portFilePath = path.join(appDataPath, 'server.port');
-  try { fs.writeFileSync(portFilePath, String(port), 'utf8'); } catch (_) { }
+function runDeferredFullStack() {
+  try {
+    console.time('[Server] full-stack-init');
+    postStartupCtx = registerLazyApplication();
+    console.timeEnd('[Server] full-stack-init');
+    
+    if (!IS_MINIMAL_BUILD) {
+      schedulePostStartupTasks();
+    }
+  } catch (e) {
+    console.error('[Server] full-stack-init 실패:', e);
+  }
 }
 
 function startListening(actualPort) {
-  writePortFile(actualPort);
+  writePortFileEarly(actualPort);
 
   const server = app.listen(actualPort, '127.0.0.1', () => {
     console.log(`Local Bridge Server running at http://localhost:${actualPort}`);
     if (actualPort !== API_PORT_MIN) {
       console.warn(`[주의] 기본 포트(${API_PORT_MIN})가 이미 사용 중이어서 포트 ${actualPort}로 시작했습니다.`);
     }
-
-    warmUpExcelPdfConverter(appDataPath).catch((error) => {
-      console.warn(`[Excel PDF Warmup Error] ${error.message}`);
-    });
-    normalizeLegacyPhotoFiles(appDataPath)
-      .then((result) => {
-        if (result.totalConverted > 0) {
-          console.log(`[Photo Normalize] 총 ${result.totalConverted}개 표준화 완료 (약품: ${result.medicineConverted}, 슬러지: ${result.sludgeConverted})`);
-        }
-      })
-      .catch((error) => {
-        console.warn(`[Photo Normalize Error] ${error.message}`);
-      });
+    setImmediate(runDeferredFullStack);
   });
   server.on('error', (err) => { console.error('[Server Error]', err.message); });
 }
@@ -161,24 +287,12 @@ if (process.env.ELECTRON === '1') {
   });
 } else {
   const fixedPort = API_PORT_MIN;
-  const server = app.listen(fixedPort, '127.0.0.1', () => {
-    writePortFile(fixedPort);
+  writePortFileEarly(fixedPort);
+  const devServer = app.listen(fixedPort, '127.0.0.1', () => {
     console.log(`Local Bridge Server running at http://localhost:${fixedPort}`);
-    warmUpExcelPdfConverter(appDataPath).catch((error) => {
-      console.warn(`[Excel PDF Warmup Error] ${error.message}`);
-    });
-    normalizeLegacyPhotoFiles(appDataPath)
-      .then((result) => {
-        if (result.totalConverted > 0) {
-          console.log(`[Photo Normalize] 총 ${result.totalConverted}개 표준화 완료 (약품: ${result.medicineConverted}, 슬러지: ${result.sludgeConverted})`);
-        }
-      })
-      .catch((error) => {
-        console.warn(`[Photo Normalize Error] ${error.message}`);
-      });
+    setImmediate(runDeferredFullStack);
   });
-
-  server.on('error', (err) => {
+  devServer.on('error', (err) => {
     console.error('[Server Error]', err.message);
     if (err.code === 'EADDRINUSE') {
       console.error(`[Server Error] 개발 환경에서는 백엔드 포트 ${fixedPort}를 고정 사용합니다. 기존 프로세스를 종료한 뒤 다시 시작해 주세요.`);

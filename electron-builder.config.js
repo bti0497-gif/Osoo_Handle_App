@@ -5,6 +5,9 @@
 module.exports = {
   appId: 'com.osoo.handle-app',
   productName: 'Osoo Handle App',
+  npmRebuild: false,
+  nodeGypRebuild: false,
+  beforePack: './scripts/patch-nsis-install-section.cjs',
   directories: {
     output: 'release',
     buildResources: 'build',
@@ -21,6 +24,12 @@ module.exports = {
     'package.json',
     '.env.local',
   ],
+  asarUnpack: [
+    'server.cjs',
+    'server/**/*',
+    'node_modules/**/*',
+    '.env.local',
+  ],
   extraResources: [
     { from: 'templates', to: 'templates' },
     { from: 'scripts', to: 'scripts' },
@@ -30,10 +39,14 @@ module.exports = {
       { target: 'nsis', arch: ['x64'] },
     ],
     icon: 'public/icon.ico',
+    // electron-builder.config.cjs 와 동기화. 설치 속도 우선(용량은 증가할 수 있음).
+    compression: 'store',
   },
   nsis: {
     oneClick: false,
     allowToChangeInstallationDirectory: true,
+    /** 사용자 안내 문구 — `electron/installer.nsh` */
+    include: 'electron/installer.nsh',
     installerIcon: 'public/icon.ico',
     uninstallerIcon: 'public/icon.ico',
     installerHeaderIcon: 'public/icon.ico',
