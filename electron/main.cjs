@@ -52,13 +52,17 @@ function stopServer() {
 }
 
 function createWindow() {
+  const iconPath = isDev
+    ? path.join(__dirname, '..', 'public', 'icon.ico')
+    : path.join(process.resourcesPath, 'app.asar.unpacked', 'public', 'icon.ico');
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1024,
     minHeight: 700,
     title: 'Osoo Handle App',
-    icon: path.join(__dirname, '..', 'public', 'icon.ico'),
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,

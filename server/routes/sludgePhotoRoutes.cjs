@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -33,25 +33,25 @@ function parseSludgePhotoFileName(fileName, date) {
   const dateHyphen = String(date || '').slice(0, 10);
   const normalized = String(fileName || '').trim();
 
-  // 최신 포맷: YYYYMMDD-슬러지N.jpg
+  // 理쒖떊 ?щ㎎: YYYYMMDD-슬러지N.jpg
   let m = normalized.match(new RegExp(`^${stamp}-슬러지(\\d+)\\.jpg$`));
   if (m) {
     return { kind: 'sludge', index: Number(m[1]) || 0 };
   }
 
-  // 레거시 포맷: YYYY-MM-DD-슬러지N.jpg
+  // ?덇굅???щ㎎: YYYY-MM-DD-슬러지N.jpg
   m = normalized.match(new RegExp(`^${dateHyphen}-슬러지(\\d+)\\.jpg$`));
   if (m) {
     return { kind: 'sludge', index: Number(m[1]) || 0 };
   }
 
-  // 레거시 단일 포맷: YYYY-MM-DD-반출.jpg
-  if (normalized === `${dateHyphen}-반출.jpg`) {
+  // ?덇굅???⑥씪 ?щ㎎: YYYY-MM-DD-諛섏텧.jpg
+  if (normalized === `${dateHyphen}-諛섏텧.jpg`) {
     return { kind: 'sludge', index: 1 };
   }
 
-  // 최신/레거시 청소필증
-  if (normalized === `${stamp}-청소필증.jpg` || normalized === `${dateHyphen}-청소필증.jpg`) {
+  // 理쒖떊/?덇굅??泥?냼?꾩쬆
+  if (normalized === `${stamp}-泥?냼?꾩쬆.jpg` || normalized === `${dateHyphen}-泥?냼?꾩쬆.jpg`) {
     return { kind: 'certificate', index: 0 };
   }
 
@@ -80,17 +80,17 @@ function resolveLatestSludgePhotoInfo(appDataPath, date) {
     fileName: last.fileName,
     index: last.index,
     filePath: path.join(dir, last.fileName),
-    url: `/사진관리/슬러지/${String(date).slice(0, 4)}/${last.fileName}`,
+    url: `/사진관리슬러지/${String(date).slice(0, 4)}/${last.fileName}`,
   };
 }
 
 function buildCertificateFileName(date) {
-  return `${toDateStamp(date)}-청소필증.jpg`;
+  return `${toDateStamp(date)}-泥?냼?꾩쬆.jpg`;
 }
 
 /**
- * JPEG/PNG EXIF에서 촬영 시각 추출
- * EXIF DateTimeOriginal 포맷: "YYYY:MM:DD HH:MM:SS" → "YYYY-MM-DD HH:MM:SS"
+ * JPEG/PNG EXIF?먯꽌 珥ъ쁺 ?쒓컖 異붿텧
+ * EXIF DateTimeOriginal ?щ㎎: "YYYY:MM:DD HH:MM:SS" ??"YYYY-MM-DD HH:MM:SS"
  */
 function extractExifDateTime(buf) {
   function isDigit(b) { return b >= 0x30 && b <= 0x39; }
@@ -145,7 +145,7 @@ function toLocalDateTimeString(d) {
   return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
 }
 
-/** BMP → RGB raw 픽셀 디코딩 (24/32bpp, bottom-up) */
+/** BMP ??RGB raw ?쎌? ?붿퐫??(24/32bpp, bottom-up) */
 function decodeBmpToRgb(buf) {
   const dataOffset    = buf.readUInt32LE(10);
   const width         = buf.readInt32LE(18);
@@ -171,7 +171,7 @@ function decodeBmpToRgb(buf) {
 }
 
 /**
- * 사진 파일을 JPG로 변환 저장 + EXIF 촬영 시각 반환
+ * ?ъ쭊 ?뚯씪??JPG濡?蹂?????+ EXIF 珥ъ쁺 ?쒓컖 諛섑솚
  * { destPath: string|null, takenAt: string|null }
  */
 async function savePhotoToLocal(appDataPath, date, label, srcPath) {
@@ -180,7 +180,7 @@ async function savePhotoToLocal(appDataPath, date, label, srcPath) {
   const srcBuf   = fs.readFileSync(srcPath);
   const year     = String(date).slice(0, 4);
   const stamp    = toDateStamp(date);
-  const isSludge = label === '반출';
+  const isSludge = label === '諛섏텧';
   const fileName = isSludge
     ? `${stamp}-슬러지${(resolveLatestSludgePhotoInfo(appDataPath, date)?.index || 0) + 1}.jpg`
     : buildCertificateFileName(date);
@@ -206,25 +206,25 @@ async function savePhotoToLocal(appDataPath, date, label, srcPath) {
 
 function photoUrl(date, label) {
   const year = String(date).slice(0, 4);
-  if (label === '반출') {
+  if (label === '諛섏텧') {
     const stamp = toDateStamp(date);
-    return `/사진관리/슬러지/${year}/${stamp}-슬러지1.jpg`;
+    return `/사진관리슬러지/${year}/${stamp}-슬러지1.jpg`;
   }
-  return `/사진관리/슬러지/${year}/${buildCertificateFileName(date)}`;
+  return `/사진관리슬러지/${year}/${buildCertificateFileName(date)}`;
 }
 
 function resolvePhotoUrl(appDataPath, date, label) {
-  if (label === '반출') {
+  if (label === '諛섏텧') {
     return resolveLatestSludgePhotoInfo(appDataPath, date)?.url || null;
   }
   const year = String(date).slice(0, 4);
-  const hyphenName = `${String(date || '').slice(0, 10)}-청소필증.jpg`;
+  const hyphenName = `${String(date || '').slice(0, 10)}-泥?냼?꾩쬆.jpg`;
   const stampName = buildCertificateFileName(date);
   const candidates = [hyphenName, stampName];
   for (const fileName of candidates) {
     const filePath = path.join(getSludgePhotoDir(appDataPath, date), fileName);
     if (fs.existsSync(filePath)) {
-      return `/사진관리/슬러지/${year}/${fileName}`;
+      return `/사진관리슬러지/${year}/${fileName}`;
     }
   }
   return null;
@@ -232,8 +232,8 @@ function resolvePhotoUrl(appDataPath, date, label) {
 
 function resolveLocalPathFromUrl(appDataPath, url) {
   const raw = String(url || '').trim();
-  if (!raw.startsWith('/사진관리/슬러지/')) return null;
-  const relative = raw.replace(/^\/사진관리\/슬러지\//, '');
+  if (!raw.startsWith('/사진관리슬러지/')) return null;
+  const relative = raw.replace(/^\/사진관리/슬러지\//, '');
   const candidate = path.join(appDataPath, '사진관리', '슬러지', relative);
   return fs.existsSync(candidate) ? candidate : null;
 }
@@ -260,7 +260,7 @@ function getMergedSludgeRows(db, start, end) {
       : (fr?.raw_value != null ? fr.raw_value : null);
     const amount = rawAmount != null ? Number(rawAmount) : null;
     if (!map.has(date)) {
-      // flow_readings만 있는 날짜는 실제 반출량 값이 있을 때만 표시
+      // flow_readings留??덈뒗 ?좎쭨???ㅼ젣 諛섏텧??媛믪씠 ?덉쓣 ?뚮쭔 ?쒖떆
       if (amount == null || !Number.isFinite(amount)) continue;
       map.set(date, {
         date,
@@ -294,7 +294,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const year  = parseInt(req.query.year,  10);
       const month = parseInt(req.query.month, 10);
       if (!year || !month || month < 1 || month > 12) {
-        return res.status(400).json({ success: false, error: '유효하지 않은 연월입니다.' });
+        return res.status(400).json({ success: false, error: '?좏슚?섏? ?딆? ?곗썡?낅땲??' });
       }
       const mm      = String(month).padStart(2, '0');
       const start   = `${year}-${mm}-01`;
@@ -303,8 +303,8 @@ module.exports = function (db, baseDir, appDataPath) {
       const rows = getMergedSludgeRows(db, start, end);
       const items = rows.map(r => ({
         ...r,
-        sludge_photo_url      : resolvePhotoUrl(appDataPath, r.date, '반출'),
-        certificate_photo_url : resolvePhotoUrl(appDataPath, r.date, '청소필증'),
+        sludge_photo_url      : resolvePhotoUrl(appDataPath, r.date, '諛섏텧'),
+        certificate_photo_url : resolvePhotoUrl(appDataPath, r.date, '泥?냼?꾩쬆'),
       }));
       res.json({ success: true, items });
     } catch (err) {
@@ -317,7 +317,7 @@ module.exports = function (db, baseDir, appDataPath) {
   router.get('/api/sludge-photos/flow-amount', (req, res) => {
     try {
       const { date } = req.query;
-      if (!date) return res.status(400).json({ success: false, error: '날짜가 없습니다.' });
+      if (!date) return res.status(400).json({ success: false, error: '?좎쭨媛 ?놁뒿?덈떎.' });
       const row = db.prepare(
         "SELECT sludge_export FROM flow_readings WHERE date = ? AND type = '슬러지'"
       ).get(date);
@@ -333,7 +333,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const year = parseInt(req.query.year, 10);
       const month = parseInt(req.query.month, 10);
       if (!year || !month || month < 1 || month > 12) {
-        return res.status(400).json({ success: false, error: '유효하지 않은 연월입니다.' });
+        return res.status(400).json({ success: false, error: '?좏슚?섏? ?딆? ?곗썡?낅땲??' });
       }
 
       const mm = String(month).padStart(2, '0');
@@ -380,18 +380,18 @@ module.exports = function (db, baseDir, appDataPath) {
   router.post('/api/sludge-photos/save', async (req, res) => {
     try {
       const { date, sludge_amount, sludge_photo_path, certificate_photo_path, note } = req.body;
-      if (!date) return res.status(400).json({ success: false, error: '날짜가 없습니다.' });
+      if (!date) return res.status(400).json({ success: false, error: '?좎쭨媛 ?놁뒿?덈떎.' });
 
       const metadata = getCurrentRecordMetadata(db, req.body);
 
-      const { takenAt: newTakenAt } = await savePhotoToLocal(appDataPath, date, '반출', sludge_photo_path);
-      await savePhotoToLocal(appDataPath, date, '청소필증', certificate_photo_path);
+      const { takenAt: newTakenAt } = await savePhotoToLocal(appDataPath, date, '諛섏텧', sludge_photo_path);
+      await savePhotoToLocal(appDataPath, date, '泥?냼?꾩쬆', certificate_photo_path);
 
-      const sludgeUrl = resolvePhotoUrl(appDataPath, date, '반출');
-      const certUrl   = resolvePhotoUrl(appDataPath, date, '청소필증');
+      const sludgeUrl = resolvePhotoUrl(appDataPath, date, '諛섏텧');
+      const certUrl   = resolvePhotoUrl(appDataPath, date, '泥?냼?꾩쬆');
       const now       = new Date().toISOString();
 
-      // 기존 EXIF 유지 (새 사진 업로드 시에만 덮어쓰기)
+      // 湲곗〈 EXIF ?좎? (???ъ쭊 ?낅줈???쒖뿉留???뼱?곌린)
       const existing    = db.prepare('SELECT sludge_photo_taken_at FROM sludge_photo_logs WHERE date = ?').get(date);
       const finalTakenAt = sludge_photo_path
         ? (newTakenAt ?? existing?.sludge_photo_taken_at ?? null)
@@ -419,7 +419,7 @@ module.exports = function (db, baseDir, appDataPath) {
         note || null, metadata.siteId, metadata.siteName, metadata.author, now, now
       );
 
-      // flow_readings 동기화
+      // flow_readings ?숆린??
       if (sludge_amount != null && sludge_amount !== '') {
         const flowRow = db.prepare(
           "SELECT id FROM flow_readings WHERE date = ? AND type = '슬러지'"
@@ -449,18 +449,18 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  /** POST /api/sludge-photos/upload-photo  (multipart, 웹 환경용) */
+  /** POST /api/sludge-photos/upload-photo  (multipart, ???섍꼍?? */
   router.post('/api/sludge-photos/upload-photo', upload.single('photo'), async (req, res) => {
     try {
       const { date, type } = req.query;
-      if (!date || !type) return res.status(400).json({ success: false, error: '날짜/타입 없음' });
-      if (!req.file)       return res.status(400).json({ success: false, error: '파일 없음' });
+      if (!date || !type) return res.status(400).json({ success: false, error: '?좎쭨/????놁쓬' });
+      if (!req.file)       return res.status(400).json({ success: false, error: '?뚯씪 ?놁쓬' });
 
-      const label    = type === 'certificate' ? '청소필증' : '반출';
+      const label    = type === 'certificate' ? '泥?냼?꾩쬆' : '諛섏텧';
       const sharp    = require('sharp');
       const year     = String(date).slice(0, 4);
       const stamp    = toDateStamp(date);
-      const isSludge = label === '반출';
+      const isSludge = label === '諛섏텧';
       const fileName = isSludge
         ? `${stamp}-슬러지${(resolveLatestSludgePhotoInfo(appDataPath, date)?.index || 0) + 1}.jpg`
         : buildCertificateFileName(date);
@@ -479,9 +479,9 @@ module.exports = function (db, baseDir, appDataPath) {
         await sharp(srcBuf).rotate().jpeg({ quality: 90 }).toFile(destPath);
       }
 
-      const url     = label === '반출'
-        ? `/사진관리/슬러지/${year}/${fileName}`
-        : `/사진관리/슬러지/${year}/${buildCertificateFileName(date)}`;
+      const url     = label === '諛섏텧'
+        ? `/사진관리슬러지/${year}/${fileName}`
+        : `/사진관리슬러지/${year}/${buildCertificateFileName(date)}`;
       const takenAt = type === 'sludge'
         ? (isBmp
             ? (clientTakenAt || nowDateTimeString())
@@ -553,19 +553,19 @@ module.exports = function (db, baseDir, appDataPath) {
   router.post('/api/sludge-photos/export', async (req, res) => {
     try {
       const { year, month } = req.body;
-      if (!year || !month) return res.status(400).json({ success: false, error: '연월 없음' });
+      if (!year || !month) return res.status(400).json({ success: false, error: '?곗썡 ?놁쓬' });
 
       const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
-      const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, '슬러지사진대지');
+      const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, '슬러지?ъ쭊?吏');
       if (!templateInfo?.absolutePath) {
         return res.status(404).json({
           success: false,
-          error: '슬러지사진대지 템플릿이 없습니다. 설정에서 업로드해 주세요.',
+          error: '슬러지?ъ쭊?吏 ?쒗뵆由우씠 ?놁뒿?덈떎. ?ㅼ젙?먯꽌 ?낅줈?쒗빐 二쇱꽭??',
         });
       }
       const templatePath = templateInfo.absolutePath;
       if (!['.xlsx', '.xls', '.xlsm'].includes(path.extname(templatePath).toLowerCase())) {
-        return res.status(400).json({ success: false, error: '엑셀 형식의 템플릿만 지원합니다.' });
+        return res.status(400).json({ success: false, error: '?묒? ?뺤떇???쒗뵆由용쭔 吏?먰빀?덈떎.' });
       }
 
       const mm      = String(month).padStart(2, '0');
@@ -593,7 +593,7 @@ module.exports = function (db, baseDir, appDataPath) {
         return toKey(a.date) - toKey(b.date);
       });
 
-      const outputFileName = `슬러지사진대지_${year}_${mm}_${Date.now()}.xlsx`;
+      const outputFileName = `슬러지?ъ쭊?吏_${year}_${mm}_${Date.now()}.xlsx`;
       const outputPath = buildExcelTempPath('osoo-sludge-photo', outputFileName);
       await exportSludgePhotoXlsx({
         templatePath, outputPath, year, month, items, siteName: settings?.site_name || ''
@@ -610,20 +610,20 @@ module.exports = function (db, baseDir, appDataPath) {
   router.post('/api/sludge-photos/export-ledger', async (req, res) => {
     try {
       const { year, month } = req.body;
-      if (!year || !month) return res.status(400).json({ success: false, error: '연월 없음' });
+      if (!year || !month) return res.status(400).json({ success: false, error: '?곗썡 ?놁쓬' });
 
       const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
-      const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, '슬러지반출관리대장');
+      const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, '슬러지諛섏텧愿由щ???);
       if (!templateInfo?.absolutePath) {
         return res.status(404).json({
           success: false,
-          error: '슬러지반출관리대장 템플릿이 없습니다. 설정에서 업로드해 주세요.',
+          error: '슬러지諛섏텧愿由щ????쒗뵆由우씠 ?놁뒿?덈떎. ?ㅼ젙?먯꽌 ?낅줈?쒗빐 二쇱꽭??',
         });
       }
 
       const templatePath = templateInfo.absolutePath;
       if (!['.xlsx', '.xls', '.xlsm'].includes(path.extname(templatePath).toLowerCase())) {
-        return res.status(400).json({ success: false, error: '엑셀 형식의 템플릿만 지원합니다.' });
+        return res.status(400).json({ success: false, error: '?묒? ?뺤떇???쒗뵆由용쭔 吏?먰빀?덈떎.' });
       }
 
       const mm = String(month).padStart(2, '0');
@@ -634,7 +634,7 @@ module.exports = function (db, baseDir, appDataPath) {
 
       const settings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
       const ledgerSettings = db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
-      const outputFileName = `슬러지반출관리대장_${year}_${mm}_${Date.now()}.xlsx`;
+      const outputFileName = `슬러지諛섏텧愿由щ???${year}_${mm}_${Date.now()}.xlsx`;
       const outputPath = buildExcelTempPath('osoo-sludge-ledger', outputFileName);
 
       await exportSludgeLedgerXlsx({
@@ -659,17 +659,17 @@ module.exports = function (db, baseDir, appDataPath) {
   return router;
 };
 
-// ─── xlsx export ──────────────────────────────────────────────────────────────
+// ??? xlsx export ??????????????????????????????????????????????????????????????
 async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, items, siteName }) {
   const ExcelJS = require('exceljs');
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(templatePath);
 
-  // 기존 이미지 초기화
+  // 湲곗〈 ?대?吏 珥덇린??
   wb.media = [];
   wb.worksheets.forEach(ws => { ws._media = []; });
 
-  // named range 맵 (excelOpenService 공통 모듈)
+  // named range 留?(excelOpenService 怨듯넻 紐⑤뱢)
   const namedMap = parseNamedRanges(wb);
   console.log('[sludge export] named ranges:', Object.keys(namedMap));
 
@@ -680,14 +680,14 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
   function cloneTemplateToSheet(src, dst) {
     const deep = (v) => JSON.parse(JSON.stringify(v || {}));
 
-    // 시트 기본 속성 복사
+    // ?쒗듃 湲곕낯 ?띿꽦 蹂듭궗
     dst.properties = deep(src.properties);
     dst.pageSetup = deep(src.pageSetup);
     dst.headerFooter = deep(src.headerFooter);
     dst.views = deep(src.views || []);
     dst.state = src.state;
 
-    // 열 복사
+    // ??蹂듭궗
     dst.columns = (src.columns || []).map(c => ({
       width: c.width,
       hidden: c.hidden,
@@ -695,7 +695,7 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
       style: c.style ? deep(c.style) : undefined,
     }));
 
-    // 행 높이/행 스타일 복사
+    // ???믪씠/???ㅽ???蹂듭궗
     src.eachRow({ includeEmpty: true }, (srcRow, rowNum) => {
       const dstRow = dst.getRow(rowNum);
       dstRow.height = srcRow.height;
@@ -705,14 +705,14 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
       dstRow.commit();
     });
 
-    // 병합 범위를 먼저 복사한 뒤 셀 스타일/값을 다시 채운다.
-    // (ExcelJS merge 처리 과정에서 일부 경계 스타일이 소실되는 케이스 방지)
+    // 蹂묓빀 踰붿쐞瑜?癒쇱? 蹂듭궗????? ?ㅽ???媛믪쓣 ?ㅼ떆 梨꾩슫??
+    // (ExcelJS merge 泥섎━ 怨쇱젙?먯꽌 ?쇰? 寃쎄퀎 ?ㅽ??쇱씠 ?뚯떎?섎뒗 耳?댁뒪 諛⑹?)
     const merges = src.model?.merges || [];
     for (const m of merges) {
       try { dst.mergeCells(m); } catch (_) {}
     }
 
-    // 셀 전체 매트릭스 복사 (빈 셀 포함)
+    // ? ?꾩껜 留ㅽ듃由?뒪 蹂듭궗 (鍮?? ?ы븿)
     const maxRow = src.rowCount || 0;
     const maxCol = src.columnCount || 0;
     for (let r = 1; r <= maxRow; r++) {
@@ -725,19 +725,19 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
     }
   }
 
-  // 1) 먼저 빈 템플릿 시트를 모두 준비 (원본 변형 없이)
+  // 1) 癒쇱? 鍮??쒗뵆由??쒗듃瑜?紐⑤몢 以鍮?(?먮낯 蹂???놁씠)
   const sheets = [templateSheet];
   for (let si = 1; si < totalSheets; si++) {
-    const ws = wb.addWorksheet(`사진대지_${si + 1}`);
+    const ws = wb.addWorksheet(`?ъ쭊?吏_${si + 1}`);
     cloneTemplateToSheet(templateSheet, ws);
     sheets.push(ws);
   }
 
-  // 2) 그 다음 시트별로 데이터 바인딩 (항상 현재 시트 기준)
+  // 2) 洹??ㅼ쓬 ?쒗듃蹂꾨줈 ?곗씠??諛붿씤??(??긽 ?꾩옱 ?쒗듃 湲곗?)
   for (let si = 0; si < sheets.length; si++) {
     const ws = sheets[si];
 
-    // 양식 고정 좌표/크기(포인트 pt) — 사용자 실측값
+    // ?묒떇 怨좎젙 醫뚰몴/?ш린(?ъ씤??pt) ???ъ슜???ㅼ륫媛?
     const photoBoxBySlot = {
       1: { leftPt: 81.75, topPt: 155.91, boxWidthPt: 191.33, boxHeightPt: 141.69 },
       2: { leftPt: 81.45, topPt: 459.54, boxWidthPt: 191.33, boxHeightPt: 141.69 },
@@ -749,29 +749,29 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
 
     function setCellOnSheet(name, value) {
       const info = namedMap[name];
-      if (!info) { console.warn(`[sludge export] named range 없음: ${name}`); return; }
+      if (!info) { console.warn(`[sludge export] named range ?놁쓬: ${name}`); return; }
       ws.getCell(info.address).value = value;
     }
 
-    // 이전 값 잔존 방지: 슬롯 1~2를 먼저 초기화
+    // ?댁쟾 媛??붿〈 諛⑹?: ?щ’ 1~2瑜?癒쇱? 珥덇린??
     for (let n = 1; n <= ITEMS_PER_SHEET; n++) {
-      setCellOnSheet(`날짜${n}`, '');
-      setCellOnSheet(`반출량${n}`, null);
+      setCellOnSheet(`?좎쭨${n}`, '');
+      setCellOnSheet(`諛섏텧??{n}`, null);
     }
 
-    if (namedMap['시트명']) setCellOnSheet('시트명', siteName || '');
+    if (namedMap['?쒗듃紐?]) setCellOnSheet('?쒗듃紐?, siteName || '');
 
     const sheetItems = items.slice(si * ITEMS_PER_SHEET, (si + 1) * ITEMS_PER_SHEET);
     for (let i = 0; i < sheetItems.length; i++) {
       const item = sheetItems[i];
       const n = i + 1;
 
-      setCellOnSheet(`날짜${n}`, item.date ? item.date.replace(/-/g, '.') : '');
-      if (item.sludge_amount != null) setCellOnSheet(`반출량${n}`, Number(item.sludge_amount));
+      setCellOnSheet(`?좎쭨${n}`, item.date ? item.date.replace(/-/g, '.') : '');
+      if (item.sludge_amount != null) setCellOnSheet(`諛섏텧??{n}`, Number(item.sludge_amount));
 
-      // 반출사진 삽입: 셀 가로의 90% 기준, 비율 유지 + 중앙 정렬
+      // 諛섏텧?ъ쭊 ?쎌엯: ? 媛濡쒖쓽 90% 湲곗?, 鍮꾩쑉 ?좎? + 以묒븰 ?뺣젹
       if (item.sludge_photo_local) {
-        const info = namedMap[`사진${n}`];
+        const info = namedMap[`?ъ쭊${n}`];
         if (info) {
           const extent = getMergedCellExtent(ws, info.col, info.row);
           try {
@@ -781,14 +781,14 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
               ...photoBoxBySlot[n],
             });
           } catch (e) {
-            console.error(`[sludge export] 사진${n} 삽입 실패:`, e.message);
+            console.error(`[sludge export] ?ъ쭊${n} ?쎌엯 ?ㅽ뙣:`, e.message);
           }
         }
       }
 
-      // 청소필증 삽입: 셀 세로의 80% 기준, 비율 유지 + 중앙 정렬
+      // 泥?냼?꾩쬆 ?쎌엯: ? ?몃줈??80% 湲곗?, 鍮꾩쑉 ?좎? + 以묒븰 ?뺣젹
       if (item.certificate_photo_local) {
-        const info = namedMap[`필증${n}`];
+        const info = namedMap[`?꾩쬆${n}`];
         if (info) {
           const extent = getMergedCellExtent(ws, info.col, info.row);
           try {
@@ -798,7 +798,7 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
               ...certBoxBySlot[n],
             });
           } catch (e) {
-            console.error(`[sludge export] 필증${n} 삽입 실패:`, e.message);
+            console.error(`[sludge export] ?꾩쬆${n} ?쎌엯 ?ㅽ뙣:`, e.message);
           }
         }
       }
@@ -928,12 +928,12 @@ function _resolveDateKeyFromCell(value, year, month) {
   const m = Number(month);
   if (value == null) return null;
 
-  // Excel 날짜 셀(Date 객체)
+  // Excel ?좎쭨 ?(Date 媛앹껜)
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return _toDateKey(value.getFullYear(), value.getMonth() + 1, value.getDate());
   }
 
-  // 숫자만 들어온 경우: 해당 월의 day로 해석
+  // ?レ옄留??ㅼ뼱??寃쎌슦: ?대떦 ?붿쓽 day濡??댁꽍
   if (typeof value === 'number' && Number.isFinite(value)) {
     const day = Math.floor(value);
     return _toDateKey(y, m, day);
@@ -950,7 +950,7 @@ function _resolveDateKeyFromCell(value, year, month) {
   m1 = s.match(/^(\d{1,2})[.\/-](\d{1,2})$/);
   if (m1) return _toDateKey(y, m1[1], m1[2]);
 
-  // dd (순수 일자 문자열)
+  // dd (?쒖닔 ?쇱옄 臾몄옄??
   m1 = s.match(/^(\d{1,2})$/);
   if (m1) return _toDateKey(y, m, m1[1]);
 
@@ -969,21 +969,21 @@ async function exportSludgeLedgerXlsx({ templatePath, outputPath, year, month, i
   await wb.xlsx.readFile(templatePath);
 
   const ws = wb.worksheets[0];
-  if (!ws) throw new Error('슬러지반출관리대장 템플릿 시트를 찾을 수 없습니다.');
+  if (!ws) throw new Error('슬러지諛섏텧愿由щ????쒗뵆由??쒗듃瑜?李얠쓣 ???놁뒿?덈떎.');
 
   const namedMap = parseNamedRanges(wb);
-  const seqCells = parseNamedRangeCells(wb, '순번');
-  const dateCells = parseNamedRangeCells(wb, '날짜');
-  const companyCells = parseNamedRangeCells(wb, '업체명');
-  const timeCells = parseNamedRangeCells(wb, '시간');
-  const weightCells = parseNamedRangeCells(wb, '중량');
-  const noteCells = parseNamedRangeCells(wb, '비고');
+  const seqCells = parseNamedRangeCells(wb, '?쒕쾲');
+  const dateCells = parseNamedRangeCells(wb, '?좎쭨');
+  const companyCells = parseNamedRangeCells(wb, '?낆껜紐?);
+  const timeCells = parseNamedRangeCells(wb, '?쒓컙');
+  const weightCells = parseNamedRangeCells(wb, '以묐웾');
+  const noteCells = parseNamedRangeCells(wb, '鍮꾧퀬');
 
-  if (namedMap['대장명']) {
-    ws.getCell(namedMap['대장명'].address).value = `${year}년 ${Number(month)}월 슬러지반출 관리대장`;
+  if (namedMap['??λ챸']) {
+    ws.getCell(namedMap['??λ챸'].address).value = `${year}??${Number(month)}??슬러지諛섏텧 愿由щ???;
   }
-  if (namedMap['현장명']) {
-    ws.getCell(namedMap['현장명'].address).value = siteName || '';
+  if (namedMap['?꾩옣紐?]) {
+    ws.getCell(namedMap['?꾩옣紐?].address).value = siteName || '';
   }
 
   const daysInMonth = new Date(Number(year), Number(month), 0).getDate();

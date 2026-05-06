@@ -1,21 +1,21 @@
-'use strict';
+﻿'use strict';
 
 /**
  * sitesSheetsService.cjs
- * ─────────────────────────────────────────────────────────────────────
- * 구글 스프레드시트 현장 관리 서비스 (서비스 계정 인증)
+ * ?????????????????????????????????????????????????????????????????????
+ * 援ш? ?ㅽ봽?덈뱶?쒗듃 ?꾩옣 愿由??쒕퉬??(?쒕퉬??怨꾩젙 ?몄쬆)
  *
- * 스프레드시트 구조 (시트명: Wastewater_Sites, 1행 = 헤더):
+ * ?ㅽ봽?덈뱶?쒗듃 援ъ“ (?쒗듃紐? Wastewater_Sites, 1??= ?ㅻ뜑):
  *   A: id  B: site_name  C: manager_name  D: method  E: series  F: is_active  G: notes
  *
- * 환경변수:
- *   GOOGLE_MEMBERS_SHEET_ID — 스프레드시트 파일 ID (여러 시트 포함)
- *   같은 파일 내에서 'Wastewater_Member' 시트와 'Wastewater_Sites' 시트 사용
+ * ?섍꼍蹂??
+ *   GOOGLE_MEMBERS_SHEET_ID ???ㅽ봽?덈뱶?쒗듃 ?뚯씪 ID (?щ윭 ?쒗듃 ?ы븿)
+ *   媛숈? ?뚯씪 ?댁뿉??'Wastewater_Member' ?쒗듃? 'Wastewater_Sites' ?쒗듃 ?ъ슜
  *
- * 첫 설정 방법:
- *   1. 이미 생성된 Google Sheets 파일에 새 시트 추가
- *   2. 새 시트 이름을 'Wastewater_Sites'로 지정
- *   3. 스프레드시트가 이미 서비스 계정과 공유된 상태
+ * 泥??ㅼ젙 諛⑸쾿:
+ *   1. ?대? ?앹꽦??Google Sheets ?뚯씪?????쒗듃 異붽?
+ *   2. ???쒗듃 ?대쫫??'Wastewater_Sites'濡?吏??
+ *   3. ?ㅽ봽?덈뱶?쒗듃媛 ?대? ?쒕퉬??怨꾩젙怨?怨듭쑀???곹깭
  */
 
 const path = require('path');
@@ -27,7 +27,7 @@ const SHEET_NAME = 'Wastewater_Sites';
 const HEADER_ROW = ['id', 'site_name', 'manager_name', 'method', 'series', 'is_active', 'notes'];
 const HEADER_IDX = Object.fromEntries(HEADER_ROW.map((h, i) => [h, i]));
 
-// 서비스 계정 인증
+// ?쒕퉬??怨꾩젙 ?몄쬆
 const auth = new google.auth.GoogleAuth({
   keyFile: KEY_FILE,
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],
@@ -37,7 +37,7 @@ const sheets = google.sheets({ version: 'v4', auth });
 
 function getSheetId() {
   const id = String(process.env.GOOGLE_MEMBERS_SHEET_ID || '').trim();
-  if (!id) throw new Error('GOOGLE_MEMBERS_SHEET_ID 환경변수가 설정되지 않았습니다. (회원/현장 공유 스프레드시트)');
+  if (!id) throw new Error('GOOGLE_MEMBERS_SHEET_ID ?섍꼍蹂?섍? ?ㅼ젙?섏? ?딆븯?듬땲?? (?뚯썝/?꾩옣 怨듭쑀 ?ㅽ봽?덈뱶?쒗듃)');
   return id;
 }
 
@@ -79,7 +79,7 @@ async function ensureSheetExists(sheetId) {
   });
 }
 
-/** 행 배열 → 현장 객체 변환 */
+/** ??諛곗뿴 ???꾩옣 媛앹껜 蹂??*/
 function rowToSite(row) {
   const getAt = (index) => row[index] ?? '';
 
@@ -87,7 +87,7 @@ function rowToSite(row) {
   const site_name = getAt(1);
   const manager_name = getAt(2);
   const method = getAt(3) || 'A2O';
-  const series = getAt(4) || '1계열';
+  const series = getAt(4) || '1怨꾩뿴';
   const is_active = getAt(5) === '1' || getAt(5) === 1 || getAt(5) === 'true' ? 1 : 0;
   const notes = getAt(6);
 
@@ -102,7 +102,7 @@ function rowToSite(row) {
   };
 }
 
-/** 현장 객체 → 행 배열 변환 */
+/** ?꾩옣 媛앹껜 ????諛곗뿴 蹂??*/
 function siteToRow(site) {
   return HEADER_ROW.map(col => {
     if (col === 'is_active') {
@@ -114,8 +114,8 @@ function siteToRow(site) {
 }
 
 /**
- * 헤더 행 초기화 (첫 사용 시)
- * 이미 있으면 스킵.
+ * ?ㅻ뜑 ??珥덇린??(泥??ъ슜 ??
+ * ?대? ?덉쑝硫??ㅽ궢.
  */
 async function ensureHeader(sheetId) {
   await ensureSheetExists(sheetId);
@@ -136,7 +136,7 @@ async function ensureHeader(sheetId) {
 }
 
 /**
- * 시트 전체 읽기 (2행~) → 현장 배열 반환
+ * ?쒗듃 ?꾩껜 ?쎄린 (2??) ???꾩옣 諛곗뿴 諛섑솚
  */
 async function getSites() {
   if (!isSheetsConfigured()) return [];
@@ -149,30 +149,30 @@ async function getSites() {
   });
 
   return (res.data.values || [])
-    .filter(row => row[0])        // id 비어있는 행 제외
+    .filter(row => row[0])        // id 鍮꾩뼱?덈뒗 ???쒖쇅
     .map(rowToSite);
 }
 
 /**
- * 현장 upsert (id로 기존 행 검색 → 없으면 append, 있으면 update)
+ * ?꾩옣 upsert (id濡?湲곗〈 ??寃?????놁쑝硫?append, ?덉쑝硫?update)
  */
 async function upsertSite(site) {
-  if (!isSheetsConfigured()) throw new Error('Google Sheets가 설정되지 않았습니다.');
+  if (!isSheetsConfigured()) throw new Error('Google Sheets媛 ?ㅼ젙?섏? ?딆븯?듬땲??');
   const sheetId = getSheetId();
   await ensureHeader(sheetId);
 
-  // 전체 조회 후 id 검색
+  // ?꾩껜 議고쉶 ??id 寃??
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `${SHEET_NAME}!A2:A`   // id 컬럼만 (헤더 제외)
+    range: `${SHEET_NAME}!A2:A`   // id 而щ읆留?(?ㅻ뜑 ?쒖쇅)
   });
-  const idCol = ['id', ...(res.data.values || []).map(r => r[0] || '')];  // 헤더 추가
+  const idCol = ['id', ...(res.data.values || []).map(r => r[0] || '')];  // ?ㅻ뜑 異붽?
   const rowIndex = idCol.indexOf(String(site.id));   // 0-based
 
   const newRow = siteToRow(site);
 
   if (rowIndex <= 0) {
-    // 새 행 추가 (append)
+    // ????異붽? (append)
     await sheets.spreadsheets.values.append({
       spreadsheetId: sheetId,
       range: `${SHEET_NAME}!A:G`,
@@ -181,7 +181,7 @@ async function upsertSite(site) {
       requestBody: { values: [newRow] }
     });
   } else {
-    // 기존 행 업데이트 (1-based 시트 행 번호 = rowIndex + 1)
+    // 湲곗〈 ???낅뜲?댄듃 (1-based ?쒗듃 ??踰덊샇 = rowIndex + 1)
     const sheetRow = rowIndex + 1;
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
@@ -193,10 +193,10 @@ async function upsertSite(site) {
 }
 
 /**
- * 현장 삭제 (해당 id 행을 is_active = 0으로 표시)
+ * ?꾩옣 ??젣 (?대떦 id ?됱쓣 is_active = 0?쇰줈 ?쒖떆)
  */
 async function deleteSite(id) {
-  if (!isSheetsConfigured()) throw new Error('Google Sheets가 설정되지 않았습니다.');
+  if (!isSheetsConfigured()) throw new Error('Google Sheets媛 ?ㅼ젙?섏? ?딆븯?듬땲??');
   const sheetId = getSheetId();
 
   const res = await sheets.spreadsheets.values.get({
@@ -207,7 +207,7 @@ async function deleteSite(id) {
   const rowIndex = idCol.indexOf(String(id));
 
   if (rowIndex <= 0) {
-    throw new Error('삭제할 현장을 찾을 수 없습니다.');
+    throw new Error('??젣???꾩옣??李얠쓣 ???놁뒿?덈떎.');
   }
 
   const sheetRow = rowIndex;
@@ -216,7 +216,7 @@ async function deleteSite(id) {
     range: `${SHEET_NAME}!A${sheetRow}:G${sheetRow}`
   });
   const currentRow = (currentRes.data.values || [])[0] || [];
-  currentRow[5] = '0';  // is_active 컬럼을 0으로
+  currentRow[5] = '0';  // is_active 而щ읆??0?쇰줈
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: sheetId,

@@ -1,10 +1,10 @@
-'use strict';
+﻿'use strict';
 
 /**
  * bigQueryClientService.cjs
- * ─────────────────────────────────────────────────────────────────────
- * BigQuery 클라이언트 싱글톤 + 공통 상수
- * 모든 BigQuery 서비스 파일은 이 모듈에서 클라이언트를 가져온다.
+ * ?????????????????????????????????????????????????????????????????????
+ * BigQuery ?대씪?댁뼵???깃???+ 怨듯넻 ?곸닔
+ * 紐⑤뱺 BigQuery ?쒕퉬???뚯씪? ??紐⑤뱢?먯꽌 ?대씪?댁뼵?몃? 媛?몄삩??
  */
 
 const { BigQuery } = require('@google-cloud/bigquery');
@@ -20,7 +20,7 @@ function getBigQueryClient() {
   if (_client) return _client;
 
   if (!fs.existsSync(KEY_FILE_PATH)) {
-    console.warn('[BigQuery] 키 파일 없음:', KEY_FILE_PATH);
+    console.warn('[BigQuery] ???뚯씪 ?놁쓬:', KEY_FILE_PATH);
     return null;
   }
 
@@ -28,7 +28,7 @@ function getBigQueryClient() {
     _client = new BigQuery({ keyFilename: KEY_FILE_PATH });
     return _client;
   } catch (err) {
-    console.error('[BigQuery] 클라이언트 초기화 실패:', err.message);
+    console.error('[BigQuery] ?대씪?댁뼵??珥덇린???ㅽ뙣:', err.message);
     return null;
   }
 }

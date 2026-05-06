@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const path = require('path');
 const fs = require('fs');
 
@@ -15,8 +15,8 @@ module.exports = function (db, baseDir, appDataPath) {
     if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
       return res.status(404).json({
         code: 'HWP_TEMPLATE_MISSING',
-        error: '한글 양식을 찾을 수 없습니다.',
-        userMessage: '설정에서 한글(HWPX) 양식 파일을 업로드해 주세요.'
+        error: '?쒓? ?묒떇??李얠쓣 ???놁뒿?덈떎.',
+        userMessage: '?ㅼ젙?먯꽌 ?쒓?(HWPX) ?묒떇 ?뚯씪???낅줈?쒗빐 二쇱꽭??'
       });
     }
 
@@ -24,13 +24,13 @@ module.exports = function (db, baseDir, appDataPath) {
     if (ext !== '.hwpx') {
       return res.status(400).json({
         code: 'HWP_TEMPLATE_INVALID',
-        error: 'HWPX 파일만 지원합니다.',
-        userMessage: 'HWPX 형식의 양식을 업로드해 주세요.'
+        error: 'HWPX ?뚯씪留?吏?먰빀?덈떎.',
+        userMessage: 'HWPX ?뺤떇???묒떇???낅줈?쒗빐 二쇱꽭??'
       });
     }
 
     try {
-      // TODO: 추후 mapping.json의 hwp 섹션 기반으로 bindings/imageBindings 구성
+      // TODO: 異뷀썑 mapping.json??hwp ?뱀뀡 湲곕컲?쇰줈 bindings/imageBindings 援ъ꽦
       const bindings = {};
       const imageBindings = {};
 
@@ -56,7 +56,7 @@ module.exports = function (db, baseDir, appDataPath) {
       return res.status(500).json({
         code: 'HWP_PREVIEW_FAILED',
         error: err.message,
-        userMessage: `한글 PDF 미리보기 생성에 실패했습니다: ${err.message}`
+        userMessage: `?쒓? PDF 誘몃━蹂닿린 ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`
       });
     }
   });

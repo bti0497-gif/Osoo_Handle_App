@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
@@ -40,8 +40,8 @@ app.get('/', (req, res) => {
   res.send(`
     <div style="font-family: sans-serif; padding: 2rem; line-height: 1.6;">
       <h1 style="color: #1e293b;">Osoo Handle App - Local Bridge Server</h1>
-      <p>백엔드 API 서버가 정상적으로 작동 중입니다.</p>
-      <p><strong>참고:</strong> 사용자 인터페이스(UI)를 보려면 프론트엔드 개발 서버(포트 8900)를 실행해야 합니다.</p>
+      <p>로컬 API 서버가 정상적으로 동작 중입니다.</p>
+      <p><strong>참고:</strong> 사용자 인터페이스(UI)를 사용하려면 프론트엔드 개발 서버(포트 8900)를 실행해야 합니다.</p>
       <div style="background: #f1f5f9; padding: 1rem; border-radius: 8px; display: inline-block;">
         <code>npm run dev</code> 를 터미널에서 실행하세요.
       </div>
@@ -62,8 +62,8 @@ let postStartupTasksScheduled = false;
 let postStartupCtx = null;
 
 /**
- * makeLazy — 첫 HTTP 요청 시 모듈을 로드하는 Lazy Loader
- * 에러 발생 시 'error' 상태를 저장하여 무한 재시도를 방지합니다.
+ * makeLazy ??泥?HTTP ?붿껌 ??紐⑤뱢??濡쒕뱶?섎뒗 Lazy Loader
+ * ?먮윭 諛쒖깮 ??'error' ?곹깭瑜???ν븯??臾댄븳 ?ъ떆?꾨? 諛⑹??⑸땲??
  */
 function makeLazy(modulePath, ...args) {
   let router = null;
@@ -77,7 +77,7 @@ function makeLazy(modulePath, ...args) {
         router = require(modulePath)(...args);
       } catch (e) {
         loadError = e.message;
-        console.error(`[Lazy] Tier2 로드 실패 ${modulePath}:`, e.message);
+        console.error(`[Lazy] Tier2 濡쒕뱶 ?ㅽ뙣 ${modulePath}:`, e.message);
         return res.status(500).json({ ok: false, error: `Module load failed: ${modulePath}: ${e.message}` });
       }
     }
@@ -86,7 +86,7 @@ function makeLazy(modulePath, ...args) {
 }
 
 /**
- * resolveArgs — routeRegistry의 args 문자열 배열을 실제 ctx 값으로 매핑합니다.
+ * resolveArgs ??routeRegistry??args 臾몄옄??諛곗뿴???ㅼ젣 ctx 媛믪쑝濡?留ㅽ븨?⑸땲??
  */
 function resolveArgs(argNames, ctx) {
   return argNames.map(name => {
@@ -120,7 +120,7 @@ function schedulePostStartupTasks() {
       normalizeLegacyPhotoFiles(appDataPath)
         .then((result) => {
           if (result.totalConverted > 0) {
-            console.log(`[Photo Normalize] 총 ${result.totalConverted}개 표준화 완료 (약품: ${result.medicineConverted}, 슬러지: ${result.sludgeConverted})`);
+            console.log(`[Photo Normalize] 총 ${result.totalConverted}개 변환 완료 (약품: ${result.medicineConverted}, 슬러지: ${result.sludgeConverted})`);  
           }
         })
         .catch((error) => {
@@ -137,7 +137,7 @@ function registerLazyApplication() {
   const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
   const ctx = { db, appDataPath, BASE_DIR };
 
-  // --- Tier 0: 즉시 등록 (registry 기반) ---
+  // --- Tier 0: 利됱떆 ?깅줉 (registry 湲곕컲) ---
   for (const entry of routeRegistry.filter(r => r.tier === 0)) {
     const router = require(entry.module)(...resolveArgs(entry.args, ctx));
     app.use(entry.path, router);
@@ -152,12 +152,12 @@ function registerLazyApplication() {
   app.use('/uploads', express.static(path.join(appDataPath, 'uploads')));
   app.use('/사진관리', express.static(path.join(appDataPath, '사진관리')));
 
-  // --- BigQuery 감시 prefix: registry에서 자동 추출 ---
+  // --- BigQuery 媛먯떆 prefix: registry?먯꽌 ?먮룞 異붿텧 ---
   const BIGQUERY_IMMEDIATE_SYNC_PREFIXES = routeRegistry
     .filter(r => r.watch)
     .map(r => r.path);
 
-  // --- BigQuery 감시 미들웨어 ---
+  // --- BigQuery 媛먯떆 誘몃뱾?⑥뼱 ---
   app.use((req, res, next) => {
     const method = String(req.method || '').toUpperCase();
     const shouldWatchMethod = method === 'POST' || method === 'PUT' || method === 'DELETE';
@@ -173,7 +173,7 @@ function registerLazyApplication() {
     return next();
   });
 
-  // --- Tier 1: registry 기반 lazy wrapper 등록 ---
+  // --- Tier 1: registry 湲곕컲 lazy wrapper ?깅줉 ---
   const tier1Entries = routeRegistry.filter(r => r.tier === 1);
   const tier1RouterRefs = {};
   for (const entry of tier1Entries) {
@@ -183,7 +183,7 @@ function registerLazyApplication() {
         try {
           tier1RouterRefs[entry.path] = require(entry.module)(...resolveArgs(entry.args, ctx));
         } catch (e) {
-          console.error(`[Lazy] Tier1 로드 실패 ${entry.path}:`, e.message);
+          console.error(`[Lazy] Tier1 濡쒕뱶 ?ㅽ뙣 ${entry.path}:`, e.message);
           tier1RouterRefs[entry.path] = 'error';
           return res.status(500).json({ ok: false, error: `Module load failed: ${entry.path}` });
         }
@@ -195,25 +195,25 @@ function registerLazyApplication() {
     });
   }
 
-  // --- Tier 2: registry 기반 makeLazy 등록 ---
+  // --- Tier 2: registry 湲곕컲 makeLazy ?깅줉 ---
   for (const entry of routeRegistry.filter(r => r.tier === 2)) {
     app.use(entry.path, makeLazy(entry.module, ...resolveArgs(entry.args, ctx)));
   }
 
-  // --- BigQuery 스케줄러 ---
+  // --- BigQuery ?ㅼ?以꾨윭 ---
   function startBigQueryScheduler() {
     if (isBigQuerySyncEnabled && isBigQuerySchedulerEnabled) {
       const syncScheduler = require('./cron/syncScheduler.cjs');
       syncScheduler.start();
-      console.log('[Scheduler] BigQuery 백그라운드 동기화 시작');
+      console.log('[Scheduler] BigQuery 동기화 스케줄러 시작');
     } else if (!isBigQuerySyncEnabled) {
-      console.log('[Scheduler] BigQuery 동기화 비활성화 (BIGQUERY_SYNC_ENABLED=false)');
+      console.log('[Scheduler] BigQuery 스케줄러 비활성화 (BIGQUERY_SYNC_ENABLED=false)');
     } else {
-      console.log('[Scheduler] 주기 동기화 비활성화 (BIGQUERY_SYNC_SCHEDULER=false) - 저장/시작/로그아웃 트리거 모드 사용');
+      console.log('[Scheduler] 즉시 스케줄러 비활성화 (BIGQUERY_SYNC_SCHEDULER=false) - 수동 시작/중지용 API 모듈 사용');
     }
   }
 
-  // --- /api/preload-trigger: registry 기반 자동화 ---
+  // --- /api/preload-trigger: registry 湲곕컲 ?먮룞??---
   app.post('/api/preload-trigger', (req, res) => {
     res.json({ ok: true });
     setImmediate(() => {
@@ -225,7 +225,7 @@ function registerLazyApplication() {
           try {
             tier1RouterRefs[entry.path] = require(entry.module)(...resolveArgs(entry.args, ctx));
           } catch (e) {
-            console.error(`[Preload] Tier1 로드 실패 ${entry.path}:`, e.message);
+            console.error(`[Preload] Tier1 濡쒕뱶 ?ㅽ뙣 ${entry.path}:`, e.message);
             tier1RouterRefs[entry.path] = 'error';
           }
         }
@@ -295,7 +295,7 @@ if (process.env.ELECTRON === '1') {
   devServer.on('error', (err) => {
     console.error('[Server Error]', err.message);
     if (err.code === 'EADDRINUSE') {
-      console.error(`[Server Error] 개발 환경에서는 백엔드 포트 ${fixedPort}를 고정 사용합니다. 기존 프로세스를 종료한 뒤 다시 시작해 주세요.`);
+      console.error(`[Server Error] 현재 환경에서는 로컬 포트 ${fixedPort}를 고정 사용합니다. 기존 프로세스를 종료하고 다시 시작해 주세요.`);
     }
     process.exit(1);
   });

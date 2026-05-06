@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const router = express.Router();
 
@@ -110,15 +110,15 @@ module.exports = function (db) {
     }
   });
 
-  /** 특정 날짜에 약품별 입고량 일괄 반영 후 재고 연쇄 재계산 (키트 /api/kits/purchase 와 동일 패턴) */
+  /** ?뱀젙 ?좎쭨???쏀뭹蹂??낃퀬???쇨큵 諛섏쁺 ???ш퀬 ?곗뇙 ?ш퀎??(?ㅽ듃 /api/kits/purchase ? ?숈씪 ?⑦꽩) */
   router.post('/api/medicines/purchase', (req, res) => {
     try {
       const { date, items } = req.body;
       if (!date || !Array.isArray(items) || items.length === 0) {
-        return res.status(400).json({ success: false, error: '날짜와 항목이 필요합니다.' });
+        return res.status(400).json({ success: false, error: '?좎쭨? ??ぉ???꾩슂?⑸땲??' });
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
-        return res.status(400).json({ success: false, error: '날짜 형식이 올바르지 않습니다.' });
+        return res.status(400).json({ success: false, error: '?좎쭨 ?뺤떇???щ컮瑜댁? ?딆뒿?덈떎.' });
       }
 
       const metadata = getCurrentRecordMetadata(db, req.body);
@@ -138,8 +138,8 @@ module.exports = function (db) {
 
       const affected = new Set();
 
-      // 입고 upsert만 먼저 커밋한 뒤 재고 재계산을 별 트랜잭션으로 수행한다.
-      // (동일 트랜잭션 안에서 INSERT 직후 SELECT가 최신 purchase를 못 읽는 환경을 피함)
+      // ?낃퀬 upsert留?癒쇱? 而ㅻ컠?????ш퀬 ?ш퀎?곗쓣 蹂??몃옖??뀡?쇰줈 ?섑뻾?쒕떎.
+      // (?숈씪 ?몃옖??뀡 ?덉뿉??INSERT 吏곹썑 SELECT媛 理쒖떊 purchase瑜?紐??쎈뒗 ?섍꼍???쇳븿)
       db.transaction(() => {
         for (const item of items) {
           const name = item.medicineName;

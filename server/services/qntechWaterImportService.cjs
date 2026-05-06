@@ -1,4 +1,4 @@
-const { createAuthenticatedClient } = require('./qntechAuthService.cjs');
+﻿const { createAuthenticatedClient } = require('./qntechAuthService.cjs');
 const { PROJECTS_QUERY, getActiveLocations, getConfiguredSampleMappings, mapProjectsToWaterRows } = require('./qntechWaterValueImportService.cjs');
 const { saveProjectPhotos } = require('./qntechWaterPhotoImportService.cjs');
 const { getCurrentRecordMetadata } = require('./syncMetadataService.cjs');
@@ -8,7 +8,7 @@ const RANGE_IMPORT_DELAY_MS = 250;
 function normalizeDateInput(date) {
   const normalized = String(date || '').trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    throw new Error('날짜 형식은 YYYY-MM-DD 이어야 합니다.');
+    throw new Error('?좎쭨 ?뺤떇? YYYY-MM-DD ?댁뼱???⑸땲??');
   }
   return normalized;
 }
@@ -34,7 +34,7 @@ function enumerateDates(startDate, endDate) {
   const start = new Date(`${normalizeDateInput(startDate)}T00:00:00`);
   const end = new Date(`${normalizeDateInput(endDate)}T00:00:00`);
   if (start > end) {
-    throw new Error('시작일은 종료일보다 늦을 수 없습니다.');
+    throw new Error('?쒖옉?쇱? 醫낅즺?쇰낫????쓣 ???놁뒿?덈떎.');
   }
 
   const dates = [];
@@ -90,7 +90,7 @@ function persistWaterRows(db, importedRows) {
   const runInsert = db.transaction((rows) => {
     rows.forEach((item) => {
       const measurementGroup = item.measurement_group || `manual:${item.date}`;
-      if (!existingRowStmt.get(item.date, measurementGroup, item.location || '유입수')) {
+      if (!existingRowStmt.get(item.date, measurementGroup, item.location || '?좎엯??)) {
         insertedRowCount += 1;
       }
 
@@ -101,7 +101,7 @@ function persistWaterRows(db, importedRows) {
         item.source_type || 'manual',
         item.source_label ?? null,
         item.qntech_project_id ?? null,
-        item.location || '유입수',
+        item.location || '?좎엯??,
         item.nh3_n ?? null,
         item.no3_n ?? null,
         item.po4_p ?? null,
@@ -130,7 +130,7 @@ function persistWaterRows(db, importedRows) {
 async function fetchProjectsForDateWithClient(client, normalizedDate) {
   const sites = client.me?.sites || [];
   if (!sites.length) {
-    throw new Error('QnTECH에서 접근 가능한 현장을 찾지 못했습니다.');
+    throw new Error('QnTECH?먯꽌 ?묎렐 媛?ν븳 ?꾩옣??李얠? 紐삵뻽?듬땲??');
   }
 
   const site = sites[0];
@@ -247,7 +247,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
     totalDates: dates.length,
     completedDates: 0,
     currentDate: null,
-    message: `총 ${dates.length}일 데이터를 준비하는 중...`
+    message: `珥?${dates.length}???곗씠?곕? 以鍮꾪븯??以?..`
   });
 
   for (const [index, date] of dates.entries()) {
@@ -260,7 +260,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
       totalDates: dates.length,
       completedDates: index,
       currentDate: date,
-      message: `${date} 데이터를 불러오는 중...`
+      message: `${date} ?곗씠?곕? 遺덈윭?ㅻ뒗 以?..`
     });
 
     const context = await fetchProjectsForDateWithClient(client, date);
@@ -305,7 +305,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
       totalDates: dates.length,
       completedDates: index + 1,
       currentDate: date,
-      message: `${date} 데이터 처리를 완료했습니다.`
+      message: `${date} ?곗씠??泥섎━瑜??꾨즺?덉뒿?덈떎.`
     });
   }
 

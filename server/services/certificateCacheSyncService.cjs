@@ -1,4 +1,4 @@
-const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
+﻿const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
 
 function normalizeMonth(value) {
   const m = String(value || '').trim();

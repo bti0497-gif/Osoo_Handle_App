@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const multer = require('multer');
 const JSZip = require('jszip');
 const { drive, getOrCreateFolder, uploadBufferToFolder } = require('../services/driveService.cjs');
@@ -12,8 +12,8 @@ const router = express.Router();
 
 const CERTIFICATE_ROOT_FOLDER_ID =
   String(process.env.CERTIFICATE_DRIVE_FOLDER_ID || '1Po-gd-OKlaeGyL-Ppjc6_wKgSLEM4iX4').trim();
-const CERTIFICATE_PREFIX_RE = /^(성적서|mlss)-(\d{8})(\.[^.]+)?$/i;
-const MANUAL_CERT_FILE_RE = /^(성적서|mlss)[_-](\d{8})[_-](.+)\.(jpg|jpeg|png|webp|pdf)$/i;
+const CERTIFICATE_PREFIX_RE = /^(?깆쟻??mlss)-(\d{8})(\.[^.]+)?$/i;
+const MANUAL_CERT_FILE_RE = /^(?깆쟻??mlss)[_-](\d{8})[_-](.+)\.(jpg|jpeg|png|webp|pdf)$/i;
 const zipUploadProgressMap = new Map();
 
 function toDisplayDate(yyyymmdd) {
@@ -82,7 +82,7 @@ function normalizeMonth(value) {
 
 async function resolveMonthFolders({ year, month }) {
   const rootFolders = await listFolders(CERTIFICATE_ROOT_FOLDER_ID);
-  const certRoot = rootFolders.find((f) => String(f.name || '').trim() === '성적서');
+  const certRoot = rootFolders.find((f) => String(f.name || '').trim() === '?깆쟻??);
   const searchRoots = [CERTIFICATE_ROOT_FOLDER_ID, certRoot?.id].filter(Boolean);
   const monthFolders = [];
   const seen = new Set();
@@ -136,9 +136,9 @@ function normalizeSiteNameKey(value) {
     .toLowerCase()
     .replace(/\s+/g, '')
     .replace(/[()\-_/]/g, '')
-    .replace(/휴게소/g, '')
-    .replace(/방향/g, '')
-    .replace(/상행|하행/g, '');
+    .replace(/?닿쾶??g, '')
+    .replace(/諛⑺뼢/g, '')
+    .replace(/?곹뻾|?섑뻾/g, '');
 }
 
 function normalizeDateLike(value) {
@@ -253,9 +253,9 @@ function buildAliasCandidates(siteName) {
 
   const aliases = new Set([raw]);
   aliases.add(raw.replace(/\s+/g, ''));
-  aliases.add(raw.replace(/휴게소/g, '').trim());
-  aliases.add(raw.replace(/방향/g, '').trim());
-  aliases.add(raw.replace(/휴게소/g, '').replace(/방향/g, '').trim());
+  aliases.add(raw.replace(/?닿쾶??g, '').trim());
+  aliases.add(raw.replace(/諛⑺뼢/g, '').trim());
+  aliases.add(raw.replace(/?닿쾶??g, '').replace(/諛⑺뼢/g, '').trim());
   aliases.add(raw.replace(/[()]/g, '').trim());
   aliases.add(raw.replace(/[()]/g, '').replace(/\s+/g, '').trim());
 
@@ -267,10 +267,10 @@ function buildAliasCandidates(siteName) {
       aliases.add(`${base}(${dir})`);
       aliases.add(`${base}${dir}`);
       aliases.add(`${base} ${dir}`);
-      aliases.add(`${base}휴게소(${dir})`);
-      aliases.add(`${base}휴게소${dir}`);
-      aliases.add(`${base}(${dir.replace(/방향/g, '')})`);
-      aliases.add(`${base}${dir.replace(/방향/g, '')}`);
+      aliases.add(`${base}?닿쾶??${dir})`);
+      aliases.add(`${base}?닿쾶??{dir}`);
+      aliases.add(`${base}(${dir.replace(/諛⑺뼢/g, '')})`);
+      aliases.add(`${base}${dir.replace(/諛⑺뼢/g, '')}`);
     }
   }
 
@@ -341,7 +341,7 @@ function findBestSiteMatch(rawSiteName, siteMaster = []) {
     }
   }
 
-  // OCR·약칭 등 약간 어긋난 현장명도 시트 별칭과 맞추기 위해 하한을 낮춤 (업서트 폴백이 추가 안전망)
+  // OCR쨌?쎌묶 ???쎄컙 ?닿툔???꾩옣紐낅룄 ?쒗듃 蹂꾩묶怨?留욎텛湲??꾪빐 ?섑븳????땄 (?낆꽌???대갚??異붽? ?덉쟾留?
   if (!best || bestScore < 0.5) {
     return {
       site_id: null,
@@ -472,7 +472,7 @@ function getManagedSiteNamesByManagerName(userName) {
 function ensureAdmin(req, res) {
   const role = resolveUserRole(req);
   if (role === 'admin' || role === 'group_admin') return true;
-  res.status(403).json({ success: false, message: '관리자 권한이 필요합니다.' });
+  res.status(403).json({ success: false, message: '愿由ъ옄 沅뚰븳???꾩슂?⑸땲??' });
   return false;
 }
 
@@ -498,7 +498,7 @@ function parseJsonObject(text) {
   }
 }
 
-/** JSON 본문에 들어 있을 수 있는 현장명 후보 (OCR 원문 등) */
+/** JSON 蹂몃Ц???ㅼ뼱 ?덉쓣 ???덈뒗 ?꾩옣紐??꾨낫 (OCR ?먮Ц ?? */
 function collectSiteNameHintsFromPayloadJson(jsonStr) {
   const p = parseJsonObject(jsonStr);
   const out = [];
@@ -515,7 +515,7 @@ function collectSiteNameHintsFromPayloadJson(jsonStr) {
   return out;
 }
 
-/** DB 행(컬럼 + payload) vs 파일명에서 온 현장 문자열 유사도 */
+/** DB ??而щ읆 + payload) vs ?뚯씪紐낆뿉?????꾩옣 臾몄옄???좎궗??*/
 function rowSiteSimilarityScore(row, siteRawFromFile, officialFromMatch) {
   const needles = [];
   const r = String(siteRawFromFile || '').trim();
@@ -557,7 +557,7 @@ async function upsertCertificateFileMeta({
 }) {
   const bq = getBigQueryClient();
   if (!bq) {
-    throw new Error('BigQuery 연결이 필요합니다. (certificate 파일 메타 동기화)');
+    throw new Error('BigQuery ?곌껐???꾩슂?⑸땲?? (certificate ?뚯씪 硫뷀? ?숆린??');
   }
 
   const nowIso = new Date().toISOString();
@@ -652,7 +652,7 @@ async function upsertCertificateFileMeta({
 
 async function upsertCertificateRowToBigQuery(row, uniqueIndex) {
   const bq = getBigQueryClient();
-  if (!bq) throw new Error('BigQuery 연결이 필요합니다.');
+  if (!bq) throw new Error('BigQuery ?곌껐???꾩슂?⑸땲??');
 
   const reportDate = normalizeDateLike(row.report_date || row.date || row.sampled_at);
   if (!reportDate) return { inserted: false, reason: 'invalid_date' };
@@ -780,7 +780,7 @@ function isMasterJsonFile(fileName) {
   return String(fileName || '').trim().toLowerCase() === 'all_pages_data.json';
 }
 
-/** 페이지/래퍼 객체를 INSERT에서 바로 쓸 수 있게 record·data·extracted를 한 객체로 합침 */
+/** ?섏씠吏/?섑띁 媛앹껜瑜?INSERT?먯꽌 諛붾줈 ?????덇쾶 record쨌data쨌extracted瑜???媛앹껜濡??⑹묠 */
 function mergeRowForCertificateImport(row) {
   if (!row || typeof row !== 'object') return null;
   const base = { ...row };
@@ -851,8 +851,8 @@ function mergeRowForCertificateImport(row) {
 }
 
 /**
- * AI Studio batch_export 등: 최상위 배열, records[], pages[] 만 다건으로 인식했었음.
- * 단일 객체에 record만 있거나 pages[]에 페이지별 데이터가 있으면 1건만 들어가던 문제 보완.
+ * AI Studio batch_export ?? 理쒖긽??諛곗뿴, records[], pages[] 留??ㅺ굔?쇰줈 ?몄떇?덉뿀??
+ * ?⑥씪 媛앹껜??record留??덇굅??pages[]???섏씠吏蹂??곗씠?곌? ?덉쑝硫?1嫄대쭔 ?ㅼ뼱媛??臾몄젣 蹂댁셿.
  */
 function normalizeIncomingJsonRecords(payload) {
   if (payload == null) return [];
@@ -954,11 +954,11 @@ module.exports = function () {
       if (!ensureAdmin(req, res)) return;
       const taskId = String(req.query.taskId || '').trim();
       if (!taskId) {
-        return res.status(400).json({ success: false, message: 'taskId가 필요합니다.' });
+        return res.status(400).json({ success: false, message: 'taskId媛 ?꾩슂?⑸땲??' });
       }
       const progress = zipUploadProgressMap.get(taskId);
       if (!progress) {
-        return res.status(404).json({ success: false, message: '진행 상태를 찾을 수 없습니다.' });
+        return res.status(404).json({ success: false, message: '吏꾪뻾 ?곹깭瑜?李얠쓣 ???놁뒿?덈떎.' });
       }
       return res.json({ success: true, progress });
     } catch (err) {
@@ -971,7 +971,7 @@ module.exports = function () {
       if (!isSitesSheetsConfigured()) {
         return res.status(400).json({
           success: false,
-          message: 'Google Sheets이 설정되지 않았습니다. (GOOGLE_MEMBERS_SHEET_ID)',
+          message: 'Google Sheets???ㅼ젙?섏? ?딆븯?듬땲?? (GOOGLE_MEMBERS_SHEET_ID)',
         });
       }
 
@@ -1021,7 +1021,7 @@ module.exports = function () {
       if (!record.report_date || !/^\d{4}-\d{2}-\d{2}$/.test(String(record.report_date))) {
         return res.status(400).json({
           success: false,
-          message: 'report_date(YYYY-MM-DD)가 필요합니다.',
+          message: 'report_date(YYYY-MM-DD)媛 ?꾩슂?⑸땲??',
           received: normalized,
         });
       }
@@ -1029,7 +1029,7 @@ module.exports = function () {
       if (!record.site_name && !record.site_id) {
         return res.status(400).json({
           success: false,
-          message: 'site_name 또는 site_id 중 하나는 필요합니다.',
+          message: 'site_name ?먮뒗 site_id 以??섎굹???꾩슂?⑸땲??',
           received: normalized,
         });
       }
@@ -1058,7 +1058,7 @@ module.exports = function () {
       return res.json({
         success: true,
         accepted: true,
-        message: 'AI 추출 결과를 정상 수신/저장했습니다.',
+        message: 'AI 異붿텧 寃곌낵瑜??뺤긽 ?섏떊/??ν뻽?듬땲??',
         id: null,
         received: normalized,
       });
@@ -1077,7 +1077,7 @@ module.exports = function () {
         : (Array.isArray(body?.records) ? body.records : [body]);
       const records = incomingRecords.filter((row) => row && typeof row === 'object');
       if (records.length === 0) {
-        return res.status(400).json({ success: false, message: '업로드할 JSON 레코드가 없습니다.' });
+        return res.status(400).json({ success: false, message: '?낅줈?쒗븷 JSON ?덉퐫?쒓? ?놁뒿?덈떎.' });
       }
 
       const warnings = [];
@@ -1086,7 +1086,7 @@ module.exports = function () {
         const raw = records[index];
         const reportDate = resolveReportDate(raw);
         if (!reportDate) {
-          warnings.push(`index ${index}: report_date 형식이 올바르지 않아 제외되었습니다.`);
+          warnings.push(`index ${index}: report_date ?뺤떇???щ컮瑜댁? ?딆븘 ?쒖쇅?섏뿀?듬땲??`);
           continue;
         }
 
@@ -1131,7 +1131,7 @@ module.exports = function () {
           }, index);
           inserted += 1;
         } catch (rowErr) {
-          warnings.push(`index ${index}: BigQuery 저장 실패 (${rowErr.message})`);
+          warnings.push(`index ${index}: BigQuery ????ㅽ뙣 (${rowErr.message})`);
         }
       }
 
@@ -1146,7 +1146,7 @@ module.exports = function () {
     }
   });
 
-  // 성적서 목록은 BigQuery/Drive를 단일 진실원본으로 사용한다. (로컬 SQLite 미사용)
+  // ?깆쟻??紐⑸줉? BigQuery/Drive瑜??⑥씪 吏꾩떎?먮낯?쇰줈 ?ъ슜?쒕떎. (濡쒖뺄 SQLite 誘몄궗??
 
   router.get('/api/certificates', async (req, res) => {
     try {
@@ -1160,10 +1160,10 @@ module.exports = function () {
         const allowedFromManager = getManagedSiteNamesByManagerName(userName);
         const allowedSites = Array.from(new Set([...allowedFromHeader, ...allowedFromManager]));
         if (allowedSites.length === 0) {
-          return res.status(403).json({ success: false, message: '현장 정보가 없어 성적서를 조회할 수 없습니다.' });
+          return res.status(403).json({ success: false, message: '?꾩옣 ?뺣낫媛 ?놁뼱 ?깆쟻?쒕? 議고쉶?????놁뒿?덈떎.' });
         }
         if (requestedSiteName && !allowedSites.includes(requestedSiteName)) {
-          return res.status(403).json({ success: false, message: '타 현장 성적서는 조회할 수 없습니다.' });
+          return res.status(403).json({ success: false, message: '? ?꾩옣 ?깆쟻?쒕뒗 議고쉶?????놁뒿?덈떎.' });
         }
         siteNameFilters = requestedSiteName ? [requestedSiteName] : allowedSites;
       }
@@ -1227,7 +1227,7 @@ module.exports = function () {
           });
       }
 
-      // 사용자 의도: 성적서 JPG 목록은 Drive 기준으로 보여야 한다.
+      // ?ъ슜???섎룄: ?깆쟻??JPG 紐⑸줉? Drive 湲곗??쇰줈 蹂댁뿬???쒕떎.
       if (drive && CERTIFICATE_ROOT_FOLDER_ID) {
         const folders = await resolveMonthFolders({ year, month });
         const driveItems = [];
@@ -1236,16 +1236,16 @@ module.exports = function () {
           const files = await listFiles(folder.folderId);
           for (const file of files) {
             const baseName = toBaseName(file.name);
-            // 성적서 목록은 결과 파일만 노출 (ZIP/기타 산출물 제외)
+            // ?깆쟻??紐⑸줉? 寃곌낵 ?뚯씪留??몄텧 (ZIP/湲고? ?곗텧臾??쒖쇅)
             if (!isAllowedManualMedia(baseName)) {
               continue;
             }
             const parsed = parseManualCertificateFileName(file.name);
-            let siteName = '공통';
+            let siteName = '怨듯넻';
             let reportDate = '';
             let category = '';
             if (parsed) {
-              siteName = parsed.site_name_raw || '공통';
+              siteName = parsed.site_name_raw || '怨듯넻';
               reportDate = normalizeDateLike(parsed.yyyymmdd);
               category = parsed.prefix || '';
             } else {
@@ -1316,7 +1316,7 @@ module.exports = function () {
       const month = normalizeMonth(req.body?.month);
 
       if (!year || !month) {
-        return res.status(400).json({ success: false, message: 'year/month 값이 필요합니다.' });
+        return res.status(400).json({ success: false, message: 'year/month 媛믪씠 ?꾩슂?⑸땲??' });
       }
 
       let targetSiteNames = requestedSiteName ? [requestedSiteName] : [];
@@ -1325,10 +1325,10 @@ module.exports = function () {
         const allowedFromManager = getManagedSiteNamesByManagerName(userName);
         const allowedSites = Array.from(new Set([...allowedFromHeader, ...allowedFromManager]));
         if (allowedSites.length === 0) {
-          return res.status(403).json({ success: false, message: '현장 정보가 없어 동기화할 수 없습니다.' });
+          return res.status(403).json({ success: false, message: '?꾩옣 ?뺣낫媛 ?놁뼱 ?숆린?뷀븷 ???놁뒿?덈떎.' });
         }
         if (requestedSiteName && !allowedSites.includes(requestedSiteName)) {
-          return res.status(403).json({ success: false, message: '타 현장 동기화는 허용되지 않습니다.' });
+          return res.status(403).json({ success: false, message: '? ?꾩옣 ?숆린?붾뒗 ?덉슜?섏? ?딆뒿?덈떎.' });
         }
         targetSiteNames = requestedSiteName ? [requestedSiteName] : allowedSites;
       } else if (targetSiteNames.length === 0 && userSiteName) {
@@ -1336,7 +1336,7 @@ module.exports = function () {
       }
 
       if (targetSiteNames.length === 0) {
-        return res.status(400).json({ success: false, message: '동기화 대상 현장을 확인할 수 없습니다.' });
+        return res.status(400).json({ success: false, message: '?숆린??????꾩옣???뺤씤?????놁뒿?덈떎.' });
       }
 
       let totalCount = 0;
@@ -1366,7 +1366,7 @@ module.exports = function () {
 
   router.get('/api/certificates/:id/download', async (req, res) => {
     let id = String(req.params.id || '').trim();
-    if (!id) return res.status(400).json({ success: false, message: '성적서 ID가 필요합니다.' });
+    if (!id) return res.status(400).json({ success: false, message: '?깆쟻??ID媛 ?꾩슂?⑸땲??' });
 
     return res.json({
       success: true,
@@ -1377,7 +1377,7 @@ module.exports = function () {
   router.get('/api/certificates/files/:id', async (req, res) => {
     try {
       const id = String(req.params.id || '').trim();
-      if (!id) return res.status(400).send('잘못된 요청입니다.');
+      if (!id) return res.status(400).send('?섎せ???붿껌?낅땲??');
 
       const meta = await drive.files.get({
         fileId: id,
@@ -1406,10 +1406,10 @@ module.exports = function () {
   router.post('/api/certificates/upload', upload.single('certificatePdf'), async (req, res) => {
     try {
       if (!drive || !CERTIFICATE_ROOT_FOLDER_ID) {
-        return res.status(400).json({ success: false, message: 'Drive 설정이 필요합니다.' });
+        return res.status(400).json({ success: false, message: 'Drive ?ㅼ젙???꾩슂?⑸땲??' });
       }
       if (!req.file) {
-        return res.status(400).json({ success: false, message: '업로드 파일이 없습니다.' });
+        return res.status(400).json({ success: false, message: '?낅줈???뚯씪???놁뒿?덈떎.' });
       }
 
       const now = new Date();
@@ -1435,15 +1435,15 @@ module.exports = function () {
     try {
       if (!ensureAdmin(req, res)) return;
       if (!drive || !CERTIFICATE_ROOT_FOLDER_ID) {
-        return res.status(400).json({ success: false, message: 'Drive 설정이 필요합니다.' });
+        return res.status(400).json({ success: false, message: 'Drive ?ㅼ젙???꾩슂?⑸땲??' });
       }
       const files = Array.isArray(req.files) ? req.files : [];
       if (files.length === 0) {
-        return res.status(400).json({ success: false, message: '업로드 파일이 없습니다.' });
+        return res.status(400).json({ success: false, message: '?낅줈???뚯씪???놁뒿?덈떎.' });
       }
 
       const siteMaster = await loadSiteMaster();
-      const certFolder = await getOrCreateFolder(CERTIFICATE_ROOT_FOLDER_ID, '성적서');
+      const certFolder = await getOrCreateFolder(CERTIFICATE_ROOT_FOLDER_ID, '?깆쟻??);
       const items = [];
       const errors = [];
 
@@ -1453,7 +1453,7 @@ module.exports = function () {
           if (!parsed) {
             errors.push({
               file: file.originalname,
-              message: '파일명 형식이 올바르지 않습니다. (성적서_yyyymmdd_현장명.jpg 또는 mlss_yyyymmdd_현장명.jpg)',
+              message: '?뚯씪紐??뺤떇???щ컮瑜댁? ?딆뒿?덈떎. (?깆쟻??yyyymmdd_?꾩옣紐?jpg ?먮뒗 mlss_yyyymmdd_?꾩옣紐?jpg)',
             });
             continue;
           }
@@ -1461,7 +1461,7 @@ module.exports = function () {
           if (!reportDate) {
             errors.push({
               file: file.originalname,
-              message: '파일명 날짜(yyyymmdd)가 올바르지 않습니다.',
+              message: '?뚯씪紐??좎쭨(yyyymmdd)媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
             });
             continue;
           }
@@ -1532,26 +1532,26 @@ module.exports = function () {
     try {
       if (!ensureAdmin(req, res)) return;
       if (!drive || !CERTIFICATE_ROOT_FOLDER_ID) {
-        return res.status(400).json({ success: false, message: 'Drive 설정이 필요합니다.' });
+        return res.status(400).json({ success: false, message: 'Drive ?ㅼ젙???꾩슂?⑸땲??' });
       }
       if (!req.file) {
-        return res.status(400).json({ success: false, message: 'ZIP 파일이 필요합니다. (bundleZip)' });
+        return res.status(400).json({ success: false, message: 'ZIP ?뚯씪???꾩슂?⑸땲?? (bundleZip)' });
       }
       if (!/\.zip$/i.test(String(req.file.originalname || ''))) {
-        return res.status(400).json({ success: false, message: 'zip 형식 파일만 업로드할 수 있습니다.' });
+        return res.status(400).json({ success: false, message: 'zip ?뺤떇 ?뚯씪留??낅줈?쒗븷 ???덉뒿?덈떎.' });
       }
 
       const uploadTaskId = String(req.body?.uploadTaskId || '').trim();
       setZipUploadProgress(uploadTaskId, {
         status: 'processing',
         stage: 'zip_received',
-        message: '압축 파일을 해석 중입니다...',
+        message: '?뺤텞 ?뚯씪???댁꽍 以묒엯?덈떎...',
         fileName: req.file.originalname,
       });
-      console.log(`[Certificate ZIP] 처리 시작: ${req.file.originalname} (${req.file.size || 0} bytes)`);
+      console.log(`[Certificate ZIP] 泥섎━ ?쒖옉: ${req.file.originalname} (${req.file.size || 0} bytes)`);
 
       const siteMaster = await loadSiteMaster();
-      const certFolder = await getOrCreateFolder(CERTIFICATE_ROOT_FOLDER_ID, '성적서');
+      const certFolder = await getOrCreateFolder(CERTIFICATE_ROOT_FOLDER_ID, '?깆쟻??);
       const zip = await JSZip.loadAsync(req.file.buffer);
       const entries = Object.keys(zip.files || {})
         .map((key) => zip.files[key])
@@ -1564,10 +1564,10 @@ module.exports = function () {
       const masterJsonEntry = entries.find((entry) => isMasterJsonFile(toBaseName(entry.name))) || null;
 
       if (!masterJsonEntry) {
-        console.warn(`[Certificate ZIP] all_pages_data.json 누락: ${req.file.originalname}`);
+        console.warn(`[Certificate ZIP] all_pages_data.json ?꾨씫: ${req.file.originalname}`);
         return res.status(400).json({
           success: false,
-          message: 'all_pages_data.json 파일이 필요합니다.',
+          message: 'all_pages_data.json ?뚯씪???꾩슂?⑸땲??',
         });
       }
 
@@ -1579,7 +1579,7 @@ module.exports = function () {
       } catch (jsonErr) {
         jsonErrors.push({
           file: masterJsonEntry.name,
-          message: `JSON 파싱 실패: ${jsonErr.message}`,
+          message: `JSON ?뚯떛 ?ㅽ뙣: ${jsonErr.message}`,
         });
       }
 
@@ -1598,11 +1598,11 @@ module.exports = function () {
       }
 
       console.log(
-        `[Certificate ZIP] 파싱 완료: jsonRecords=${allJsonRecords.length}, mediaFiles=${fileEntries.length}, ignoredJson=${ignoredJsonFiles.length}`
+        `[Certificate ZIP] ?뚯떛 ?꾨즺: jsonRecords=${allJsonRecords.length}, mediaFiles=${fileEntries.length}, ignoredJson=${ignoredJsonFiles.length}`
       );
       setZipUploadProgress(uploadTaskId, {
         stage: 'parsed',
-        message: `압축 해석 완료 (JSON ${allJsonRecords.length}건, 이미지 ${fileEntries.length}개)`,
+        message: `?뺤텞 ?댁꽍 ?꾨즺 (JSON ${allJsonRecords.length}嫄? ?대?吏 ${fileEntries.length}媛?`,
         jsonTotal: allJsonRecords.length,
         fileTotal: fileEntries.length,
       });
@@ -1614,7 +1614,7 @@ module.exports = function () {
         const reportDate = resolveReportDate(raw);
         if (!reportDate) {
           importWarnings.push(
-            `json index ${index}: report_date 형식이 올바르지 않아 제외되었습니다. `
+            `json index ${index}: report_date ?뺤떇???щ컮瑜댁? ?딆븘 ?쒖쇅?섏뿀?듬땲?? `
             + `keys=${Object.keys(raw || {}).slice(0, 12).join(',')}, `
             + `recordKeys=${Object.keys(raw?.record || {}).slice(0, 12).join(',')}`
           );
@@ -1662,11 +1662,11 @@ module.exports = function () {
           }, index);
           inserted += 1;
         } catch (rowErr) {
-          importWarnings.push(`json index ${index}: BigQuery 저장 실패 (${rowErr.message})`);
+          importWarnings.push(`json index ${index}: BigQuery ????ㅽ뙣 (${rowErr.message})`);
         }
         setZipUploadProgress(uploadTaskId, {
           stage: 'json_processing',
-          message: `JSON 처리 중... (${index + 1}/${allJsonRecords.length})`,
+          message: `JSON 泥섎━ 以?.. (${index + 1}/${allJsonRecords.length})`,
           jsonProcessed: index + 1,
           jsonInserted: inserted,
         });
@@ -1681,7 +1681,7 @@ module.exports = function () {
           if (!parsed) {
             uploadErrors.push({
               file: originalName,
-              message: '파일명 형식이 올바르지 않습니다. (성적서_yyyymmdd_현장명.jpg 또는 mlss_yyyymmdd_현장명.jpg)',
+              message: '?뚯씪紐??뺤떇???щ컮瑜댁? ?딆뒿?덈떎. (?깆쟻??yyyymmdd_?꾩옣紐?jpg ?먮뒗 mlss_yyyymmdd_?꾩옣紐?jpg)',
             });
             continue;
           }
@@ -1689,7 +1689,7 @@ module.exports = function () {
           if (!reportDate) {
             uploadErrors.push({
               file: originalName,
-              message: '파일명 날짜(yyyymmdd)가 올바르지 않습니다.',
+              message: '?뚯씪紐??좎쭨(yyyymmdd)媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
             });
             continue;
           }
@@ -1751,7 +1751,7 @@ module.exports = function () {
         }
         setZipUploadProgress(uploadTaskId, {
           stage: 'image_uploading',
-          message: `이미지 업로드 중... (${uploadedItems.length + uploadErrors.length}/${fileEntries.length})`,
+          message: `?대?吏 ?낅줈??以?.. (${uploadedItems.length + uploadErrors.length}/${fileEntries.length})`,
           fileProcessed: uploadedItems.length + uploadErrors.length,
           fileUploaded: uploadedItems.length,
         });
@@ -1759,7 +1759,7 @@ module.exports = function () {
 
       setZipUploadProgress(uploadTaskId, {
         stage: 'finalizing',
-        message: '저장 결과를 확인 중입니다...',
+        message: '???寃곌낵瑜??뺤씤 以묒엯?덈떎...',
         jsonProcessed: allJsonRecords.length,
         jsonInserted: inserted,
         fileProcessed: fileEntries.length,
@@ -1770,21 +1770,21 @@ module.exports = function () {
       const hasProcessableFiles = fileEntries.length > 0;
       const hardFailureReasons = [];
       if (!hasProcessableJson && !hasProcessableFiles) {
-        hardFailureReasons.push('ZIP에서 처리 가능한 JSON/이미지 파일을 찾지 못했습니다. (all_pages_data.json, jpg/png/webp/pdf)');
+        hardFailureReasons.push('ZIP?먯꽌 泥섎━ 媛?ν븳 JSON/?대?吏 ?뚯씪??李얠? 紐삵뻽?듬땲?? (all_pages_data.json, jpg/png/webp/pdf)');
       }
       if (hasProcessableJson && inserted === 0) {
-        hardFailureReasons.push('JSON 레코드 저장이 0건입니다. warnings/errors를 확인해 주세요.');
+        hardFailureReasons.push('JSON ?덉퐫????μ씠 0嫄댁엯?덈떎. warnings/errors瑜??뺤씤??二쇱꽭??');
       }
       if (hasProcessableFiles && uploadedItems.length === 0) {
-        hardFailureReasons.push('이미지/파일 업로드가 0건입니다. 파일명 형식과 Drive 권한을 확인해 주세요.');
+        hardFailureReasons.push('?대?吏/?뚯씪 ?낅줈?쒓? 0嫄댁엯?덈떎. ?뚯씪紐??뺤떇怨?Drive 沅뚰븳???뺤씤??二쇱꽭??');
       }
 
       if (hardFailureReasons.length > 0) {
         if (importWarnings.length > 0) {
-          console.warn(`[Certificate ZIP] JSON 경고 샘플: ${importWarnings.slice(0, 5).join(' | ')}`);
+          console.warn(`[Certificate ZIP] JSON 寃쎄퀬 ?섑뵆: ${importWarnings.slice(0, 5).join(' | ')}`);
         }
         console.warn(
-          `[Certificate ZIP] 처리 실패: inserted=${inserted}/${allJsonRecords.length}, uploaded=${uploadedItems.length}/${fileEntries.length}`
+          `[Certificate ZIP] 泥섎━ ?ㅽ뙣: inserted=${inserted}/${allJsonRecords.length}, uploaded=${uploadedItems.length}/${fileEntries.length}`
         );
         setZipUploadProgress(uploadTaskId, {
           status: 'failed',
@@ -1819,15 +1819,15 @@ module.exports = function () {
       }
 
       console.log(
-        `[Certificate ZIP] 처리 완료: inserted=${inserted}/${allJsonRecords.length}, uploaded=${uploadedItems.length}/${fileEntries.length}, jsonWarnings=${importWarnings.length}, jsonErrors=${jsonErrors.length}, fileErrors=${uploadErrors.length}`
+        `[Certificate ZIP] 泥섎━ ?꾨즺: inserted=${inserted}/${allJsonRecords.length}, uploaded=${uploadedItems.length}/${fileEntries.length}, jsonWarnings=${importWarnings.length}, jsonErrors=${jsonErrors.length}, fileErrors=${uploadErrors.length}`
       );
       if (importWarnings.length > 0) {
-        console.warn(`[Certificate ZIP] JSON 경고 샘플: ${importWarnings.slice(0, 5).join(' | ')}`);
+        console.warn(`[Certificate ZIP] JSON 寃쎄퀬 ?섑뵆: ${importWarnings.slice(0, 5).join(' | ')}`);
       }
       setZipUploadProgress(uploadTaskId, {
         status: 'completed',
         stage: 'completed',
-        message: `처리 완료 (JSON ${inserted}/${allJsonRecords.length}, 이미지 ${uploadedItems.length}/${fileEntries.length})`,
+        message: `泥섎━ ?꾨즺 (JSON ${inserted}/${allJsonRecords.length}, ?대?吏 ${uploadedItems.length}/${fileEntries.length})`,
         jsonInserted: inserted,
         jsonTotal: allJsonRecords.length,
         fileUploaded: uploadedItems.length,
@@ -1856,7 +1856,7 @@ module.exports = function () {
         },
       });
     } catch (err) {
-      console.error(`[Certificate ZIP] 예외 발생: ${err.message}`);
+      console.error(`[Certificate ZIP] ?덉쇅 諛쒖깮: ${err.message}`);
       const uploadTaskId = String(req.body?.uploadTaskId || '').trim();
       setZipUploadProgress(uploadTaskId, {
         status: 'failed',

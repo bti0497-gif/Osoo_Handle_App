@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
@@ -18,11 +18,11 @@ const { getHtmlTemplatePath } = require('../services/excelTemplateHtmlService.cj
 const router = express.Router();
 
 function buildMissingTemplateResponse(templateName) {
-  const requestedTemplateName = String(templateName || '수질분석일지').trim() || '수질분석일지';
+  const requestedTemplateName = String(templateName || '?섏쭏遺꾩꽍?쇱?').trim() || '?섏쭏遺꾩꽍?쇱?';
   return {
     code: 'REPORT_TEMPLATE_MISSING',
-    error: `${requestedTemplateName} 양식을 찾을 수 없습니다.`,
-    userMessage: `${requestedTemplateName} 양식을 찾을 수 없습니다.\n설정에서 ${requestedTemplateName} 양식 파일을 업로드해 주세요.`
+    error: `${requestedTemplateName} ?묒떇??李얠쓣 ???놁뒿?덈떎.`,
+    userMessage: `${requestedTemplateName} ?묒떇??李얠쓣 ???놁뒿?덈떎.\n?ㅼ젙?먯꽌 ${requestedTemplateName} ?묒떇 ?뚯씪???낅줈?쒗빐 二쇱꽭??`
   };
 }
 
@@ -39,8 +39,8 @@ module.exports = function(db, baseDir, appDataPath) {
     if (!fs.existsSync(htmlPath)) {
       return res.status(404).json({
         code: 'REPORT_TEMPLATE_HTML_MISSING',
-        error: 'HTML 템플릿을 찾을 수 없습니다.',
-        userMessage: 'HTML 템플릿이 아직 생성되지 않았습니다. 설정에서 양식 파일을 다시 업로드해 주세요.'
+        error: 'HTML ?쒗뵆由우쓣 李얠쓣 ???놁뒿?덈떎.',
+        userMessage: 'HTML ?쒗뵆由우씠 ?꾩쭅 ?앹꽦?섏? ?딆븯?듬땲?? ?ㅼ젙?먯꽌 ?묒떇 ?뚯씪???ㅼ떆 ?낅줈?쒗빐 二쇱꽭??'
       });
     }
 
@@ -61,7 +61,7 @@ module.exports = function(db, baseDir, appDataPath) {
 
     try {
       if (!startDate || !endDate) {
-        return res.status(400).json({ success: false, error: 'startDate 및 endDate가 필요합니다.' });
+        return res.status(400).json({ success: false, error: 'startDate 諛?endDate媛 ?꾩슂?⑸땲??' });
       }
 
       const range = normalizeDateRange(startDate, endDate);
@@ -134,7 +134,7 @@ module.exports = function(db, baseDir, appDataPath) {
       return res.sendFile(pdfPath);
     } catch (err) {
       console.error('[Excel Preview PDF Error]', err.message);
-      return res.status(500).json({ error: `Excel PDF 미리보기 생성에 실패했습니다: ${err.message}` });
+      return res.status(500).json({ error: `Excel PDF 誘몃━蹂닿린 ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}` });
     }
   });
 
@@ -249,7 +249,7 @@ module.exports = function(db, baseDir, appDataPath) {
       return res.sendFile(pdfPath);
     } catch (err) {
       console.error('[Excel Batch PDF Error]', err.message);
-      return res.status(500).json({ error: `기간 PDF 생성에 실패했습니다: ${err.message}` });
+      return res.status(500).json({ error: `湲곌컙 PDF ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}` });
     }
   });
 
@@ -273,7 +273,7 @@ module.exports = function(db, baseDir, appDataPath) {
       }
       
       if (!manifest.pages.length) {
-          return res.status(400).json({ error: '선택한 기간에 수질분석 데이터가 없습니다.' });
+          return res.status(400).json({ error: '?좏깮??湲곌컙???섏쭏遺꾩꽍 ?곗씠?곌? ?놁뒿?덈떎.' });
       }
 
       const outputPaths = await buildBatchExportExcel({
@@ -285,7 +285,7 @@ module.exports = function(db, baseDir, appDataPath) {
         siteName,
       });
 
-      // 생성된 각 파일을 시스템 기본 프로그램(Excel)으로 열기
+      // ?앹꽦??媛??뚯씪???쒖뒪??湲곕낯 ?꾨줈洹몃옩(Excel)?쇰줈 ?닿린
       const { openExcelFile } = require('../services/excelOpenService.cjs');
       for (const filePath of outputPaths) {
         await openExcelFile(filePath);
@@ -293,12 +293,12 @@ module.exports = function(db, baseDir, appDataPath) {
 
       return res.json({ 
         success: true, 
-        message: `${outputPaths.length}개의 엑셀 파일을 열었습니다.`,
+        message: `${outputPaths.length}媛쒖쓽 ?묒? ?뚯씪???댁뿀?듬땲??`,
         files: outputPaths.map(p => path.basename(p)),
       });
     } catch (err) {
       console.error('[Excel Batch Export Error]', err.message);
-      return res.status(500).json({ error: `내보내기에 실패했습니다: ${err.message}` });
+      return res.status(500).json({ error: `?대낫?닿린???ㅽ뙣?덉뒿?덈떎: ${err.message}` });
     }
   });
 

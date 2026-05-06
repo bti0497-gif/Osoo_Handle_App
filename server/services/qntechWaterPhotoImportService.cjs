@@ -1,4 +1,4 @@
-const fs = require('fs');
+﻿const fs = require('fs');
 const path = require('path');
 
 const { httpRequest } = require('./qntechAuthService.cjs');
@@ -13,7 +13,7 @@ const {
   waterAnalysisPhotoSegments,
 } = require('./drivePathService.cjs');
 
-const TARGET_PHOTO_ITEMS = ['암모니아성 질소', '질산성 질소', '오르토 인산염', '알칼리도'];
+const TARGET_PHOTO_ITEMS = ['?붾え?덉븘??吏덉냼', '吏덉궛??吏덉냼', '?ㅻⅤ???몄궛??, '?뚯뭡由щ룄'];
 
 function ensureDirectory(dirPath) {
   if (!fs.existsSync(dirPath)) {
@@ -43,7 +43,7 @@ function buildProjectSourceLabel(project, projectIndex, totalProjects) {
   const note = sanitize(project?.note);
   if (analysisProcess) return analysisProcess;
   if (note) return note;
-  if (totalProjects > 1) return `${projectIndex + 1}차`;
+  if (totalProjects > 1) return `${projectIndex + 1}李?;
   return '';
 }
 
@@ -84,7 +84,7 @@ function buildPhotoDirectory(photoRoot, date) {
 }
 
 function toImportDateStamp(date) {
-  // 요청 기준: yyyyddmm
+  // ?붿껌 湲곗?: yyyyddmm
   const y = String(date || '').slice(0, 4);
   const m = String(date || '').slice(5, 7);
   const d = String(date || '').slice(8, 10);
@@ -93,7 +93,7 @@ function toImportDateStamp(date) {
 
 function sanitizeItemForFileName(itemName) {
   const cleaned = sanitize(itemName || '').replace(/\s+/g, '');
-  return cleaned || '분석항목';
+  return cleaned || '遺꾩꽍??ぉ';
 }
 
 async function downloadPhoto(baseUrl, cookieJar, filePathValue) {
@@ -112,7 +112,7 @@ async function downloadPhoto(baseUrl, cookieJar, filePathValue) {
 
   const response = await httpRequest(fileUrl, { headers });
   if (response.statusCode >= 400) {
-    throw new Error(`사진 다운로드 실패: status=${response.statusCode}`);
+    throw new Error(`?ъ쭊 ?ㅼ슫濡쒕뱶 ?ㅽ뙣: status=${response.statusCode}`);
   }
 
   return {

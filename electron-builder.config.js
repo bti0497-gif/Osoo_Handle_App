@@ -5,7 +5,7 @@
 module.exports = {
   appId: 'com.osoo.handle-app',
   productName: 'Osoo Handle App',
-  npmRebuild: false,
+  npmRebuild: true,
   nodeGypRebuild: false,
   beforePack: './scripts/patch-nsis-install-section.cjs',
   directories: {
@@ -14,6 +14,7 @@ module.exports = {
   },
   files: [
     'dist/**/*',
+    'public/**/*',
     'server/**/*',
     'server.cjs',
     'start.cjs',
@@ -26,6 +27,7 @@ module.exports = {
   ],
   asarUnpack: [
     'server.cjs',
+    'public/**/*',
     'server/**/*',
     'node_modules/**/*',
     '.env.local',

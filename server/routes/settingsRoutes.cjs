@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -19,7 +19,7 @@ const {
 } = require('../services/reportTemplateService.cjs');
 const router = express.Router();
 
-// 기본 정책: 회원/현장 마스터는 중앙에서 직접 관리하므로 앱의 외부 동기화는 비활성
+// 湲곕낯 ?뺤콉: ?뚯썝/?꾩옣 留덉뒪?곕뒗 以묒븰?먯꽌 吏곸젒 愿由ы븯誘濡??깆쓽 ?몃? ?숆린?붾뒗 鍮꾪솢??
 const ENABLE_SITE_SYNC_TO_SHEETS = process.env.ENABLE_SITE_SYNC_TO_SHEETS === 'true';
 const ENABLE_INITIAL_SYNC_TO_SHEETS = process.env.ENABLE_INITIAL_SYNC_TO_SHEETS === 'true';
 const ENABLE_SITE_MEMBER_BIGQUERY_SYNC = process.env.ENABLE_SITE_MEMBER_BIGQUERY_SYNC === 'true';
@@ -75,7 +75,7 @@ module.exports = function (db, baseDir, appDataPath) {
       normalizedSiteName,
       String(site.manager_name || '').trim(),
       String(site.method || 'A2O').trim(),
-      String(site.series || '1계열').trim(),
+      String(site.series || '1怨꾩뿴').trim(),
       site.is_active === 0 ? 0 : 1
     );
   };
@@ -99,7 +99,7 @@ module.exports = function (db, baseDir, appDataPath) {
   });
   const reportUpload = multer({ storage: reportStorage });
 
-  // ── 설정 조회 ──
+  // ?? ?ㅼ젙 議고쉶 ??
   router.get('/api/settings', (req, res) => {
     try {
       cleanupDisallowedReportTemplates(reportsDir);
@@ -112,7 +112,7 @@ module.exports = function (db, baseDir, appDataPath) {
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
-  // ── 설정 저장 ──
+  // ?? ?ㅼ젙 ?????
   router.post('/api/settings', async (req, res) => {
     const { settings, configItems } = req.body;
     try {
@@ -140,8 +140,8 @@ module.exports = function (db, baseDir, appDataPath) {
       });
       updateTransaction(settings, configItems);
 
-      const savedSeries = String(settings.series || '').trim() || '1계열';
-      if (savedSeries === '2계열') {
+      const savedSeries = String(settings.series || '').trim() || '1怨꾩뿴';
+      if (savedSeries === '2怨꾩뿴') {
         db.prepare(`
           UPDATE app_settings SET flow_option = CASE
             WHEN flow_option IS NULL OR TRIM(flow_option) = '' THEN 'combined'
@@ -152,23 +152,23 @@ module.exports = function (db, baseDir, appDataPath) {
         db.prepare(`UPDATE app_settings SET flow_option = 'single1' WHERE id = 1`).run();
       }
 
-      // Drive가 설정돼 있으면 현장 폴더 + 기본 하위 폴더를 생성한다.
+      // Drive媛 ?ㅼ젙???덉쑝硫??꾩옣 ?대뜑 + 湲곕낯 ?섏쐞 ?대뜑瑜??앹꽦?쒕떎.
       let driveSiteFolder = null;
       let driveSubFolders = [];
       let localSiteFolder = null;
       let localSubFolders = [];
       const defaultSubFolderNames = [
-        '게시판첨부파일',
-        '약품입고일지_사진',
-        '슬러지사진대장_사진',
-        '수질분석_데이타불러오기_사진',
-        '성적서',
+        '寃뚯떆?먯꺼遺?뚯씪',
+        '?쏀뭹?낃퀬?쇱?_?ъ쭊',
+        '슬러지?ъ쭊????ъ쭊',
+        '?섏쭏遺꾩꽍_데이타불러오기_?ъ쭊',
+        '?깆쟻??,
       ];
 
       const currentSiteId = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || '';
       const folderNameBySite = String(settings.siteName || '').trim() || String(currentSiteId || '').trim();
 
-      // 로컬(AppData)도 동일한 기본 폴더 세트를 항상 보장한다.
+      // 濡쒖뺄(AppData)???숈씪??湲곕낯 ?대뜑 ?명듃瑜???긽 蹂댁옣?쒕떎.
       if (folderNameBySite) {
         const localSitePath = path.join(siteStorageRoot, folderNameBySite);
         fs.mkdirSync(localSitePath, { recursive: true });
@@ -194,8 +194,8 @@ module.exports = function (db, baseDir, appDataPath) {
             }
           }
         } catch (driveErr) {
-          console.error('[Settings] Drive 현장/기본폴더 생성 실패:', driveErr.message);
-          // Drive 오류가 설정 저장을 막지 않도록 무시
+          console.error('[Settings] Drive ?꾩옣/湲곕낯?대뜑 ?앹꽦 ?ㅽ뙣:', driveErr.message);
+          // Drive ?ㅻ쪟媛 ?ㅼ젙 ??μ쓣 留됱? ?딅룄濡?臾댁떆
         }
       }
 
@@ -210,13 +210,13 @@ module.exports = function (db, baseDir, appDataPath) {
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
-  // ── 기본설정 현장 위치 저장 (즉시 저장) ──
+  // ?? 湲곕낯?ㅼ젙 ?꾩옣 ?꾩튂 ???(利됱떆 ??? ??
   router.post('/api/settings/site-location', (req, res) => {
     const { targetLat, targetLng } = req.body || {};
     const lat = Number(targetLat);
     const lng = Number(targetLng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return res.status(400).json({ success: false, message: '유효한 위도/경도 값이 필요합니다.' });
+      return res.status(400).json({ success: false, message: '?좏슚???꾨룄/寃쎈룄 媛믪씠 ?꾩슂?⑸땲??' });
     }
     try {
       db.prepare('UPDATE app_settings SET target_lat = ?, target_lng = ? WHERE id = 1').run(lat, lng);
@@ -226,11 +226,11 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 현장 목록 조회 ──
+  // ?? ?꾩옣 紐⑸줉 議고쉶 ??
   router.get('/api/settings/sites', async (req, res) => {
     try {
       if (!isSitesSheetsConfigured()) {
-        return res.status(400).json({ success: false, message: 'Google Sheets이 설정되지 않았습니다. (GOOGLE_MEMBERS_SHEET_ID)' });
+        return res.status(400).json({ success: false, message: 'Google Sheets???ㅼ젙?섏? ?딆븯?듬땲?? (GOOGLE_MEMBERS_SHEET_ID)' });
       }
       const sheetSites = await getSitesFromSheets();
       const sites = sheetSites
@@ -247,11 +247,11 @@ module.exports = function (db, baseDir, appDataPath) {
       const fallbackSite = sites.find((site) => String(site.id) === String(current?.site_id)) || sites[0] || null;
 
       if (fallbackSite && String(current?.site_id || '') !== String(fallbackSite.id)) {
-        const series = String(fallbackSite.series || '').trim() || '1계열';
+        const series = String(fallbackSite.series || '').trim() || '1怨꾩뿴';
         const prev = db.prepare('SELECT flow_option FROM app_settings WHERE id = 1').get();
         const prevOpt = prev?.flow_option != null ? String(prev.flow_option).trim() : '';
         let flowOption = prevOpt;
-        if (series === '2계열') {
+        if (series === '2怨꾩뿴') {
           if (!flowOption) flowOption = 'combined';
         } else {
           flowOption = 'single1';
@@ -276,24 +276,24 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 현장 추가/수정 ──
+  // ?? ?꾩옣 異붽?/?섏젙 ??
   router.post('/api/settings/sites', async (req, res) => {
     const { siteName, managerName, method, series, isActive, siteId } = req.body || {};
     if (!siteName) {
-      return res.status(400).json({ success: false, message: 'siteName이 필요합니다.' });
+      return res.status(400).json({ success: false, message: 'siteName???꾩슂?⑸땲??' });
     }
 
     try {
       const id = String(siteId || crypto.randomUUID());
       if (!isSitesSheetsConfigured()) {
-        return res.status(400).json({ success: false, message: 'Google Sheets이 설정되지 않았습니다. (GOOGLE_MEMBERS_SHEET_ID)' });
+        return res.status(400).json({ success: false, message: 'Google Sheets???ㅼ젙?섏? ?딆븯?듬땲?? (GOOGLE_MEMBERS_SHEET_ID)' });
       }
       const site = {
         id,
         site_name: String(siteName).trim(),
         manager_name: String(managerName || '').trim(),
         method: String(method || 'A2O').trim(),
-        series: String(series || '1계열').trim(),
+        series: String(series || '1怨꾩뿴').trim(),
         is_active: isActive === false ? 0 : 1
       };
       await upsertSiteToSheets(site);
@@ -304,21 +304,21 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 현장 삭제(비활성) ──
+  // ?? ?꾩옣 ??젣(鍮꾪솢?? ??
   router.delete('/api/settings/sites/:siteId', async (req, res) => {
     const siteId = String(req.params.siteId || '').trim();
     if (!siteId) {
-      return res.status(400).json({ success: false, message: 'siteId가 필요합니다.' });
+      return res.status(400).json({ success: false, message: 'siteId媛 ?꾩슂?⑸땲??' });
     }
 
     try {
       if (!isSitesSheetsConfigured()) {
-        return res.status(400).json({ success: false, message: 'Google Sheets이 설정되지 않았습니다. (GOOGLE_MEMBERS_SHEET_ID)' });
+        return res.status(400).json({ success: false, message: 'Google Sheets???ㅼ젙?섏? ?딆븯?듬땲?? (GOOGLE_MEMBERS_SHEET_ID)' });
       }
       const sheetSites = await getSitesFromSheets();
       const target = sheetSites.find((site) => String(site.id) === String(siteId) && site.is_active !== 0);
       if (!target) {
-        return res.status(404).json({ success: false, message: '대상 현장을 찾을 수 없습니다.' });
+        return res.status(404).json({ success: false, message: '????꾩옣??李얠쓣 ???놁뒿?덈떎.' });
       }
 
       await deleteSiteFromSheets(siteId);
@@ -349,7 +349,7 @@ module.exports = function (db, baseDir, appDataPath) {
             fallback?.site_name || '',
             fallback?.manager_name || '',
             fallback?.method || 'A2O',
-            fallback?.series || '1계열'
+            fallback?.series || '1怨꾩뿴'
           );
         }
       })();
@@ -360,17 +360,17 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 현재 로컬 현장 선택 ──
+  // ?? ?꾩옱 濡쒖뺄 ?꾩옣 ?좏깮 ??
   router.post('/api/settings/select-site', async (req, res) => {
     const { siteId } = req.body || {};
     if (!siteId) {
-      return res.status(400).json({ success: false, message: 'siteId가 필요합니다.' });
+      return res.status(400).json({ success: false, message: 'siteId媛 ?꾩슂?⑸땲??' });
     }
 
     try {
       let site = null;
       if (!isSitesSheetsConfigured()) {
-        return res.status(400).json({ success: false, message: 'Google Sheets이 설정되지 않았습니다. (GOOGLE_MEMBERS_SHEET_ID)' });
+        return res.status(400).json({ success: false, message: 'Google Sheets???ㅼ젙?섏? ?딆븯?듬땲?? (GOOGLE_MEMBERS_SHEET_ID)' });
       }
       if (isSitesSheetsConfigured()) {
         const sheetSites = await getSitesFromSheets();
@@ -387,14 +387,14 @@ module.exports = function (db, baseDir, appDataPath) {
       }
 
       if (!site) {
-        return res.status(404).json({ success: false, message: '대상 현장을 찾을 수 없습니다.' });
+        return res.status(404).json({ success: false, message: '????꾩옣??李얠쓣 ???놁뒿?덈떎.' });
       }
 
-      const series = String(site.series || '').trim() || '1계열';
+      const series = String(site.series || '').trim() || '1怨꾩뿴';
       const prev = db.prepare('SELECT flow_option FROM app_settings WHERE id = 1').get();
       const prevOpt = prev?.flow_option != null ? String(prev.flow_option).trim() : '';
       let flowOption = prevOpt;
-      if (series === '2계열') {
+      if (series === '2怨꾩뿴') {
         if (!flowOption) flowOption = 'combined';
       } else {
         flowOption = 'single1';
@@ -412,12 +412,12 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 현장/회원 동시 저장 (로컬 + BigQuery 준비) ──
+  // ?? ?꾩옣/?뚯썝 ?숈떆 ???(濡쒖뺄 + BigQuery 以鍮? ??
   router.post('/api/settings/bootstrap-site-member', async (req, res) => {
     const { site, member, link, syncToBigQuery } = req.body || {};
 
     if (!site?.siteName || !member?.name || !member?.password) {
-      return res.status(400).json({ success: false, message: '현장명, 회원명, 비밀번호는 필수입니다.' });
+      return res.status(400).json({ success: false, message: '?꾩옣紐? ?뚯썝紐? 鍮꾨?踰덊샇???꾩닔?낅땲??' });
     }
 
     try {
@@ -427,8 +427,8 @@ module.exports = function (db, baseDir, appDataPath) {
       const now = new Date().toISOString();
 
       db.transaction(() => {
-        const bootSeries = String(site.series || '1계열').trim() || '1계열';
-        const bootFlowOpt = bootSeries === '2계열' ? 'combined' : 'single1';
+        const bootSeries = String(site.series || '1怨꾩뿴').trim() || '1怨꾩뿴';
+        const bootFlowOpt = bootSeries === '2怨꾩뿴' ? 'combined' : 'single1';
         db.prepare(`
           UPDATE app_settings
           SET site_id = ?, site_name = ?, manager_name = ?, method = ?, series = ?, flow_option = ?
@@ -456,7 +456,7 @@ module.exports = function (db, baseDir, appDataPath) {
           String(site.siteName || '').trim(),
           String(site.managerName || '').trim(),
           String(site.method || 'A2O').trim(),
-          String(site.series || '1계열').trim()
+          String(site.series || '1怨꾩뿴').trim()
         );
 
         db.prepare(`
@@ -505,7 +505,7 @@ module.exports = function (db, baseDir, appDataPath) {
         }
       })();
 
-      let bigQuery = { success: false, message: '동기화 비활성화(ENABLE_SITE_MEMBER_BIGQUERY_SYNC != true)' };
+      let bigQuery = { success: false, message: '?숆린??鍮꾪솢?깊솕(ENABLE_SITE_MEMBER_BIGQUERY_SYNC != true)' };
       if (ENABLE_SITE_MEMBER_BIGQUERY_SYNC && syncToBigQuery === true) {
         await ensureSiteMemberTables();
         bigQuery = await upsertSiteMemberSnapshot({
@@ -514,7 +514,7 @@ module.exports = function (db, baseDir, appDataPath) {
             site_name: String(site.siteName || '').trim(),
             manager_name: String(site.managerName || '').trim(),
             method: String(site.method || 'A2O').trim(),
-            series: String(site.series || '1계열').trim(),
+            series: String(site.series || '1怨꾩뿴').trim(),
             is_active: 1,
             updated_at: now
           },
@@ -551,20 +551,20 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 유량 매핑 옵션 저장 ──
+  // ?? ?좊웾 留ㅽ븨 ?듭뀡 ?????
   router.post('/api/settings/save-flow-option', (req, res) => {
     const { flowOption } = req.body;
-    if (!flowOption) return res.status(400).json({ success: false, message: 'flowOption이 필요합니다.' });
+    if (!flowOption) return res.status(400).json({ success: false, message: 'flowOption???꾩슂?⑸땲??' });
     try {
       db.prepare('UPDATE app_settings SET flow_option = ? WHERE id = 1').run(flowOption);
-      res.json({ success: true, message: '유량 매핑 옵션이 저장되었습니다.' });
+      res.json({ success: true, message: '?좊웾 留ㅽ븨 ?듭뀡????λ릺?덉뒿?덈떎.' });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
   router.post('/api/settings/web-app-credentials', (req, res) => {
     const { serviceKey, serviceUrl, userId, password } = req.body || {};
     if (!serviceKey) {
-      return res.status(400).json({ success: false, message: 'serviceKey가 필요합니다.' });
+      return res.status(400).json({ success: false, message: 'serviceKey媛 ?꾩슂?⑸땲??' });
     }
 
     try {
@@ -574,7 +574,7 @@ module.exports = function (db, baseDir, appDataPath) {
 
       const result = db.prepare('UPDATE web_app_credentials SET service_url = ?, user_id = ?, password = ?, updated_at = CURRENT_TIMESTAMP WHERE service_key = ?').run(normalizedServiceUrl, userId || '', password || '', serviceKey);
       if (result.changes === 0) {
-        return res.status(404).json({ success: false, message: '대상 설정을 찾을 수 없습니다.' });
+        return res.status(404).json({ success: false, message: '????ㅼ젙??李얠쓣 ???놁뒿?덈떎.' });
       }
 
       if (serviceKey === 'water_analysis_app') {
@@ -582,7 +582,7 @@ module.exports = function (db, baseDir, appDataPath) {
       }
 
       const credential = db.prepare('SELECT service_key, service_name, service_url, user_id, password, updated_at FROM web_app_credentials WHERE service_key = ?').get(serviceKey);
-      res.json({ success: true, credential, message: '웹/앱 설정이 저장되었습니다.' });
+      res.json({ success: true, credential, message: '?????ㅼ젙????λ릺?덉뒿?덈떎.' });
     } catch (e) {
       res.status(500).json({ success: false, message: e.message });
     }
@@ -600,19 +600,19 @@ module.exports = function (db, baseDir, appDataPath) {
       `).run(photoRoot || defaultQntechPhotoRoot, serializedMappings);
 
       const settings = db.prepare('SELECT qntech_photo_root, qntech_sample_mappings FROM app_settings WHERE id = 1').get();
-      res.json({ success: true, settings, message: 'QnTECH 불러오기 설정이 저장되었습니다.' });
+      res.json({ success: true, settings, message: 'QnTECH 遺덈윭?ㅺ린 ?ㅼ젙????λ릺?덉뒿?덈떎.' });
     } catch (e) {
       res.status(500).json({ success: false, message: e.message });
     }
   });
 
-  // ── 설정 항목 즉시 추가 ──
+  // ?? ?ㅼ젙 ??ぉ 利됱떆 異붽? ??
   router.post('/api/settings/add-item', (req, res) => {
     const { category, name } = req.body;
-    if (!category || !name) return res.status(400).json({ success: false, message: 'category와 name이 필요합니다.' });
+    if (!category || !name) return res.status(400).json({ success: false, message: 'category? name???꾩슂?⑸땲??' });
     try {
       const existing = db.prepare('SELECT id FROM config_items WHERE category = ? AND item_name = ?').get(category, name);
-      if (existing) return res.status(409).json({ success: false, message: '이미 존재하는 항목입니다.' });
+      if (existing) return res.status(409).json({ success: false, message: '?대? 議댁옱?섎뒗 ??ぉ?낅땲??' });
       const maxOrder = db.prepare('SELECT MAX(display_order) as mx FROM config_items WHERE category = ?').get(category);
       const order = (maxOrder?.mx ?? -1) + 1;
       db.prepare('INSERT INTO config_items (category, item_name, is_active, display_order) VALUES (?, ?, 1, ?)').run(category, name, order);
@@ -621,17 +621,17 @@ module.exports = function (db, baseDir, appDataPath) {
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
-  // ── 설정 항목 활성/비활성 토글 ──
+  // ?? ?ㅼ젙 ??ぉ ?쒖꽦/鍮꾪솢???좉? ??
   router.post('/api/settings/toggle-item', (req, res) => {
     const { category, name, isActive } = req.body;
-    if (!category || !name) return res.status(400).json({ success: false, message: 'category와 name이 필요합니다.' });
+    if (!category || !name) return res.status(400).json({ success: false, message: 'category? name???꾩슂?⑸땲??' });
     try {
       db.prepare('UPDATE config_items SET is_active = ? WHERE category = ? AND item_name = ?').run(isActive ? 1 : 0, category, name);
       res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
-  // ── 엑셀 상태 (DB에 데이터 있는지 즉시 확인) ──
+  // ?? ?묒? ?곹깭 (DB???곗씠???덈뒗吏 利됱떆 ?뺤씤) ??
   router.get('/api/settings/excel-status', (req, res) => {
     try {
       const settings = db.prepare('SELECT excel_template_path FROM app_settings WHERE id = 1').get();
@@ -652,32 +652,32 @@ module.exports = function (db, baseDir, appDataPath) {
     } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
   });
 
-  // ── 엑셀 행 프리뷰 (DB에서 즉시 조회) ──
+  // ?? ?묒? ???꾨━酉?(DB?먯꽌 利됱떆 議고쉶) ??
   router.post('/api/settings/excel-preview', (req, res) => {
     const { sheet, row } = req.body;
     try {
-      if (!hasStoredData(db)) return res.json({ success: false, message: '엑셀 데이터가 아직 저장되지 않았습니다.' });
+      if (!hasStoredData(db)) return res.json({ success: false, message: '?묒? ?곗씠?곌? ?꾩쭅 ??λ릺吏 ?딆븯?듬땲??' });
       const data = getStoredRow(db, sheet, row);
       res.json({ success: true, data });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
-  // ── 임포트 진행 상황 ──
+  // ?? ?꾪룷??吏꾪뻾 ?곹솴 ??
   router.get('/api/settings/import-progress', (req, res) => { res.json(importProgress); });
 
-  // ── 유량 매핑 저장 + DB에서 임포트 ──
+  // ?? ?좊웾 留ㅽ븨 ???+ DB?먯꽌 ?꾪룷????
   router.post('/api/settings/save-flow-mapping', (req, res) => {
     const { config, mapping } = req.body;
     const { sheet, startRow, endRow, dateCol } = config;
     importProgress = { current: 0, total: endRow - startRow + 1, status: 'processing', result: null };
     try {
-      if (!hasStoredData(db)) throw new Error('엑셀 데이터가 아직 저장되지 않았습니다. 먼저 파일을 업로드하세요.');
+      if (!hasStoredData(db)) throw new Error('?묒? ?곗씠?곌? ?꾩쭅 ??λ릺吏 ?딆븯?듬땲?? 癒쇱? ?뚯씪???낅줈?쒗븯?몄슂.');
 
       console.log('[FlowMapping] Received mapping:', JSON.stringify(mapping, null, 2));
 
       db.prepare('UPDATE app_settings SET flow_sheet = ?, flow_start_row = ?, flow_end_row = ?, flow_date_col = ? WHERE id = 1').run(sheet, startRow, endRow, dateCol);
 
-      // config_items에 _raw/_flow 접미사가 있는 매핑만 저장 (기본 항목 키는 별도 관리되므로 제외)
+      // config_items??_raw/_flow ?묐??ш? ?덈뒗 留ㅽ븨留????(湲곕낯 ??ぉ ?ㅻ뒗 蹂꾨룄 愿由щ릺誘濡??쒖쇅)
       const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('flow', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
       Object.entries(mapping).forEach(([name, col]) => {
         if (name.endsWith('_raw') || name.endsWith('_flow')) {
@@ -686,7 +686,7 @@ module.exports = function (db, baseDir, appDataPath) {
         }
       });
 
-      // 기존 flow_readings 전체 삭제 후 재임포트
+      // 湲곗〈 flow_readings ?꾩껜 ??젣 ???ъ엫?ы듃
       db.prepare('DELETE FROM flow_readings').run();
       console.log('[FlowMapping] Cleared all flow_readings for clean re-import');
 
@@ -706,10 +706,10 @@ module.exports = function (db, baseDir, appDataPath) {
       `);
       const importedData = [];
 
-      // mapping에서 _raw/_flow 키만 파싱하여 유량계별 컬럼 매핑 구성
+      // mapping?먯꽌 _raw/_flow ?ㅻ쭔 ?뚯떛?섏뿬 ?좊웾怨꾨퀎 而щ읆 留ㅽ븨 援ъ꽦
       const flows = {};
       Object.keys(mapping).forEach(key => {
-        if (!key.endsWith('_raw') && !key.endsWith('_flow')) return; // 기본 항목 키 무시
+        if (!key.endsWith('_raw') && !key.endsWith('_flow')) return; // 湲곕낯 ??ぉ ??臾댁떆
         const lastUnderscore = key.lastIndexOf('_');
         const name = key.substring(0, lastUnderscore);
         const field = key.substring(lastUnderscore + 1); // 'raw' or 'flow'
@@ -719,7 +719,7 @@ module.exports = function (db, baseDir, appDataPath) {
 
       console.log('[FlowMapping] Parsed flow types:', JSON.stringify(flows, null, 2));
 
-      let debugRow = startRow; // 첫 행 디버그 출력용
+      let debugRow = startRow; // 泥????붾쾭洹?異쒕젰??
       db.transaction(() => {
         for (let r = startRow; r <= endRow; r++) {
           const dateStr = getCellValue(db, sheet, r, dateCol);
@@ -735,7 +735,7 @@ module.exports = function (db, baseDir, appDataPath) {
             const calcFlow = isNaN(rawF) ? null : Math.round(rawF * 10) / 10;
 
             if (r === debugRow) {
-              console.log(`[FlowMapping] Row ${r} (${formatted}): ${itemName} => raw col=${cols.raw}(${rawCellVal}→${rawValue}), flow col=${cols.flow}(${flowCellVal}→${calcFlow})`);
+              console.log(`[FlowMapping] Row ${r} (${formatted}): ${itemName} => raw col=${cols.raw}(${rawCellVal}??{rawValue}), flow col=${cols.flow}(${flowCellVal}??{calcFlow})`);
             }
 
             if (rawValue !== null || calcFlow !== null) {
@@ -751,8 +751,8 @@ module.exports = function (db, baseDir, appDataPath) {
                 metadata.lastModified,
                 metadata.isSynced
               );
-              if (rawValue !== null) rowResults[`${itemName}_적산`] = rawValue;
-              if (calcFlow !== null) rowResults[`${itemName}_누계`] = calcFlow;
+              if (rawValue !== null) rowResults[`${itemName}_?곸궛`] = rawValue;
+              if (calcFlow !== null) rowResults[`${itemName}_?꾧퀎`] = calcFlow;
             }
           });
           if (Object.keys(rowResults).length > 1) importedData.push(rowResults);
@@ -763,7 +763,7 @@ module.exports = function (db, baseDir, appDataPath) {
       importProgress.status = 'completed';
       importProgress.result = importedData;
       console.log(`[FlowMapping] Import completed: ${importedData.length} rows`);
-      res.json({ success: true, message: '유량 데이터 임포트 완료', count: importedData.length });
+      res.json({ success: true, message: '?좊웾 ?곗씠???꾪룷???꾨즺', count: importedData.length });
     } catch (e) {
       console.error('Flow mapping error:', e);
       importProgress.status = 'error';
@@ -772,21 +772,21 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 키트 매핑 저장 + DB에서 임포트 ──
-  // mapping 키 형식: "키트명_purchase", "키트명_usage", "키트명_inventory"
+  // ?? ?ㅽ듃 留ㅽ븨 ???+ DB?먯꽌 ?꾪룷????
+  // mapping ???뺤떇: "?ㅽ듃紐?purchase", "?ㅽ듃紐?usage", "?ㅽ듃紐?inventory"
   router.post('/api/settings/save-kit-mapping', (req, res) => {
     const { config, mapping } = req.body;
     const { sheet, startRow, endRow, dateCol } = config;
     importProgress = { current: 0, total: endRow - startRow + 1, status: 'processing', result: null };
     try {
-      if (!hasStoredData(db)) throw new Error('엑셀 데이터가 아직 저장되지 않았습니다. 먼저 파일을 업로드하세요.');
+      if (!hasStoredData(db)) throw new Error('?묒? ?곗씠?곌? ?꾩쭅 ??λ릺吏 ?딆븯?듬땲?? 癒쇱? ?뚯씪???낅줈?쒗븯?몄슂.');
 
       db.prepare('UPDATE app_settings SET kit_sheet = ?, kit_start_row = ?, kit_end_row = ?, kit_date_col = ? WHERE id = 1').run(sheet, startRow, endRow, dateCol);
 
       const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('kit', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
       Object.entries(mapping).forEach(([key, col]) => upsertStmt.run(key, col));
 
-      // 키트명별 purchase/usage/inventory 열 그룹화
+      // ?ㅽ듃紐낅퀎 purchase/usage/inventory ??洹몃９??
       const kits = {};
       Object.keys(mapping).forEach(key => {
         const lastUnderscore = key.lastIndexOf('_');
@@ -841,9 +841,9 @@ module.exports = function (db, baseDir, appDataPath) {
                 metadata.lastModified,
                 metadata.isSynced
               );
-              rowResults[`${kitName}_구매`] = purchase;
-              rowResults[`${kitName}_사용`] = usage;
-              rowResults[`${kitName}_재고`] = inventory;
+              rowResults[`${kitName}_援щℓ`] = purchase;
+              rowResults[`${kitName}_?ъ슜`] = usage;
+              rowResults[`${kitName}_?ш퀬`] = inventory;
             }
           });
           importedData.push(rowResults);
@@ -853,7 +853,7 @@ module.exports = function (db, baseDir, appDataPath) {
 
       importProgress.status = 'completed';
       importProgress.result = importedData;
-      res.json({ success: true, message: '키트 데이터 임포트 완료', count: importedData.length });
+      res.json({ success: true, message: '?ㅽ듃 ?곗씠???꾪룷???꾨즺', count: importedData.length });
     } catch (e) {
       console.error('Kit mapping error:', e);
       importProgress.status = 'error';
@@ -862,14 +862,14 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 약품 매핑 저장 + DB에서 임포트 ──
-  // mapping 키 형식: "약품명_purchase", "약품명_usage", "약품명_inventory"
+  // ?? ?쏀뭹 留ㅽ븨 ???+ DB?먯꽌 ?꾪룷????
+  // mapping ???뺤떇: "?쏀뭹紐?purchase", "?쏀뭹紐?usage", "?쏀뭹紐?inventory"
   router.post('/api/settings/save-medicine-mapping', (req, res) => {
     const { config, mapping } = req.body;
     const { sheet, startRow, endRow, dateCol } = config;
     importProgress = { current: 0, total: endRow - startRow + 1, status: 'processing', result: null };
     try {
-      if (!hasStoredData(db)) throw new Error('엑셀 데이터가 아직 저장되지 않았습니다. 먼저 파일을 업로드하세요.');
+      if (!hasStoredData(db)) throw new Error('?묒? ?곗씠?곌? ?꾩쭅 ??λ릺吏 ?딆븯?듬땲?? 癒쇱? ?뚯씪???낅줈?쒗븯?몄슂.');
 
       db.prepare('UPDATE app_settings SET med_sheet = ?, med_start_row = ?, med_end_row = ?, med_date_col = ? WHERE id = 1').run(sheet, startRow, endRow, dateCol);
       const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('medicine', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
@@ -929,9 +929,9 @@ module.exports = function (db, baseDir, appDataPath) {
                 metadata.lastModified,
                 metadata.isSynced
               );
-              rowResults[`${medName}_구매`] = purchase;
-              rowResults[`${medName}_사용`] = usage;
-              rowResults[`${medName}_재고`] = inventory;
+              rowResults[`${medName}_援щℓ`] = purchase;
+              rowResults[`${medName}_?ъ슜`] = usage;
+              rowResults[`${medName}_?ш퀬`] = inventory;
             }
           });
           importedData.push(rowResults);
@@ -941,7 +941,7 @@ module.exports = function (db, baseDir, appDataPath) {
 
       importProgress.status = 'completed';
       importProgress.result = importedData;
-      res.json({ success: true, message: '약품 데이터 임포트 완료', count: importedData.length });
+      res.json({ success: true, message: '?쏀뭹 ?곗씠???꾪룷???꾨즺', count: importedData.length });
     } catch (e) {
       console.error('Medicine mapping error:', e);
       importProgress.status = 'error';
@@ -950,17 +950,17 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 수질 매핑 저장 + DB에서 임포트 ──
+  // ?? ?섏쭏 留ㅽ븨 ???+ DB?먯꽌 ?꾪룷????
   router.post('/api/settings/save-water-mapping', (req, res) => {
     const { config, mapping } = req.body;
     const { sheet, startRow, endRow, dateCol } = config;
     importProgress = { current: 0, total: endRow - startRow + 1, status: 'processing', result: null };
     try {
-      if (!hasStoredData(db)) throw new Error('엑셀 데이터가 아직 저장되지 않았습니다. 먼저 파일을 업로드하세요.');
+      if (!hasStoredData(db)) throw new Error('?묒? ?곗씠?곌? ?꾩쭅 ??λ릺吏 ?딆븯?듬땲?? 癒쇱? ?뚯씪???낅줈?쒗븯?몄슂.');
 
       db.prepare('UPDATE app_settings SET water_sheet = ?, water_start_row = ?, water_end_row = ?, water_date_col = ? WHERE id = 1').run(sheet, startRow, endRow, dateCol);
 
-      // 매핑 정보는 'water_mapping' 카테고리에 저장하여 기본 항목('water')과 분리
+      // 留ㅽ븨 ?뺣낫??'water_mapping' 移댄뀒怨좊━????ν븯??湲곕낯 ??ぉ('water')怨?遺꾨━
       const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('water_mapping', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
       Object.entries(mapping).forEach(([key, col]) => {
         if (key !== 'date') {
@@ -968,10 +968,10 @@ module.exports = function (db, baseDir, appDataPath) {
         }
       });
 
-      // mapping: { "암모니아성질소_유량조정조": "C", ... }
-      const baseParams = { '암모니아성질소': 'nh3_n', '질산성질소': 'no3_n', '인산염인': 'po4_p', '알칼리도': 'alkalinity' };
+      // mapping: { "?붾え?덉븘?깆쭏???좊웾議곗젙議?: "C", ... }
+      const baseParams = { '?붾え?덉븘?깆쭏??: 'nh3_n', '吏덉궛?깆쭏??: 'no3_n', '?몄궛?쇱씤': 'po4_p', '?뚯뭡由щ룄': 'alkalinity' };
 
-      // 그룹화 기준: location name
+      // 洹몃９??湲곗?: location name
       const locations = {};
       Object.entries(mapping).forEach(([key, col]) => {
         if (key === 'date') return;
@@ -1011,7 +1011,7 @@ module.exports = function (db, baseDir, appDataPath) {
 
       db.transaction(() => {
         const metadata = getCurrentRecordMetadata(db, config || {});
-        // TODO(site-id): 다중현장 전환 시 date + site_id 범위로 정리하도록 변경
+        // TODO(site-id): ?ㅼ쨷?꾩옣 ?꾪솚 ??date + site_id 踰붿쐞濡??뺣━?섎룄濡?蹂寃?
         const deleteImportedByDate = db.prepare("DELETE FROM water_quality WHERE date = ? AND (source_type = 'excel' OR measurement_group = '')");
         const cleanedDates = new Set();
         const dateOrderCounter = new Map();
@@ -1032,7 +1032,7 @@ module.exports = function (db, baseDir, appDataPath) {
 
           const rowResults = { date: formatted, measurement_group: measurementGroup };
 
-          // Default location if no locations are mapped (fallback to '기본')
+          // Default location if no locations are mapped (fallback to '湲곕낯')
           if (Object.keys(locations).length === 0) {
             insertWater.run(
               formatted,
@@ -1040,7 +1040,7 @@ module.exports = function (db, baseDir, appDataPath) {
               nextOrder,
               'excel',
               sheet,
-              '기본',
+              '湲곕낯',
               null,
               null,
               null,
@@ -1056,7 +1056,7 @@ module.exports = function (db, baseDir, appDataPath) {
               metadata.lastModified,
               metadata.isSynced
             );
-            importedData.push({ date: formatted, measurement_group: measurementGroup, location: '기본' });
+            importedData.push({ date: formatted, measurement_group: measurementGroup, location: '湲곕낯' });
           } else {
             Object.entries(locations).forEach(([locName, cols]) => {
               const vals = { nh3_n: null, no3_n: null, po4_p: null, alkalinity: null };
@@ -1068,7 +1068,7 @@ module.exports = function (db, baseDir, appDataPath) {
                 }
               });
 
-              // tn, tp, cod, ss는 키트 분석 항목이 아니므로 null로 저장
+              // tn, tp, cod, ss???ㅽ듃 遺꾩꽍 ??ぉ???꾨땲誘濡?null濡????
               insertWater.run(
                 formatted,
                 measurementGroup,
@@ -1102,7 +1102,7 @@ module.exports = function (db, baseDir, appDataPath) {
 
       importProgress.status = 'completed';
       importProgress.result = importedData;
-      res.json({ success: true, message: '수질 데이터 임포트 완료', count: importedData.length });
+      res.json({ success: true, message: '?섏쭏 ?곗씠???꾪룷???꾨즺', count: importedData.length });
     } catch (e) {
       console.error('Water mapping error:', e);
       importProgress.status = 'error';
@@ -1111,7 +1111,7 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 파일 업로드 (엑셀 원본 → 즉시 파싱 → DB 저장) ──
+  // ?? ?뚯씪 ?낅줈??(?묒? ?먮낯 ??利됱떆 ?뚯떛 ??DB ??? ??
   router.post('/api/settings/upload', reportUpload.fields([
     { name: 'excel_original', maxCount: 1 },
     { name: 'report_templates' }
@@ -1151,8 +1151,8 @@ module.exports = function (db, baseDir, appDataPath) {
         return res.status(400).json({
           success: false,
           code: 'INVALID_REPORT_TEMPLATE_NAME',
-          message: '이 파일은 양식으로 저장할 수 없습니다.',
-          userMessage: `이 파일은 양식으로 저장할 수 없습니다.\n허용된 양식 이름: ${ALLOWED_REPORT_TEMPLATE_NAMES.join(', ')}`,
+          message: '???뚯씪? ?묒떇?쇰줈 ??ν븷 ???놁뒿?덈떎.',
+          userMessage: `???뚯씪? ?묒떇?쇰줈 ??ν븷 ???놁뒿?덈떎.\n?덉슜???묒떇 ?대쫫: ${ALLOWED_REPORT_TEMPLATE_NAMES.join(', ')}`,
           invalidFiles: invalidTemplateFiles,
         });
       }
@@ -1161,8 +1161,8 @@ module.exports = function (db, baseDir, appDataPath) {
         const uploadedName = String(templateFile.filename || '').normalize('NFC');
         const uploadedIdentity = path.parse(uploadedName).name.normalize('NFC').trim().toLowerCase();
 
-        // 현재 디렉토리의 모든 파일을 확인하여, 식별자가 같은 모든 파일을 삭제한다.
-        // (Multer가 방금 저장한 파일은 제외하고, 나머지는 확장자와 상관없이 삭제)
+        // ?꾩옱 ?붾젆?좊━??紐⑤뱺 ?뚯씪???뺤씤?섏뿬, ?앸퀎?먭? 媛숈? 紐⑤뱺 ?뚯씪????젣?쒕떎.
+        // (Multer媛 諛⑷툑 ??ν븳 ?뚯씪? ?쒖쇅?섍퀬, ?섎㉧吏???뺤옣?먯? ?곴??놁씠 ??젣)
         const currentFiles = fs.readdirSync(reportsDir, { withFileTypes: true })
           .filter((entry) => entry.isFile())
           .map((entry) => entry.name);
@@ -1191,14 +1191,14 @@ module.exports = function (db, baseDir, appDataPath) {
 
       result.reportTemplates = listReportTemplates(baseDir, appDataPath);
 
-      res.json({ success: true, message: '파일 업로드 및 데이터 저장 완료', ...result });
+      res.json({ success: true, message: '?뚯씪 ?낅줈??諛??곗씠??????꾨즺', ...result });
     } catch (err) {
       console.error('Upload error:', err);
       res.status(500).json({ success: false, message: err.message });
     }
   });
 
-  // ── 약품 기본 입고량 조회 ──
+  // ?? ?쏀뭹 湲곕낯 ?낃퀬??議고쉶 ??
   router.get('/api/settings/medicine-defaults', (req, res) => {
     try {
       const items = db.prepare(
@@ -1210,11 +1210,11 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 약품 기본 입고량 저장 ──
+  // ?? ?쏀뭹 湲곕낯 ?낃퀬???????
   router.post('/api/settings/medicine-defaults', (req, res) => {
     const { items } = req.body;
     if (!Array.isArray(items)) {
-      return res.status(400).json({ success: false, message: 'items 배열이 필요합니다.' });
+      return res.status(400).json({ success: false, message: 'items 諛곗뿴???꾩슂?⑸땲??' });
     }
     try {
       const stmt = db.prepare(
@@ -1237,7 +1237,7 @@ module.exports = function (db, baseDir, appDataPath) {
         return res.json({
           success: false,
           message:
-            'DB의 약품 항목과 이름이 하나도 맞지 않아 저장되지 않았습니다. 설정 > 약품 탭에서 약품 목록을 먼저 적용 저장한 뒤, 기본 입고량을 다시 저장해 주세요.',
+            'DB???쏀뭹 ??ぉ怨??대쫫???섎굹??留욎? ?딆븘 ??λ릺吏 ?딆븯?듬땲?? ?ㅼ젙 > ?쏀뭹 ??뿉???쏀뭹 紐⑸줉??癒쇱? ?곸슜 ??ν븳 ?? 湲곕낯 ?낃퀬?됱쓣 ?ㅼ떆 ??ν빐 二쇱꽭??',
           updatedCount: 0,
         });
       }
@@ -1248,7 +1248,7 @@ module.exports = function (db, baseDir, appDataPath) {
         updatedCount: totalChanges,
         ...(skipped > 0
           ? {
-              warning: `${skipped}개 항목은 config_items 약품명과 일치하지 않아 반영되지 않았습니다.`,
+              warning: `${skipped}媛???ぉ? config_items ?쏀뭹紐낃낵 ?쇱튂?섏? ?딆븘 諛섏쁺?섏? ?딆븯?듬땲??`,
             }
           : {}),
       });
@@ -1257,10 +1257,10 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 키트 기본 입고량 조회 ──
+  // ?? ?ㅽ듃 湲곕낯 ?낃퀬??議고쉶 ??
   router.get('/api/settings/kit-defaults', (req, res) => {
     try {
-      const BASE_KITS = ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '인산염인(PO4-P)', '알칼리도(ALK)'];
+      const BASE_KITS = ['?붾え?덉븘?깆쭏??NH3-N)', '吏덉궛?깆쭏??NO3-N)', '?몄궛?쇱씤(PO4-P)', '?뚯뭡由щ룄(ALK)'];
       const rows = db.prepare(
         "SELECT item_name, COALESCE(default_amount, 0) AS default_amount FROM config_items WHERE category = 'kit'"
       ).all();
@@ -1272,11 +1272,11 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 키트 기본 입고량 저장 ──
+  // ?? ?ㅽ듃 湲곕낯 ?낃퀬???????
   router.post('/api/settings/kit-defaults', (req, res) => {
     const { items } = req.body;
     if (!Array.isArray(items)) {
-      return res.status(400).json({ success: false, message: 'items 배열이 필요합니다.' });
+      return res.status(400).json({ success: false, message: 'items 諛곗뿴???꾩슂?⑸땲??' });
     }
     try {
       const stmt = db.prepare(
@@ -1299,7 +1299,7 @@ module.exports = function (db, baseDir, appDataPath) {
         return res.json({
           success: false,
           message:
-            'DB의 키트 항목과 이름이 하나도 맞지 않아 저장되지 않았습니다. 설정 > 키트 탭에서 키트 목록을 먼저 적용 저장한 뒤 다시 시도해 주세요.',
+            'DB???ㅽ듃 ??ぉ怨??대쫫???섎굹??留욎? ?딆븘 ??λ릺吏 ?딆븯?듬땲?? ?ㅼ젙 > ?ㅽ듃 ??뿉???ㅽ듃 紐⑸줉??癒쇱? ?곸슜 ??ν븳 ???ㅼ떆 ?쒕룄??二쇱꽭??',
           updatedCount: 0,
         });
       }
@@ -1310,7 +1310,7 @@ module.exports = function (db, baseDir, appDataPath) {
         updatedCount: totalChanges,
         ...(skipped > 0
           ? {
-              warning: `${skipped}개 항목은 config_items 키트명과 일치하지 않아 반영되지 않았습니다.`,
+              warning: `${skipped}媛???ぉ? config_items ?ㅽ듃紐낃낵 ?쇱튂?섏? ?딆븘 諛섏쁺?섏? ?딆븯?듬땲??`,
             }
           : {}),
       });
@@ -1319,7 +1319,7 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 슬러지 반출관리대장 기본설정 조회/저장 ──
+  // ?? 슬러지 諛섏텧愿由щ???湲곕낯?ㅼ젙 議고쉶/?????
   router.get('/api/settings/sludge-export-settings', (req, res) => {
     try {
       const row = db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
@@ -1348,18 +1348,18 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  // ── 초기 동기화: 로컬 DB의 모든 회원/현장 → Google Sheets ──
+  // ?? 珥덇린 ?숆린?? 濡쒖뺄 DB??紐⑤뱺 ?뚯썝/?꾩옣 ??Google Sheets ??
   router.post('/api/settings/sync-initial-to-sheets', async (req, res) => {
     try {
       if (!ENABLE_INITIAL_SYNC_TO_SHEETS) {
         return res.status(403).json({
           success: false,
-          message: '초기 동기화 기능이 비활성화되어 있습니다. (ENABLE_INITIAL_SYNC_TO_SHEETS != true)'
+          message: '珥덇린 ?숆린??湲곕뒫??鍮꾪솢?깊솕?섏뼱 ?덉뒿?덈떎. (ENABLE_INITIAL_SYNC_TO_SHEETS != true)'
         });
       }
 
       if (!isMembersSheetsConfigured()) {
-        return res.status(400).json({ success: false, message: 'Google Sheets이 설정되지 않았습니다. (GOOGLE_MEMBERS_SHEET_ID)' });
+        return res.status(400).json({ success: false, message: 'Google Sheets???ㅼ젙?섏? ?딆븯?듬땲?? (GOOGLE_MEMBERS_SHEET_ID)' });
       }
 
       const members = db.prepare('SELECT * FROM members').all();
@@ -1369,7 +1369,7 @@ module.exports = function (db, baseDir, appDataPath) {
       let siteCount = 0;
       const errors = [];
 
-      // 회원 동기화
+      // ?뚯썝 ?숆린??
       for (const member of members) {
         try {
           await upsertMemberToSheets({
@@ -1386,11 +1386,11 @@ module.exports = function (db, baseDir, appDataPath) {
           });
           memberCount++;
         } catch (err) {
-          errors.push(`회원 동기화 실패 (${member.name}): ${err.message}`);
+          errors.push(`?뚯썝 ?숆린???ㅽ뙣 (${member.name}): ${err.message}`);
         }
       }
 
-      // 현장 동기화
+      // ?꾩옣 ?숆린??
       for (const site of sites) {
         try {
           await upsertSiteToSheets({
@@ -1403,13 +1403,13 @@ module.exports = function (db, baseDir, appDataPath) {
           });
           siteCount++;
         } catch (err) {
-          errors.push(`현장 동기화 실패 (${site.site_name}): ${err.message}`);
+          errors.push(`?꾩옣 ?숆린???ㅽ뙣 (${site.site_name}): ${err.message}`);
         }
       }
 
       res.json({
         success: errors.length === 0,
-        message: errors.length === 0 ? '초기 동기화 완료' : '초기 동기화 일부 실패',
+        message: errors.length === 0 ? '珥덇린 ?숆린???꾨즺' : '珥덇린 ?숆린???쇰? ?ㅽ뙣',
         memberCount,
         siteCount,
         totalCount: memberCount + siteCount,

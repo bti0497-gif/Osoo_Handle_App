@@ -1,4 +1,4 @@
-const { execFile } = require('child_process');
+﻿const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -18,7 +18,7 @@ function toPowerShellLiteral(value) {
 }
 
 /**
- * PowerShell CLIXML 에러 출력을 사람이 읽을 수 있는 텍스트로 정제합니다.
+ * PowerShell CLIXML ?먮윭 異쒕젰???щ엺???쎌쓣 ???덈뒗 ?띿뒪?몃줈 ?뺤젣?⑸땲??
  */
 function parsePowerShellError(raw) {
   if (!raw) return '';
@@ -38,11 +38,11 @@ function parsePowerShellError(raw) {
 }
 
 /**
- * HWPX 템플릿을 한글 COM으로 열어서 북마크에 텍스트/이미지를 삽입한 뒤 PDF로 저장합니다.
+ * HWPX ?쒗뵆由우쓣 ?쒓? COM?쇰줈 ?댁뼱??遺곷쭏?ъ뿉 ?띿뒪???대?吏瑜??쎌엯????PDF濡???ν빀?덈떎.
  *
- * 주의:
- * - 실행 PC에 한글이 설치되어 있어야 합니다.
- * - 보안/정책에 따라 COM 자동화가 차단될 수 있습니다.
+ * 二쇱쓽:
+ * - ?ㅽ뻾 PC???쒓????ㅼ튂?섏뼱 ?덉뼱???⑸땲??
+ * - 蹂댁븞/?뺤콉???곕씪 COM ?먮룞?붽? 李⑤떒?????덉뒿?덈떎.
  */
 function renderHwpxToPdf({ templatePath, outputPath, bindings = {}, imageBindings = {} }) {
   const sourceAbsolutePath = path.resolve(templatePath);
@@ -64,13 +64,13 @@ function renderHwpxToPdf({ templatePath, outputPath, bindings = {}, imageBinding
     "$images = ConvertFrom-Json $imagesJson",
     "$hwp = $null",
     "try {",
-    // 한글 자동화 객체 생성 (배포 환경에 따라 ProgID가 다를 수 있음)
+    // ?쒓? ?먮룞??媛앹껜 ?앹꽦 (諛고룷 ?섍꼍???곕씪 ProgID媛 ?ㅻ? ???덉쓬)
     "  $hwp = New-Object -ComObject HWPFrame.HwpObject",
     "  try { $hwp.RegisterModule('FilePathCheckDLL', 'FilePathChecker') | Out-Null } catch {}",
     "  $hwp.SetMessageBoxMode(65535)",
     "  $openResult = $hwp.Open($templatePath, 'HWPX', 0)",
-    "  if (-not $openResult) { throw \"HWPX 파일을 열 수 없습니다: $templatePath\" }",
-    // 텍스트 바인딩
+    "  if (-not $openResult) { throw \"HWPX ?뚯씪???????놁뒿?덈떎: $templatePath\" }",
+    // ?띿뒪??諛붿씤??
     "  foreach ($prop in $bindings.PSObject.Properties) {",
     "    $name = [string]$prop.Name",
     "    $value = [string]$prop.Value",
@@ -79,7 +79,7 @@ function renderHwpxToPdf({ templatePath, outputPath, bindings = {}, imageBinding
     "      $hwp.InsertText($value)",
     "    }",
     "  }",
-    // 이미지 바인딩: 북마크 위치로 이동 후 InsertPicture
+    // ?대?吏 諛붿씤?? 遺곷쭏???꾩튂濡??대룞 ??InsertPicture
     "  foreach ($prop in $images.PSObject.Properties) {",
     "    $name = [string]$prop.Name",
     "    $imgPath = [string]$prop.Value",
@@ -91,7 +91,7 @@ function renderHwpxToPdf({ templatePath, outputPath, bindings = {}, imageBinding
     "      $hwp.InsertPicture($imgPath)",
     "    }",
     "  }",
-    // PDF 저장 (버전에 따라 액션명이 다를 수 있어, 실패 시 에러 메시지로 확인 필요)
+    // PDF ???(踰꾩쟾???곕씪 ?≪뀡紐낆씠 ?ㅻ? ???덉뼱, ?ㅽ뙣 ???먮윭 硫붿떆吏濡??뺤씤 ?꾩슂)
     "  $hwp.SaveAs($outputPath, 'PDF')",
     "} finally {",
     "  if ($hwp -ne $null) {",
@@ -117,7 +117,7 @@ function renderHwpxToPdf({ templatePath, outputPath, bindings = {}, imageBinding
         }
 
         if (!fs.existsSync(outputAbsolutePath)) {
-          reject(new Error('HWPX PDF 변환이 완료되지 않았습니다.'));
+          reject(new Error('HWPX PDF 蹂?섏씠 ?꾨즺?섏? ?딆븯?듬땲??'));
           return;
         }
 
@@ -128,10 +128,10 @@ function renderHwpxToPdf({ templatePath, outputPath, bindings = {}, imageBinding
 }
 
 /**
- * HWPX 템플릿의 {{키}} 플레이스홀더를 AllReplace 방식으로 치환한 뒤 PDF로 저장합니다.
- * @param {string} templatePath - 원본 HWPX 파일 경로
- * @param {string} outputPath - 결과 PDF 파일 경로
- * @param {Object} bindings - { '{{키}}': '값', ... } 형태의 치환 맵
+ * HWPX ?쒗뵆由우쓽 {{??} ?뚮젅?댁뒪??붾? AllReplace 諛⑹떇?쇰줈 移섑솚????PDF濡???ν빀?덈떎.
+ * @param {string} templatePath - ?먮낯 HWPX ?뚯씪 寃쎈줈
+ * @param {string} outputPath - 寃곌낵 PDF ?뚯씪 寃쎈줈
+ * @param {Object} bindings - { '{{??}': '媛?, ... } ?뺥깭??移섑솚 留?
  */
 function renderHwpxToPdfWithPlaceholders({ templatePath, outputPath, bindings = {} }) {
   const sourceAbsolutePath = path.resolve(templatePath);
@@ -154,7 +154,7 @@ function renderHwpxToPdfWithPlaceholders({ templatePath, outputPath, bindings = 
     "  try { $hwp.RegisterModule('FilePathCheckDLL', 'FilePathChecker') | Out-Null } catch {}",
     "  $hwp.SetMessageBoxMode(65535)",
     "  $openResult = $hwp.Open($templatePath, 'HWPX', 0)",
-    "  if (-not $openResult) { throw \"HWPX 파일을 열 수 없습니다: $templatePath\" }",
+    "  if (-not $openResult) { throw \"HWPX ?뚯씪???????놁뒿?덈떎: $templatePath\" }",
     "  foreach ($prop in $bindings.PSObject.Properties) {",
     "    $findStr = [string]$prop.Name",
     "    $replStr = [string]$prop.Value",
@@ -190,7 +190,7 @@ function renderHwpxToPdfWithPlaceholders({ templatePath, outputPath, bindings = 
           return;
         }
         if (!fs.existsSync(outputAbsolutePath)) {
-          reject(new Error('HWPX PDF 변환이 완료되지 않았습니다.'));
+          reject(new Error('HWPX PDF 蹂?섏씠 ?꾨즺?섏? ?딆븯?듬땲??'));
           return;
         }
         resolve(outputAbsolutePath);
@@ -200,12 +200,12 @@ function renderHwpxToPdfWithPlaceholders({ templatePath, outputPath, bindings = 
 }
 
 /**
- * HWPX(ZIP) 안의 XML을 직접 치환하여 새 HWPX 파일을 생성합니다.
- * HWP 설치 불필요. {{키}} 형태의 플레이스홀더를 문자열 치환합니다.
+ * HWPX(ZIP) ?덉쓽 XML??吏곸젒 移섑솚?섏뿬 ??HWPX ?뚯씪???앹꽦?⑸땲??
+ * HWP ?ㅼ튂 遺덊븘?? {{??} ?뺥깭???뚮젅?댁뒪??붾? 臾몄옄??移섑솚?⑸땲??
  *
- * @param {string} templatePath - 원본 HWPX 파일 경로
- * @param {string} outputPath   - 결과 HWPX 파일 경로 (.hwpx)
- * @param {Object} bindings     - { '{{키}}': '값', ... }
+ * @param {string} templatePath - ?먮낯 HWPX ?뚯씪 寃쎈줈
+ * @param {string} outputPath   - 寃곌낵 HWPX ?뚯씪 寃쎈줈 (.hwpx)
+ * @param {Object} bindings     - { '{{??}': '媛?, ... }
  */
 async function replaceHwpxPlaceholders({ templatePath, outputPath, bindings = {} }) {
   const JSZip = require('jszip');
@@ -216,7 +216,7 @@ async function replaceHwpxPlaceholders({ templatePath, outputPath, bindings = {}
   const zipData = fs.readFileSync(sourceAbsolutePath);
   const zip = await JSZip.loadAsync(zipData);
 
-  // HWPX 본문은 Contents/section*.xml 에 저장됩니다
+  // HWPX 蹂몃Ц? Contents/section*.xml ????λ맗?덈떎
   const xmlFiles = Object.keys(zip.files).filter(
     (name) => name.startsWith('Contents/') && name.endsWith('.xml')
   );
@@ -224,13 +224,13 @@ async function replaceHwpxPlaceholders({ templatePath, outputPath, bindings = {}
   for (const fileName of xmlFiles) {
     let content = await zip.files[fileName].async('string');
     for (const [placeholder, value] of Object.entries(bindings)) {
-      // XML 인코딩 안전 치환
+      // XML ?몄퐫???덉쟾 移섑솚
       const safeValue = String(value ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-      // 플레이스홀더는 이미 XML에서 그대로 나타날 수도 있고
-      // &lt;&lt;키&gt;&gt; 형태로 인코딩돼 있을 수도 있으므로 두 가지 모두 치환
+      // ?뚮젅?댁뒪??붾뒗 ?대? XML?먯꽌 洹몃?濡??섑????섎룄 ?덇퀬
+      // &lt;&lt;??gt;&gt; ?뺥깭濡??몄퐫?⑸뤌 ?덉쓣 ?섎룄 ?덉쑝誘濡???媛吏 紐⑤몢 移섑솚
       const encodedPlaceholder = placeholder
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')

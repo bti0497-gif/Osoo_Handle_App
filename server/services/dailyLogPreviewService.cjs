@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+﻿const crypto = require('crypto');
 const ExcelJS = require('exceljs');
 const fs = require('fs');
 const JSZip = require('jszip');

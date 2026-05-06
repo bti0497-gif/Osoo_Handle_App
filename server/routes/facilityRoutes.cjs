@@ -1,9 +1,9 @@
-const express = require('express');
+﻿const express = require('express');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const router = express.Router();
 
 module.exports = function(db) {
-  // 전체 목록 조회 (검색, 최신순)
+  // ?꾩껜 紐⑸줉 議고쉶 (寃?? 理쒖떊??
   router.get('/api/facilities', (req, res) => {
     const { q, site_id } = req.query;
     let sql = 'SELECT * FROM facility_logs';
@@ -26,7 +26,7 @@ module.exports = function(db) {
     res.json(rows);
   });
 
-  // 등록
+  // ?깅줉
   router.post('/api/facilities', (req, res) => {
     const { date, location, facility_name, content, notes } = req.body;
     try {
@@ -47,7 +47,7 @@ module.exports = function(db) {
     }
   });
 
-  // 수정
+  // ?섏젙
   router.put('/api/facilities/:id', (req, res) => {
     const { id } = req.params;
     const { date, location, facility_name, content, notes } = req.body;
@@ -65,7 +65,7 @@ module.exports = function(db) {
     }
   });
 
-  // 삭제
+  // ??젣
   router.delete('/api/facilities/:id', (req, res) => {
     const { id } = req.params;
     try {

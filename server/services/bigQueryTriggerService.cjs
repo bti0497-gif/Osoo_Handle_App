@@ -1,4 +1,4 @@
-const { syncAll } = require('./bigQuerySyncService.cjs');
+﻿const { syncAll } = require('./bigQuerySyncService.cjs');
 
 let isSyncing = false;
 let hasPending = false;
@@ -21,11 +21,11 @@ async function runSync(reason = 'manual') {
     const results = await syncAll();
     const totalCount = Object.values(results || {}).reduce((sum, row) => sum + (row?.count || 0), 0);
     if (totalCount > 0) {
-      console.log(`[BigQuery Trigger] ${reason} 동기화 완료: ${totalCount}건 전송`);
+      console.log(`[BigQuery Trigger] ${reason} ?숆린???꾨즺: ${totalCount}嫄??꾩넚`);
     }
     return { queued: false, results };
   } catch (error) {
-    console.error(`[BigQuery Trigger] ${reason} 동기화 실패:`, error.message);
+    console.error(`[BigQuery Trigger] ${reason} ?숆린???ㅽ뙣:`, error.message);
     return { queued: false, error: error.message };
   } finally {
     isSyncing = false;

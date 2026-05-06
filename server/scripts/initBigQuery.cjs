@@ -1,13 +1,13 @@
-const { BigQuery } = require('@google-cloud/bigquery');
+﻿const { BigQuery } = require('@google-cloud/bigquery');
 const path = require('path');
 const fs = require('fs');
 
-// 설정
+// ?ㅼ젙
 const KEY_FILE_PATH = path.join(__dirname, '../config/work-jindan-194620a46d59.json');
-const DATASET_ID = 'daily_log_system'; // 사용자가 생성한 데이터셋 이름
+const DATASET_ID = 'daily_log_system'; // ?ъ슜?먭? ?앹꽦???곗씠?곗뀑 ?대쫫
 
 if (!fs.existsSync(KEY_FILE_PATH)) {
-  console.error('❌ 키 파일을 찾을 수 없습니다:', KEY_FILE_PATH);
+  console.error('?????뚯씪??李얠쓣 ???놁뒿?덈떎:', KEY_FILE_PATH);
   process.exit(1);
 }
 
@@ -20,13 +20,13 @@ async function ensureTableSchema(table, tableName, schema) {
   const missingFields = schema.filter((field) => !existingNames.has(field.name));
 
   if (missingFields.length === 0) {
-    console.log(`⚠️  [Skip] 테이블 '${tableName}' 스키마는 최신 상태입니다.`);
+    console.log(`?좑툘  [Skip] ?뚯씠釉?'${tableName}' ?ㅽ궎留덈뒗 理쒖떊 ?곹깭?낅땲??`);
     return;
   }
 
   const missingRequired = missingFields.filter((field) => field.mode === 'REQUIRED');
   if (missingRequired.length > 0) {
-    console.warn(`⚠️  [Warn] 테이블 '${tableName}'에 REQUIRED 컬럼 ${missingRequired.map((field) => field.name).join(', ')} 이(가) 누락되어 자동 추가할 수 없습니다.`);
+    console.warn(`?좑툘  [Warn] ?뚯씠釉?'${tableName}'??REQUIRED 而щ읆 ${missingRequired.map((field) => field.name).join(', ')} ??媛) ?꾨씫?섏뼱 ?먮룞 異붽??????놁뒿?덈떎.`);
   }
 
   const appendableFields = missingFields.filter((field) => field.mode !== 'REQUIRED');
@@ -40,11 +40,11 @@ async function ensureTableSchema(table, tableName, schema) {
     }
   });
 
-  console.log(`✅ [Updated] 테이블 '${tableName}'에 컬럼 ${appendableFields.map((field) => field.name).join(', ')} 추가 완료.`);
+  console.log(`??[Updated] ?뚯씠釉?'${tableName}'??而щ읆 ${appendableFields.map((field) => field.name).join(', ')} 異붽? ?꾨즺.`);
 }
 
-// 테이블 스키마 정의
-// 로컬 DB 컬럼 + site_name, author, local_id, created_at, updated_at, uploaded_at
+// ?뚯씠釉??ㅽ궎留??뺤쓽
+// 濡쒖뺄 DB 而щ읆 + site_name, author, local_id, created_at, updated_at, uploaded_at
 const SCHEMAS = {
   flow_readings: [
     { name: 'site_id',  type: 'STRING' },
@@ -59,8 +59,8 @@ const SCHEMAS = {
     { name: 'is_reset', type: 'BOOLEAN' },
     { name: 'is_manual', type: 'BOOLEAN' },
     { name: 'sludge_export', type: 'FLOAT' },
-    { name: 'updated_at', type: 'TIMESTAMP' }, // 로컬 수정 시간
-    { name: 'uploaded_at', type: 'TIMESTAMP' }  // 서버 전송 시간
+    { name: 'updated_at', type: 'TIMESTAMP' }, // 濡쒖뺄 ?섏젙 ?쒓컙
+    { name: 'uploaded_at', type: 'TIMESTAMP' }  // ?쒕쾭 ?꾩넚 ?쒓컙
   ],
   medicine_logs: [
     { name: 'site_id',  type: 'STRING' },
@@ -90,7 +90,7 @@ const SCHEMAS = {
     { name: 'source_label', type: 'STRING' },
     { name: 'qntech_project_id', type: 'STRING' },
     { name: 'location', type: 'STRING' },
-    { name: 'nh3_n', type: 'STRING' }, // 특수기호 포함 가능하므로 STRING
+    { name: 'nh3_n', type: 'STRING' }, // ?뱀닔湲고샇 ?ы븿 媛?ν븯誘濡?STRING
     { name: 'no3_n', type: 'STRING' },
     { name: 'po4_p', type: 'STRING' },
     { name: 'alkalinity', type: 'STRING' },
@@ -163,22 +163,22 @@ const SCHEMAS = {
     { name: 'uploaded_at',             type: 'TIMESTAMP' }
   ],
 
-  // ── 게시판 ──────────────────────────────────────────────────────────
-  // author_role: 'admin'(중앙관리자) | 'manager'(현장관리자)
-  // target_site: '' or NULL = 전체 현장, 특정 현장명 = 해당 현장만 (관리자 작성 시)
-  // 현장관리자가 올린 글: author_site 현장 + 중앙관리자 전체에게 보임
-  // is_deleted: 소프트 삭제 (BigQuery DML 최소화)
+  // ?? 寃뚯떆????????????????????????????????????????????????????????????
+  // author_role: 'admin'(以묒븰愿由ъ옄) | 'manager'(?꾩옣愿由ъ옄)
+  // target_site: '' or NULL = ?꾩껜 ?꾩옣, ?뱀젙 ?꾩옣紐?= ?대떦 ?꾩옣留?(愿由ъ옄 ?묒꽦 ??
+  // ?꾩옣愿由ъ옄媛 ?щ┛ 湲: author_site ?꾩옣 + 以묒븰愿由ъ옄 ?꾩껜?먭쾶 蹂댁엫
+  // is_deleted: ?뚰봽????젣 (BigQuery DML 理쒖냼??
   posts: [
     { name: 'id',          type: 'STRING',    mode: 'REQUIRED' },  // UUID
     { name: 'author',      type: 'STRING',    mode: 'REQUIRED' },
     { name: 'author_role', type: 'STRING',    mode: 'REQUIRED' },  // 'admin' | 'manager'
-    { name: 'author_site', type: 'STRING' },                        // 현장명 (관리자='CENTRAL')
-    { name: 'target_site', type: 'STRING' },                        // '' or NULL=전체, 현장명=특정
+    { name: 'author_site', type: 'STRING' },                        // ?꾩옣紐?(愿由ъ옄='CENTRAL')
+    { name: 'target_site', type: 'STRING' },                        // '' or NULL=?꾩껜, ?꾩옣紐??뱀젙
     { name: 'title',       type: 'STRING',    mode: 'REQUIRED' },
     { name: 'content',     type: 'STRING' },
     { name: 'is_notice',   type: 'BOOLEAN' },
-    { name: 'attachments', type: 'STRING' },                        // JSON 배열 문자열
-    { name: 'parent_id',   type: 'STRING' },                        // 답글 원글 id
+    { name: 'attachments', type: 'STRING' },                        // JSON 諛곗뿴 臾몄옄??
+    { name: 'parent_id',   type: 'STRING' },                        // ?듦? ?먭? id
     { name: 'is_deleted',  type: 'BOOLEAN' },
     { name: 'created_at',  type: 'TIMESTAMP', mode: 'REQUIRED' },
     { name: 'updated_at',  type: 'TIMESTAMP' }
@@ -192,7 +192,7 @@ const SCHEMAS = {
     { name: 'created_at', type: 'TIMESTAMP', mode: 'REQUIRED' }
   ],
 
-  // ── 출결 ──────────────────────────────────────────────────────────
+  // ?? 異쒓껐 ??????????????????????????????????????????????????????????
   attendance: [
     { name: 'id',                type: 'STRING',    mode: 'REQUIRED' },  // UUID
     { name: 'site_id',           type: 'STRING' },
@@ -247,7 +247,7 @@ const SCHEMAS = {
 };
 
 async function createTables() {
-  console.log(`Dataset '${DATASET_ID}'에 테이블 생성을 시작합니다...`);
+  console.log(`Dataset '${DATASET_ID}'???뚯씠釉??앹꽦???쒖옉?⑸땲??..`);
   
   const dataset = bigquery.dataset(DATASET_ID);
 
@@ -260,13 +260,13 @@ async function createTables() {
         await ensureTableSchema(table, tableName, schema);
       } else {
         await table.create({ schema });
-        console.log(`✅ [Created] 테이블 '${tableName}' 생성 완료.`);
+        console.log(`??[Created] ?뚯씠釉?'${tableName}' ?앹꽦 ?꾨즺.`);
       }
     } catch (err) {
-      console.error(`❌ [Error] 테이블 '${tableName}' 생성 실패:`, err.message);
+      console.error(`??[Error] ?뚯씠釉?'${tableName}' ?앹꽦 ?ㅽ뙣:`, err.message);
     }
   }
-  console.log('모든 작업이 완료되었습니다.');
+  console.log('紐⑤뱺 ?묒뾽???꾨즺?섏뿀?듬땲??');
 }
 
 createTables().catch(console.error);

@@ -1,21 +1,21 @@
-'use strict';
+﻿'use strict';
 
 /**
  * boardRoutes.cjs
- * ─────────────────────────────────────────────────────────────────────
- * 게시판 REST API (BigQuery 백엔드)
+ * ?????????????????????????????????????????????????????????????????????
+ * 寃뚯떆??REST API (BigQuery 諛깆뿏??
  *
- * GET    /api/board/posts              게시글 목록
- * POST   /api/board/posts              게시글 작성
- * PUT    /api/board/posts/:id          게시글 수정
- * DELETE /api/board/posts/:id          게시글 삭제 (소프트)
- * GET    /api/board/posts/:id          게시글 단건
- * GET    /api/board/posts/:id/comments 댓글 목록
- * POST   /api/board/posts/:id/comments 댓글 작성
- * DELETE /api/board/comments/:id       댓글 삭제 (소프트)
+ * GET    /api/board/posts              寃뚯떆湲 紐⑸줉
+ * POST   /api/board/posts              寃뚯떆湲 ?묒꽦
+ * PUT    /api/board/posts/:id          寃뚯떆湲 ?섏젙
+ * DELETE /api/board/posts/:id          寃뚯떆湲 ??젣 (?뚰봽??
+ * GET    /api/board/posts/:id          寃뚯떆湲 ?④굔
+ * GET    /api/board/posts/:id/comments ?볤? 紐⑸줉
+ * POST   /api/board/posts/:id/comments ?볤? ?묒꽦
+ * DELETE /api/board/comments/:id       ?볤? ??젣 (?뚰봽??
  *
- * 요청 헤더: x-user-role, x-user-site, x-user-name
- * (프론트엔드 apiClient가 현재 로그인 사용자 정보를 헤더에 포함한다)
+ * ?붿껌 ?ㅻ뜑: x-user-role, x-user-site, x-user-name
+ * (?꾨줎?몄뿏??apiClient媛 ?꾩옱 濡쒓렇???ъ슜???뺣낫瑜??ㅻ뜑???ы븿?쒕떎)
  */
 
 const express = require('express');
@@ -25,8 +25,8 @@ const {
   getComments, createComment, deleteComment
 } = require('../services/boardBigQueryService.cjs');
 
-// ── 요청에서 현재 사용자 추출 ──────────────────────────────────────
-// 우선순위: 헤더 > body._user > query params
+// ?? ?붿껌?먯꽌 ?꾩옱 ?ъ슜??異붿텧 ??????????????????????????????????????
+// ?곗꽑?쒖쐞: ?ㅻ뜑 > body._user > query params
 function extractUser(req) {
   const u = req.body?._user || {};
   return {
@@ -36,7 +36,7 @@ function extractUser(req) {
   };
 }
 
-// ── 오류 응답 헬퍼 ────────────────────────────────────────────────
+// ?? ?ㅻ쪟 ?묐떟 ?ы띁 ????????????????????????????????????????????????
 function handleError(res, err, context) {
   console.error(`[BoardRoutes] ${context}:`, err.message);
   res.status(500).json({ success: false, message: err.message });
@@ -44,7 +44,7 @@ function handleError(res, err, context) {
 
 module.exports = function () {
 
-  // 1. 게시글 목록
+  // 1. 寃뚯떆湲 紐⑸줉
   router.get('/api/board/posts', async (req, res) => {
     const user = extractUser(req);
     try {
@@ -53,16 +53,16 @@ module.exports = function () {
     } catch (err) { handleError(res, err, 'getPosts'); }
   });
 
-  // 2. 게시글 단건
+  // 2. 寃뚯떆湲 ?④굔
   router.get('/api/board/posts/:id', async (req, res) => {
     try {
       const post = await getPost(req.params.id);
-      if (!post) return res.status(404).json({ success: false, message: '게시글 없음' });
+      if (!post) return res.status(404).json({ success: false, message: '寃뚯떆湲 ?놁쓬' });
       res.json({ success: true, data: post });
     } catch (err) { handleError(res, err, 'getPost'); }
   });
 
-  // 3. 게시글 작성
+  // 3. 寃뚯떆湲 ?묒꽦
   router.post('/api/board/posts', async (req, res) => {
     const user = extractUser(req);
     const body = req.body || {};
@@ -71,7 +71,7 @@ module.exports = function () {
         author:      user.name,
         author_role: user.role,
         author_site: user.role === 'admin' ? 'CENTRAL' : user.site,
-        target_site: body.target_site  ?? '',   // '' = 전체, 특정 현장명 = 타겟
+        target_site: body.target_site  ?? '',   // '' = ?꾩껜, ?뱀젙 ?꾩옣紐?= ?寃?
         title:       body.title        || '',
         content:     body.content      || '',
         is_notice:   Boolean(body.is_notice),
@@ -82,16 +82,16 @@ module.exports = function () {
     } catch (err) { handleError(res, err, 'createPost'); }
   });
 
-  // 4. 게시글 수정 (작성자 or admin만 허용)
+  // 4. 寃뚯떆湲 ?섏젙 (?묒꽦??or admin留??덉슜)
   router.put('/api/board/posts/:id', async (req, res) => {
     const user = extractUser(req);
     const body = req.body || {};
     try {
-      // 권한 확인: 원글 조회
+      // 沅뚰븳 ?뺤씤: ?먭? 議고쉶
       const existing = await getPost(req.params.id);
-      if (!existing) return res.status(404).json({ success: false, message: '게시글 없음' });
+      if (!existing) return res.status(404).json({ success: false, message: '寃뚯떆湲 ?놁쓬' });
       if (user.role !== 'admin' && existing.author !== user.name) {
-        return res.status(403).json({ success: false, message: '수정 권한 없음' });
+        return res.status(403).json({ success: false, message: '?섏젙 沅뚰븳 ?놁쓬' });
       }
 
       await updatePost(req.params.id, {
@@ -105,21 +105,21 @@ module.exports = function () {
     } catch (err) { handleError(res, err, 'updatePost'); }
   });
 
-  // 5. 게시글 삭제
+  // 5. 寃뚯떆湲 ??젣
   router.delete('/api/board/posts/:id', async (req, res) => {
     const user = extractUser(req);
     try {
       const existing = await getPost(req.params.id);
-      if (!existing) return res.status(404).json({ success: false, message: '게시글 없음' });
+      if (!existing) return res.status(404).json({ success: false, message: '寃뚯떆湲 ?놁쓬' });
       if (user.role !== 'admin' && existing.author !== user.name) {
-        return res.status(403).json({ success: false, message: '삭제 권한 없음' });
+        return res.status(403).json({ success: false, message: '??젣 沅뚰븳 ?놁쓬' });
       }
       await deletePost(req.params.id);
       res.json({ success: true });
     } catch (err) { handleError(res, err, 'deletePost'); }
   });
 
-  // 6. 댓글 목록
+  // 6. ?볤? 紐⑸줉
   router.get('/api/board/posts/:id/comments', async (req, res) => {
     try {
       const comments = await getComments(req.params.id);
@@ -127,7 +127,7 @@ module.exports = function () {
     } catch (err) { handleError(res, err, 'getComments'); }
   });
 
-  // 7. 댓글 작성
+  // 7. ?볤? ?묒꽦
   router.post('/api/board/posts/:id/comments', async (req, res) => {
     const user = extractUser(req);
     const body = req.body || {};
@@ -140,7 +140,7 @@ module.exports = function () {
     } catch (err) { handleError(res, err, 'createComment'); }
   });
 
-  // 8. 댓글 삭제
+  // 8. ?볤? ??젣
   router.delete('/api/board/comments/:id', async (req, res) => {
     const user = extractUser(req);
     try {

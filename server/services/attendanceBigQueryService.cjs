@@ -1,27 +1,27 @@
-'use strict';
+﻿'use strict';
 
 /**
  * attendanceBigQueryService.cjs
- * ─────────────────────────────────────────────────────────────────────
- * 출결 기록 → BigQuery 동기화 서비스
+ * ?????????????????????????????????????????????????????????????????????
+ * 異쒓껐 湲곕줉 ??BigQuery ?숆린???쒕퉬??
  *
- * 로컬 SQLite attendance 테이블의 미동기화(is_synced=0) 레코드를
- * BigQuery attendance 테이블에 스트리밍 insert 한다.
- * 성공하면 로컬 is_synced = 1, 실패해도 로컬 레코드는 보존된다.
+ * 濡쒖뺄 SQLite attendance ?뚯씠釉붿쓽 誘몃룞湲고솕(is_synced=0) ?덉퐫?쒕?
+ * BigQuery attendance ?뚯씠釉붿뿉 ?ㅽ듃由щ컢 insert ?쒕떎.
+ * ?깃났?섎㈃ 濡쒖뺄 is_synced = 1, ?ㅽ뙣?대룄 濡쒖뺄 ?덉퐫?쒕뒗 蹂댁〈?쒕떎.
  */
 
 const crypto = require('crypto');
 const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
 
 /**
- * 출결 로그 배치 동기화
- * @param {Array}  logs      SQLite attendance 레코드 배열
- * @param {{siteId?: string, siteName?: string}} siteMeta  현장 정보
+ * 異쒓껐 濡쒓렇 諛곗튂 ?숆린??
+ * @param {Array}  logs      SQLite attendance ?덉퐫??諛곗뿴
+ * @param {{siteId?: string, siteName?: string}} siteMeta  ?꾩옣 ?뺣낫
  * @returns {{ syncedIds: number[], errors: string[] }}
  */
 async function syncAttendanceLogs(logs, siteMeta = {}) {
   const bq = getBigQueryClient();
-  if (!bq) return { syncedIds: [], errors: ['BigQuery 클라이언트 초기화 실패'] };
+  if (!bq) return { syncedIds: [], errors: ['BigQuery ?대씪?댁뼵??珥덇린???ㅽ뙣'] };
   if (!logs || logs.length === 0) return { syncedIds: [], errors: [] };
 
   const siteName = String(siteMeta.siteName || '');
@@ -62,7 +62,7 @@ async function syncAttendanceLogs(logs, siteMeta = {}) {
     syncedIds.push(...logs.map(l => l.id));
   } catch (err) {
     const msg = err.errors ? JSON.stringify(err.errors) : err.message;
-    console.error('[BigQuery] attendance 동기화 실패:', msg);
+    console.error('[BigQuery] attendance ?숆린???ㅽ뙣:', msg);
     errors.push(msg);
   }
 

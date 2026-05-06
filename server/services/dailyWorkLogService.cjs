@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+﻿const crypto = require('crypto');
 const ExcelJS = require('exceljs');
 const fs = require('fs');
 const os = require('os');
@@ -40,7 +40,7 @@ function cleanupOldExportTempFiles() {
         fs.unlinkSync(fullPath);
       }
     } catch (_) {
-      // 파일이 이미 삭제되었거나 접근 불가한 경우 무시
+      // ?뚯씪???대? ??젣?섏뿀嫄곕굹 ?묎렐 遺덇???寃쎌슦 臾댁떆
     }
   }
 }
@@ -61,11 +61,11 @@ function normalizeDateRange(startDate, endDate) {
   const normalizedEndDate = normalizeDate(endDate || startDate || normalizedStartDate);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedStartDate) || !/^\d{4}-\d{2}-\d{2}$/.test(normalizedEndDate)) {
-    throw new Error('유효한 날짜 범위를 입력해 주세요.');
+    throw new Error('?좏슚???좎쭨 踰붿쐞瑜??낅젰??二쇱꽭??');
   }
 
   if (normalizedStartDate > normalizedEndDate) {
-    throw new Error('시작일은 종료일보다 늦을 수 없습니다.');
+    throw new Error('?쒖옉?쇱? 醫낅즺?쇰낫????쓣 ???놁뒿?덈떎.');
   }
 
   return { startDate: normalizedStartDate, endDate: normalizedEndDate };
@@ -144,12 +144,12 @@ function getSiteSettings(db) {
   return db.prepare('SELECT site_name, manager_name, method, series, flow_option FROM app_settings WHERE id = 1').get() || {};
 }
 
-/** flow_option이 비어 있으면: 2계열 → combined(1+2), 그 외 → single1 */
+/** flow_option??鍮꾩뼱 ?덉쑝硫? 2怨꾩뿴 ??combined(1+2), 洹?????single1 */
 function resolveFlowOption(settings) {
   const raw = settings.flow_option != null ? String(settings.flow_option).trim() : '';
   if (raw) return raw;
   const series = String(settings.series || '').trim();
-  if (series === '2계열') return 'combined';
+  if (series === '2怨꾩뿴') return 'combined';
   return 'single1';
 }
 
@@ -171,7 +171,7 @@ function getYearStartDate(dateStr) {
   return dateStr.slice(0, 4) + '-01-01';
 }
 
-// 기간 합계 조회 헬퍼
+// 湲곌컙 ?⑷퀎 議고쉶 ?ы띁
 function sumFlowField(db, type, field, startDate, endDate) {
   const row = db.prepare(
     `SELECT SUM(${field}) as total FROM flow_readings WHERE type = ? AND date BETWEEN ? AND ?`
@@ -213,16 +213,16 @@ function findFlowByKeyword(flows, keyword) {
 }
 
 /**
- * flowOption에 따라 내부/외부 반송 유량값을 결정하는 헬퍼
- * @param {Array} flows - 해당 날짜의 flow_readings 목록
- * @param {string} keyword - '내부반송' 또는 '외부반송'
+ * flowOption???곕씪 ?대?/?몃? 諛섏넚 ?좊웾媛믪쓣 寃곗젙?섎뒗 ?ы띁
+ * @param {Array} flows - ?대떦 ?좎쭨??flow_readings 紐⑸줉
+ * @param {string} keyword - '?대?諛섏넚' ?먮뒗 '?몃?諛섏넚'
  * @param {string} flowOption - 'single1' | 'single2' | 'combined'
- * @returns {{ raw_value, calculated_flow }} 또는 null
+ * @returns {{ raw_value, calculated_flow }} ?먮뒗 null
  */
 function getFlowByOption(flows, keyword, flowOption) {
-  // 1계열 현장이면 기존 방식 그대로
+  // 1怨꾩뿴 ?꾩옣?대㈃ 湲곗〈 諛⑹떇 洹몃?濡?
   if (!flowOption || flowOption === 'single1') {
-    // 1계열: '내부반송유량계' 또는 '내부반송유량계1' 형태
+    // 1怨꾩뿴: '?대?諛섏넚?좊웾怨? ?먮뒗 '?대?諛섏넚?좊웾怨?' ?뺥깭
     return flows.find(f => {
       const t = String(f.type || '').trim();
       return t.includes(keyword) && !t.endsWith('2');
@@ -230,7 +230,7 @@ function getFlowByOption(flows, keyword, flowOption) {
   }
 
   if (flowOption === 'single2') {
-    // 2계열만: '내부반송유량계2' 형태
+    // 2怨꾩뿴留? '?대?諛섏넚?좊웾怨?' ?뺥깭
     return flows.find(f => {
       const t = String(f.type || '').trim();
       return t.includes(keyword) && t.endsWith('2');
@@ -238,7 +238,7 @@ function getFlowByOption(flows, keyword, flowOption) {
   }
 
   if (flowOption === 'combined') {
-    // 1+2계열 합산
+    // 1+2怨꾩뿴 ?⑹궛
     const series1 = flows.find(f => {
       const t = String(f.type || '').trim();
       return t.includes(keyword) && !t.endsWith('2');
@@ -252,7 +252,7 @@ function getFlowByOption(flows, keyword, flowOption) {
     if (!series2) return series1;
     if (!series1) return series2;
 
-    // 두 계열 합산
+    // ??怨꾩뿴 ?⑹궛
     const rawVal1 = parseFloat(series1.raw_value) || 0;
     const rawVal2 = parseFloat(series2.raw_value) || 0;
     const calcFlow1 = parseFloat(series1.calculated_flow) || 0;
@@ -270,11 +270,11 @@ function getFlowByOption(flows, keyword, flowOption) {
 }
 
 /**
- * flowOption에 따라 내부/외부 반송 기간 합계를 구하는 헬퍼
+ * flowOption???곕씪 ?대?/?몃? 諛섏넚 湲곌컙 ?⑷퀎瑜?援ы븯???ы띁
  */
 function sumFlowFieldByOption(db, keyword, field, startDate, endDate, flowOption) {
   if (!flowOption || flowOption === 'single1') {
-    // 1계열: type이 keyword를 포함하고 '2'로 끝나지 않는 것
+    // 1怨꾩뿴: type??keyword瑜??ы븿?섍퀬 '2'濡??앸굹吏 ?딅뒗 寃?
     const row = db.prepare(
       `SELECT SUM(${field}) as total FROM flow_readings WHERE type LIKE ? AND type NOT LIKE '%2' AND date BETWEEN ? AND ?`
     ).get(`%${keyword}%`, startDate, endDate);
@@ -282,7 +282,7 @@ function sumFlowFieldByOption(db, keyword, field, startDate, endDate, flowOption
   }
 
   if (flowOption === 'single2') {
-    // 2계열만: type이 keyword를 포함하고 '2'로 끝나는 것
+    // 2怨꾩뿴留? type??keyword瑜??ы븿?섍퀬 '2'濡??앸굹??寃?
     const row = db.prepare(
       `SELECT SUM(${field}) as total FROM flow_readings WHERE type LIKE ? AND type LIKE '%2' AND date BETWEEN ? AND ?`
     ).get(`%${keyword}%`, startDate, endDate);
@@ -290,7 +290,7 @@ function sumFlowFieldByOption(db, keyword, field, startDate, endDate, flowOption
   }
 
   if (flowOption === 'combined') {
-    // 1+2계열 합산: keyword를 포함하는 모든 type의 합
+    // 1+2怨꾩뿴 ?⑹궛: keyword瑜??ы븿?섎뒗 紐⑤뱺 type????
     const row = db.prepare(
       `SELECT SUM(${field}) as total FROM flow_readings WHERE type LIKE ? AND date BETWEEN ? AND ?`
     ).get(`%${keyword}%`, startDate, endDate);
@@ -351,14 +351,14 @@ function findKitNameByKeyword(db, keyword) {
 }
 
 /**
- * 지정된 날짜의 모든 데이터를 수집하여 일일업무일지 셀 이름에 맞는 바인딩 맵을 생성합니다.
+ * 吏?뺣맂 ?좎쭨??紐⑤뱺 ?곗씠?곕? ?섏쭛?섏뿬 ?쇱씪?낅Т?쇱? ? ?대쫫??留욌뒗 諛붿씤??留듭쓣 ?앹꽦?⑸땲??
  *
- * 셀 이름 매핑:
- * - 유량: 유입전일/금일/누계/월간/연간, 방류~, 내부반송~, 외부반송~, 슬러지
- * - 약품: 포도당/중탄산/팩 + 추가약품1~3 (구입/사용/재고/월간/연간)
- * - 키트: 암모니아/질산/인/알칼리 (구입/사용/재고/월간/연간)
- * - 기본: 날짜, 이름
- * - 전력: 전일전력, 금일전력, 전력사용, 전력계산
+ * ? ?대쫫 留ㅽ븨:
+ * - ?좊웾: ?좎엯?꾩씪/湲덉씪/?꾧퀎/?붽컙/?곌컙, 諛⑸쪟~, ?대?諛섏넚~, ?몃?諛섏넚~, 슬러지
+ * - ?쏀뭹: ?щ룄??以묓깂????+ 異붽??쏀뭹1~3 (援ъ엯/?ъ슜/?ш퀬/?붽컙/?곌컙)
+ * - ?ㅽ듃: ?붾え?덉븘/吏덉궛/???뚯뭡由?(援ъ엯/?ъ슜/?ш퀬/?붽컙/?곌컙)
+ * - 湲곕낯: ?좎쭨, ?대쫫
+ * - ?꾨젰: ?꾩씪?꾨젰, 湲덉씪?꾨젰, ?꾨젰?ъ슜, ?꾨젰怨꾩궛
  */
 function buildBindingsForDate(db, date) {
   const settings = getSiteSettings(db);
@@ -373,62 +373,62 @@ function buildBindingsForDate(db, date) {
 
   const bindings = {};
 
-  // 제목은 양식 파일 원본 값을 유지한다 (현장마다 다른 제목 사용)
-  // bindings['제목'] = '일 일 업 무 일 지';
-  bindings['날짜'] = date;
-  bindings['이름'] = settings.manager_name || '';
+  // ?쒕ぉ? ?묒떇 ?뚯씪 ?먮낯 媛믪쓣 ?좎??쒕떎 (?꾩옣留덈떎 ?ㅻⅨ ?쒕ぉ ?ъ슜)
+  // bindings['?쒕ぉ'] = '??????臾???吏';
+  bindings['?좎쭨'] = date;
+  bindings['?대쫫'] = settings.manager_name || '';
 
-  // --- 유량 데이터 ---
-  // 유입유량계 (유입은 대부분 1개이므로 flowOption 적용 안 함)
-  const flowIn = findFlowByKeyword(flows, '유입');
-  const prevFlowIn = findFlowByKeyword(prevFlows, '유입');
-  const flowInType = findFlowTypeNameByKeyword(db, '유입');
-  bindings['유입전일'] = prevFlowIn?.raw_value ?? '';
-  bindings['유입금일'] = flowIn?.raw_value ?? '';
-  bindings['유입누계'] = flowIn?.calculated_flow ?? '';
-  bindings['월간유입'] = sumFlowField(db, flowInType, 'calculated_flow', monthStart, date);
-  bindings['연간유입'] = sumFlowField(db, flowInType, 'calculated_flow', yearStart, date);
+  // --- ?좊웾 ?곗씠??---
+  // ?좎엯?좊웾怨?(?좎엯? ?遺遺?1媛쒖씠誘濡?flowOption ?곸슜 ????
+  const flowIn = findFlowByKeyword(flows, '?좎엯');
+  const prevFlowIn = findFlowByKeyword(prevFlows, '?좎엯');
+  const flowInType = findFlowTypeNameByKeyword(db, '?좎엯');
+  bindings['?좎엯?꾩씪'] = prevFlowIn?.raw_value ?? '';
+  bindings['?좎엯湲덉씪'] = flowIn?.raw_value ?? '';
+  bindings['?좎엯?꾧퀎'] = flowIn?.calculated_flow ?? '';
+  bindings['?붽컙?좎엯'] = sumFlowField(db, flowInType, 'calculated_flow', monthStart, date);
+  bindings['?곌컙?좎엯'] = sumFlowField(db, flowInType, 'calculated_flow', yearStart, date);
 
-  // 방류유량계 (방류도 대부분 1개이므로 flowOption 적용 안 함)
-  const flowOut = findFlowByKeyword(flows, '방류');
-  const prevFlowOut = findFlowByKeyword(prevFlows, '방류');
-  const flowOutType = findFlowTypeNameByKeyword(db, '방류');
-  bindings['방류전일'] = prevFlowOut?.raw_value ?? '';
-  bindings['방류금일'] = flowOut?.raw_value ?? '';
-  bindings['방류누계'] = flowOut?.calculated_flow ?? '';
-  bindings['월간방류'] = sumFlowField(db, flowOutType, 'calculated_flow', monthStart, date);
-  bindings['연간방류'] = sumFlowField(db, flowOutType, 'calculated_flow', yearStart, date);
+  // 諛⑸쪟?좊웾怨?(諛⑸쪟???遺遺?1媛쒖씠誘濡?flowOption ?곸슜 ????
+  const flowOut = findFlowByKeyword(flows, '諛⑸쪟');
+  const prevFlowOut = findFlowByKeyword(prevFlows, '諛⑸쪟');
+  const flowOutType = findFlowTypeNameByKeyword(db, '諛⑸쪟');
+  bindings['諛⑸쪟?꾩씪'] = prevFlowOut?.raw_value ?? '';
+  bindings['諛⑸쪟湲덉씪'] = flowOut?.raw_value ?? '';
+  bindings['諛⑸쪟?꾧퀎'] = flowOut?.calculated_flow ?? '';
+  bindings['?붽컙諛⑸쪟'] = sumFlowField(db, flowOutType, 'calculated_flow', monthStart, date);
+  bindings['?곌컙諛⑸쪟'] = sumFlowField(db, flowOutType, 'calculated_flow', yearStart, date);
 
-  // 내부반송유량계 ── flowOption 적용
-  const flowInternal = getFlowByOption(flows, '내부반송', flowOption) || getFlowByOption(flows, '내부', flowOption);
-  const prevFlowInternal = getFlowByOption(prevFlows, '내부반송', flowOption) || getFlowByOption(prevFlows, '내부', flowOption);
-  bindings['내부반송전일'] = prevFlowInternal?.raw_value ?? '';
-  bindings['내부반송금일'] = flowInternal?.raw_value ?? '';
-  bindings['내부누계'] = flowInternal?.calculated_flow ?? '';
-  bindings['월간내부'] = sumFlowFieldByOption(db, '내부반송', 'calculated_flow', monthStart, date, flowOption);
-  bindings['연간내부'] = sumFlowFieldByOption(db, '내부반송', 'calculated_flow', yearStart, date, flowOption);
+  // ?대?諛섏넚?좊웾怨??? flowOption ?곸슜
+  const flowInternal = getFlowByOption(flows, '?대?諛섏넚', flowOption) || getFlowByOption(flows, '?대?', flowOption);
+  const prevFlowInternal = getFlowByOption(prevFlows, '?대?諛섏넚', flowOption) || getFlowByOption(prevFlows, '?대?', flowOption);
+  bindings['?대?諛섏넚?꾩씪'] = prevFlowInternal?.raw_value ?? '';
+  bindings['?대?諛섏넚湲덉씪'] = flowInternal?.raw_value ?? '';
+  bindings['?대??꾧퀎'] = flowInternal?.calculated_flow ?? '';
+  bindings['?붽컙?대?'] = sumFlowFieldByOption(db, '?대?諛섏넚', 'calculated_flow', monthStart, date, flowOption);
+  bindings['?곌컙?대?'] = sumFlowFieldByOption(db, '?대?諛섏넚', 'calculated_flow', yearStart, date, flowOption);
 
-  // 외부반송유량계 ── flowOption 적용
-  const flowExternal = getFlowByOption(flows, '외부반송', flowOption) || getFlowByOption(flows, '외부', flowOption);
-  const prevFlowExternal = getFlowByOption(prevFlows, '외부반송', flowOption) || getFlowByOption(prevFlows, '외부', flowOption);
-  bindings['외부반송전일'] = prevFlowExternal?.raw_value ?? '';
-  bindings['외부반송금일'] = flowExternal?.raw_value ?? '';
-  bindings['외부누계'] = flowExternal?.calculated_flow ?? '';
-  bindings['월간외부'] = sumFlowFieldByOption(db, '외부반송', 'calculated_flow', monthStart, date, flowOption);
-  bindings['연간외부'] = sumFlowFieldByOption(db, '외부반송', 'calculated_flow', yearStart, date, flowOption);
+  // ?몃?諛섏넚?좊웾怨??? flowOption ?곸슜
+  const flowExternal = getFlowByOption(flows, '?몃?諛섏넚', flowOption) || getFlowByOption(flows, '?몃?', flowOption);
+  const prevFlowExternal = getFlowByOption(prevFlows, '?몃?諛섏넚', flowOption) || getFlowByOption(prevFlows, '?몃?', flowOption);
+  bindings['?몃?諛섏넚?꾩씪'] = prevFlowExternal?.raw_value ?? '';
+  bindings['?몃?諛섏넚湲덉씪'] = flowExternal?.raw_value ?? '';
+  bindings['?몃??꾧퀎'] = flowExternal?.calculated_flow ?? '';
+  bindings['?붽컙?몃?'] = sumFlowFieldByOption(db, '?몃?諛섏넚', 'calculated_flow', monthStart, date, flowOption);
+  bindings['?곌컙?몃?'] = sumFlowFieldByOption(db, '?몃?諛섏넚', 'calculated_flow', yearStart, date, flowOption);
 
-  // 슬러지 처리량은 총 누계(calculated_flow)가 아니라 반출량(sludge_export) 기준이다.
-  // 반출이 없는 날이 많으므로 값이 없으면 빈 칸으로 유지하고, 월간/연간도 반출량만 누적한다.
+  // 슬러지 泥섎━?됱? 珥??꾧퀎(calculated_flow)媛 ?꾨땲??諛섏텧??sludge_export) 湲곗??대떎.
+  // 諛섏텧???녿뒗 ?좎씠 留롮쑝誘濡?媛믪씠 ?놁쑝硫?鍮?移몄쑝濡??좎??섍퀬, ?붽컙/?곌컙??諛섏텧?됰쭔 ?꾩쟻?쒕떎.
   const flowSludge = findFlowByKeyword(flows, '슬러지');
   const sludgeType = findFlowTypeNameByKeyword(db, '슬러지');
   bindings['슬러지'] = flowSludge?.sludge_export ?? flowSludge?.raw_value ?? '';
-  bindings['월간슬러지'] = sumFlowField(db, sludgeType, 'COALESCE(sludge_export, raw_value)', monthStart, date);
-  bindings['연간슬러지'] = sumFlowField(db, sludgeType, 'COALESCE(sludge_export, raw_value)', yearStart, date);
+  bindings['?붽컙슬러지'] = sumFlowField(db, sludgeType, 'COALESCE(sludge_export, raw_value)', monthStart, date);
+  bindings['?곌컙슬러지'] = sumFlowField(db, sludgeType, 'COALESCE(sludge_export, raw_value)', yearStart, date);
 
-  // --- 약품 데이터 ---
+  // --- ?쏀뭹 ?곗씠??---
   let allMedicineItems = getActiveConfigItems(db, 'medicine');
   
-  // 과거 매핑 찌꺼기(DB 칼럼명 형태) 제외
+  // 怨쇨굅 留ㅽ븨 李뚭볼湲?DB 移쇰읆紐??뺥깭) ?쒖쇅
   allMedicineItems = allMedicineItems.filter(item => {
     const name = item.item_name || '';
     return !name.includes('_purchase') && !name.includes('_usage') && !name.includes('_inventory');
@@ -439,9 +439,9 @@ function buildBindingsForDate(db, date) {
     const medNameNoSpace = medName.replace(/\s+/g, '');
     let medLog = findMedicineByKeyword(medicines, medName);
     
-    // PAC/팩 특수 처리
-    if (medNameNoSpace.includes('팩') || medNameNoSpace.toUpperCase().includes('PAC')) {
-      medLog = findMedicineByKeyword(medicines, '팩') || findMedicineByKeyword(medicines, 'PAC') || medLog;
+    // PAC/???뱀닔 泥섎━
+    if (medNameNoSpace.includes('??) || medNameNoSpace.toUpperCase().includes('PAC')) {
+      medLog = findMedicineByKeyword(medicines, '??) || findMedicineByKeyword(medicines, 'PAC') || medLog;
     }
 
     const siteName = getSiteSettings(db).site_name;
@@ -451,64 +451,64 @@ function buildBindingsForDate(db, date) {
     const mTotal = db.prepare('SELECT SUM(usage_amount) as total FROM medicine_logs WHERE medicine_name = ? AND site_name = ? AND date >= ? AND date <= ?').get(medName, siteName, monthStart, date)?.total || 0;
     const yTotal = db.prepare('SELECT SUM(usage_amount) as total FROM medicine_logs WHERE medicine_name = ? AND site_name = ? AND date >= ? AND date <= ?').get(medName, siteName, yearStart, date)?.total || 0;
 
-    // 기본 이름들
+    // 湲곕낯 ?대쫫??
     const baseNames = [medNameNoSpace];
-    if (medNameNoSpace.includes('포도당')) baseNames.push('포도당');
-    if (medNameNoSpace.includes('중탄산')) baseNames.push('중탄산', '중탄산나트륨');
-    if (medNameNoSpace.includes('팩') || medNameNoSpace.toUpperCase().includes('PAC')) baseNames.push('팩', 'PAC', '팩(PAC)', 'PAC팩');
+    if (medNameNoSpace.includes('?щ룄??)) baseNames.push('?щ룄??);
+    if (medNameNoSpace.includes('以묓깂??)) baseNames.push('以묓깂??, '以묓깂?곕굹?몃ⅷ');
+    if (medNameNoSpace.includes('??) || medNameNoSpace.toUpperCase().includes('PAC')) baseNames.push('??, 'PAC', '??PAC)', 'PAC??);
 
-    // 추가 확장을 위한 약품명 별명 매핑 (사용자가 엑셀에 지은 다양한 이름 지원)
-    if (medNameNoSpace.includes('알루민산') || medNameNoSpace.includes('알민산')) {
-      baseNames.push('알루민산', '알루민산나트륨', '알민산', '알민산나트륨');
+    // 異붽? ?뺤옣???꾪븳 ?쏀뭹紐?蹂꾨챸 留ㅽ븨 (?ъ슜?먭? ?묒???吏? ?ㅼ뼇???대쫫 吏??
+    if (medNameNoSpace.includes('?뚮（誘쇱궛') || medNameNoSpace.includes('?뚮???)) {
+      baseNames.push('?뚮（誘쇱궛', '?뚮（誘쇱궛?섑듃瑜?, '?뚮???, '?뚮??곕굹?몃ⅷ');
     }
-    if (medNameNoSpace.includes('차염') || medNameNoSpace.includes('차아염소산')) {
-      baseNames.push('차염', '차염소산', '차염소산나트륨', '차아염소산', '차아염소산나트륨');
+    if (medNameNoSpace.includes('李⑥뿼') || medNameNoSpace.includes('李⑥븘?쇱냼??)) {
+      baseNames.push('李⑥뿼', '李⑥뿼?뚯궛', '李⑥뿼?뚯궛?섑듃瑜?, '李⑥븘?쇱냼??, '李⑥븘?쇱냼?곕굹?몃ⅷ');
     }
-    if (medNameNoSpace.includes('인산나트륨') || medNameNoSpace.includes('인산염')) {
-      baseNames.push('인산나트륨', '인산염');
+    if (medNameNoSpace.includes('?몄궛?섑듃瑜?) || medNameNoSpace.includes('?몄궛??)) {
+      baseNames.push('?몄궛?섑듃瑜?, '?몄궛??);
     }
-    if (medNameNoSpace.includes('폴리머') || medNameNoSpace.toUpperCase().includes('POLYMER')) {
-      baseNames.push('폴리머', 'Polymer', 'POLYMER');
+    if (medNameNoSpace.includes('?대━癒?) || medNameNoSpace.toUpperCase().includes('POLYMER')) {
+      baseNames.push('?대━癒?, 'Polymer', 'POLYMER');
     }
 
-    // 중복 제거
+    // 以묐났 ?쒓굅
     const uniqueBaseNames = [...new Set(baseNames)];
 
     uniqueBaseNames.forEach(bName => {
-      bindings[`${bName}구입`] = purchase;
-      bindings[`${bName}구입량`] = purchase;
-      bindings[`${bName}사용`] = usage;
-      bindings[`${bName}사용량`] = usage;
-      bindings[`${bName}재고`] = inventory;
-      bindings[`${bName}재고량`] = inventory;
-      bindings[`${bName}잔량`] = inventory;
-      bindings[`월간${bName}`] = mTotal;
-      bindings[`연간${bName}`] = yTotal;
-      bindings[`${bName}월간`] = mTotal;
-      bindings[`${bName}월간누계`] = mTotal;
-      bindings[`${bName}월간사용량누계`] = mTotal;
-      bindings[`${bName}연간`] = yTotal;
-      bindings[`${bName}연간누계`] = yTotal;
+      bindings[`${bName}援ъ엯`] = purchase;
+      bindings[`${bName}援ъ엯??] = purchase;
+      bindings[`${bName}?ъ슜`] = usage;
+      bindings[`${bName}?ъ슜??] = usage;
+      bindings[`${bName}?ш퀬`] = inventory;
+      bindings[`${bName}?ш퀬??] = inventory;
+      bindings[`${bName}?붾웾`] = inventory;
+      bindings[`?붽컙${bName}`] = mTotal;
+      bindings[`?곌컙${bName}`] = yTotal;
+      bindings[`${bName}?붽컙`] = mTotal;
+      bindings[`${bName}?붽컙?꾧퀎`] = mTotal;
+      bindings[`${bName}?붽컙?ъ슜?됰늻怨?] = mTotal;
+      bindings[`${bName}?곌컙`] = yTotal;
+      bindings[`${bName}?곌컙?꾧퀎`] = yTotal;
       bindings[`${bName}_purchase`] = purchase;
       bindings[`${bName}_usage`] = usage;
       bindings[`${bName}_inventory`] = inventory;
     });
 
-    // 추가약품 호환용 (첫 3개 기본약품 제외한 나머지)
-    // 포도당(1), 중탄산(2), 팩(3) 제외
+    // 異붽??쏀뭹 ?명솚??(泥?3媛?湲곕낯?쏀뭹 ?쒖쇅???섎㉧吏)
+    // ?щ룄??1), 以묓깂??2), ??3) ?쒖쇅
     if (idx >= 3) {
        const extraIdx = idx - 2;
-       // 사용자의 의도대로 현장별 추가 약품 이름을 엑셀 폼에 동적으로 뿌려줌.
-       bindings[`추가약품명${extraIdx}`] = medName;
-       bindings[`추가약품${extraIdx}구입`] = purchase;
-       bindings[`추가약품${extraIdx}사용`] = usage;
-       bindings[`추가약품${extraIdx}재고`] = inventory;
-       bindings[`월간추가약품${extraIdx}`] = mTotal;
-       bindings[`연간추가약품${extraIdx}`] = yTotal;
+       // ?ъ슜?먯쓽 ?섎룄?濡??꾩옣蹂?異붽? ?쏀뭹 ?대쫫???묒? ?쇱뿉 ?숈쟻?쇰줈 肉뚮젮以?
+       bindings[`異붽??쏀뭹紐?{extraIdx}`] = medName;
+       bindings[`異붽??쏀뭹${extraIdx}援ъ엯`] = purchase;
+       bindings[`異붽??쏀뭹${extraIdx}?ъ슜`] = usage;
+       bindings[`異붽??쏀뭹${extraIdx}?ш퀬`] = inventory;
+       bindings[`?붽컙異붽??쏀뭹${extraIdx}`] = mTotal;
+       bindings[`?곌컙異붽??쏀뭹${extraIdx}`] = yTotal;
     }
   });
 
-  // --- 키트 데이터 ---
+  // --- ?ㅽ듃 ?곗씠??---
   let allKitItems = getActiveConfigItems(db, 'kit');
   allKitItems = allKitItems.filter(item => {
     const name = item.item_name || '';
@@ -529,81 +529,81 @@ function buildBindingsForDate(db, date) {
     const yTotal = db.prepare('SELECT SUM(usage_amount) as total FROM kit_logs WHERE kit_name = ? AND site_name = ? AND date >= ? AND date <= ?').get(kitName, siteName, yearStart, date)?.total || 0;
 
     const baseNames = [kitNameNoSpace];
-    if (kitNameNoSpace.includes('암모니아') || kitNameNoSpace.toUpperCase().includes('NH3')) {
-      baseNames.push('암모니아', 'NH3', 'NH3-N', 'NH3_N', 'NH3-N', 'NH3 -N');
+    if (kitNameNoSpace.includes('?붾え?덉븘') || kitNameNoSpace.toUpperCase().includes('NH3')) {
+      baseNames.push('?붾え?덉븘', 'NH3', 'NH3-N', 'NH3_N', 'NH3-N', 'NH3 -N');
     }
-    if (kitNameNoSpace.includes('질산') || kitNameNoSpace.toUpperCase().includes('NO3')) {
-      baseNames.push('질산', 'NO3', 'NO3-N', 'NO3_N');
+    if (kitNameNoSpace.includes('吏덉궛') || kitNameNoSpace.toUpperCase().includes('NO3')) {
+      baseNames.push('吏덉궛', 'NO3', 'NO3-N', 'NO3_N');
     }
-    if (kitNameNoSpace.includes('인산염') || kitNameNoSpace.includes('오르토인산염') || kitNameNoSpace.toUpperCase().includes('PO4')) {
-      baseNames.push('인', 'PO4', 'PO4-P', 'PO4_P');
+    if (kitNameNoSpace.includes('?몄궛??) || kitNameNoSpace.includes('?ㅻⅤ?좎씤?곗뿼') || kitNameNoSpace.toUpperCase().includes('PO4')) {
+      baseNames.push('??, 'PO4', 'PO4-P', 'PO4_P');
     }
-    if (kitNameNoSpace.includes('알칼리') || kitNameNoSpace.toUpperCase().includes('ALK')) {
-      baseNames.push('알칼리', 'ALK');
+    if (kitNameNoSpace.includes('?뚯뭡由?) || kitNameNoSpace.toUpperCase().includes('ALK')) {
+      baseNames.push('?뚯뭡由?, 'ALK');
     }
 
-    // 중복 제거
+    // 以묐났 ?쒓굅
     const uniqueKitBaseNames = [...new Set(baseNames)];
 
     uniqueKitBaseNames.forEach(bName => {
-      bindings[`${bName}구입`] = purchase;
-      bindings[`${bName}구입량`] = purchase;
-      bindings[`${bName}사용`] = usage;
-      bindings[`${bName}사용량`] = usage;
-      bindings[`${bName}재고`] = inventory;
-      bindings[`${bName}재고량`] = inventory;
-      bindings[`${bName}잔량`] = inventory;
-      bindings[`${bName}`] = inventory; // 셀 이름이 'NH3-N' 등일 때 기본으로 재고(계산값) 바인딩
+      bindings[`${bName}援ъ엯`] = purchase;
+      bindings[`${bName}援ъ엯??] = purchase;
+      bindings[`${bName}?ъ슜`] = usage;
+      bindings[`${bName}?ъ슜??] = usage;
+      bindings[`${bName}?ш퀬`] = inventory;
+      bindings[`${bName}?ш퀬??] = inventory;
+      bindings[`${bName}?붾웾`] = inventory;
+      bindings[`${bName}`] = inventory; // ? ?대쫫??'NH3-N' ?깆씪 ??湲곕낯?쇰줈 ?ш퀬(怨꾩궛媛? 諛붿씤??
       bindings[`${bName}_inventory`] = inventory;
       bindings[`${bName}_usage`] = usage;
       bindings[`${bName}_purchase`] = purchase;
-      bindings[`월간${bName}`] = mTotal;
-      bindings[`연간${bName}`] = yTotal;
-      bindings[`${bName}월간`] = mTotal;
-      bindings[`${bName}월간누계`] = mTotal;
-      bindings[`${bName}월간사용량누계`] = mTotal;
-      bindings[`${bName}연간`] = yTotal;
-      bindings[`${bName}연간누계`] = yTotal;
+      bindings[`?붽컙${bName}`] = mTotal;
+      bindings[`?곌컙${bName}`] = yTotal;
+      bindings[`${bName}?붽컙`] = mTotal;
+      bindings[`${bName}?붽컙?꾧퀎`] = mTotal;
+      bindings[`${bName}?붽컙?ъ슜?됰늻怨?] = mTotal;
+      bindings[`${bName}?곌컙`] = yTotal;
+      bindings[`${bName}?곌컙?꾧퀎`] = yTotal;
     });
   });
 
-  // --- 전력 (flow_readings에서 '전력' 타입) ---
-  const flowPower = findFlowByKeyword(flows, '전력');
-  const prevFlowPower = findFlowByKeyword(prevFlows, '전력');
-  bindings['전일전력'] = prevFlowPower?.raw_value ?? '';
-  bindings['금일전력'] = flowPower?.raw_value ?? '';
-  bindings['전력사용'] = flowPower?.calculated_flow ?? '';
-  bindings['전력사용량'] = flowPower?.calculated_flow ?? '';
+  // --- ?꾨젰 (flow_readings?먯꽌 '?꾨젰' ??? ---
+  const flowPower = findFlowByKeyword(flows, '?꾨젰');
+  const prevFlowPower = findFlowByKeyword(prevFlows, '?꾨젰');
+  bindings['?꾩씪?꾨젰'] = prevFlowPower?.raw_value ?? '';
+  bindings['湲덉씪?꾨젰'] = flowPower?.raw_value ?? '';
+  bindings['?꾨젰?ъ슜'] = flowPower?.calculated_flow ?? '';
+  bindings['?꾨젰?ъ슜??] = flowPower?.calculated_flow ?? '';
   
-  // kw당 사용량 = (금일 전력사용량) / (금일 방류수 처리량)
+  // kw???ъ슜??= (湲덉씪 ?꾨젰?ъ슜?? / (湲덉씪 諛⑸쪟??泥섎━??
   let kwPerM3 = '';
   const parsedPowerFlow = parseFloat(flowPower?.calculated_flow);
-  const parsedOutFlow = parseFloat(flowOut?.calculated_flow); // 방류처리량(calculated_flow) 사용
+  const parsedOutFlow = parseFloat(flowOut?.calculated_flow); // 諛⑸쪟泥섎━??calculated_flow) ?ъ슜
   if (!isNaN(parsedPowerFlow) && !isNaN(parsedOutFlow) && parsedOutFlow > 0) {
-    kwPerM3 = (parsedPowerFlow / parsedOutFlow).toFixed(3); // 1m3당 사용량 (보통 소수점 3자리까지)
+    kwPerM3 = (parsedPowerFlow / parsedOutFlow).toFixed(3); // 1m3???ъ슜??(蹂댄넻 ?뚯닔??3?먮━源뚯?)
   }
-  bindings['kw당사용량'] = kwPerM3;
-  bindings['전력효율'] = kwPerM3;
-  bindings['1m3당사용량'] = kwPerM3;
+  bindings['kw?뱀궗?⑸웾'] = kwPerM3;
+  bindings['?꾨젰?⑥쑉'] = kwPerM3;
+  bindings['1m3?뱀궗?⑸웾'] = kwPerM3;
 
-  // 전력계산(방류량/전력량 계산값) 바인딩
-  bindings['전력계산'] = kwPerM3;
+  // ?꾨젰怨꾩궛(諛⑸쪟???꾨젰??怨꾩궛媛? 諛붿씤??
+  bindings['?꾨젰怨꾩궛'] = kwPerM3;
 
-  // --- 수질 분석 (향후 구현, 현재는 빈 값) ---
-  ['ph', 'bod', 'toc', 'ss', 'tn', 'tp', '대장균'].forEach(item => {
-    bindings[`수질${item}1`] = '';
-    bindings[`수질${item}2`] = '';
+  // --- ?섏쭏 遺꾩꽍 (?ν썑 援ы쁽, ?꾩옱??鍮?媛? ---
+  ['ph', 'bod', 'toc', 'ss', 'tn', 'tp', '??κ퇏'].forEach(item => {
+    bindings[`?섏쭏${item}1`] = '';
+    bindings[`?섏쭏${item}2`] = '';
   });
-  bindings['수질날짜1'] = '';
-  bindings['수질날짜2'] = '';
+  bindings['?섏쭏?좎쭨1'] = '';
+  bindings['?섏쭏?좎쭨2'] = '';
 
-  // --- 기타 (수동 입력) ---
-  bindings['수온'] = '';
-  bindings['산소'] = '';
+  // --- 湲고? (?섎룞 ?낅젰) ---
+  bindings['?섏삩'] = '';
+  bindings['?곗냼'] = '';
   bindings['ml'] = '';
   bindings['svi'] = '';
-  // 엑셀 이름 관리자의 영문 대소문자 명명(PAC vs pac, NH3-N vs NH3_N 등) 차이를
-  // 근본적으로 백엔드단에서 무력화하기 위해 모든 바인딩 키를 정규화하여 복제합니다.
+  // ?묒? ?대쫫 愿由ъ옄???곷Ц ??뚮Ц??紐낅챸(PAC vs pac, NH3-N vs NH3_N ?? 李⑥씠瑜?
+  // 洹쇰낯?곸쑝濡?諛깆뿏?쒕떒?먯꽌 臾대젰?뷀븯湲??꾪빐 紐⑤뱺 諛붿씤???ㅻ? ?뺢퇋?뷀븯??蹂듭젣?⑸땲??
   const normalizedBindings = { ...bindings };
   for (const [key, val] of Object.entries(bindings)) {
     if (key) {
@@ -707,18 +707,18 @@ async function bindWorkbookToPage(templatePath, workbookPath, bindings) {
       draft: false,
     };
 
-    // 셀 이름을 정규화하여 바인딩에서 찾기
+    // ? ?대쫫???뺢퇋?뷀븯??諛붿씤?⑹뿉??李얘린
     const normalizedName = namedCell.normalizedName;
     const originalName = namedCell.name;
 
-    // 정규화된 이름으로 먼저 찾고, 없으면 원래 이름으로 찾기
+    // ?뺢퇋?붾맂 ?대쫫?쇰줈 癒쇱? 李얘퀬, ?놁쑝硫??먮옒 ?대쫫?쇰줈 李얘린
     let value;
     if (Object.prototype.hasOwnProperty.call(bindings, normalizedName)) {
       value = bindings[normalizedName];
     } else if (Object.prototype.hasOwnProperty.call(bindings, originalName)) {
       value = bindings[originalName];
     } else {
-      // 바인딩에 없는 셀은 건드리지 않음 (사용자 수동 입력용)
+      // 諛붿씤?⑹뿉 ?녿뒗 ?? 嫄대뱶由ъ? ?딆쓬 (?ъ슜???섎룞 ?낅젰??
       continue;
     }
 
@@ -801,7 +801,7 @@ async function mergePdfFiles(pdfPaths, outputPath) {
 
 async function buildBatchPreviewPdf({ db, appDataPath, templateInfo, manifest }) {
   if (!manifest.pages.length) {
-    throw new Error('선택한 기간에 데이터가 없습니다.');
+    throw new Error('?좏깮??湲곌컙???곗씠?곌? ?놁뒿?덈떎.');
   }
 
   const pageResults = [];
@@ -861,15 +861,15 @@ function cloneSheet(workbook, sourceSheet, newSheetName) {
   return newSheet;
 }
 
-// --- 엑셀 내보내기: JSZip 기반 (도형/이미지/카메라 보존) ---
+// --- ?묒? ?대낫?닿린: JSZip 湲곕컲 (?꾪삎/?대?吏/移대찓??蹂댁〈) ---
 
 /**
- * xlsx 파일을 zip으로 열어, definedNames에서 셀 이름 ↔ 셀 주소 매핑을 추출한다.
- * ExcelJS는 사용하지 않고, workbook.xml의 XML을 직접 파싱한다.
+ * xlsx ?뚯씪??zip?쇰줈 ?댁뼱, definedNames?먯꽌 ? ?대쫫 ??? 二쇱냼 留ㅽ븨??異붿텧?쒕떎.
+ * ExcelJS???ъ슜?섏? ?딄퀬, workbook.xml??XML??吏곸젒 ?뚯떛?쒕떎.
  */
 function parseDefinedNamesFromXml(workbookXml) {
   const names = [];
-  // <definedName name="..." ...>RANGE</definedName> 패턴 매칭
+  // <definedName name="..." ...>RANGE</definedName> ?⑦꽩 留ㅼ묶
   const regex = /<definedName\s+name="([^"]+)"[^>]*>([^<]+)<\/definedName>/g;
   let match;
   while ((match = regex.exec(workbookXml)) !== null) {
@@ -884,8 +884,8 @@ function parseDefinedNamesFromXml(workbookXml) {
 }
 
 /**
- * workbook.xml에서 시트 이름 → rId 매핑을, workbook.xml.rels에서 rId → 파일명 매핑을 추출하여
- * 시트 이름 → 실제 zip 경로를 반환한다.
+ * workbook.xml?먯꽌 ?쒗듃 ?대쫫 ??rId 留ㅽ븨?? workbook.xml.rels?먯꽌 rId ???뚯씪紐?留ㅽ븨??異붿텧?섏뿬
+ * ?쒗듃 ?대쫫 ???ㅼ젣 zip 寃쎈줈瑜?諛섑솚?쒕떎.
  */
 function resolveSheetPaths(workbookXml, relsXml) {
   const sheetMap = {};
@@ -893,21 +893,21 @@ function resolveSheetPaths(workbookXml, relsXml) {
   const sheetRegex = /<sheet\s+name="([^"]+)"[^>]*r:id="([^"]+)"[^>]*\/?>/g;
   let m;
   while ((m = sheetRegex.exec(workbookXml)) !== null) {
-    sheetMap[m[1]] = m[2]; // name → rId
+    sheetMap[m[1]] = m[2]; // name ??rId
   }
 
   const relMap = {};
   // <Relationship Id="..." ... Target="..."/>
   const relRegex = /<Relationship\s[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"[^>]*/g;
   while ((m = relRegex.exec(relsXml)) !== null) {
-    relMap[m[1]] = m[2]; // rId → target path
+    relMap[m[1]] = m[2]; // rId ??target path
   }
 
   const result = {};
   for (const [sheetName, rId] of Object.entries(sheetMap)) {
     const target = relMap[rId];
     if (target) {
-      // target은 "worksheets/sheet1.xml" 형태, zip 경로는 "xl/worksheets/sheet1.xml"
+      // target? "worksheets/sheet1.xml" ?뺥깭, zip 寃쎈줈??"xl/worksheets/sheet1.xml"
       result[sheetName] = target.startsWith('/') ? target.slice(1) : `xl/${target}`;
     }
   }
@@ -915,7 +915,7 @@ function resolveSheetPaths(workbookXml, relsXml) {
 }
 
 /**
- * 셀 주소(예: "F5")를 열 번호(1-based)로 변환한다.
+ * ? 二쇱냼(?? "F5")瑜???踰덊샇(1-based)濡?蹂?섑븳??
  */
 function colLetterToNumber(letters) {
   let n = 0;
@@ -926,7 +926,7 @@ function colLetterToNumber(letters) {
 }
 
 /**
- * 열 번호(1-based)를 셀 주소 문자열(예: "AF")로 변환한다.
+ * ??踰덊샇(1-based)瑜?? 二쇱냼 臾몄옄???? "AF")濡?蹂?섑븳??
  */
 function colNumberToLetter(num) {
   let result = '';
@@ -939,11 +939,11 @@ function colNumberToLetter(num) {
 }
 
 /**
- * 시트 XML 내에서 특정 셀의 값을 교체한다.
- * 기존 셀 태그의 <v>...</v> 값을 새 값으로 교체하거나,
- * 셀이 없으면 해당 행에 새 셀을 삽입한다.
+ * ?쒗듃 XML ?댁뿉???뱀젙 ???媛믪쓣 援먯껜?쒕떎.
+ * 湲곗〈 ? ?쒓렇??<v>...</v> 媛믪쓣 ??媛믪쑝濡?援먯껜?섍굅??
+ * ????놁쑝硫??대떦 ?됱뿉 ??????쎌엯?쒕떎.
  *
- * 숫자 값은 <v>로, 문자열은 inlineStr 방식의 <is><t>로 저장한다.
+ * ?レ옄 媛믪? <v>濡? 臾몄옄?댁? inlineStr 諛⑹떇??<is><t>濡???ν븳??
  */
 function setCellInSheetXml(sheetXml, address, value) {
   const colMatch = address.match(/^([A-Z]+)(\d+)$/);
@@ -954,8 +954,8 @@ function setCellInSheetXml(sheetXml, address, value) {
   const strValue = value === undefined || value === null ? '' : String(value);
   const isNum = strValue !== '' && !isNaN(Number(strValue)) && isFinite(Number(strValue));
 
-  // 기존 셀을 찾아서 교체
-  // <c r="F5" ...>...</c> 또는 <c r="F5" .../>
+  // 湲곗〈 ???李얠븘??援먯껜
+  // <c r="F5" ...>...</c> ?먮뒗 <c r="F5" .../>
   const cellRegex = new RegExp(
     `(<c\\s[^>]*r="${address}"[^>]*?)(?:\\/>|>([\\s\\S]*?)<\\/c>)`,
     'i'
@@ -963,15 +963,15 @@ function setCellInSheetXml(sheetXml, address, value) {
   const cellMatch = cellRegex.exec(sheetXml);
 
   if (cellMatch) {
-    // 기존 셀이 있음 → 값 교체
+    // 湲곗〈 ????덉쓬 ??媛?援먯껜
     let openTag = cellMatch[1];
     if (isNum) {
-      // 숫자: t 속성 제거, <v> 사용
+      // ?レ옄: t ?띿꽦 ?쒓굅, <v> ?ъ슜
       openTag = openTag.replace(/\s+t="[^"]*"/, '');
       const replacement = `${openTag}><v>${strValue}</v></c>`;
       return sheetXml.replace(cellMatch[0], replacement);
     } else {
-      // 문자열: t="inlineStr", <is><t> 사용
+      // 臾몄옄?? t="inlineStr", <is><t> ?ъ슜
       openTag = openTag.replace(/\s+t="[^"]*"/, '');
       openTag = openTag.replace(/(r="[^"]+")/, `$1 t="inlineStr"`);
       const escaped = strValue.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -980,7 +980,7 @@ function setCellInSheetXml(sheetXml, address, value) {
     }
   }
 
-  // 셀이 없으면 → 해당 행에 새 셀을 삽입
+  // ????놁쑝硫????대떦 ?됱뿉 ??????쎌엯
   const rowRegex = new RegExp(`(<row\\s[^>]*r="${rowNum}"[^>]*?>)([\\s\\S]*?)(<\\/row>)`, 'i');
   const rowMatch = rowRegex.exec(sheetXml);
   if (rowMatch) {
@@ -995,14 +995,14 @@ function setCellInSheetXml(sheetXml, address, value) {
     return sheetXml.replace(rowMatch[0], updatedRow);
   }
 
-  return sheetXml; // 행도 없으면 변경하지 않음
+  return sheetXml; // ?됰룄 ?놁쑝硫?蹂寃쏀븯吏 ?딆쓬
 }
 
 async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }) {
   const JSZip = require('jszip');
 
   if (!manifest.pages.length) {
-    throw new Error('선택한 기간에 데이터가 없습니다.');
+    throw new Error('?좏깮??湲곌컙???곗씠?곌? ?놁뒿?덈떎.');
   }
 
   cleanupOldExportTempFiles();
@@ -1027,20 +1027,20 @@ async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }
 
   console.log(`[Daily Work Log Export] JSZip multi-sheet: ${namedCells.length} named cells, template sheet: "${firstSheetName}"`);
 
-  // 원본 시트 관련 파일 경로 파악
+  // ?먮낯 ?쒗듃 愿???뚯씪 寃쎈줈 ?뚯븙
   const sheetFileName = path.basename(firstSheetZipPath); // "sheet1.xml"
   const sheetBaseName = path.parse(sheetFileName).name;   // "sheet1"
   const sheetDir = path.dirname(firstSheetZipPath);       // "xl/worksheets"
 
-  // 원본 시트 XML 읽기
+  // ?먮낯 ?쒗듃 XML ?쎄린
   const templateSheetXml = await zip.file(firstSheetZipPath).async('string');
 
-  // 원본 시트의 rels 파일 (도형/이미지 참조)
+  // ?먮낯 ?쒗듃??rels ?뚯씪 (?꾪삎/?대?吏 李몄“)
   const sheetRelsPath = `${sheetDir}/_rels/${sheetFileName}.rels`;
   const hasSheetRels = !!zip.file(sheetRelsPath);
   const templateSheetRels = hasSheetRels ? await zip.file(sheetRelsPath).async('string') : null;
 
-  // 원본 시트의 drawing 파일 찾기
+  // ?먮낯 ?쒗듃??drawing ?뚯씪 李얘린
   let templateDrawingPath = null;
   let templateDrawingXml = null;
   let templateDrawingRelsPath = null;
@@ -1053,7 +1053,7 @@ async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }
         ? drawTarget.slice(1)
         : path.posix.join('xl/worksheets', drawTarget).replace(/\.\.\//g, '').replace('worksheets/drawings', 'drawings');
 
-      // normalize path: ../drawings/drawing1.xml → xl/drawings/drawing1.xml
+      // normalize path: ../drawings/drawing1.xml ??xl/drawings/drawing1.xml
       if (drawTarget.startsWith('..')) {
         templateDrawingPath = path.posix.normalize(`xl/worksheets/${drawTarget}`);
       }
@@ -1069,28 +1069,28 @@ async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }
     }
   }
 
-  // 원본 시트의 인쇄 영역 definedName 항목 추출을 위한 준비
+  // ?먮낯 ?쒗듃???몄뇙 ?곸뿭 definedName ??ぉ 異붿텧???꾪븳 以鍮?
   const escapedOrigName = firstSheetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  // wbRelsXml에서 기존 최대 rId 번호 찾기
+  // wbRelsXml?먯꽌 湲곗〈 理쒕? rId 踰덊샇 李얘린
   const rIdMatches = [...wbRelsXml.matchAll(/Id="rId(\d+)"/g)];
   let maxRId = rIdMatches.reduce((max, m) => Math.max(max, parseInt(m[1])), 0);
 
-  // wbXml에서 기존 최대 sheetId 찾기
+  // wbXml?먯꽌 湲곗〈 理쒕? sheetId 李얘린
   const sheetIdMatches = [...wbXml.matchAll(/sheetId="(\d+)"/g)];
   let maxSheetId = sheetIdMatches.reduce((max, m) => Math.max(max, parseInt(m[1])), 0);
 
-  // [Content_Types].xml에서 기존 시트 Override 추가용 위치 찾기
+  // [Content_Types].xml?먯꽌 湲곗〈 ?쒗듃 Override 異붽????꾩튂 李얘린
   const contentTypeInsertPoint = '</Types>';
 
-  // 각 날짜에 대해 시트를 복제하고 바인딩 적용
+  // 媛??좎쭨??????쒗듃瑜?蹂듭젣?섍퀬 諛붿씤???곸슜
   for (let i = 0; i < manifest.pages.length; i++) {
     const page = manifest.pages[i];
-    const pageDate = page.date || '날짜미상';
+    const pageDate = page.date || '?좎쭨誘몄긽';
     const bindings = buildBindingsForDate(db, page.date);
 
     if (i === 0) {
-      // === 첫 번째 시트: 원본 시트를 직접 수정 ===
+      // === 泥?踰덉㎏ ?쒗듃: ?먮낯 ?쒗듃瑜?吏곸젒 ?섏젙 ===
       let sheetXml = templateSheetXml;
       for (const nc of namedCells) {
         if (nc.cell.sheetName !== firstSheetName) continue;
@@ -1104,24 +1104,24 @@ async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }
       }
       zip.file(firstSheetZipPath, sheetXml);
 
-      // 시트 이름 변경
+      // ?쒗듃 ?대쫫 蹂寃?
       wbXml = wbXml.replace(
         new RegExp(`name="${escapedOrigName}"`),
         `name="${pageDate}"`
       );
-      // definedName 참조도 업데이트
+      // definedName 李몄“???낅뜲?댄듃
       wbXml = wbXml.replace(new RegExp(`'${escapedOrigName}'!`, 'g'), `'${pageDate}'!`);
       wbXml = wbXml.replace(new RegExp(`${escapedOrigName}!`, 'g'), `'${pageDate}'!`);
 
     } else {
-      // === 추가 시트: 시트 XML/도면/rels를 복사 ===
+      // === 異붽? ?쒗듃: ?쒗듃 XML/?꾨㈃/rels瑜?蹂듭궗 ===
       const newSheetNum = i + 1;
       const newSheetFileName = `sheet${maxSheetId + newSheetNum}.xml`;
       const newSheetZipPath = `${sheetDir}/${newSheetFileName}`;
       const newRId = `rId${++maxRId}`;
       const newSheetId = ++maxSheetId;
 
-      // 시트 XML 복사 및 바인딩
+      // ?쒗듃 XML 蹂듭궗 諛?諛붿씤??
       let newSheetXml = templateSheetXml;
       for (const nc of namedCells) {
         if (nc.cell.sheetName !== firstSheetName) continue;
@@ -1135,12 +1135,12 @@ async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }
       }
       zip.file(newSheetZipPath, newSheetXml);
 
-      // 시트 rels 복사 (도면 참조 포함)
+      // ?쒗듃 rels 蹂듭궗 (?꾨㈃ 李몄“ ?ы븿)
       let newDrawingPath = null;
       if (templateSheetRels) {
         let newSheetRels = templateSheetRels;
 
-        // drawing 파일도 복제
+        // drawing ?뚯씪??蹂듭젣
         if (templateDrawingPath && templateDrawingXml) {
           const drawingBaseName = path.parse(path.basename(templateDrawingPath)).name;
           const newDrawingFileName = `${drawingBaseName}_s${newSheetNum}.xml`;
@@ -1148,13 +1148,13 @@ async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }
 
           zip.file(newDrawingPath, templateDrawingXml);
 
-          // drawing rels도 복사 (이미지 참조)
+          // drawing rels??蹂듭궗 (?대?吏 李몄“)
           if (templateDrawingRels) {
             const newDrawingRelsPath = `${path.dirname(templateDrawingPath)}/_rels/${newDrawingFileName}.rels`;
             zip.file(newDrawingRelsPath, templateDrawingRels);
           }
 
-          // 시트 rels에서 drawing 경로를 새 경로로 교체
+          // ?쒗듃 rels?먯꽌 drawing 寃쎈줈瑜???寃쎈줈濡?援먯껜
           const oldDrawingTarget = path.basename(templateDrawingPath);
           newSheetRels = newSheetRels.replace(oldDrawingTarget, newDrawingFileName);
         }
@@ -1163,20 +1163,20 @@ async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }
         zip.file(newSheetRelsPath, newSheetRels);
       }
 
-      // workbook.xml에 새 시트 등록
+      // workbook.xml?????쒗듃 ?깅줉
       const sheetInsertRegex = /(<\/sheets>)/;
       wbXml = wbXml.replace(
         sheetInsertRegex,
         `<sheet name="${pageDate}" sheetId="${newSheetId}" r:id="${newRId}"/></sheets>`
       );
 
-      // 인쇄영역 등 definedName을 새 시트에도 적용
-      // localSheetId는 시트 순서 (0-based index)
+      // ?몄뇙?곸뿭 ??definedName?????쒗듃?먮룄 ?곸슜
+      // localSheetId???쒗듃 ?쒖꽌 (0-based index)
       const printAreaRegex = /<definedName\s+name="_xlnm\.Print_Area"[^>]*>([^<]+)<\/definedName>/;
       const printAreaMatch = printAreaRegex.exec(wbXml);
       if (printAreaMatch) {
         const origRange = printAreaMatch[1];
-        // 첫 시트 이름으로 된 참조를 새 시트 이름으로 교체
+        // 泥??쒗듃 ?대쫫?쇰줈 ??李몄“瑜????쒗듃 ?대쫫?쇰줈 援먯껜
         const newRangeRef = origRange.replace(
           new RegExp(`'[^']*'!`),
           `'${pageDate}'!`
@@ -1185,19 +1185,19 @@ async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }
         wbXml = wbXml.replace('</definedNames>', `${newDefinedName}</definedNames>`);
       }
 
-      // workbook.xml.rels에 새 관계 등록
+      // workbook.xml.rels????愿怨??깅줉
       wbRelsXml = wbRelsXml.replace(
         '</Relationships>',
         `<Relationship Id="${newRId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/${newSheetFileName}"/></Relationships>`
       );
 
-      // [Content_Types].xml에 새 시트 등록
+      // [Content_Types].xml?????쒗듃 ?깅줉
       contentTypesXml = contentTypesXml.replace(
         contentTypeInsertPoint,
         `<Override PartName="/xl/worksheets/${newSheetFileName}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>${contentTypeInsertPoint}`
       );
 
-      // drawing도 [Content_Types].xml에 등록
+      // drawing??[Content_Types].xml???깅줉
       if (newDrawingPath) {
         const drawingPartName = '/' + newDrawingPath.replace(/\\/g, '/');
         contentTypesXml = contentTypesXml.replace(
@@ -1208,7 +1208,7 @@ async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest }
     }
   }
 
-  // 수정된 메타 XML들을 zip에 반영
+  // ?섏젙??硫뷀? XML?ㅼ쓣 zip??諛섏쁺
   zip.file('xl/workbook.xml', wbXml);
   zip.file('xl/_rels/workbook.xml.rels', wbRelsXml);
   zip.file('[Content_Types].xml', contentTypesXml);

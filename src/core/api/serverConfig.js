@@ -3,8 +3,8 @@
  * 서버가 포트 충돌로 8901 이 아닌 다른 포트를 사용할 경우에도 자동으로 찾아 연결합니다.
  */
 
-const PORT_MIN = 8901;
-const PORT_MAX = 8950;
+const PORT_MIN = 18731;
+const PORT_MAX = 18734;
 const PING_TIMEOUT_MS = 600;
 const CACHE_KEY = 'osoo_server_port';
 

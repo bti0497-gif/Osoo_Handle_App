@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { parseNamedRanges, buildExcelTempPath, openExcelFile } = require('../services/excelOpenService.cjs');
@@ -7,17 +7,17 @@ const { resolveReportTemplatePath } = require('../services/reportTemplateService
 
 const router = express.Router();
 
-// 기본 3종 약품 (순서 고정)
-const BASE_MEDICINES = ['포도당', '중탄산나트륨', '팩(PAC)'];
-// 기본 4종 키트 (순서 고정)
-const BASE_KITS = ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '인산염인(PO4-P)', '알칼리도(ALK)'];
+// 湲곕낯 3醫??쏀뭹 (?쒖꽌 怨좎젙)
+const BASE_MEDICINES = ['?щ룄??, '以묓깂?곕굹?몃ⅷ', '??PAC)'];
+// 湲곕낯 4醫??ㅽ듃 (?쒖꽌 怨좎젙)
+const BASE_KITS = ['?붾え?덉븘?깆쭏??NH3-N)', '吏덉궛?깆쭏??NO3-N)', '?몄궛?쇱씤(PO4-P)', '?뚯뭡由щ룄(ALK)'];
 
 /**
- * 월간 집계 데이터를 조회한다.
- * - purchase  : 해당 월 구매량 합계
- * - usage     : 해당 월 사용량 합계
- * - yearTotal : 해당 연도 1월 ~ 해당 월 사용량 누계
- * - balance   : 해당 월 내 가장 최근 current_inventory
+ * ?붽컙 吏묎퀎 ?곗씠?곕? 議고쉶?쒕떎.
+ * - purchase  : ?대떦 ??援щℓ???⑷퀎
+ * - usage     : ?대떦 ???ъ슜???⑷퀎
+ * - yearTotal : ?대떦 ?곕룄 1??~ ?대떦 ???ъ슜???꾧퀎
+ * - balance   : ?대떦 ????媛??理쒓렐 current_inventory
  */
 function getAggregate(db, table, nameCol, name, startDate, endDate, yearStart) {
   const purchase = db.prepare(
@@ -56,7 +56,7 @@ async function exportMedicineRegisterXlsx({ templatePath, outputPath, year, mont
   await wb.xlsx.readFile(templatePath);
 
   const ws = wb.worksheets[0];
-  if (!ws) throw new Error('약품관리대장 템플릿 시트를 찾을 수 없습니다.');
+  if (!ws) throw new Error('?쏀뭹愿由щ????쒗뵆由??쒗듃瑜?李얠쓣 ???놁뒿?덈떎.');
 
   const namedMap = parseNamedRanges(wb);
   const normalizeNamed = (s) => String(s || '')
@@ -88,53 +88,53 @@ async function exportMedicineRegisterXlsx({ templatePath, outputPath, year, mont
   const mm = String(month).padStart(2, '0');
   const medicineNames = [...BASE_MEDICINES, ...extraMedicines].filter(Boolean);
 
-  // 공통 헤더
-  setNamed('대장명', `${year}년 ${Number(month)}월 약품관리대장`);
-  setNamed('현장명', siteName || '');
-  setNamed('사용약품', medicineNames.length ? `(${medicineNames.join(', ')})` : '()');
+  // 怨듯넻 ?ㅻ뜑
+  setNamed('??λ챸', `${year}??${Number(month)}???쏀뭹愿由щ???);
+  setNamed('?꾩옣紐?, siteName || '');
+  setNamed('?ъ슜?쏀뭹', medicineNames.length ? `(${medicineNames.join(', ')})` : '()');
 
-  // 기본 약품명/수치
+  // 湲곕낯 ?쏀뭹紐??섏튂
   BASE_MEDICINES.forEach((name, idx) => {
     const i = idx + 1;
     const row = medicineData[idx] || {};
-    setNamed(`약${i}약품명`, name);
-    setNamed(`약${i}구매`, formatNumber(row.purchase));
-    setNamed(`약${i}사용`, formatNumber(row.usage));
-    setNamed(`약${i}누계`, formatNumber(row.yearTotal));
-    setNamed(`약${i}잔량`, formatNumber(row.balance));
+    setNamed(`??{i}?쏀뭹紐?, name);
+    setNamed(`??{i}援щℓ`, formatNumber(row.purchase));
+    setNamed(`??{i}?ъ슜`, formatNumber(row.usage));
+    setNamed(`??{i}?꾧퀎`, formatNumber(row.yearTotal));
+    setNamed(`??{i}?붾웾`, formatNumber(row.balance));
   });
 
-  // 추가 약품(최대 3개)
+  // 異붽? ?쏀뭹(理쒕? 3媛?
   for (let i = 1; i <= 3; i++) {
     const row = extraData[i - 1] || {};
     const hasName = Boolean(row.name);
-    setNamed(`추${i}약품명`, row.name || '');
-    setNamed(`추${i}구매`, hasName ? formatNumber(row.purchase) : '');
-    setNamed(`추${i}사용`, hasName ? formatNumber(row.usage) : '');
-    setNamed(`추${i}누계`, hasName ? formatNumber(row.yearTotal) : '');
-    setNamed(`추${i}잔량`, hasName ? formatNumber(row.balance) : '');
+    setNamed(`異?{i}?쏀뭹紐?, row.name || '');
+    setNamed(`異?{i}援щℓ`, hasName ? formatNumber(row.purchase) : '');
+    setNamed(`異?{i}?ъ슜`, hasName ? formatNumber(row.usage) : '');
+    setNamed(`異?{i}?꾧퀎`, hasName ? formatNumber(row.yearTotal) : '');
+    setNamed(`異?{i}?붾웾`, hasName ? formatNumber(row.balance) : '');
   }
 
-  // 분석 시약(키트)
+  // 遺꾩꽍 ?쒖빟(?ㅽ듃)
   const kitNameMap = {
-    '암모니아성질소(NH3-N)': ['암모니아', '암모니아성질소', 'NH3'],
-    '질산성질소(NO3-N)': ['질산', '질산성질소', 'NO3'],
-    '인산염인(PO4-P)': ['인산', '인산염인', '인', 'PO4', 'PO4-P', 'PO4P'],
-    '알칼리도(ALK)': ['알칼리', '알칼리도', 'Alkalinity'],
+    '?붾え?덉븘?깆쭏??NH3-N)': ['?붾え?덉븘', '?붾え?덉븘?깆쭏??, 'NH3'],
+    '吏덉궛?깆쭏??NO3-N)': ['吏덉궛', '吏덉궛?깆쭏??, 'NO3'],
+    '?몄궛?쇱씤(PO4-P)': ['?몄궛', '?몄궛?쇱씤', '??, 'PO4', 'PO4-P', 'PO4P'],
+    '?뚯뭡由щ룄(ALK)': ['?뚯뭡由?, '?뚯뭡由щ룄', 'Alkalinity'],
   };
   for (const [originName, prefixes] of Object.entries(kitNameMap)) {
     const row = kitData.find((item) => item.name === originName) || {};
     prefixes.forEach((prefix) => {
-      setNamedAny([`${prefix}구매`], formatNumber(row.purchase));
-      setNamedAny([`${prefix}사용`], formatNumber(row.usage));
-      setNamedAny([`${prefix}누계`, `${prefix}연누계`], formatNumber(row.yearTotal));
-      setNamedAny([`${prefix}잔량`], formatNumber(row.balance));
+      setNamedAny([`${prefix}援щℓ`], formatNumber(row.purchase));
+      setNamedAny([`${prefix}?ъ슜`], formatNumber(row.usage));
+      setNamedAny([`${prefix}?꾧퀎`, `${prefix}?곕늻怨?], formatNumber(row.yearTotal));
+      setNamedAny([`${prefix}?붾웾`], formatNumber(row.balance));
     });
   }
 
-  // 일부 템플릿은 월 텍스트를 별도 named range로 둘 수 있음
-  setNamed('월', `${Number(month)}월`);
-  setNamed('기준월', `${year}.${mm}`);
+  // ?쇰? ?쒗뵆由우? ???띿뒪?몃? 蹂꾨룄 named range濡??????덉쓬
+  setNamed('??, `${Number(month)}??);
+  setNamed('湲곗???, `${year}.${mm}`);
 
   await wb.xlsx.writeFile(outputPath);
 }
@@ -150,7 +150,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const month = parseInt(req.query.month, 10);
 
       if (!year || !month || month < 1 || month > 12) {
-        return res.status(400).json({ success: false, error: '유효하지 않은 연월입니다.' });
+        return res.status(400).json({ success: false, error: '?좏슚?섏? ?딆? ?곗썡?낅땲??' });
       }
 
       const mm = String(month).padStart(2, '0');
@@ -160,37 +160,37 @@ module.exports = function (db, baseDir, appDataPath) {
       const endDate = `${year}-${mm}-${dd}`;
       const yearStart = `${year}-01-01`;
 
-      // 현장명
+      // ?꾩옣紐?
       const settings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
       const siteName = settings?.site_name || '';
 
-      // 추가 약품 (기본 3종 제외, is_active=1인 것)
+      // 異붽? ?쏀뭹 (湲곕낯 3醫??쒖쇅, is_active=1??寃?
       const extraMedicines = db.prepare(
         `SELECT item_name FROM config_items
          WHERE category = 'medicine' AND is_active = 1
-           AND item_name NOT IN ('포도당', '중탄산나트륨', '팩(PAC)')
+           AND item_name NOT IN ('?щ룄??, '以묓깂?곕굹?몃ⅷ', '??PAC)')
          ORDER BY display_order ASC
          LIMIT 3`
       ).all().map((r) => r.item_name);
 
-      // 기본 약품 집계
+      // 湲곕낯 ?쏀뭹 吏묎퀎
       const medicineData = BASE_MEDICINES.map((name) =>
         ({ name, ...getAggregate(db, 'medicine_logs', 'medicine_name', name, startDate, endDate, yearStart) })
       );
 
-      // 추가 약품 집계 (최대 3개, 없으면 null)
+      // 異붽? ?쏀뭹 吏묎퀎 (理쒕? 3媛? ?놁쑝硫?null)
       const extraData = Array.from({ length: 3 }, (_, i) => {
         const name = extraMedicines[i] || null;
         if (!name) return { name: '', purchase: 0, usage: 0, yearTotal: 0, balance: 0 };
         return { name, ...getAggregate(db, 'medicine_logs', 'medicine_name', name, startDate, endDate, yearStart) };
       });
 
-      // 키트 집계
+      // ?ㅽ듃 吏묎퀎
       const kitData = BASE_KITS.map((name) =>
         ({ name, ...getAggregate(db, 'kit_logs', 'kit_name', name, startDate, endDate, yearStart) })
       );
 
-      // 인터록: 지난 달이거나 말일 데이터가 존재하면 생성 가능
+      // ?명꽣濡? 吏???ъ씠嫄곕굹 留먯씪 ?곗씠?곌? 議댁옱?섎㈃ ?앹꽦 媛??
       const now = new Date();
       const isPastMonth = year < now.getFullYear() || (year === now.getFullYear() && month < now.getMonth() + 1);
       const lastDayRecordCount = db.prepare(
@@ -208,7 +208,7 @@ module.exports = function (db, baseDir, appDataPath) {
         kits: kitData,
         interlock: {
           enabled: interlockEnabled,
-          reason: isPastMonth ? '지난 달' : lastDayRecordCount > 0 ? `말일(${endDate}) 데이터 존재` : '',
+          reason: isPastMonth ? '吏???? : lastDayRecordCount > 0 ? `留먯씪(${endDate}) ?곗씠??議댁옱` : '',
         },
       });
     } catch (err) {
@@ -229,17 +229,17 @@ module.exports = function (db, baseDir, appDataPath) {
       const m = parseInt(month, 10);
 
       if (!y || !m || m < 1 || m > 12) {
-        return res.status(400).json({ success: false, error: '유효하지 않은 연월입니다.' });
+        return res.status(400).json({ success: false, error: '?좏슚?섏? ?딆? ?곗썡?낅땲??' });
       }
 
-      // 템플릿 파일 확인 (엑셀만 지원)
-      const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, '약품관리대장', { excelOnly: true });
+      // ?쒗뵆由??뚯씪 ?뺤씤 (?묒?留?吏??
+      const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, '?쏀뭹愿由щ???, { excelOnly: true });
       if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
         return res.status(404).json({
           success: false,
           code: 'EXCEL_TEMPLATE_MISSING',
-          error: '약품관리대장 엑셀 양식을 찾을 수 없습니다.',
-          userMessage: '설정에서 약품관리대장 엑셀 파일을 업로드해 주세요.',
+          error: '?쏀뭹愿由щ????묒? ?묒떇??李얠쓣 ???놁뒿?덈떎.',
+          userMessage: '?ㅼ젙?먯꽌 ?쏀뭹愿由щ????묒? ?뚯씪???낅줈?쒗빐 二쇱꽭??',
         });
       }
 
@@ -248,11 +248,11 @@ module.exports = function (db, baseDir, appDataPath) {
         return res.status(400).json({
           success: false,
           code: 'EXCEL_TEMPLATE_INVALID',
-          error: '엑셀 파일만 지원합니다.',
+          error: '?묒? ?뚯씪留?吏?먰빀?덈떎.',
         });
       }
 
-      // 집계 데이터 조회 (GET 엔드포인트와 동일 로직)
+      // 吏묎퀎 ?곗씠??議고쉶 (GET ?붾뱶?ъ씤?몄? ?숈씪 濡쒖쭅)
       const mm = String(m).padStart(2, '0');
       const lastDay = new Date(y, m, 0).getDate();
       const dd = String(lastDay).padStart(2, '0');
@@ -266,7 +266,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const extraMedicines = db.prepare(
         `SELECT item_name FROM config_items
          WHERE category = 'medicine' AND is_active = 1
-           AND item_name NOT IN ('포도당', '중탄산나트륨', '팩(PAC)')
+           AND item_name NOT IN ('?щ룄??, '以묓깂?곕굹?몃ⅷ', '??PAC)')
          ORDER BY display_order ASC
          LIMIT 3`
       ).all().map((r) => r.item_name);
@@ -285,7 +285,7 @@ module.exports = function (db, baseDir, appDataPath) {
         ({ name, ...getAggregate(db, 'kit_logs', 'kit_name', name, startDate, endDate, yearStart) })
       );
 
-      const outputPath = buildExcelTempPath('osoo-medicine-register', `약품관리대장_${y}_${mm}_${Date.now()}.xlsx`);
+      const outputPath = buildExcelTempPath('osoo-medicine-register', `?쏀뭹愿由щ???${y}_${mm}_${Date.now()}.xlsx`);
 
       await exportMedicineRegisterXlsx({
         templatePath: templateInfo.absolutePath,
@@ -299,7 +299,7 @@ module.exports = function (db, baseDir, appDataPath) {
         extraMedicines,
       });
 
-      // 서버에서 직접 파일 열기 (dev/Electron 모두 동작)
+      // ?쒕쾭?먯꽌 吏곸젒 ?뚯씪 ?닿린 (dev/Electron 紐⑤몢 ?숈옉)
       await openExcelFile(outputPath);
       res.json({ success: true });
     } catch (err) {
@@ -308,7 +308,7 @@ module.exports = function (db, baseDir, appDataPath) {
         success: false,
         code: 'EXPORT_FAILED',
         error: err.message,
-        userMessage: `엑셀 생성에 실패했습니다: ${err.message}`,
+        userMessage: `?묒? ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`,
       });
     }
   });

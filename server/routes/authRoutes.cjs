@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const { syncAttendanceLogs } = require('../services/attendanceBigQueryService.cjs');
 const { getMembers, upsertMember, deleteMember, isSheetsConfigured } = require('../services/membersSheetsService.cjs');
 const { detectRemoteSession } = require('../services/remoteSessionDetectService.cjs');
@@ -8,7 +8,7 @@ const { syncRecentCertificateCacheForSite } = require('../services/certificateCa
 module.exports = (db) => {
     const router = express.Router();
 
-    // 현재 날짜 KST 기준으로 구하기 (YYYY-MM-DD)
+    // ?꾩옱 ?좎쭨 KST 湲곗??쇰줈 援ы븯湲?(YYYY-MM-DD)
     const getTodayKST = () => {
         return new Date(new Date().getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
     };
@@ -244,7 +244,7 @@ module.exports = (db) => {
         return String(fallback?.name || '').trim();
     };
 
-    // 1. 로컬 로그인
+    // 1. 濡쒖뺄 濡쒓렇??
     router.post('/local-login', async (req, res) => {
         const { name, password } = req.body;
         try {
@@ -253,7 +253,7 @@ module.exports = (db) => {
                     const members = await getMembers();
                     const member = members.find((item) => item.name === name && item.password === password);
                     if (member) {
-                        // 온라인 첫 로그인/정상 로그인 시 로컬 캐시 갱신
+                        // ?⑤씪??泥?濡쒓렇???뺤긽 濡쒓렇????濡쒖뺄 罹먯떆 媛깆떊
                         upsertLocalMember(member);
                         try {
                             await syncRecentCertificateCacheForSite({
@@ -262,14 +262,14 @@ module.exports = (db) => {
                                 months: 2,
                             });
                         } catch (syncErr) {
-                            console.warn('[auth/local-login] 성적서 캐시 동기화 실패(sheets):', syncErr.message);
+                            console.warn('[auth/local-login] ?깆쟻??罹먯떆 ?숆린???ㅽ뙣(sheets):', syncErr.message);
                         }
                         triggerBigQuerySync('login-success:sheets');
                         return res.json({ success: true, member: enrichMemberWithSites(member), source: 'sheets' });
                     }
                 } catch (sheetErr) {
-                    // 시트 조회 실패(네트워크/권한 오류) 시 로컬 캐시로 자동 fallback
-                    console.warn('[auth/local-login] Sheets 조회 실패, 로컬 캐시 로그인으로 fallback:', sheetErr.message);
+                    // ?쒗듃 議고쉶 ?ㅽ뙣(?ㅽ듃?뚰겕/沅뚰븳 ?ㅻ쪟) ??濡쒖뺄 罹먯떆濡??먮룞 fallback
+                    console.warn('[auth/local-login] Sheets 議고쉶 ?ㅽ뙣, 濡쒖뺄 罹먯떆 濡쒓렇?몄쑝濡?fallback:', sheetErr.message);
                 }
             }
 
@@ -282,19 +282,19 @@ module.exports = (db) => {
                         months: 2,
                     });
                 } catch (syncErr) {
-                    console.warn('[auth/local-login] 성적서 캐시 동기화 실패(local):', syncErr.message);
+                    console.warn('[auth/local-login] ?깆쟻??罹먯떆 ?숆린???ㅽ뙣(local):', syncErr.message);
                 }
                 triggerBigQuerySync('login-success:local');
                 res.json({ success: true, member: enrichMemberWithSites(member) });
             } else {
-                res.status(401).json({ success: false, message: '이름 또는 비밀번호가 일치하지 않습니다.' });
+                res.status(401).json({ success: false, message: '?대쫫 ?먮뒗 鍮꾨?踰덊샇媛 ?쇱튂?섏? ?딆뒿?덈떎.' });
             }
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
         }
     });
 
-    // 로그인 화면 기본값(현장관리자 이름) 제공
+    // 濡쒓렇???붾㈃ 湲곕낯媛??꾩옣愿由ъ옄 ?대쫫) ?쒓났
     router.get('/login-hint', (req, res) => {
         try {
             const name = resolveLoginHintName();
@@ -304,12 +304,12 @@ module.exports = (db) => {
         }
     });
 
-    // 2. 관리자가 내려받은 사용자 데이터를 로컬 DB에 저장(동기화)
+    // 2. 愿由ъ옄媛 ?대젮諛쏆? ?ъ슜???곗씠?곕? 濡쒖뺄 DB??????숆린??
     router.post('/sync-member', (req, res) => {
         const { id, name, password, role, site_name1, phone, notes } = req.body;
         try {
             if (name === 'admin') {
-                return res.json({ success: true, message: 'admin은 로컬에 저장하지 않습니다.' });
+                return res.json({ success: true, message: 'admin? 濡쒖뺄????ν븯吏 ?딆뒿?덈떎.' });
             }
 
             const existing = db.prepare('SELECT id FROM members WHERE id = ? OR name = ?').get(id, name);
@@ -340,7 +340,7 @@ module.exports = (db) => {
         }
     });
 
-    // 3. 활성 세션(진행 중인 출근 기록) 찾기
+    // 3. ?쒖꽦 ?몄뀡(吏꾪뻾 以묒씤 異쒓렐 湲곕줉) 李얘린
     router.post('/session', (req, res) => {
         const { memberId } = req.body;
         const dateKST = getTodayKST();
@@ -352,7 +352,7 @@ module.exports = (db) => {
         }
     });
 
-    // 3b. 일자별 출결 목록 (로컬 SQLite)
+    // 3b. ?쇱옄蹂?異쒓껐 紐⑸줉 (濡쒖뺄 SQLite)
     router.get('/attendance', (req, res) => {
         const dateParam = String(req.query.date || '').trim();
         const dateKST = dateParam || getTodayKST();
@@ -368,7 +368,7 @@ module.exports = (db) => {
         }
     });
 
-    // 4. 출근 처리
+    // 4. 異쒓렐 泥섎━
     router.post('/attendance', (req, res) => {
         const { memberId, memberName, lat, lng, locationMatched } = req.body;
         const dateKST = getTodayKST();
@@ -377,7 +377,7 @@ module.exports = (db) => {
         try {
             const site = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get() || {};
             const remote = detectRemoteSession();
-            // 이미 활성 세션이 있는지 확인
+            // ?대? ?쒖꽦 ?몄뀡???덈뒗吏 ?뺤씤
             let activeSession = db.prepare('SELECT * FROM attendance WHERE member_id = ? AND date = ? AND logout_time IS NULL').get(memberId, dateKST);
 
             if (!activeSession) {
@@ -409,7 +409,7 @@ module.exports = (db) => {
         }
     });
 
-    // 5. 퇴근 처리
+    // 5. ?닿렐 泥섎━
     router.post('/logout', (req, res) => {
         const { memberId, autoLogout } = req.body;
         const dateKST = getTodayKST();
@@ -428,7 +428,7 @@ module.exports = (db) => {
         }
     });
 
-    // 6. 로컬에 저장된 미동기화 출결 기록 목록 반환
+    // 6. 濡쒖뺄????λ맂 誘몃룞湲고솕 異쒓껐 湲곕줉 紐⑸줉 諛섑솚
     router.get('/unsynced-attendance', (req, res) => {
         try {
             const logs = db.prepare('SELECT * FROM attendance WHERE is_synced = 0 ORDER BY login_time ASC').all();
@@ -438,7 +438,7 @@ module.exports = (db) => {
         }
     });
 
-    // 7. 동기화 완료 마킹
+    // 7. ?숆린???꾨즺 留덊궧
     router.post('/mark-attendance-synced', (req, res) => {
         const { ids } = req.body; // Array of IDs
         try {
@@ -452,7 +452,7 @@ module.exports = (db) => {
         }
     });
 
-    // 8. 출결 기록 → BigQuery 동기화
+    // 8. 異쒓껐 湲곕줉 ??BigQuery ?숆린??
     router.post('/sync-attendance-bq', async (req, res) => {
         try {
             const siteRow = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get();
@@ -475,11 +475,11 @@ module.exports = (db) => {
         }
     });
 
-    // 9. 회원 목록 조회 (Google Sheets)
+    // 9. ?뚯썝 紐⑸줉 議고쉶 (Google Sheets)
     router.get('/members', async (req, res) => {
         try {
             if (!isSheetsConfigured()) {
-                return res.status(400).json({ success: false, error: 'Google Sheets가 설정되지 않았습니다.' });
+                return res.status(400).json({ success: false, error: 'Google Sheets媛 ?ㅼ젙?섏? ?딆븯?듬땲??' });
             }
             const members = await getMembers();
             res.json({ success: true, members, source: 'sheets' });
@@ -488,12 +488,12 @@ module.exports = (db) => {
         }
     });
 
-    // 10. 회원 upsert (Google Sheets)
+    // 10. ?뚯썝 upsert (Google Sheets)
     router.post('/members', async (req, res) => {
         const member = req.body;
         try {
             if (!isSheetsConfigured()) {
-                return res.status(400).json({ success: false, error: 'Google Sheets가 설정되지 않았습니다.' });
+                return res.status(400).json({ success: false, error: 'Google Sheets媛 ?ㅼ젙?섏? ?딆븯?듬땲??' });
             }
             await upsertMember(member);
             res.json({ success: true });
@@ -502,23 +502,23 @@ module.exports = (db) => {
         }
     });
 
-    // 11. 회원 삭제 (Google Sheets)
+    // 11. ?뚯썝 ??젣 (Google Sheets)
     router.delete('/members/:id', async (req, res) => {
         const { id } = req.params;
         try {
             if (!isSheetsConfigured()) {
-                return res.status(400).json({ success: false, error: 'Google Sheets가 설정되지 않았습니다.' });
+                return res.status(400).json({ success: false, error: 'Google Sheets媛 ?ㅼ젙?섏? ?딆븯?듬땲??' });
             }
             const members = await getMembers();
             const matched = members.find((member) => String(member.id) === String(id));
             const target = matched ? { name: matched.name } : null;
 
             if (!target) {
-                return res.status(404).json({ success: false, error: '대상 회원을 찾을 수 없습니다.' });
+                return res.status(404).json({ success: false, error: '????뚯썝??李얠쓣 ???놁뒿?덈떎.' });
             }
 
             if (target.name === 'admin') {
-                return res.status(400).json({ success: false, error: '최고관리자(admin) 계정은 삭제할 수 없습니다.' });
+                return res.status(400).json({ success: false, error: '理쒓퀬愿由ъ옄(admin) 怨꾩젙? ??젣?????놁뒿?덈떎.' });
             }
 
             await deleteMember(id);

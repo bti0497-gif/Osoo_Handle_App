@@ -5,7 +5,7 @@
 module.exports = {
   appId: 'com.osoo.handle-app',
   productName: 'Osoo Handle App',
-  npmRebuild: false,
+  npmRebuild: true,
   nodeGypRebuild: false,
   /** NSIS installSection.nsh 에서 SetDetailsPrint none 제거(상세 로그 표시). `scripts/patch-nsis-install-section.cjs` */
   beforePack: './scripts/patch-nsis-install-section.cjs',
@@ -15,6 +15,7 @@ module.exports = {
   },
   files: [
     'dist/**/*',
+    'public/**/*',
     'server/**/*',
     'server.cjs',
     'start.cjs',
@@ -27,6 +28,7 @@ module.exports = {
   ],
   asarUnpack: [
     'server.cjs',
+    'public/**/*',
     'server/**/*',
     'node_modules/**/*',
     '.env.local',

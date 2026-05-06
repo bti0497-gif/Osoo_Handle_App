@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const { importQntechWaterValues, importQntechWaterPhotos, importQntechWaterAll, importQntechWaterRange } = require('../services/qntechWaterImportService.cjs');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const router = express.Router();
@@ -101,7 +101,7 @@ module.exports = function (db, baseDir) {
             normalizeSourceType(item),
             item.source_label ?? null,
             item.qntech_project_id ?? null,
-            item.location || '유입수',
+            item.location || '?좎엯??,
             item.nh3_n ?? null,
             item.no3_n ?? null,
             item.po4_p ?? null,
@@ -165,7 +165,7 @@ module.exports = function (db, baseDir) {
         totalDates: 0,
         completedDates: 0,
         currentDate: null,
-        message: '기간 데이터를 준비하는 중...'
+        message: '湲곌컙 ?곗씠?곕? 以鍮꾪븯??以?..'
       };
 
       const result = await importQntechWaterRange(db, baseDir, startDate, endDate, {
@@ -183,7 +183,7 @@ module.exports = function (db, baseDir) {
         totalDates: result.processedDates || rangeImportProgress.totalDates,
         completedDates: result.processedDates || rangeImportProgress.completedDates,
         currentDate: result.endDate || rangeImportProgress.currentDate,
-        message: '기간 데이터 불러오기가 완료되었습니다.'
+        message: '湲곌컙 ?곗씠??遺덈윭?ㅺ린媛 ?꾨즺?섏뿀?듬땲??'
       };
       res.json(result);
     } catch (err) {
@@ -232,7 +232,7 @@ module.exports = function (db, baseDir) {
         normalizeSourceType(req.body),
         req.body.source_label ?? null,
         req.body.qntech_project_id ?? null,
-        location || '유입수',
+        location || '?좎엯??,
         nh3_n ?? null,
         no3_n ?? null,
         po4_p ?? null,

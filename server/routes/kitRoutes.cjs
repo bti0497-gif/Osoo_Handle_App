@@ -1,12 +1,12 @@
-const express = require('express');
+﻿const express = require('express');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const router = express.Router();
 
 const KIT_FIELD_MAP = [
-    { kitName: '암모니아성질소(NH3-N)', field: 'nh3_n' },
-    { kitName: '질산성질소(NO3-N)', field: 'no3_n' },
-    { kitName: '인산염인(PO4-P)', field: 'po4_p' },
-    { kitName: '알칼리도(ALK)', field: 'alkalinity' },
+    { kitName: '?붾え?덉븘?깆쭏??NH3-N)', field: 'nh3_n' },
+    { kitName: '吏덉궛?깆쭏??NO3-N)', field: 'no3_n' },
+    { kitName: '?몄궛?쇱씤(PO4-P)', field: 'po4_p' },
+    { kitName: '?뚯뭡由щ룄(ALK)', field: 'alkalinity' },
 ];
 
 function normalizeDate(value) {
@@ -33,10 +33,10 @@ function aggregateExpectedUsageByDate(db, startDate, endDate) {
         if (!date) continue;
 
         const current = byDate.get(date) || {
-            '암모니아성질소(NH3-N)': 0,
-            '질산성질소(NO3-N)': 0,
-            '인산염인(PO4-P)': 0,
-            '알칼리도(ALK)': 0,
+            '?붾え?덉븘?깆쭏??NH3-N)': 0,
+            '吏덉궛?깆쭏??NO3-N)': 0,
+            '?몄궛?쇱씤(PO4-P)': 0,
+            '?뚯뭡由щ룄(ALK)': 0,
         };
 
         for (const { kitName, field } of KIT_FIELD_MAP) {
@@ -151,15 +151,15 @@ module.exports = function (db) {
         }
     });
 
-    // 구매 저장: 특정 날짜에 키트별 구매량을 upsert하고 재고 재계산
+    // 援щℓ ??? ?뱀젙 ?좎쭨???ㅽ듃蹂?援щℓ?됱쓣 upsert?섍퀬 ?ш퀬 ?ш퀎??
     router.post('/api/kits/purchase', (req, res) => {
         try {
             const { date, items } = req.body; // items: [{ kitName, purchaseAmount }]
             if (!date || !Array.isArray(items) || items.length === 0) {
-                return res.status(400).json({ success: false, error: '날짜와 항목이 필요합니다.' });
+                return res.status(400).json({ success: false, error: '?좎쭨? ??ぉ???꾩슂?⑸땲??' });
             }
             if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-                return res.status(400).json({ success: false, error: '날짜 형식이 올바르지 않습니다.' });
+                return res.status(400).json({ success: false, error: '?좎쭨 ?뺤떇???щ컮瑜댁? ?딆뒿?덈떎.' });
             }
 
             const metadata = getCurrentRecordMetadata(db, req.body);
@@ -216,7 +216,7 @@ module.exports = function (db) {
             const endDate = bodyEnd || todayStr;
 
             if (startDate > endDate) {
-                return res.status(400).json({ success: false, error: '시작일은 종료일보다 늦을 수 없습니다.' });
+                return res.status(400).json({ success: false, error: '?쒖옉?쇱? 醫낅즺?쇰낫????쓣 ???놁뒿?덈떎.' });
             }
 
             const expectedByDate = aggregateExpectedUsageByDate(db, startDate, endDate);

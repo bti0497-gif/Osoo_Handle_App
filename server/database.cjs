@@ -1,4 +1,4 @@
-const sqlite3 = require('better-sqlite3');
+﻿const sqlite3 = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -441,11 +441,11 @@ if (shouldRebuildWaterQuality) {
   })();
 }
 
-// QnTECH sentinel migration: -1 계열은 실제 화면 의미상 '초과'로 저장
+// QnTECH sentinel migration: -1 怨꾩뿴? ?ㅼ젣 ?붾㈃ ?섎???'珥덇낵'濡????
 ['nh3_n', 'no3_n', 'po4_p', 'alkalinity', 'tn', 'tp', 'cod', 'ss'].forEach((column) => {
   db.prepare(`
     UPDATE water_quality
-    SET ${column} = '초과'
+    SET ${column} = '珥덇낵'
     WHERE ${column} IN ('-1', '-1.0', '-1.00')
   `).run();
 });
@@ -475,18 +475,18 @@ if (!sludgeCols.includes('sludge_photo_taken_at')) {
   db.prepare('ALTER TABLE sludge_photo_logs ADD COLUMN sludge_photo_taken_at TEXT').run();
 }
 
-// --- 슬러지 반출관리대장 기본설정 테이블 시드 ---
+// --- 슬러지 諛섏텧愿由щ???湲곕낯?ㅼ젙 ?뚯씠釉??쒕뱶 ---
 db.prepare(`
   INSERT OR IGNORE INTO sludge_export_settings (id, company_name, default_amount, updated_at)
   VALUES (1, '', 0, datetime('now', 'localtime'))
 `).run();
 
 // --- Seeds ---
-db.prepare("INSERT OR IGNORE INTO app_settings (id, site_name) VALUES (1, '새 현장')").run();
+db.prepare("INSERT OR IGNORE INTO app_settings (id, site_name) VALUES (1, '???꾩옣')").run();
 
 const settingsExists = db.prepare('SELECT id FROM app_settings WHERE id = 1').get();
 if (!settingsExists) {
-  db.prepare(`INSERT INTO app_settings (id, site_name, manager_name, method, series) VALUES (1, '오수처리장', '관리자', 'A2O', '1계열')`).run();
+  db.prepare(`INSERT INTO app_settings (id, site_name, manager_name, method, series) VALUES (1, '?ㅼ닔泥섎━??, '愿由ъ옄', 'A2O', '1怨꾩뿴')`).run();
 }
 
 db.prepare(`
@@ -498,9 +498,9 @@ db.prepare(`
 
 migrateLegacyQntechPhotoRoot(db);
 
-db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('road_web', '도로공사 웹페이지 설정', ?, '', '')").run(DEFAULT_ROAD_WEB_URL);
-db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('water_analysis_app', '수질분석 앱 설정', ?, '', '')").run(DEFAULT_WATER_ANALYSIS_URL);
-db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('gemini_api', 'Gemini API 키', '', '', '')").run();
+db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('road_web', '?꾨줈怨듭궗 ?뱁럹?댁? ?ㅼ젙', ?, '', '')").run(DEFAULT_ROAD_WEB_URL);
+db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('water_analysis_app', '?섏쭏遺꾩꽍 ???ㅼ젙', ?, '', '')").run(DEFAULT_WATER_ANALYSIS_URL);
+db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('gemini_api', 'Gemini API ??, '', '', '')").run();
 
 db.prepare(`
   UPDATE web_app_credentials
@@ -580,7 +580,7 @@ if (db.prepare('SELECT count(*) as count FROM config_items').get().count === 0) 
 }
 
 // --- Sync Columns Migration (BigQuery Synchronization) ---
-// 동기화 대상 테이블 목록
+// ?숆린??????뚯씠釉?紐⑸줉
 const syncTables = ['flow_readings', 'medicine_logs', 'water_quality', 'kit_logs', 'facility_logs'];
 const syncDefaults = db.prepare('SELECT site_name, manager_name FROM app_settings WHERE id = 1').get() || {};
 const defaultSiteName = syncDefaults.site_name || 'Unknown Site';
@@ -602,14 +602,14 @@ syncTables.forEach(tableName => {
   if (!cols.includes('is_synced')) {
     console.log(`Adding 'is_synced' column to ${tableName}`);
     db.prepare(`ALTER TABLE ${tableName} ADD COLUMN is_synced INTEGER DEFAULT 0`).run();
-    // 기존 데이터는 모두 미동기화(0) 상태로 초기화하여 최초 동기화 유도
+    // 湲곗〈 ?곗씠?곕뒗 紐⑤몢 誘몃룞湲고솕(0) ?곹깭濡?珥덇린?뷀븯??理쒖큹 ?숆린???좊룄
     db.prepare(`UPDATE ${tableName} SET is_synced = 0`).run();
   }
 
   if (!cols.includes('last_modified')) {
     console.log(`Adding 'last_modified' column to ${tableName}`);
     db.prepare(`ALTER TABLE ${tableName} ADD COLUMN last_modified TEXT`).run();
-    // 기존 데이터의 수정 시각을 현재 시간으로 초기화
+    // 湲곗〈 ?곗씠?곗쓽 ?섏젙 ?쒓컖???꾩옱 ?쒓컙?쇰줈 珥덇린??
     db.prepare(`UPDATE ${tableName} SET last_modified = datetime('now', 'localtime') WHERE last_modified IS NULL`).run();
   }
 
@@ -629,14 +629,14 @@ syncTables.forEach(tableName => {
   `).run(defaultSiteName, defaultAuthor);
 });
 
-// attendance 테이블은 이미 is_synced가 있으므로 last_modified만 확인
+// attendance ?뚯씠釉붿? ?대? is_synced媛 ?덉쑝誘濡?last_modified留??뺤씤
 const attendanceSyncCols = db.prepare("PRAGMA table_info(attendance)").all().map(c => c.name);
 if (!attendanceSyncCols.includes('last_modified')) {
   db.prepare('ALTER TABLE attendance ADD COLUMN last_modified TEXT').run();
   db.prepare("UPDATE attendance SET last_modified = datetime('now', 'localtime') WHERE last_modified IS NULL").run();
 }
 
-// --- 현장/회원 기준 테이블 인덱스 및 백필 ---
+// --- ?꾩옣/?뚯썝 湲곗? ?뚯씠釉??몃뜳??諛?諛깊븘 ---
 db.prepare('CREATE INDEX IF NOT EXISTS idx_sites_active_name ON sites (is_active, site_name)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_member_sites_member ON member_sites (member_id)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_member_sites_site ON member_sites (site_id)').run();
@@ -645,19 +645,19 @@ db.prepare('CREATE INDEX IF NOT EXISTS idx_attendance_site_date ON attendance (s
 db.prepare('CREATE INDEX IF NOT EXISTS idx_attendance_member_date ON attendance (member_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_sludge_photo_logs_site_date ON sludge_photo_logs (site_id, date)').run();
 
-// --- Facility Logs: location 컬럼 추가 ---
+// --- Facility Logs: location 而щ읆 異붽? ---
 const facilityCols = db.prepare("PRAGMA table_info(facility_logs)").all().map(c => c.name);
 if (!facilityCols.includes('location')) {
   db.prepare('ALTER TABLE facility_logs ADD COLUMN location TEXT').run();
 }
 
-// --- Config Items: default_amount 컬럼 추가 ---
+// --- Config Items: default_amount 而щ읆 異붽? ---
 const configItemsCols = db.prepare("PRAGMA table_info(config_items)").all().map(c => c.name);
 if (!configItemsCols.includes('default_amount')) {
   db.prepare('ALTER TABLE config_items ADD COLUMN default_amount REAL DEFAULT 0').run();
 }
 
-// --- photo_url 마이그레이션 (medicine_logs, kit_logs) ---
+// --- photo_url 留덉씠洹몃젅?댁뀡 (medicine_logs, kit_logs) ---
 const photoTables = ['medicine_logs', 'kit_logs'];
 photoTables.forEach(tableName => {
   const tCols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
@@ -666,15 +666,15 @@ photoTables.forEach(tableName => {
   }
 });
 
-// --- site_id 마이그레이션 (휴게소별 고유 식별자) ---
-// app_settings 에 site_id 컬럼 추가 및 UUID 시드
+// --- site_id 留덉씠洹몃젅?댁뀡 (?닿쾶?뚮퀎 怨좎쑀 ?앸퀎?? ---
+// app_settings ??site_id 而щ읆 異붽? 諛?UUID ?쒕뱶
 const appSettingsCols = db.prepare("PRAGMA table_info(app_settings)").all().map(c => c.name);
 if (!appSettingsCols.includes('site_id')) {
   db.prepare('ALTER TABLE app_settings ADD COLUMN site_id TEXT').run();
 }
 db.prepare("UPDATE app_settings SET site_id = ? WHERE id = 1 AND (site_id IS NULL OR TRIM(site_id) = '')").run(crypto.randomUUID());
 
-// app_settings의 기본 현장 정보 → sites 테이블 마이그레이션 (site_id 설정 후)
+// app_settings??湲곕낯 ?꾩옣 ?뺣낫 ??sites ?뚯씠釉?留덉씠洹몃젅?댁뀡 (site_id ?ㅼ젙 ??
 const settingsSeed = db.prepare('SELECT site_id, site_name, manager_name, method, series FROM app_settings WHERE id = 1').get();
 if (settingsSeed?.site_id) {
   db.prepare(`
@@ -686,14 +686,14 @@ if (settingsSeed?.site_id) {
       method = excluded.method,
       series = excluded.series,
       updated_at = datetime('now', 'localtime')
-  `).run(settingsSeed.site_id, settingsSeed.site_name || '새 현장', settingsSeed.manager_name || '관리자', settingsSeed.method || 'A2O', settingsSeed.series || '1계열');
+  `).run(settingsSeed.site_id, settingsSeed.site_name || '???꾩옣', settingsSeed.manager_name || '愿由ъ옄', settingsSeed.method || 'A2O', settingsSeed.series || '1怨꾩뿴');
 
   db.prepare('UPDATE attendance SET site_id = COALESCE(site_id, ?)').run(settingsSeed.site_id);
-  db.prepare('UPDATE attendance SET site_name = COALESCE(NULLIF(site_name, \'\'), ?)').run(settingsSeed.site_name || '새 현장');
+  db.prepare('UPDATE attendance SET site_name = COALESCE(NULLIF(site_name, \'\'), ?)').run(settingsSeed.site_name || '???꾩옣');
   db.prepare('UPDATE sludge_photo_logs SET site_id = COALESCE(site_id, ?)').run(settingsSeed.site_id);
 }
 
-// 5개 동기화 테이블에 site_id 추가 및 기존 데이터 백필
+// 5媛??숆린???뚯씠釉붿뿉 site_id 異붽? 諛?湲곗〈 ?곗씠??諛깊븘
 const currentSiteId = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || null;
 syncTables.forEach(tableName => {
   const tCols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
@@ -705,7 +705,7 @@ syncTables.forEach(tableName => {
   }
 });
 
-// 로그성 테이블 site_id + date 조회 인덱스 (다중현장 전환 대비)
+// 濡쒓렇???뚯씠釉?site_id + date 議고쉶 ?몃뜳??(?ㅼ쨷?꾩옣 ?꾪솚 ?鍮?
 db.prepare('CREATE INDEX IF NOT EXISTS idx_flow_readings_site_date ON flow_readings (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_medicine_logs_site_date ON medicine_logs (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_water_quality_site_date ON water_quality (site_id, date)').run();
@@ -713,7 +713,7 @@ db.prepare('CREATE INDEX IF NOT EXISTS idx_kit_logs_site_date ON kit_logs (site_
 db.prepare('CREATE INDEX IF NOT EXISTS idx_facility_logs_site_date ON facility_logs (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_certificate_wq_site_date ON certificate_water_quality (site_id, report_date)').run();
 
-// site_id 백필: 기존 데이터가 있으면 app_settings.site_id로 채움
+// site_id 諛깊븘: 湲곗〈 ?곗씠?곌? ?덉쑝硫?app_settings.site_id濡?梨꾩?
 if (currentSiteId) {
   db.prepare('UPDATE flow_readings SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE medicine_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);

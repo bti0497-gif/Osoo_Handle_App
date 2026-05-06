@@ -1,4 +1,4 @@
-function getCurrentTimestamp() {
+﻿function getCurrentTimestamp() {
   return new Date().toISOString();
 }
 

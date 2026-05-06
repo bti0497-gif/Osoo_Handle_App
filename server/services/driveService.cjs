@@ -1,4 +1,4 @@
-const { google } = require('googleapis');
+﻿const { google } = require('googleapis');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '../../.env.local') });
@@ -97,11 +97,11 @@ function isDriveConfigured() {
 }
 
 async function getOrCreateFolder(parentFolderId, folderName) {
-  if (!drive) throw new Error('Google Drive 인증 정보가 설정되지 않았습니다.');
+  if (!drive) throw new Error('Google Drive ?몄쬆 ?뺣낫媛 ?ㅼ젙?섏? ?딆븯?듬땲??');
   const normalizedParentId = String(parentFolderId || '').trim();
   const normalizedName = String(folderName || '').trim();
-  if (!normalizedParentId) throw new Error('Google Drive parent folder ID가 비어 있습니다.');
-  if (!normalizedName) throw new Error('Google Drive folder name이 비어 있습니다.');
+  if (!normalizedParentId) throw new Error('Google Drive parent folder ID媛 鍮꾩뼱 ?덉뒿?덈떎.');
+  if (!normalizedName) throw new Error('Google Drive folder name??鍮꾩뼱 ?덉뒿?덈떎.');
 
   const res = await drive.files.list({
     q: [
@@ -167,9 +167,9 @@ async function getOrCreateFolderPath(rootFolderId, segments = []) {
 }
 
 async function uploadBufferToFolder({ folderId, fileName, buffer, mimeType }) {
-  if (!drive) throw new Error('Google Drive 인증 정보가 설정되지 않았습니다.');
-  if (!folderId) throw new Error('Google Drive folder ID가 필요합니다.');
-  if (!fileName) throw new Error('Google Drive file name이 필요합니다.');
+  if (!drive) throw new Error('Google Drive ?몄쬆 ?뺣낫媛 ?ㅼ젙?섏? ?딆븯?듬땲??');
+  if (!folderId) throw new Error('Google Drive folder ID媛 ?꾩슂?⑸땲??');
+  if (!fileName) throw new Error('Google Drive file name???꾩슂?⑸땲??');
 
   const { Readable } = require('stream');
   const existingFile = await findFileInFolder(folderId, fileName);

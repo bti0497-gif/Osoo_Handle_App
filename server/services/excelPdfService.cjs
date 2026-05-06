@@ -1,4 +1,4 @@
-const ExcelJS = require('exceljs');
+﻿const ExcelJS = require('exceljs');
 const { execFile } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -78,7 +78,7 @@ function runExcelToPdfConversion(sourcePath, outputPath) {
         }
 
         if (!fs.existsSync(outputAbsolutePath)) {
-          reject(new Error('Excel PDF 변환이 완료되지 않았습니다.'));
+          reject(new Error('Excel PDF 蹂?섏씠 ?꾨즺?섏? ?딆븯?듬땲??'));
           return;
         }
 

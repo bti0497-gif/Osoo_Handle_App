@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const router = express.Router();
 
@@ -140,7 +140,7 @@ module.exports = function (db) {
         for (const item of rows) {
           const { type, raw_value, calculated_flow, sludge_export, is_reset, is_manual } = item;
           const sludgeAmount = type === '슬러지' ? (sludge_export ?? raw_value ?? null) : null;
-          // 프론트엔드에서 이미 계산된 flow와 raw를 넘겨주므로 그대로 저장 (수동이든 자동이든)
+          // ?꾨줎?몄뿏?쒖뿉???대? 怨꾩궛??flow? raw瑜??섍꺼二쇰?濡?洹몃?濡????(?섎룞?대뱺 ?먮룞?대뱺)
           stmt.run(
             date,
             type,
@@ -181,13 +181,13 @@ module.exports = function (db) {
       const metadata = getCurrentRecordMetadata(db, req.body);
       const prevReading = db.prepare('SELECT raw_value, calculated_flow, date FROM flow_readings WHERE type = ? AND date < ? ORDER BY date DESC LIMIT 1').get(type, date);
 
-      // 보정 로직 동일 적용
+      // 蹂댁젙 濡쒖쭅 ?숈씪 ?곸슜
       const effectivePrevRaw = (prevReading?.raw_value === null && prevReading?.calculated_flow > 10000)
         ? prevReading.calculated_flow
         : prevReading?.raw_value;
 
       if (!is_manual && !is_reset && effectivePrevRaw !== undefined && raw_value < effectivePrevRaw) {
-        return res.status(400).json({ success: false, message: '검침값이 어제보다 작을 수 없습니다. 초기화가 필요한 경우 체크해주세요.' });
+        return res.status(400).json({ success: false, message: '寃移④컪???댁젣蹂대떎 ?묒쓣 ???놁뒿?덈떎. 珥덇린?붽? ?꾩슂??寃쎌슦 泥댄겕?댁＜?몄슂.' });
       }
 
       let calculated_flow = 0;

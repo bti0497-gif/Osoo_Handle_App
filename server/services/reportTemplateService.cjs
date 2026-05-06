@@ -1,14 +1,14 @@
-const fs = require('fs');
+﻿const fs = require('fs');
 const path = require('path');
 
 const EXCEL_TEMPLATE_EXTENSIONS = new Set(['.xlsx', '.xls', '.xlsm']);
 const ALLOWED_REPORT_TEMPLATE_NAMES = [
-  '일일업무일지',
-  '수질분석일지',
-  '약품관리대장',
-  '약품입고일지',
-  '슬러지반출관리대장',
-  '슬러지사진대지',
+  '?쇱씪?낅Т?쇱?',
+  '?섏쭏遺꾩꽍?쇱?',
+  '?쏀뭹愿由щ???,
+  '?쏀뭹?낃퀬?쇱?',
+  '슬러지諛섏텧愿由щ???,
+  '슬러지?ъ쭊?吏',
 ];
 const ALLOWED_REPORT_TEMPLATE_IDENTITIES = new Set(
   ALLOWED_REPORT_TEMPLATE_NAMES.map((name) => normalizeTemplateKey(name))
@@ -116,14 +116,14 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
       const sourcePath = path.join(bundledDir, fileName);
       const targetPath = path.join(customDir, fileName);
 
-      // 해당 식별자의 파일이 이미 존재하면 (확장자 상관없이) 복사하지 않음
+      // ?대떦 ?앸퀎?먯쓽 ?뚯씪???대? 議댁옱?섎㈃ (?뺤옣???곴??놁씠) 蹂듭궗?섏? ?딆쓬
       if (existingIdentities.has(identity)) {
         return;
       }
 
       if (!fs.existsSync(targetPath)) {
         fs.copyFileSync(sourcePath, targetPath);
-        existingIdentities.add(identity); // 새로 추가된 식별자 기록
+        existingIdentities.add(identity); // ?덈줈 異붽????앸퀎??湲곕줉
       }
     });
   });

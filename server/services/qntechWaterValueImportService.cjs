@@ -1,10 +1,10 @@
-const DEFAULT_LOCATION_ORDER = ['유량조정조', '무산소조', '포기조', '침전조', '방류조'];
+﻿const DEFAULT_LOCATION_ORDER = ['?좊웾議곗젙議?, '臾댁궛?뚯“', '?ш린議?, '移⑥쟾議?, '諛⑸쪟議?];
 
 const ITEM_NAME_TO_FIELD = new Map([
-  ['암모니아성 질소', 'nh3_n'],
-  ['질산성 질소', 'no3_n'],
-  ['오르토 인산염', 'po4_p'],
-  ['알칼리도', 'alkalinity']
+  ['?붾え?덉븘??吏덉냼', 'nh3_n'],
+  ['吏덉궛??吏덉냼', 'no3_n'],
+  ['?ㅻⅤ???몄궛??, 'po4_p'],
+  ['?뚯뭡由щ룄', 'alkalinity']
 ]);
 
 const PROJECTS_QUERY = `query Projects($data: SelectProjectInput!) {
@@ -88,11 +88,11 @@ function buildDirectLocationMap(activeLocations, configuredSampleMappings = []) 
     const normalized = normalizeSampleName(sampleName);
     if (configuredMap.has(normalized)) return configuredMap.get(normalized);
     if (candidates.has(normalized)) return candidates.get(normalized);
-    if (normalized.includes('유량')) return '유량조정조';
-    if (normalized.includes('무산소')) return '무산소조';
-    if (normalized.includes('포기') || normalized.includes('호기')) return '포기조';
-    if (normalized.includes('침전')) return '침전조';
-    if (normalized.includes('방류') || normalized.includes('막여과')) return '방류조';
+    if (normalized.includes('?좊웾')) return '?좊웾議곗젙議?;
+    if (normalized.includes('臾댁궛??)) return '臾댁궛?뚯“';
+    if (normalized.includes('?ш린') || normalized.includes('?멸린')) return '?ш린議?;
+    if (normalized.includes('移⑥쟾')) return '移⑥쟾議?;
+    if (normalized.includes('諛⑸쪟') || normalized.includes('留됱뿬怨?)) return '諛⑸쪟議?;
     return null;
   };
 }
@@ -134,7 +134,7 @@ function normalizeMeasurementValue(value) {
 
   const normalized = String(value).trim();
   if (['-1', '-1.0', '-1.00'].includes(normalized)) {
-    return '초과';
+    return '珥덇낵';
   }
 
   return normalized;
@@ -174,7 +174,7 @@ function buildSourceLabel(project, measurementOrder, totalForDate) {
 
   if (analysisProcess) return analysisProcess;
   if (note) return note;
-  if (totalForDate > 1) return `${measurementOrder}차`;
+  if (totalForDate > 1) return `${measurementOrder}李?;
   return '';
 }
 
