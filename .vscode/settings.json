@@ -1,0 +1,13 @@
+{
+    "files.encoding": "utf8",
+    "files.autoGuessEncoding": false,
+    "files.associations": {
+        "*.cjs": "javascript"
+    },
+    "chat.tools.terminal.autoApprove": {
+        "/^\\$dbPath = \\[System\\.IO\\.Path\\]::Combine\\(\\$env:APPDATA, \"Osoo_Handle_App\", \"osoo\\.db\"\\); node -e \"const Database = require\\('better-sqlite3'\\); const db = new Database\\('\\$\\(\\$dbPath\\.Replace\\('\\\\', '\\\\\\\\'\\)\\)'\\); console\\.log\\(JSON\\.stringify\\(db\\.prepare\\('PRAGMA table_info\\(app_settings\\)'\\)\\.all\\(\\)\\)\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
