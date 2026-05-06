@@ -34,7 +34,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
         <div className="login-screen">
             <div className="login-card">
                 <div className="login-header-new" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
-                    <img src="/logo.png" alt="Logo" style={{ width: '50px', height: 'auto' }} />
+                    <img src="./logo.png" alt="Logo" style={{ width: '50px', height: 'auto' }} />
                     <h1 className="login-title-main" style={{ textAlign: 'left' }}>
                         더죤환경기술(주)<br />
                         <span className="login-title-sub">오수처리 통합관리시스템</span>

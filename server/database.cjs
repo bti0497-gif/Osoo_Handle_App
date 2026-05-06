@@ -486,7 +486,7 @@ db.prepare("INSERT OR IGNORE INTO app_settings (id, site_name) VALUES (1, '???�
 
 const settingsExists = db.prepare('SELECT id FROM app_settings WHERE id = 1').get();
 if (!settingsExists) {
-  db.prepare(`INSERT INTO app_settings (id, site_name, manager_name, method, series) VALUES (1, '?ㅼ닔泥섎━??, '愿由ъ옄', 'A2O', '1怨꾩뿴')`).run();
+  db.prepare(`INSERT INTO app_settings (id, site_name, manager_name, method, series) VALUES (1, '오수처리장', '관리자', 'A2O', '1계열')`).run();
 }
 
 db.prepare(`
@@ -498,9 +498,9 @@ db.prepare(`
 
 migrateLegacyQntechPhotoRoot(db);
 
-db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('road_web', '?꾨줈怨듭궗 ?뱁럹?댁? ?ㅼ젙', ?, '', '')").run(DEFAULT_ROAD_WEB_URL);
-db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('water_analysis_app', '?섏쭏遺꾩꽍 ???ㅼ젙', ?, '', '')").run(DEFAULT_WATER_ANALYSIS_URL);
-db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('gemini_api', 'Gemini API ??, '', '', '')").run();
+db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('road_web', '도로공사 웹페이지 설정', ?, '', '')").run(DEFAULT_ROAD_WEB_URL);
+db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('water_analysis_app', '수질분석 앱 설정', ?, '', '')").run(DEFAULT_WATER_ANALYSIS_URL);
+db.prepare("INSERT OR IGNORE INTO web_app_credentials (service_key, service_name, service_url, user_id, password) VALUES ('gemini_api', 'Gemini API 설정', '', '', '')").run();
 
 db.prepare(`
   UPDATE web_app_credentials
