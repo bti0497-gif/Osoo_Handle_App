@@ -40,7 +40,7 @@ function updateLocalMemberReferences(oldId, newId, name) {
 
 async function main() {
   if (!isSheetsConfigured()) {
-    throw new Error('Google Sheets ?ㅼ젙???놁뼱 ?뚯썝 ID ?뺢퇋?붾? 吏꾪뻾?????놁뒿?덈떎.');
+    throw new Error('Google Sheets 설정이 없어 회원 ID 정규화를 진행할 수 없습니다.');
   }
 
   const members = await getMembers();
@@ -54,17 +54,17 @@ async function main() {
     }));
 
   if (targets.length === 0) {
-    console.log('UUID濡??꾪솚???뚯썝???놁뒿?덈떎.');
+    console.log('UUID로 전환한 회원이 없습니다.');
     return;
   }
 
-  console.log('UUID ?꾪솚 ????뚯썝:');
+  console.log('UUID 전환 대상 회원:');
   targets.forEach((member) => {
     console.log(`- ${member.name}: ${member.oldId} -> ${member.newId}`);
   });
 
   if (!apply) {
-    console.log('\n?ㅼ젣 諛섏쁺? ?ㅼ쓬 紐낅졊?쇰줈 ?ㅽ뻾?섏꽭?? node server/scripts/normalizeMemberIds.cjs --apply');
+    console.log('\n실제 반영은 다음 명령으로 실행하세요 node server/scripts/normalizeMemberIds.cjs --apply');
     return;
   }
 
@@ -72,7 +72,7 @@ async function main() {
     await replaceMemberId(member.oldId, member.newId);
     const localResult = updateLocalMemberReferences(member.oldId, member.newId, member.name);
     const localMessage = localResult.changed ? 'local updated' : localResult.reason;
-    console.log(`?곸슜 ?꾨즺: ${member.name} (${localMessage})`);
+    적용 완료: ${member.name} (${localMessage})`);
   }
 }
 

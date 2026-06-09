@@ -7,7 +7,7 @@ import { useDialog } from '../../components/common/DialogContext';
  *
  * [향후 연계 계획: 장비이력카드]
  * - facility_logs 테이블에 facility_id 컬럼 추가 예정
- *   → 각 행이 어떤 장비의 이력인지 참조
+ *
  * - EquipmentCardView (src/features/facility/EquipmentCardView.jsx) 에서
  *   장비 목록(장비명, 사양, 사진, 설치일 등)을 관리
  * - 이 뷰에서 행 클릭 시 해당 장비카드로 이동하거나 팝업으로 연결하는 UX 구현 예정

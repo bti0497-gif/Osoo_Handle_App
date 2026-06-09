@@ -4,5 +4,6 @@ export {
     getLockedRowEditGridProps,
 } from './advancedDataGridPresets';
 export { DialogProvider } from './DialogProvider';
+export { default as WorkspaceErrorBoundary } from './WorkspaceErrorBoundary';
 
 export { BatchProgressDialog } from './BatchProgressDialog';

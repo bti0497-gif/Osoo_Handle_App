@@ -1,9 +1,14 @@
-﻿const express = require('express');
+const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
 const cors = require('cors');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
+const dotenvResult = require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
+if (dotenvResult.error) {
+  console.warn('[dotenv] .env.local 로드 실패:', dotenvResult.error.message);
+} else {
+  console.log('[dotenv] .env.local 로드 성공:', Object.keys(dotenvResult.parsed || {}).join(', '));
+}
 const routeRegistry = require('./routeRegistry.cjs');
 
 const BASE_DIR = path.join(__dirname, '..');
@@ -23,6 +28,33 @@ function writePortFileEarly(port) {
   }
 }
 
+// 로그 파일 기록 설정
+const logDir = path.join(resolveAppDataPathForPort(), 'logs');
+const logFile = path.join(logDir, 'electron-server.log');
+if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+const logStream = fs.createWriteStream(logFile, { flags: 'a', encoding: 'utf8' });
+
+function logToBoth(...args) {
+  const msg = args.map(String).join(' ');
+  logStream.write(msg + '\n');
+  console.log(...args);
+}
+function errorToBoth(...args) {
+  const msg = args.map(String).join(' ');
+  logStream.write('[ERROR] ' + msg + '\n');
+  console.error(...args);
+}
+
+// stdout/stderr 리다이렉트 (console.log/console.error 유지)
+process.stdout.write = ((orig) => function(chunk, encoding, cb) {
+  logStream.write(chunk);
+  return orig.call(process.stdout, chunk, encoding, cb);
+})(process.stdout.write);
+process.stderr.write = ((orig) => function(chunk, encoding, cb) {
+  logStream.write('[STDERR] ' + chunk);
+  return orig.call(process.stderr, chunk, encoding, cb);
+})(process.stderr.write);
+
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -41,7 +73,7 @@ app.get('/', (req, res) => {
     <div style="font-family: sans-serif; padding: 2rem; line-height: 1.6;">
       <h1 style="color: #1e293b;">Osoo Handle App - Local Bridge Server</h1>
       <p>로컬 API 서버가 정상적으로 동작 중입니다.</p>
-      <p><strong>참고:</strong> 사용자 인터페이스(UI)를 사용하려면 프론트엔드 개발 서버(포트 8900)를 실행해야 합니다.</p>
+      <p><strong>참고:</strong> 사용자 인터페이스(UI)를 사용하려면 프론트엔드 개발 서버(포트 18735)를 실행해야 합니다.</p>
       <div style="background: #f1f5f9; padding: 1rem; border-radius: 8px; display: inline-block;">
         <code>npm run dev</code> 를 터미널에서 실행하세요.
       </div>
@@ -62,8 +94,8 @@ let postStartupTasksScheduled = false;
 let postStartupCtx = null;
 
 /**
- * makeLazy ??泥?HTTP ?붿껌 ??紐⑤뱢??濡쒕뱶?섎뒗 Lazy Loader
- * ?먮윭 諛쒖깮 ??'error' ?곹깭瑜???ν븯??臾댄븳 ?ъ떆?꾨? 諛⑹??⑸땲??
+ * makeLazy 시 첫 HTTP 요청 시 모듈을 로드하는 Lazy Loader
+ * 에러 발생 시 'error' 상태를 저장하여 무한 재시도를 방지합니다
  */
 function makeLazy(modulePath, ...args) {
   let router = null;
@@ -77,7 +109,7 @@ function makeLazy(modulePath, ...args) {
         router = require(modulePath)(...args);
       } catch (e) {
         loadError = e.message;
-        console.error(`[Lazy] Tier2 濡쒕뱶 ?ㅽ뙣 ${modulePath}:`, e.message);
+        console.error(`[Lazy] Tier2 로드 실패 ${modulePath}:`, e.message);
         return res.status(500).json({ ok: false, error: `Module load failed: ${modulePath}: ${e.message}` });
       }
     }
@@ -86,7 +118,7 @@ function makeLazy(modulePath, ...args) {
 }
 
 /**
- * resolveArgs ??routeRegistry??args 臾몄옄??諛곗뿴???ㅼ젣 ctx 媛믪쑝濡?留ㅽ븨?⑸땲??
+ * resolveArgs는 routeRegistry의 args 문자열 배열을 실제 ctx 값으로 매핑합니다.
  */
 function resolveArgs(argNames, ctx) {
   return argNames.map(name => {
@@ -95,6 +127,10 @@ function resolveArgs(argNames, ctx) {
     if (name === 'BASE_DIR') return ctx.BASE_DIR;
     return name;
   });
+}
+
+function getTier1EntryKey(entry) {
+  return `${entry.path}::${entry.module}`;
 }
 
 function schedulePostStartupTasks() {
@@ -137,7 +173,7 @@ function registerLazyApplication() {
   const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
   const ctx = { db, appDataPath, BASE_DIR };
 
-  // --- Tier 0: 利됱떆 ?깅줉 (registry 湲곕컲) ---
+  // --- Tier 0: 즉시 등록 (registry 기반) ---
   for (const entry of routeRegistry.filter(r => r.tier === 0)) {
     const router = require(entry.module)(...resolveArgs(entry.args, ctx));
     app.use(entry.path, router);
@@ -152,12 +188,12 @@ function registerLazyApplication() {
   app.use('/uploads', express.static(path.join(appDataPath, 'uploads')));
   app.use('/사진관리', express.static(path.join(appDataPath, '사진관리')));
 
-  // --- BigQuery 媛먯떆 prefix: registry?먯꽌 ?먮룞 異붿텧 ---
+  // --- BigQuery 캐시 prefix: registry에서 자동 추출 ---
   const BIGQUERY_IMMEDIATE_SYNC_PREFIXES = routeRegistry
     .filter(r => r.watch)
     .map(r => r.path);
 
-  // --- BigQuery 媛먯떆 誘몃뱾?⑥뼱 ---
+  // --- BigQuery 감시 미들웨어 ---
   app.use((req, res, next) => {
     const method = String(req.method || '').toUpperCase();
     const shouldWatchMethod = method === 'POST' || method === 'PUT' || method === 'DELETE';
@@ -177,21 +213,22 @@ function registerLazyApplication() {
   const tier1Entries = routeRegistry.filter(r => r.tier === 1);
   const tier1RouterRefs = {};
   for (const entry of tier1Entries) {
-    tier1RouterRefs[entry.path] = null;
+    const entryKey = getTier1EntryKey(entry);
+    tier1RouterRefs[entryKey] = null;
     app.use(entry.path, (req, res, next) => {
-      if (!tier1RouterRefs[entry.path]) {
+      if (!tier1RouterRefs[entryKey]) {
         try {
-          tier1RouterRefs[entry.path] = require(entry.module)(...resolveArgs(entry.args, ctx));
+          tier1RouterRefs[entryKey] = require(entry.module)(...resolveArgs(entry.args, ctx));
         } catch (e) {
-          console.error(`[Lazy] Tier1 濡쒕뱶 ?ㅽ뙣 ${entry.path}:`, e.message);
-          tier1RouterRefs[entry.path] = 'error';
+          console.error(`[Lazy] Tier1 로드 실패 ${entry.path}:`, e.message);
+          tier1RouterRefs[entryKey] = 'error';
           return res.status(500).json({ ok: false, error: `Module load failed: ${entry.path}` });
         }
       }
-      if (tier1RouterRefs[entry.path] === 'error') {
+      if (tier1RouterRefs[entryKey] === 'error') {
         return res.status(500).json({ ok: false, error: `Module previously failed: ${entry.path}` });
       }
-      tier1RouterRefs[entry.path](req, res, next);
+      tier1RouterRefs[entryKey](req, res, next);
     });
   }
 
@@ -200,7 +237,7 @@ function registerLazyApplication() {
     app.use(entry.path, makeLazy(entry.module, ...resolveArgs(entry.args, ctx)));
   }
 
-  // --- BigQuery ?ㅼ?以꾨윭 ---
+  // --- BigQuery 스케줄러 ---
   function startBigQueryScheduler() {
     if (isBigQuerySyncEnabled && isBigQuerySchedulerEnabled) {
       const syncScheduler = require('./cron/syncScheduler.cjs');
@@ -221,12 +258,13 @@ function registerLazyApplication() {
       function loadNext() {
         if (i >= tier1Entries.length) { startBigQueryScheduler(); return; }
         const entry = tier1Entries[i++];
-        if (!tier1RouterRefs[entry.path]) {
+        const entryKey = getTier1EntryKey(entry);
+        if (!tier1RouterRefs[entryKey]) {
           try {
-            tier1RouterRefs[entry.path] = require(entry.module)(...resolveArgs(entry.args, ctx));
+            tier1RouterRefs[entryKey] = require(entry.module)(...resolveArgs(entry.args, ctx));
           } catch (e) {
-            console.error(`[Preload] Tier1 濡쒕뱶 ?ㅽ뙣 ${entry.path}:`, e.message);
-            tier1RouterRefs[entry.path] = 'error';
+            console.error(`[Preload] Tier1 로드 실패 ${entry.path}:`, e.message);
+            tier1RouterRefs[entryKey] = 'error';
           }
         }
         setTimeout(loadNext, 200);

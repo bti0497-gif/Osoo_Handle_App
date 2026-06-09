@@ -57,6 +57,63 @@ module.exports = function(db) {
 app.use(require('./routes/newRoutes.cjs')(db));
 ```
 
+## 파일 인코딩 (필수 ⚠️)
+
+**모든 코드 파일은 반드시 UTF-8 BOM 없음으로 인코딩되어야 합니다.**
+
+### 작성 규칙
+```javascript
+// ✅ 올바른 패턴: UTF-8 인코딩, 한글 문자 직접 기입
+const ERROR_MSG = '약품 이름이 비어있습니다.'; // ✅
+const label = '슬러지 관리';  // ✅
+
+// ❌ 금지: EUC-KR이나 다른 인코딩
+// ❌ 금지: 이스케이프 문자열로 한글 표현
+// const msg = '\xb1\xd7\xc6'; // ❌ 금지
+```
+
+### 파일 생성 시 검사
+1. **VS Code 설정**: 우측 하단 "인코딩" → UTF-8 확인
+2. **저장**: `Ctrl+S` 전에 인코딩 선택
+3. **커밋 전**: 다음 명령 실행
+   ```bash
+   node scripts/utf8-validate.cjs  # 모든 파일 UTF-8 검증
+   npm run validate                 # 배포 전 최종 검증
+   ```
+
+### 문제 발생 시
+```bash
+node scripts/fix-encoding.cjs  # 모든 파일 자동 UTF-8 재인코딩
+```
+
+---
+
+## 라우트 경로 규칙 (필수 ⚠️)
+
+**라우트 내 API 경로 중복 금지**
+
+### 올바른 패턴
+```javascript
+// server/routes/certificateRoutes.cjs
+const router = express.Router();
+router.get('/list', (req, res) => { /* ... */ });      // ✅ 상대 경로
+router.post('/upload', (req, res) => { /* ... */ });   // ✅ 상대 경로
+module.exports = (db) => router;
+
+// server/routeRegistry.cjs에서 마운트
+{ path: '/api/certificates', module: './routes/certificateRoutes.cjs' }
+// 결과: GET /api/certificates/list
+```
+
+### 금지된 패턴
+```javascript
+// ❌ 라우트 내에 전체 경로 포함
+router.get('/api/certificates/list', ...);   // ❌ double-prefix 발생
+router.post('/api/certificates/upload', ...); // ❌ 404 에러
+```
+
+---
+
 ## 변경 시 주의
 
 구조적 변경이 필요하면 사용자에게 먼저 확인을 받으세요:

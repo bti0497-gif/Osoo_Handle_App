@@ -5,9 +5,8 @@
 module.exports = {
   appId: 'com.osoo.handle-app',
   productName: 'Osoo Handle App',
-  npmRebuild: true,
+  npmRebuild: false,
   nodeGypRebuild: false,
-  beforePack: './scripts/patch-nsis-install-section.cjs',
   directories: {
     output: 'release',
     buildResources: 'build',
@@ -47,8 +46,6 @@ module.exports = {
   nsis: {
     oneClick: false,
     allowToChangeInstallationDirectory: true,
-    /** 사용자 안내 문구 — `electron/installer.nsh` */
-    include: 'electron/installer.nsh',
     installerIcon: 'public/icon.ico',
     uninstallerIcon: 'public/icon.ico',
     installerHeaderIcon: 'public/icon.ico',

@@ -1,7 +1,7 @@
 ﻿const express = require('express');
-const multer = require('multer');
-const JSZip = require('jszip');
-const { drive, getOrCreateFolder, uploadBufferToFolder } = require('../services/driveService.cjs');
+const sharp = require('sharp');
+const { PDFDocument } = require('pdf-lib');
+const { drive } = require('../services/driveService.cjs');
 const { isSheetsConfigured: isSitesSheetsConfigured, getSites: getSitesFromSheets } = require('../services/sitesSheetsService.cjs');
 const { db } = require('../database.cjs');
 const { decodeUserContextHeader } = require('../utils/httpUserHeaders.cjs');
@@ -12,10 +12,8 @@ const router = express.Router();
 
 const CERTIFICATE_ROOT_FOLDER_ID =
   String(process.env.CERTIFICATE_DRIVE_FOLDER_ID || '1Po-gd-OKlaeGyL-Ppjc6_wKgSLEM4iX4').trim();
-const CERTIFICATE_PREFIX_RE = /^(?깆쟻??mlss)-(\d{8})(\.[^.]+)?$/i;
-const MANUAL_CERT_FILE_RE = /^(?깆쟻??mlss)[_-](\d{8})[_-](.+)\.(jpg|jpeg|png|webp|pdf)$/i;
-const zipUploadProgressMap = new Map();
-
+const CERTIFICATE_PREFIX_RE = /^(성적서|mlss)-(\d{8})(\.[^.]+)?$/i;
+const MANUAL_CERT_FILE_RE = /^(성적서|mlss)[_-](\d{8})[_-](.+)\.(jpg|jpeg|png|webp|pdf)$/i;
 function toDisplayDate(yyyymmdd) {
   if (!/^\d{8}$/.test(String(yyyymmdd || ''))) return '';
   const y = yyyymmdd.slice(0, 4);
@@ -70,6 +68,74 @@ async function listFiles(parentId) {
   return res.data.files || [];
 }
 
+function streamToBuffer(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+  });
+}
+
+async function downloadDriveFileWithMeta(fileId) {
+  const meta = await drive.files.get({
+    fileId,
+    fields: 'id,name,mimeType,size',
+    supportsAllDrives: true,
+  });
+  const media = await drive.files.get(
+    { fileId, alt: 'media', supportsAllDrives: true },
+    { responseType: 'stream' }
+  );
+  return {
+    meta: meta.data || {},
+    buffer: await streamToBuffer(media.data),
+  };
+}
+
+function fitSize(width, height, maxWidth, maxHeight) {
+  const scale = Math.min(maxWidth / width, maxHeight / height, 1);
+  return {
+    width: width * scale,
+    height: height * scale,
+  };
+}
+
+async function appendCertificateFileToPdf(mergedPdf, file) {
+  const mimeType = String(file.meta?.mimeType || '').toLowerCase();
+  const fileName = String(file.meta?.name || '').toLowerCase();
+  const buffer = file.buffer;
+
+  if (mimeType.includes('pdf') || fileName.endsWith('.pdf')) {
+    const sourcePdf = await PDFDocument.load(buffer);
+    const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+    copiedPages.forEach((page) => mergedPdf.addPage(page));
+    return;
+  }
+
+  let image;
+  if (mimeType.includes('png') || fileName.endsWith('.png')) {
+    image = await mergedPdf.embedPng(buffer);
+  } else if (mimeType.includes('jpeg') || mimeType.includes('jpg') || /\.(jpe?g)$/i.test(fileName)) {
+    image = await mergedPdf.embedJpg(buffer);
+  } else {
+    const pngBuffer = await sharp(buffer).png().toBuffer();
+    image = await mergedPdf.embedPng(pngBuffer);
+  }
+
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const margin = 24;
+  const fitted = fitSize(image.width, image.height, pageWidth - margin * 2, pageHeight - margin * 2);
+  const page = mergedPdf.addPage([pageWidth, pageHeight]);
+  page.drawImage(image, {
+    x: (pageWidth - fitted.width) / 2,
+    y: (pageHeight - fitted.height) / 2,
+    width: fitted.width,
+    height: fitted.height,
+  });
+}
+
 function normalizeYear(value) {
   const y = String(value || '').trim();
   return /^\d{4}$/.test(y) ? y : '';
@@ -82,7 +148,7 @@ function normalizeMonth(value) {
 
 async function resolveMonthFolders({ year, month }) {
   const rootFolders = await listFolders(CERTIFICATE_ROOT_FOLDER_ID);
-  const certRoot = rootFolders.find((f) => String(f.name || '').trim() === '?깆쟻??);
+  const certRoot = rootFolders.find((f) => String(f.name || '').trim() === '성적서');
   const searchRoots = [CERTIFICATE_ROOT_FOLDER_ID, certRoot?.id].filter(Boolean);
   const monthFolders = [];
   const seen = new Set();
@@ -136,9 +202,9 @@ function normalizeSiteNameKey(value) {
     .toLowerCase()
     .replace(/\s+/g, '')
     .replace(/[()\-_/]/g, '')
-    .replace(/?닿쾶??g, '')
-    .replace(/諛⑺뼢/g, '')
-    .replace(/?곹뻾|?섑뻾/g, '');
+    .replace(/합계/g, '')
+    .replace(/방향/g, '')
+    .replace(/상행|하행/g, '');
 }
 
 function normalizeDateLike(value) {
@@ -253,9 +319,9 @@ function buildAliasCandidates(siteName) {
 
   const aliases = new Set([raw]);
   aliases.add(raw.replace(/\s+/g, ''));
-  aliases.add(raw.replace(/?닿쾶??g, '').trim());
-  aliases.add(raw.replace(/諛⑺뼢/g, '').trim());
-  aliases.add(raw.replace(/?닿쾶??g, '').replace(/諛⑺뼢/g, '').trim());
+  aliases.add(raw.replace(/합계/g, '').trim());
+  aliases.add(raw.replace(/방향/g, '').trim());
+  aliases.add(raw.replace(/합계/g, '').replace(/방향/g, '').trim());
   aliases.add(raw.replace(/[()]/g, '').trim());
   aliases.add(raw.replace(/[()]/g, '').replace(/\s+/g, '').trim());
 
@@ -269,8 +335,8 @@ function buildAliasCandidates(siteName) {
       aliases.add(`${base} ${dir}`);
       aliases.add(`${base}?닿쾶??${dir})`);
       aliases.add(`${base}?닿쾶??{dir}`);
-      aliases.add(`${base}(${dir.replace(/諛⑺뼢/g, '')})`);
-      aliases.add(`${base}${dir.replace(/諛⑺뼢/g, '')}`);
+      aliases.add(`${base}(${dir.replace(/방향/g, '')})`);
+      aliases.add(`${base}${dir.replace(/방향/g, '')}`);
     }
   }
 
@@ -341,7 +407,7 @@ function findBestSiteMatch(rawSiteName, siteMaster = []) {
     }
   }
 
-  // OCR쨌?쎌묶 ???쎄컙 ?닿툔???꾩옣紐낅룄 ?쒗듃 蹂꾩묶怨?留욎텛湲??꾪빐 ?섑븳????땄 (?낆꽌???대갚??異붽? ?덉쟾留?
+  // OCR·약칭 등 약간 어긋난 현장명도 시트 별칭과 맞추기 위해 하한을 낮춤 (업서트 폴백이 추가 안전망)
   if (!best || bestScore < 0.5) {
     return {
       site_id: null,
@@ -472,7 +538,7 @@ function getManagedSiteNamesByManagerName(userName) {
 function ensureAdmin(req, res) {
   const role = resolveUserRole(req);
   if (role === 'admin' || role === 'group_admin') return true;
-  res.status(403).json({ success: false, message: '愿由ъ옄 沅뚰븳???꾩슂?⑸땲??' });
+  res.status(403).json({ success: false, message: '관리자 권한이 필요합니다.' });
   return false;
 }
 
@@ -498,7 +564,7 @@ function parseJsonObject(text) {
   }
 }
 
-/** JSON 蹂몃Ц???ㅼ뼱 ?덉쓣 ???덈뒗 ?꾩옣紐??꾨낫 (OCR ?먮Ц ?? */
+/** JSON 본문에 들어 있을 수 있는 현장명 후보 (OCR 원문 등) */
 function collectSiteNameHintsFromPayloadJson(jsonStr) {
   const p = parseJsonObject(jsonStr);
   const out = [];
@@ -515,7 +581,7 @@ function collectSiteNameHintsFromPayloadJson(jsonStr) {
   return out;
 }
 
-/** DB ??而щ읆 + payload) vs ?뚯씪紐낆뿉?????꾩옣 臾몄옄???좎궗??*/
+/** DB 행(컬럼 + payload) vs 파일명에서 온 현장 문자열 유사도 */
 function rowSiteSimilarityScore(row, siteRawFromFile, officialFromMatch) {
   const needles = [];
   const r = String(siteRawFromFile || '').trim();
@@ -557,7 +623,7 @@ async function upsertCertificateFileMeta({
 }) {
   const bq = getBigQueryClient();
   if (!bq) {
-    throw new Error('BigQuery ?곌껐???꾩슂?⑸땲?? (certificate ?뚯씪 硫뷀? ?숆린??');
+    throw new Error('BigQuery 연결이 필요합니다. (certificate 파일 메타 동기화)');
   }
 
   const nowIso = new Date().toISOString();
@@ -567,7 +633,7 @@ async function upsertCertificateFileMeta({
   const [candidates] = await bq.query({
     query: `
       SELECT local_id, site_id, site_name, site_name_raw, source_payload_json
-      FROM \`${DATASET_ID}.certificate_water_quality\`
+      FROM \`${DATASET_ID}.water_quality\`
       WHERE report_date = @reportDate
       ORDER BY local_id DESC
       LIMIT 200
@@ -613,7 +679,7 @@ async function upsertCertificateFileMeta({
     if (!Number.isFinite(localId)) continue;
     await bq.query({
       query: `
-        UPDATE \`${DATASET_ID}.certificate_water_quality\`
+        UPDATE \`${DATASET_ID}.water_quality\`
         SET
           certificate_category = @category,
           certificate_file_name = @uploadedFileName,
@@ -652,7 +718,7 @@ async function upsertCertificateFileMeta({
 
 async function upsertCertificateRowToBigQuery(row, uniqueIndex) {
   const bq = getBigQueryClient();
-  if (!bq) throw new Error('BigQuery ?곌껐???꾩슂?⑸땲??');
+  if (!bq) throw new Error('BigQuery 연결이 필요합니다.');
 
   const reportDate = normalizeDateLike(row.report_date || row.date || row.sampled_at);
   if (!reportDate) return { inserted: false, reason: 'invalid_date' };
@@ -661,7 +727,7 @@ async function upsertCertificateRowToBigQuery(row, uniqueIndex) {
 
   await bq.query({
     query: `
-      DELETE FROM \`${DATASET_ID}.certificate_water_quality\`
+      DELETE FROM \`${DATASET_ID}.water_quality\`
       WHERE report_date = DATE(@reportDate)
         AND (
           (@siteId IS NOT NULL AND site_id = @siteId)
@@ -682,7 +748,7 @@ async function upsertCertificateRowToBigQuery(row, uniqueIndex) {
 
   await bq.query({
     query: `
-      INSERT INTO \`${DATASET_ID}.certificate_water_quality\` (
+      INSERT INTO \`${DATASET_ID}.water_quality\` (
         certificate_category, certificate_file_name, certificate_original_file_name,
         drive_file_id, drive_web_view_link,
         site_id, site_name, site_name_raw, local_id, report_date,
@@ -780,7 +846,7 @@ function isMasterJsonFile(fileName) {
   return String(fileName || '').trim().toLowerCase() === 'all_pages_data.json';
 }
 
-/** ?섏씠吏/?섑띁 媛앹껜瑜?INSERT?먯꽌 諛붾줈 ?????덇쾶 record쨌data쨌extracted瑜???媛앹껜濡??⑹묠 */
+/** 페이지/래퍼 객체를 INSERT에서 바로 쓸 수 있게 record·data·extracted를 한 객체로 합침 */
 function mergeRowForCertificateImport(row) {
   if (!row || typeof row !== 'object') return null;
   const base = { ...row };
@@ -851,8 +917,8 @@ function mergeRowForCertificateImport(row) {
 }
 
 /**
- * AI Studio batch_export ?? 理쒖긽??諛곗뿴, records[], pages[] 留??ㅺ굔?쇰줈 ?몄떇?덉뿀??
- * ?⑥씪 媛앹껜??record留??덇굅??pages[]???섏씠吏蹂??곗씠?곌? ?덉쑝硫?1嫄대쭔 ?ㅼ뼱媛??臾몄젣 蹂댁셿.
+ * AI Studio batch_export 등: 최상위 배열, records[], pages[] 만 다건으로 인식했었음.
+ * 단일 객체에 record만 있거나 pages[]에 페이지별 데이터가 있으면 1건만 들어가던 문제 보완.
  */
 function normalizeIncomingJsonRecords(payload) {
   if (payload == null) return [];
@@ -935,219 +1001,7 @@ function toNullableNumber(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-function setZipUploadProgress(taskId, patch = {}) {
-  const key = String(taskId || '').trim();
-  if (!key) return;
-  const prev = zipUploadProgressMap.get(key) || {};
-  zipUploadProgressMap.set(key, {
-    ...prev,
-    ...patch,
-    updatedAt: Date.now(),
-  });
-}
-
 module.exports = function () {
-  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
-
-  router.get('/api/certificates/manual-upload-zip-progress', async (req, res) => {
-    try {
-      if (!ensureAdmin(req, res)) return;
-      const taskId = String(req.query.taskId || '').trim();
-      if (!taskId) {
-        return res.status(400).json({ success: false, message: 'taskId媛 ?꾩슂?⑸땲??' });
-      }
-      const progress = zipUploadProgressMap.get(taskId);
-      if (!progress) {
-        return res.status(404).json({ success: false, message: '吏꾪뻾 ?곹깭瑜?李얠쓣 ???놁뒿?덈떎.' });
-      }
-      return res.json({ success: true, progress });
-    } catch (err) {
-      return res.status(500).json({ success: false, message: err.message });
-    }
-  });
-
-  router.get('/api/certificates/site-normalization', async (req, res) => {
-    try {
-      if (!isSitesSheetsConfigured()) {
-        return res.status(400).json({
-          success: false,
-          message: 'Google Sheets???ㅼ젙?섏? ?딆븯?듬땲?? (GOOGLE_MEMBERS_SHEET_ID)',
-        });
-      }
-
-      const sites = await getSitesFromSheets();
-      const activeSites = (sites || []).filter((site) => site && site.is_active !== 0);
-      const siteMaster = activeSites.map((site) => {
-        const officialName = String(site.site_name || '').trim();
-        const aliases = buildAliasCandidates(officialName);
-        return {
-          site_id: String(site.id || '').trim(),
-          official_name: officialName,
-          aliases,
-          normalized_key: normalizeSiteNameKey(officialName),
-          regex: aliases.length
-            ? aliases.map((alias) => escapeRegex(alias)).join('|')
-            : escapeRegex(officialName),
-        };
-      }).filter((item) => item.site_id && item.official_name);
-
-      const combinedRegex = siteMaster.map((item) => `(?:${item.regex})`).join('|');
-      return res.json({
-        success: true,
-        count: siteMaster.length,
-        siteMaster,
-        combinedRegex,
-      });
-    } catch (err) {
-      return res.status(500).json({ success: false, message: err.message });
-    }
-  });
-
-  router.post('/api/certificates/import-from-ai', async (req, res) => {
-    try {
-      const normalized = normalizeAiImportPayload(req.body || {});
-      const { include, record } = normalized;
-
-      if (!include) {
-        return res.json({
-          success: true,
-          accepted: false,
-          skipped: true,
-          reason: normalized.reason || 'excluded_by_ai',
-          received: normalized,
-        });
-      }
-
-      if (!record.report_date || !/^\d{4}-\d{2}-\d{2}$/.test(String(record.report_date))) {
-        return res.status(400).json({
-          success: false,
-          message: 'report_date(YYYY-MM-DD)媛 ?꾩슂?⑸땲??',
-          received: normalized,
-        });
-      }
-
-      if (!record.site_name && !record.site_id) {
-        return res.status(400).json({
-          success: false,
-          message: 'site_name ?먮뒗 site_id 以??섎굹???꾩슂?⑸땲??',
-          received: normalized,
-        });
-      }
-
-      await upsertCertificateRowToBigQuery({
-        site_id: record.site_id ? String(record.site_id) : null,
-        site_name: record.site_name ? String(record.site_name) : null,
-        site_name_raw: record.site_name_raw ? String(record.site_name_raw) : null,
-        report_date: String(record.report_date),
-        ss: record.ss,
-        bod: record.bod,
-        tn: record.tn,
-        tp: record.tp,
-        total_coliform: record.total_coliform,
-        mlss: record.mlss,
-        do: record.do,
-        ph: record.ph,
-        source_pdf_name: normalized.source.source_pdf_name ? String(normalized.source.source_pdf_name) : null,
-        source_page_index: normalized.source.page_index != null ? Number(normalized.source.page_index) : null,
-        ai_confidence: normalized.meta.confidence,
-        site_match_confidence: normalized.meta.site_match_confidence,
-        manual_review_required: normalized.meta.manual_review_required ? 1 : 0,
-        warnings_json: JSON.stringify(normalized.meta.warnings || []),
-        source_payload_json: JSON.stringify(req.body || {}),
-      }, 0);
-      return res.json({
-        success: true,
-        accepted: true,
-        message: 'AI 異붿텧 寃곌낵瑜??뺤긽 ?섏떊/??ν뻽?듬땲??',
-        id: null,
-        received: normalized,
-      });
-    } catch (err) {
-      return res.status(500).json({ success: false, message: err.message });
-    }
-  });
-
-  router.post('/api/certificates/manual-import-json', async (req, res) => {
-    try {
-      if (!ensureAdmin(req, res)) return;
-      const siteMaster = await loadSiteMaster();
-      const body = req.body;
-      const incomingRecords = Array.isArray(body)
-        ? body
-        : (Array.isArray(body?.records) ? body.records : [body]);
-      const records = incomingRecords.filter((row) => row && typeof row === 'object');
-      if (records.length === 0) {
-        return res.status(400).json({ success: false, message: '?낅줈?쒗븷 JSON ?덉퐫?쒓? ?놁뒿?덈떎.' });
-      }
-
-      const warnings = [];
-      let inserted = 0;
-      for (let index = 0; index < records.length; index += 1) {
-        const raw = records[index];
-        const reportDate = resolveReportDate(raw);
-        if (!reportDate) {
-          warnings.push(`index ${index}: report_date ?뺤떇???щ컮瑜댁? ?딆븘 ?쒖쇅?섏뿀?듬땲??`);
-          continue;
-        }
-
-        const matchedById = raw.site_id
-          ? siteMaster.find((site) => String(site.site_id) === String(raw.site_id))
-          : null;
-        const matched = matchedById
-          ? {
-              site_id: matchedById.site_id,
-              site_name: matchedById.official_name,
-              site_name_raw: String(raw.site_name || raw.site_name_raw || matchedById.official_name || '').trim() || null,
-              site_match_confidence: 1,
-              manual_review_required: false,
-            }
-          : findBestSiteMatch(raw.site_name || raw.site_name_raw || '', siteMaster);
-        const rowWarnings = Array.isArray(raw.warnings)
-          ? raw.warnings
-          : (Array.isArray(raw.meta?.warnings) ? raw.meta.warnings : []);
-        const manualReview = Boolean(raw.manual_review_required || raw.meta?.manual_review_required || matched.manual_review_required);
-
-        try {
-          await upsertCertificateRowToBigQuery({
-            site_id: matched.site_id ? String(matched.site_id) : null,
-            site_name: matched.site_name ? String(matched.site_name) : null,
-            site_name_raw: matched.site_name_raw ? String(matched.site_name_raw) : null,
-            report_date: reportDate,
-            ss: raw.ss,
-            bod: raw.bod,
-            tn: raw.tn,
-            tp: raw.tp,
-            total_coliform: raw.total_coliform,
-            mlss: raw.mlss,
-            do: raw.do,
-            ph: raw.ph,
-            source_pdf_name: raw.source_pdf_name ? String(raw.source_pdf_name) : null,
-            source_page_index: raw.source_page_index != null ? Number(raw.source_page_index) : null,
-            ai_confidence: raw.ai_confidence ?? raw.meta?.confidence ?? null,
-            site_match_confidence: raw.site_match_confidence ?? raw.meta?.site_match_confidence ?? matched.site_match_confidence,
-            manual_review_required: manualReview,
-            warnings_json: JSON.stringify(rowWarnings),
-            source_payload_json: JSON.stringify(raw),
-          }, index);
-          inserted += 1;
-        } catch (rowErr) {
-          warnings.push(`index ${index}: BigQuery ????ㅽ뙣 (${rowErr.message})`);
-        }
-      }
-
-      return res.json({
-        success: true,
-        inserted,
-        skipped: records.length - inserted,
-        warnings,
-      });
-    } catch (err) {
-      return res.status(500).json({ success: false, message: err.message });
-    }
-  });
-
-  // ?깆쟻??紐⑸줉? BigQuery/Drive瑜??⑥씪 吏꾩떎?먮낯?쇰줈 ?ъ슜?쒕떎. (濡쒖뺄 SQLite 誘몄궗??
-
   router.get('/api/certificates', async (req, res) => {
     try {
       const role = resolveUserRole(req);
@@ -1160,10 +1014,10 @@ module.exports = function () {
         const allowedFromManager = getManagedSiteNamesByManagerName(userName);
         const allowedSites = Array.from(new Set([...allowedFromHeader, ...allowedFromManager]));
         if (allowedSites.length === 0) {
-          return res.status(403).json({ success: false, message: '?꾩옣 ?뺣낫媛 ?놁뼱 ?깆쟻?쒕? 議고쉶?????놁뒿?덈떎.' });
+          return res.status(403).json({ success: false, message: '현장 정보가 없어 성적서를 조회할 수 없습니다.' });
         }
         if (requestedSiteName && !allowedSites.includes(requestedSiteName)) {
-          return res.status(403).json({ success: false, message: '? ?꾩옣 ?깆쟻?쒕뒗 議고쉶?????놁뒿?덈떎.' });
+          return res.status(403).json({ success: false, message: '현장 정보가 없어 성적서를 조회할 수 없습니다.' });
         }
         siteNameFilters = requestedSiteName ? [requestedSiteName] : allowedSites;
       }
@@ -1200,7 +1054,7 @@ module.exports = function () {
             COALESCE(certificate_file_name, JSON_EXTRACT_SCALAR(source_payload_json, '$.certificate_file.file_name')) AS file_name,
             COALESCE(certificate_category, JSON_EXTRACT_SCALAR(source_payload_json, '$.certificate_file.category')) AS category,
             COALESCE(drive_file_id, JSON_EXTRACT_SCALAR(source_payload_json, '$.certificate_file.drive_file_id')) AS drive_file_id
-          FROM \`${DATASET_ID}.certificate_water_quality\`
+          FROM \`${DATASET_ID}.water_quality\`
           WHERE ${where.join(' AND ')}
           ORDER BY report_date DESC
           LIMIT 1000
@@ -1227,7 +1081,7 @@ module.exports = function () {
           });
       }
 
-      // ?ъ슜???섎룄: ?깆쟻??JPG 紐⑸줉? Drive 湲곗??쇰줈 蹂댁뿬???쒕떎.
+      // 사용자 의도: 성적서 JPG 목록은 Drive 기준으로 보여야 한다.
       if (drive && CERTIFICATE_ROOT_FOLDER_ID) {
         const folders = await resolveMonthFolders({ year, month });
         const driveItems = [];
@@ -1236,16 +1090,16 @@ module.exports = function () {
           const files = await listFiles(folder.folderId);
           for (const file of files) {
             const baseName = toBaseName(file.name);
-            // ?깆쟻??紐⑸줉? 寃곌낵 ?뚯씪留??몄텧 (ZIP/湲고? ?곗텧臾??쒖쇅)
+            // 성적서 목록은 결과 파일만 노출 (ZIP/기타 산출물 제외)
             if (!isAllowedManualMedia(baseName)) {
               continue;
             }
             const parsed = parseManualCertificateFileName(file.name);
-            let siteName = '怨듯넻';
+            let siteName = '공통';
             let reportDate = '';
             let category = '';
             if (parsed) {
-              siteName = parsed.site_name_raw || '怨듯넻';
+              siteName = parsed.site_name_raw || '공통';
               reportDate = normalizeDateLike(parsed.yyyymmdd);
               category = parsed.prefix || '';
             } else {
@@ -1316,7 +1170,7 @@ module.exports = function () {
       const month = normalizeMonth(req.body?.month);
 
       if (!year || !month) {
-        return res.status(400).json({ success: false, message: 'year/month 媛믪씠 ?꾩슂?⑸땲??' });
+        return res.status(400).json({ success: false, message: 'year/month 값이 필요합니다.' });
       }
 
       let targetSiteNames = requestedSiteName ? [requestedSiteName] : [];
@@ -1325,10 +1179,10 @@ module.exports = function () {
         const allowedFromManager = getManagedSiteNamesByManagerName(userName);
         const allowedSites = Array.from(new Set([...allowedFromHeader, ...allowedFromManager]));
         if (allowedSites.length === 0) {
-          return res.status(403).json({ success: false, message: '?꾩옣 ?뺣낫媛 ?놁뼱 ?숆린?뷀븷 ???놁뒿?덈떎.' });
+          return res.status(403).json({ success: false, message: '현장 정보가 없어 동기화할 수 없습니다.' });
         }
         if (requestedSiteName && !allowedSites.includes(requestedSiteName)) {
-          return res.status(403).json({ success: false, message: '? ?꾩옣 ?숆린?붾뒗 ?덉슜?섏? ?딆뒿?덈떎.' });
+          return res.status(403).json({ success: false, message: '현장 정보가 없어 동기화할 수 없습니다.' });
         }
         targetSiteNames = requestedSiteName ? [requestedSiteName] : allowedSites;
       } else if (targetSiteNames.length === 0 && userSiteName) {
@@ -1336,7 +1190,7 @@ module.exports = function () {
       }
 
       if (targetSiteNames.length === 0) {
-        return res.status(400).json({ success: false, message: '?숆린??????꾩옣???뺤씤?????놁뒿?덈떎.' });
+        return res.status(400).json({ success: false, message: '동기화 대상 현장을 확인할 수 없습니다.' });
       }
 
       let totalCount = 0;
@@ -1366,7 +1220,7 @@ module.exports = function () {
 
   router.get('/api/certificates/:id/download', async (req, res) => {
     let id = String(req.params.id || '').trim();
-    if (!id) return res.status(400).json({ success: false, message: '?깆쟻??ID媛 ?꾩슂?⑸땲??' });
+    if (!id) return res.status(400).json({ success: false, message: '성적서 ID가 필요합니다.' });
 
     return res.json({
       success: true,
@@ -1374,10 +1228,59 @@ module.exports = function () {
     });
   });
 
+  router.post('/api/certificates/download-selected-pdf', async (req, res) => {
+    try {
+      const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+      const items = rawItems
+        .map((item) => ({
+          id: String(item?.id || '').trim(),
+          fileName: String(item?.fileName || item?.file_name || '').trim(),
+        }))
+        .filter((item) => item.id);
+
+      if (!items.length) {
+        return res.status(400).json({ success: false, message: '다운로드할 성적서를 선택해 주세요.' });
+      }
+      if (items.length > 100) {
+        return res.status(400).json({ success: false, message: '한 번에 100개 이하만 다운로드할 수 있습니다.' });
+      }
+      if (!drive) {
+        return res.status(400).json({ success: false, message: 'Drive 설정이 필요합니다.' });
+      }
+
+      const mergedPdf = await PDFDocument.create();
+      for (const item of items) {
+        const file = await downloadDriveFileWithMeta(item.id);
+        if (item.fileName && !file.meta.name) {
+          file.meta.name = item.fileName;
+        }
+        await appendCertificateFileToPdf(mergedPdf, file);
+      }
+
+      const bytes = await mergedPdf.save();
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, '0'),
+        String(now.getDate()).padStart(2, '0'),
+        '-',
+        String(now.getHours()).padStart(2, '0'),
+        String(now.getMinutes()).padStart(2, '0'),
+      ].join('');
+      const outputName = `성적서_${items.length}건_${stamp}.pdf`;
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(outputName)}`);
+      return res.send(Buffer.from(bytes));
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
   router.get('/api/certificates/files/:id', async (req, res) => {
     try {
       const id = String(req.params.id || '').trim();
-      if (!id) return res.status(400).send('?섎せ???붿껌?낅땲??');
+      if (!id) return res.status(400).send('잘못된 요청입니다.');
 
       const meta = await drive.files.get({
         fileId: id,
@@ -1400,470 +1303,6 @@ module.exports = function () {
       media.data.pipe(res);
     } catch (err) {
       res.status(500).json({ success: false, message: err.message });
-    }
-  });
-
-  router.post('/api/certificates/upload', upload.single('certificatePdf'), async (req, res) => {
-    try {
-      if (!drive || !CERTIFICATE_ROOT_FOLDER_ID) {
-        return res.status(400).json({ success: false, message: 'Drive ?ㅼ젙???꾩슂?⑸땲??' });
-      }
-      if (!req.file) {
-        return res.status(400).json({ success: false, message: '?낅줈???뚯씪???놁뒿?덈떎.' });
-      }
-
-      const now = new Date();
-      const year = String(now.getFullYear());
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const yearFolder = await getOrCreateFolder(CERTIFICATE_ROOT_FOLDER_ID, year);
-      const monthFolder = await getOrCreateFolder(yearFolder.id, month);
-
-      const uploadRes = await drive.files.create({
-        resource: { name: req.file.originalname, parents: [monthFolder.id] },
-        media: { mimeType: req.file.mimetype || 'application/pdf', body: require('stream').Readable.from(req.file.buffer) },
-        fields: 'id,name,webViewLink',
-        supportsAllDrives: true,
-      });
-
-      res.json({ success: true, item: uploadRes.data });
-    } catch (err) {
-      res.status(500).json({ success: false, message: err.message });
-    }
-  });
-
-  router.post('/api/certificates/manual-upload-file', upload.array('files', 300), async (req, res) => {
-    try {
-      if (!ensureAdmin(req, res)) return;
-      if (!drive || !CERTIFICATE_ROOT_FOLDER_ID) {
-        return res.status(400).json({ success: false, message: 'Drive ?ㅼ젙???꾩슂?⑸땲??' });
-      }
-      const files = Array.isArray(req.files) ? req.files : [];
-      if (files.length === 0) {
-        return res.status(400).json({ success: false, message: '?낅줈???뚯씪???놁뒿?덈떎.' });
-      }
-
-      const siteMaster = await loadSiteMaster();
-      const certFolder = await getOrCreateFolder(CERTIFICATE_ROOT_FOLDER_ID, '?깆쟻??);
-      const items = [];
-      const errors = [];
-
-      for (const file of files) {
-        try {
-          const parsed = parseManualCertificateFileName(file.originalname);
-          if (!parsed) {
-            errors.push({
-              file: file.originalname,
-              message: '?뚯씪紐??뺤떇???щ컮瑜댁? ?딆뒿?덈떎. (?깆쟻??yyyymmdd_?꾩옣紐?jpg ?먮뒗 mlss_yyyymmdd_?꾩옣紐?jpg)',
-            });
-            continue;
-          }
-          const reportDate = normalizeDateLike(parsed.yyyymmdd);
-          if (!reportDate) {
-            errors.push({
-              file: file.originalname,
-              message: '?뚯씪紐??좎쭨(yyyymmdd)媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
-            });
-            continue;
-          }
-
-          const year = parsed.yyyymmdd.slice(0, 4);
-          const month = parsed.yyyymmdd.slice(4, 6);
-          const yearFolder = await getOrCreateFolder(certFolder.id, year);
-          const monthFolder = await getOrCreateFolder(yearFolder.id, month);
-
-          const matched = findBestSiteMatch(parsed.site_name_raw, siteMaster);
-          const safeSiteName = normalizeForFileSegment(matched.site_name || parsed.site_name_raw);
-          const finalFileName = `${parsed.prefix}_${getCompactDate(reportDate)}_${safeSiteName}.${parsed.ext}`;
-          const uploaded = await uploadBufferToFolder({
-            folderId: monthFolder.id,
-            fileName: finalFileName,
-            buffer: file.buffer,
-            mimeType: file.mimetype || 'application/octet-stream',
-          });
-          const linkedRows = await upsertCertificateFileMeta({
-            reportDate,
-            siteId: matched.site_id,
-            siteName: matched.site_name || parsed.site_name_raw,
-            siteNameRawFromFile: parsed.site_name_raw,
-            category: parsed.prefix,
-            driveFileId: uploaded.id,
-            driveWebViewLink: uploaded.webViewLink || null,
-            uploadedFileName: finalFileName,
-            originalFileName: file.originalname,
-          });
-
-          items.push({
-            original_file_name: file.originalname,
-            uploaded_file_name: finalFileName,
-            category: parsed.prefix,
-            report_date: reportDate,
-            year,
-            month,
-            site_id: matched.site_id,
-            site_name: matched.site_name || parsed.site_name_raw,
-            site_name_raw: parsed.site_name_raw,
-            site_match_confidence: matched.site_match_confidence,
-            manual_review_required: Boolean(matched.manual_review_required),
-            drive_file_id: uploaded.id,
-            drive_web_view_link: uploaded.webViewLink || null,
-            linked_row_count: linkedRows,
-          });
-        } catch (fileErr) {
-          errors.push({
-            file: file.originalname,
-            message: fileErr.message,
-          });
-        }
-      }
-
-      return res.json({
-        success: true,
-        uploaded_count: items.length,
-        failed_count: errors.length,
-        items,
-        errors,
-      });
-    } catch (err) {
-      return res.status(500).json({ success: false, message: err.message });
-    }
-  });
-
-  router.post('/api/certificates/manual-upload-zip', upload.single('bundleZip'), async (req, res) => {
-    try {
-      if (!ensureAdmin(req, res)) return;
-      if (!drive || !CERTIFICATE_ROOT_FOLDER_ID) {
-        return res.status(400).json({ success: false, message: 'Drive ?ㅼ젙???꾩슂?⑸땲??' });
-      }
-      if (!req.file) {
-        return res.status(400).json({ success: false, message: 'ZIP ?뚯씪???꾩슂?⑸땲?? (bundleZip)' });
-      }
-      if (!/\.zip$/i.test(String(req.file.originalname || ''))) {
-        return res.status(400).json({ success: false, message: 'zip ?뺤떇 ?뚯씪留??낅줈?쒗븷 ???덉뒿?덈떎.' });
-      }
-
-      const uploadTaskId = String(req.body?.uploadTaskId || '').trim();
-      setZipUploadProgress(uploadTaskId, {
-        status: 'processing',
-        stage: 'zip_received',
-        message: '?뺤텞 ?뚯씪???댁꽍 以묒엯?덈떎...',
-        fileName: req.file.originalname,
-      });
-      console.log(`[Certificate ZIP] 泥섎━ ?쒖옉: ${req.file.originalname} (${req.file.size || 0} bytes)`);
-
-      const siteMaster = await loadSiteMaster();
-      const certFolder = await getOrCreateFolder(CERTIFICATE_ROOT_FOLDER_ID, '?깆쟻??);
-      const zip = await JSZip.loadAsync(req.file.buffer);
-      const entries = Object.keys(zip.files || {})
-        .map((key) => zip.files[key])
-        .filter((entry) => entry && !entry.dir);
-
-      const allJsonRecords = [];
-      const jsonErrors = [];
-      const ignoredJsonFiles = [];
-      const fileEntries = [];
-      const masterJsonEntry = entries.find((entry) => isMasterJsonFile(toBaseName(entry.name))) || null;
-
-      if (!masterJsonEntry) {
-        console.warn(`[Certificate ZIP] all_pages_data.json ?꾨씫: ${req.file.originalname}`);
-        return res.status(400).json({
-          success: false,
-          message: 'all_pages_data.json ?뚯씪???꾩슂?⑸땲??',
-        });
-      }
-
-      try {
-        const text = await masterJsonEntry.async('text');
-        const parsed = JSON.parse(text);
-        const records = normalizeIncomingJsonRecords(parsed);
-        allJsonRecords.push(...records);
-      } catch (jsonErr) {
-        jsonErrors.push({
-          file: masterJsonEntry.name,
-          message: `JSON ?뚯떛 ?ㅽ뙣: ${jsonErr.message}`,
-        });
-      }
-
-      for (const entry of entries) {
-        const baseName = toBaseName(entry.name);
-        if (isJsonFileName(baseName)) {
-          if (entry.name !== masterJsonEntry.name) {
-            ignoredJsonFiles.push(entry.name);
-          }
-          continue;
-        }
-
-        if (isAllowedManualMedia(baseName)) {
-          fileEntries.push({ entry, baseName });
-        }
-      }
-
-      console.log(
-        `[Certificate ZIP] ?뚯떛 ?꾨즺: jsonRecords=${allJsonRecords.length}, mediaFiles=${fileEntries.length}, ignoredJson=${ignoredJsonFiles.length}`
-      );
-      setZipUploadProgress(uploadTaskId, {
-        stage: 'parsed',
-        message: `?뺤텞 ?댁꽍 ?꾨즺 (JSON ${allJsonRecords.length}嫄? ?대?吏 ${fileEntries.length}媛?`,
-        jsonTotal: allJsonRecords.length,
-        fileTotal: fileEntries.length,
-      });
-
-      const importWarnings = [];
-      let inserted = 0;
-      for (let index = 0; index < allJsonRecords.length; index += 1) {
-        const raw = allJsonRecords[index];
-        const reportDate = resolveReportDate(raw);
-        if (!reportDate) {
-          importWarnings.push(
-            `json index ${index}: report_date ?뺤떇???щ컮瑜댁? ?딆븘 ?쒖쇅?섏뿀?듬땲?? `
-            + `keys=${Object.keys(raw || {}).slice(0, 12).join(',')}, `
-            + `recordKeys=${Object.keys(raw?.record || {}).slice(0, 12).join(',')}`
-          );
-          continue;
-        }
-
-        const matchedById = raw.site_id
-          ? siteMaster.find((site) => String(site.site_id) === String(raw.site_id))
-          : null;
-        const matched = matchedById
-          ? {
-              site_id: matchedById.site_id,
-              site_name: matchedById.official_name,
-              site_name_raw: String(raw.site_name || raw.site_name_raw || matchedById.official_name || '').trim() || null,
-              site_match_confidence: 1,
-              manual_review_required: false,
-            }
-          : findBestSiteMatch(raw.site_name || raw.site_name_raw || '', siteMaster);
-        const rowWarnings = Array.isArray(raw.warnings)
-          ? raw.warnings
-          : (Array.isArray(raw.meta?.warnings) ? raw.meta.warnings : []);
-        const manualReview = Boolean(raw.manual_review_required || raw.meta?.manual_review_required || matched.manual_review_required);
-
-        try {
-          await upsertCertificateRowToBigQuery({
-            site_id: matched.site_id ? String(matched.site_id) : null,
-            site_name: matched.site_name ? String(matched.site_name) : null,
-            site_name_raw: matched.site_name_raw ? String(matched.site_name_raw) : null,
-            report_date: reportDate,
-            ss: raw.ss,
-            bod: raw.bod,
-            tn: raw.tn,
-            tp: raw.tp,
-            total_coliform: raw.total_coliform,
-            mlss: raw.mlss,
-            do: raw.do,
-            ph: raw.ph,
-            source_pdf_name: raw.source_pdf_name ? String(raw.source_pdf_name) : null,
-            source_page_index: raw.source_page_index != null ? Number(raw.source_page_index) : null,
-            ai_confidence: raw.ai_confidence ?? raw.meta?.confidence ?? null,
-            site_match_confidence: raw.site_match_confidence ?? raw.meta?.site_match_confidence ?? matched.site_match_confidence,
-            manual_review_required: manualReview,
-            warnings_json: JSON.stringify(rowWarnings),
-            source_payload_json: JSON.stringify(raw),
-          }, index);
-          inserted += 1;
-        } catch (rowErr) {
-          importWarnings.push(`json index ${index}: BigQuery ????ㅽ뙣 (${rowErr.message})`);
-        }
-        setZipUploadProgress(uploadTaskId, {
-          stage: 'json_processing',
-          message: `JSON 泥섎━ 以?.. (${index + 1}/${allJsonRecords.length})`,
-          jsonProcessed: index + 1,
-          jsonInserted: inserted,
-        });
-      }
-
-      const uploadedItems = [];
-      const uploadErrors = [];
-      for (const fileObj of fileEntries) {
-        const originalName = fileObj.baseName;
-        try {
-          const parsed = parseManualCertificateFileName(originalName);
-          if (!parsed) {
-            uploadErrors.push({
-              file: originalName,
-              message: '?뚯씪紐??뺤떇???щ컮瑜댁? ?딆뒿?덈떎. (?깆쟻??yyyymmdd_?꾩옣紐?jpg ?먮뒗 mlss_yyyymmdd_?꾩옣紐?jpg)',
-            });
-            continue;
-          }
-          const reportDate = normalizeDateLike(parsed.yyyymmdd);
-          if (!reportDate) {
-            uploadErrors.push({
-              file: originalName,
-              message: '?뚯씪紐??좎쭨(yyyymmdd)媛 ?щ컮瑜댁? ?딆뒿?덈떎.',
-            });
-            continue;
-          }
-
-          const year = parsed.yyyymmdd.slice(0, 4);
-          const month = parsed.yyyymmdd.slice(4, 6);
-          const yearFolder = await getOrCreateFolder(certFolder.id, year);
-          const monthFolder = await getOrCreateFolder(yearFolder.id, month);
-
-          const matched = findBestSiteMatch(parsed.site_name_raw, siteMaster);
-          const effectiveReportDate = pickReportDateForImageLink({
-            fileReportDate: reportDate,
-            parsedSiteName: parsed.site_name_raw,
-            normalizedSiteName: matched.site_name,
-            jsonRecords: allJsonRecords,
-          });
-          const safeSiteName = normalizeForFileSegment(matched.site_name || parsed.site_name_raw);
-          const finalFileName = `${parsed.prefix}_${getCompactDate(effectiveReportDate || reportDate)}_${safeSiteName}.${parsed.ext}`;
-          const fileBuffer = await fileObj.entry.async('nodebuffer');
-          const uploaded = await uploadBufferToFolder({
-            folderId: monthFolder.id,
-            fileName: finalFileName,
-            buffer: fileBuffer,
-            mimeType: parsed.ext === 'pdf' ? 'application/pdf' : 'image/jpeg',
-          });
-          const linkedRows = await upsertCertificateFileMeta({
-            reportDate: effectiveReportDate || reportDate,
-            siteId: matched.site_id,
-            siteName: matched.site_name || parsed.site_name_raw,
-            siteNameRawFromFile: parsed.site_name_raw,
-            category: parsed.prefix,
-            driveFileId: uploaded.id,
-            driveWebViewLink: uploaded.webViewLink || null,
-            uploadedFileName: finalFileName,
-            originalFileName: originalName,
-          });
-
-          uploadedItems.push({
-            original_file_name: originalName,
-            uploaded_file_name: finalFileName,
-            category: parsed.prefix,
-            report_date: effectiveReportDate || reportDate,
-            year,
-            month,
-            site_id: matched.site_id,
-            site_name: matched.site_name || parsed.site_name_raw,
-            site_name_raw: parsed.site_name_raw,
-            site_match_confidence: matched.site_match_confidence,
-            manual_review_required: Boolean(matched.manual_review_required),
-            drive_file_id: uploaded.id,
-            drive_web_view_link: uploaded.webViewLink || null,
-            linked_row_count: linkedRows,
-          });
-        } catch (fileErr) {
-          uploadErrors.push({
-            file: originalName,
-            message: fileErr.message,
-          });
-        }
-        setZipUploadProgress(uploadTaskId, {
-          stage: 'image_uploading',
-          message: `?대?吏 ?낅줈??以?.. (${uploadedItems.length + uploadErrors.length}/${fileEntries.length})`,
-          fileProcessed: uploadedItems.length + uploadErrors.length,
-          fileUploaded: uploadedItems.length,
-        });
-      }
-
-      setZipUploadProgress(uploadTaskId, {
-        stage: 'finalizing',
-        message: '???寃곌낵瑜??뺤씤 以묒엯?덈떎...',
-        jsonProcessed: allJsonRecords.length,
-        jsonInserted: inserted,
-        fileProcessed: fileEntries.length,
-        fileUploaded: uploadedItems.length,
-      });
-
-      const hasProcessableJson = allJsonRecords.length > 0;
-      const hasProcessableFiles = fileEntries.length > 0;
-      const hardFailureReasons = [];
-      if (!hasProcessableJson && !hasProcessableFiles) {
-        hardFailureReasons.push('ZIP?먯꽌 泥섎━ 媛?ν븳 JSON/?대?吏 ?뚯씪??李얠? 紐삵뻽?듬땲?? (all_pages_data.json, jpg/png/webp/pdf)');
-      }
-      if (hasProcessableJson && inserted === 0) {
-        hardFailureReasons.push('JSON ?덉퐫????μ씠 0嫄댁엯?덈떎. warnings/errors瑜??뺤씤??二쇱꽭??');
-      }
-      if (hasProcessableFiles && uploadedItems.length === 0) {
-        hardFailureReasons.push('?대?吏/?뚯씪 ?낅줈?쒓? 0嫄댁엯?덈떎. ?뚯씪紐??뺤떇怨?Drive 沅뚰븳???뺤씤??二쇱꽭??');
-      }
-
-      if (hardFailureReasons.length > 0) {
-        if (importWarnings.length > 0) {
-          console.warn(`[Certificate ZIP] JSON 寃쎄퀬 ?섑뵆: ${importWarnings.slice(0, 5).join(' | ')}`);
-        }
-        console.warn(
-          `[Certificate ZIP] 泥섎━ ?ㅽ뙣: inserted=${inserted}/${allJsonRecords.length}, uploaded=${uploadedItems.length}/${fileEntries.length}`
-        );
-        setZipUploadProgress(uploadTaskId, {
-          status: 'failed',
-          stage: 'failed',
-          message: hardFailureReasons.join(' '),
-          jsonInserted: inserted,
-          jsonTotal: allJsonRecords.length,
-          fileUploaded: uploadedItems.length,
-          fileTotal: fileEntries.length,
-        });
-        return res.status(400).json({
-          success: false,
-          message: hardFailureReasons.join(' '),
-          zip_file_name: req.file.originalname,
-          json: {
-            source: masterJsonEntry ? 'all_pages_data.json' : 'all-json-files',
-            total_records: allJsonRecords.length,
-            inserted,
-            skipped: allJsonRecords.length - inserted,
-            warnings: importWarnings,
-            errors: jsonErrors,
-            ignored_files: ignoredJsonFiles,
-          },
-          files: {
-            total_files: fileEntries.length,
-            uploaded_count: uploadedItems.length,
-            failed_count: uploadErrors.length,
-            items: uploadedItems,
-            errors: uploadErrors,
-          },
-        });
-      }
-
-      console.log(
-        `[Certificate ZIP] 泥섎━ ?꾨즺: inserted=${inserted}/${allJsonRecords.length}, uploaded=${uploadedItems.length}/${fileEntries.length}, jsonWarnings=${importWarnings.length}, jsonErrors=${jsonErrors.length}, fileErrors=${uploadErrors.length}`
-      );
-      if (importWarnings.length > 0) {
-        console.warn(`[Certificate ZIP] JSON 寃쎄퀬 ?섑뵆: ${importWarnings.slice(0, 5).join(' | ')}`);
-      }
-      setZipUploadProgress(uploadTaskId, {
-        status: 'completed',
-        stage: 'completed',
-        message: `泥섎━ ?꾨즺 (JSON ${inserted}/${allJsonRecords.length}, ?대?吏 ${uploadedItems.length}/${fileEntries.length})`,
-        jsonInserted: inserted,
-        jsonTotal: allJsonRecords.length,
-        fileUploaded: uploadedItems.length,
-        fileTotal: fileEntries.length,
-      });
-
-      return res.json({
-        success: true,
-        partial_success: (inserted < allJsonRecords.length) || (uploadedItems.length < fileEntries.length),
-        zip_file_name: req.file.originalname,
-        json: {
-          source: masterJsonEntry ? 'all_pages_data.json' : 'all-json-files',
-          total_records: allJsonRecords.length,
-          inserted,
-          skipped: allJsonRecords.length - inserted,
-          warnings: importWarnings,
-          errors: jsonErrors,
-          ignored_files: ignoredJsonFiles,
-        },
-        files: {
-          total_files: fileEntries.length,
-          uploaded_count: uploadedItems.length,
-          failed_count: uploadErrors.length,
-          items: uploadedItems,
-          errors: uploadErrors,
-        },
-      });
-    } catch (err) {
-      console.error(`[Certificate ZIP] ?덉쇅 諛쒖깮: ${err.message}`);
-      const uploadTaskId = String(req.body?.uploadTaskId || '').trim();
-      setZipUploadProgress(uploadTaskId, {
-        status: 'failed',
-        stage: 'failed',
-        message: err.message,
-      });
-      return res.status(500).json({ success: false, message: err.message });
     }
   });
 

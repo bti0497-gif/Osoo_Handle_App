@@ -51,6 +51,8 @@ async function syncCertificateCacheForSiteMonth({ db, siteName, year, month }) {
         site_id,
         site_name,
         site_name_raw,
+        items,
+        results,
         ss, bod, tn, tp, total_coliform, mlss, do, ph,
         source_pdf_name,
         source_page_index,
@@ -58,8 +60,13 @@ async function syncCertificateCacheForSiteMonth({ db, siteName, year, month }) {
         site_match_confidence,
         manual_review_required,
         warnings_json,
-        source_payload_json
-      FROM \`${DATASET_ID}.certificate_water_quality\`
+        source_payload_json,
+        certificate_category,
+        certificate_file_name,
+        certificate_original_file_name,
+        drive_file_id,
+        drive_web_view_link
+      FROM \`${DATASET_ID}.water_quality\`
       WHERE report_date BETWEEN @monthStart AND @monthEnd
         AND REPLACE(COALESCE(site_name, ''), ' ', '') = REPLACE(@siteName, ' ', '')
       ORDER BY report_date ASC
@@ -78,20 +85,23 @@ async function syncCertificateCacheForSiteMonth({ db, siteName, year, month }) {
 
   const tx = db.transaction((items) => {
     db.prepare(`
-      DELETE FROM certificate_water_quality
+      DELETE FROM water_quality
       WHERE report_date BETWEEN ? AND ?
         AND REPLACE(COALESCE(site_name, ''), ' ', '') = REPLACE(?, ' ', '')
     `).run(range.monthStart, range.monthEnd, trimmedSite);
 
     const insertStmt = db.prepare(`
-      INSERT INTO certificate_water_quality (
+      INSERT INTO water_quality (
         report_date, site_id, site_name, site_name_raw,
+        items, results,
         ss, bod, tn, tp, total_coliform, mlss, do, ph,
         source_pdf_name, source_page_index,
         ai_confidence, site_match_confidence, manual_review_required,
         warnings_json, source_payload_json,
+        certificate_category, certificate_file_name, certificate_original_file_name,
+        drive_file_id, drive_web_view_link,
         created_at, last_modified, is_synced
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const nowIso = new Date().toISOString();
@@ -103,6 +113,8 @@ async function syncCertificateCacheForSiteMonth({ db, siteName, year, month }) {
         r.site_id ? String(r.site_id) : null,
         r.site_name ? String(r.site_name) : null,
         r.site_name_raw ? String(r.site_name_raw) : null,
+        r.items ? String(r.items) : null,
+        r.results ? String(r.results) : null,
         r.ss ?? null,
         r.bod ?? null,
         r.tn ?? null,
@@ -118,6 +130,11 @@ async function syncCertificateCacheForSiteMonth({ db, siteName, year, month }) {
         r.manual_review_required ? 1 : 0,
         r.warnings_json ? String(r.warnings_json) : '[]',
         r.source_payload_json ? String(r.source_payload_json) : '{}',
+        r.certificate_category ? String(r.certificate_category) : null,
+        r.certificate_file_name ? String(r.certificate_file_name) : null,
+        r.certificate_original_file_name ? String(r.certificate_original_file_name) : null,
+        r.drive_file_id ? String(r.drive_file_id) : null,
+        r.drive_web_view_link ? String(r.drive_web_view_link) : null,
         nowIso,
         nowIso,
         1

@@ -6,12 +6,30 @@ const KNOWN_REMOTE_PROCESSES = [
   'anydesk.exe',
   'anydesk_service.exe',
   'remoting_host.exe',
+  'remoting_desktop.exe',
+  'chrome_remote_desktop_host.exe',
   'rustdesk.exe',
   'rustdesk-service.exe',
   'parsecd.exe',
   'todesk.exe',
   'sunloginclient.exe',
-  'awesun.exe'
+  'awesun.exe',
+  'anypc.exe',
+  'anypcviewer.exe',
+  'anypcservice.exe'
+];
+
+const KNOWN_REMOTE_PROCESS_KEYWORDS = [
+  'teamviewer',
+  'anydesk',
+  'remoting_host',
+  'chrome_remote_desktop',
+  'rustdesk',
+  'anypc',
+  'parsec',
+  'todesk',
+  'sunlogin',
+  'awesun'
 ];
 
 function tryReadTasklistProcessNames() {
@@ -54,14 +72,18 @@ function detectRemoteSession() {
   const runningProcessNames = tryReadTasklistProcessNames();
   const matchedRemoteProcesses = KNOWN_REMOTE_PROCESSES
     .filter((name) => runningProcessNames.includes(name));
+  const matchedByKeyword = runningProcessNames
+    .filter((proc) => KNOWN_REMOTE_PROCESS_KEYWORDS.some((keyword) => proc.includes(keyword)))
+    .filter((proc) => !matchedRemoteProcesses.includes(proc));
 
   matchedRemoteProcesses.forEach((proc) => indicators.push(`proc:${proc}`));
+  matchedByKeyword.forEach((proc) => indicators.push(`proc:${proc}`));
 
   const detected = indicators.length > 0;
   let sessionType = 'local';
   if (sessionName.toUpperCase().startsWith('RDP-') || clientName) {
     sessionType = 'rdp';
-  } else if (matchedRemoteProcesses.length > 0) {
+  } else if (matchedRemoteProcesses.length > 0 || matchedByKeyword.length > 0) {
     sessionType = 'remote_app';
   } else if (sshConnection) {
     sessionType = 'ssh';

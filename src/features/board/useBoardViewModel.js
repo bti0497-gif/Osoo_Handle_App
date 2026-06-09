@@ -59,8 +59,9 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
     };
 
     const sortThreadedPosts = (data) => {
-        const notices = data.filter(p => p.is_notice === 1).map(p => ({ ...p, depth: 0 }));
-        const regulars = data.filter(p => p.is_notice !== 1);
+        const isNotice = (post) => post.is_notice === 1 || post.is_notice === true;
+        const notices = data.filter(isNotice).map(p => ({ ...p, depth: 0 }));
+        const regulars = data.filter(p => !isNotice(p));
 
         const postMap = {};
         regulars.forEach(p => { postMap[p.id] = p; });
@@ -205,7 +206,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
     // Comments
     const loadComments = async (postId) => {
         try {
-            const data = await BoardModel.fetchComments(postId);
+            const data = await BoardModel.fetchComments(postId, currentUser);
             setComments(data);
         } catch (err) {
             console.error('Failed to load comments:', err);

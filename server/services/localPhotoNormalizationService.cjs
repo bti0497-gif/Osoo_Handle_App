@@ -36,13 +36,13 @@ function parseSludgeFile(fileName) {
   m = stem.match(/^(\d{4})-(\d{2})-(\d{2})-슬러지(\d+)$/);
   if (m) return { yyyymmdd: `${m[1]}${m[2]}${m[3]}`, type: 'sludge', index: Number(m[4]) || 1 };
 
-  m = stem.match(/^(\d{4})-(\d{2})-(\d{2})-諛섏텧$/);
+  m = stem.match(/^(\d{4})-(\d{2})-(\d{2})-반출$/);
   if (m) return { yyyymmdd: `${m[1]}${m[2]}${m[3]}`, type: 'sludge', index: 1 };
 
-  m = stem.match(/^(\d{8})-泥?냼?꾩쬆$/);
+  m = stem.match(/^(\d{8})-청소필증$/);
   if (m) return { yyyymmdd: m[1], type: 'certificate' };
 
-  m = stem.match(/^(\d{4})-(\d{2})-(\d{2})-泥?냼?꾩쬆$/);
+  m = stem.match(/^(\d{4})-(\d{2})-(\d{2})-반출$/);
   if (m) return { yyyymmdd: `${m[1]}${m[2]}${m[3]}`, type: 'certificate' };
 
   return null;
@@ -109,7 +109,7 @@ async function normalizeSludgePhotos(appDataPath) {
       const parsed = parseSludgeFile(fileName);
       if (!parsed) continue;
       const targetName = parsed.type === 'certificate'
-        ? `${parsed.yyyymmdd}-泥?냼?꾩쬆.jpg`
+        ? `${parsed.yyyymmdd}-청소필증.jpg`
         : `${parsed.yyyymmdd}-슬러지${parsed.index}.jpg`;
       const sourcePath = path.join(yearDir, fileName);
       const targetPath = path.join(yearDir, targetName);

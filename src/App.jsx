@@ -2,11 +2,11 @@ import React, { lazy, Suspense, useState, useEffect } from 'react';
 import { TAB_LABELS, DEFAULT_TAB } from './core/constants';
 import { useAuthViewModel, LoginView, SyncService } from './features/auth';
 import Sidebar from './components/Sidebar';
-import Header from './components/Header';
 import StatusBar from './components/StatusBar';
+import { WorkspaceErrorBoundary } from './components/common';
 import { DashboardView } from './features/dashboard';
 const AttendanceView = lazy(() => import('./features/attendance').then((module) => ({ default: module.AttendanceView })));
-const MemberManagementView = lazy(() => import('./features/members').then((module) => ({ default: module.MemberManagementView })));
+const MyInfoView = lazy(() => import('./features/members').then((module) => ({ default: module.MyInfoView })));
 const FlowManagementView = lazy(() => import('./features/flow').then((module) => ({ default: module.FlowManagementView })));
 const MedicineManagementView = lazy(() => import('./features/medicine').then((module) => ({ default: module.MedicineManagementView })));
 const MedicineRegisterView = lazy(() => import('./features/medicine').then((module) => ({ default: module.MedicineRegisterView })));
@@ -20,6 +20,7 @@ const KitManagementView = lazy(() => import('./features/kit').then((module) => (
 const CertificateView = lazy(() => import('./features/certificate').then((module) => ({ default: module.CertificateView })));
 const SludgePhotoView = lazy(() => import('./features/sludge').then((module) => ({ default: module.SludgePhotoView })));
 const SludgeLedgerView = lazy(() => import('./features/sludge').then((module) => ({ default: module.SludgeLedgerView })));
+const RoadworkHelperView = lazy(() => import('./features/roadwork-helper').then((module) => ({ default: module.RoadworkHelperView })));
 
 const contentLoadingFallback = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '320px' }}>
@@ -121,12 +122,11 @@ function App() {
             case 'log_med_in': return <MedicineInView currentUser={user} />;
             case 'log_sludge_out': return <SludgeLedgerView currentUser={user} />;
             case 'log_sludge_photo': return <SludgePhotoView currentUser={user} />;
+            case 'log_roadwork_helper': return <RoadworkHelperView currentUser={user} />;
             case 'attendance':
                 return <AttendanceView currentUser={user} />;
-            case 'members':
-                return <MemberManagementView currentUser={user} />;
             case 'myinfo':
-                return <MemberManagementView currentUser={user} passwordOnly={true} />;
+                return <MyInfoView currentUser={user} />;
             case 'board':
                 return <BoardView currentUser={user} />;
             case 'dashboard':
@@ -148,8 +148,6 @@ function App() {
 
     return (
         <div className="app-shell">
-            <Header />
-
             <div className="app-main-body">
                 <Sidebar
                     user={user}
@@ -161,9 +159,11 @@ function App() {
 
                 <main className="main-content">
                     <div className="main-content-workspace">
-                        <Suspense fallback={contentLoadingFallback}>
-                            {renderContent()}
-                        </Suspense>
+                        <WorkspaceErrorBoundary resetKey={activeTab}>
+                            <Suspense fallback={contentLoadingFallback}>
+                                {renderContent()}
+                            </Suspense>
+                        </WorkspaceErrorBoundary>
                     </div>
                 </main>
             </div>

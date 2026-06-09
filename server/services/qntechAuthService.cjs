@@ -92,7 +92,7 @@ function markSessionTouched(sessionState) {
 
 function invalidateQntechSessionCache(reason = '') {
   if (reason) {
-    console.log(`[QnTECH] ?몄뀡 罹먯떆 臾댄슚?? ${reason}`);
+    console.log(`[QnTECH] 세션 캐시 무효화: ${reason}`);
   }
   cachedSession = null;
 }
@@ -162,7 +162,7 @@ async function graphqlRequest(baseUrl, cookieJar, query, variables, referer = '/
   }
 
   if (response.statusCode >= 400) {
-    throw new Error(`QnTECH GraphQL ?붿껌 ?ㅽ뙣: status=${response.statusCode}`);
+    throw new Error(`QnTECH GraphQL 요청 실패: status=${response.statusCode}`);
   }
 
   if (parsed.errors?.length) {
@@ -180,7 +180,7 @@ function getStoredCredential(db) {
   `).get();
 
   if (!credential?.user_id || !credential?.password) {
-    throw new Error('?섏쭏遺꾩꽍 ??怨꾩젙????λ릺???덉? ?딆뒿?덈떎.');
+    throw new Error('수질분석 앱 계정이 저장되어 있지 않습니다.');
   }
 
   return {
@@ -202,12 +202,12 @@ async function authenticateWithCredential(credential, fingerprint) {
   );
 
   if (!loginResult?.signIn?.id) {
-    throw new Error('QnTECH 濡쒓렇?몄뿉 ?ㅽ뙣?덉뒿?덈떎.');
+    throw new Error('QnTECH 로그인에 실패했습니다.');
   }
 
   const meResult = await graphqlRequest(credential.baseUrl, cookieJar, ME_QUERY, {}, '/');
   if (!meResult?.me) {
-    throw new Error('QnTECH ?ъ슜???뺣낫瑜?媛?몄삤吏 紐삵뻽?듬땲??');
+    throw new Error('QnTECH 로그인에 실패했습니다.');
   }
 
   const now = Date.now();
@@ -249,7 +249,7 @@ async function ensureAuthenticatedSession(db, options = {}) {
     try {
       const meResult = await graphqlRequest(credential.baseUrl, cachedSession.cookieJar, ME_QUERY, {}, '/');
       if (!meResult?.me) {
-        throw new Error('QnTECH ?ъ슜???뺣낫瑜?媛?몄삤吏 紐삵뻽?듬땲??');
+        throw new Error('QnTECH 사용자 정보를 가져오지 못했습니다.');
       }
 
       cachedSession.me = meResult.me;
@@ -272,8 +272,8 @@ function isAuthenticationError(error) {
     'status=403',
     'unauthorized',
     'forbidden',
-    '濡쒓렇??,
-    '?몄쬆',
+    '로그인',
+    '인증',
     'session',
     'csrf'
   ].some((token) => message.includes(token));

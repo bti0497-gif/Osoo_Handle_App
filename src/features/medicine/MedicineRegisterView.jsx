@@ -90,7 +90,7 @@ const fmt = (v) => {
   return Number.isInteger(n) ? n.toLocaleString('ko-KR') : n.toFixed(2);
 };
 
-export default function MedicineRegisterView() {
+export default function MedicineRegisterView({ currentUser }) {
   const {
     year, setYear,
     month, setMonth,
@@ -103,7 +103,7 @@ export default function MedicineRegisterView() {
     interlockEnabled,
     interlockReason,
     handleExportExcel,
-  } = useMedicineRegisterViewModel();
+  } = useMedicineRegisterViewModel(currentUser);
 
   const medicines = data?.medicines ?? [];
   const extraMedicines = data?.extraMedicines ?? [];
@@ -170,7 +170,7 @@ export default function MedicineRegisterView() {
         </button>
       </div>
 
-      {/* ── 우측 패널 ── */}
+      {/* 우측 패널 */}
       <div style={rightPanelStyle}>
         {isLoading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '200px', color: '#94a3b8', fontSize: '14px' }}>

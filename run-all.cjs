@@ -1,47 +1,53 @@
 const { spawn } = require('child_process');
+const path = require('path');
 
-const FRONTEND_PORT = 8900;
-const BACKEND_PORT_MIN = 8901;
-const BACKEND_PORT_MAX = 8951;
+const FRONTEND_PORT = 18735;
+const BACKEND_PORT_MIN = 18731;
+const BACKEND_PORT_MAX = 18734;
 
-let backend = null;
 let frontend = null;
+let electron = null;
 let isShuttingDown = false;
 
-console.log('Restarting both Frontend (Vite) and Backend (Node) dev servers...');
+console.log('Restarting Frontend and Electron app...');
 
 function buildWindowsCleanupScript() {
     const scriptRoot = __dirname.replace(/'/g, "''");
     const currentPid = process.pid;
+    const parentPid = process.ppid || 0;
 
-        return `
+    return `
 $ErrorActionPreference = 'SilentlyContinue'
-$root = '${scriptRoot}'
+$rootNormalized = '${scriptRoot}'.Replace('\\', '/').ToLower()
 $currentPid = ${currentPid}
-$targetPorts = @(${Array.from({ length: BACKEND_PORT_MAX - FRONTEND_PORT + 1 }, (_, index) => FRONTEND_PORT + index).join(', ')})
+$parentPid = ${parentPid}
+$excludedIds = @($currentPid, $parentPid, $PID)
+$targetPorts = @(${Array.from({ length: FRONTEND_PORT - BACKEND_PORT_MIN + 1 }, (_, index) => BACKEND_PORT_MIN + index).join(', ')})
 $candidateIds = New-Object 'System.Collections.Generic.HashSet[int]'
 
 Get-NetTCPConnection -State Listen |
-    Where-Object { $targetPorts -contains $_.LocalPort -and $_.OwningProcess -ne $currentPid } |
+    Where-Object { $targetPorts -contains $_.LocalPort -and $excludedIds -notcontains $_.OwningProcess } |
     Select-Object -ExpandProperty OwningProcess -Unique |
     ForEach-Object { [void]$candidateIds.Add([int]$_) }
 
 Get-CimInstance Win32_Process |
     Where-Object {
-        $_.ProcessId -ne $currentPid -and
+        $excludedIds -notcontains $_.ProcessId -and
+        @('node.exe', 'electron.exe', 'Osoo Handle App.exe') -contains $_.Name -and
         $_.CommandLine -and
-        $_.CommandLine -match [regex]::Escape($root) -and
+        $_.CommandLine.Replace('\\', '/').ToLower().Contains($rootNormalized) -and
         (
-            $_.CommandLine -match 'run-all\\.cjs' -or
             $_.CommandLine -match 'start\\.cjs' -or
             $_.CommandLine -match 'server\\.cjs' -or
             $_.CommandLine -match 'vite(?:\\.js)?' -or
-            $_.CommandLine -match 'npm(?:\\.cmd)?\\s+run\\s+dev(?::all)?'
+            $_.CommandLine -match 'electron(?:\\.exe)?'
         )
     } |
     ForEach-Object { [void]$candidateIds.Add([int]$_.ProcessId) }
 
-$candidateIds | ForEach-Object { Stop-Process -Id $_ -Force }
+$candidateIds | ForEach-Object {
+    Stop-Process -Id $_ -Force
+}
 Start-Sleep -Milliseconds 1200
 `.trim();
 }
@@ -72,6 +78,77 @@ function spawnCommand(command, args, options = {}) {
     });
 }
 
+function buildElectronEnv() {
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    return env;
+}
+
+function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForHttp(url, label, timeoutMs = 30000) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+        try {
+            const res = await fetch(url, { method: 'GET' });
+            if (res.ok) {
+                console.log(`[${label}] ready: ${url}`);
+                return true;
+            }
+        } catch (_) {
+            // keep waiting
+        }
+        await wait(500);
+    }
+    throw new Error(`${label} did not become ready: ${url}`);
+}
+
+async function waitForFrontendReady() {
+    const urls = [
+        `http://localhost:${FRONTEND_PORT}`,
+        `http://127.0.0.1:${FRONTEND_PORT}`,
+        `http://[::1]:${FRONTEND_PORT}`,
+    ];
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 30000) {
+        for (const url of urls) {
+            try {
+                const res = await fetch(url, { method: 'GET' });
+                if (res.ok) {
+                    console.log(`[Frontend] ready: ${url}`);
+                    return url;
+                }
+            } catch (_) {
+                // try next host
+            }
+        }
+        await wait(500);
+    }
+    throw new Error(`Frontend did not become ready on port ${FRONTEND_PORT}`);
+}
+
+async function waitForBackendReady() {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 30000) {
+        for (let port = BACKEND_PORT_MIN; port <= BACKEND_PORT_MAX; port += 1) {
+            try {
+                const url = `http://127.0.0.1:${port}/api/ping`;
+                const res = await fetch(url, { method: 'GET' });
+                if (res.ok) {
+                    console.log(`[Backend] ready: ${url}`);
+                    return port;
+                }
+            } catch (_) {
+                // try next port
+            }
+        }
+        await wait(500);
+    }
+    throw new Error(`Backend did not become ready on ports ${BACKEND_PORT_MIN}-${BACKEND_PORT_MAX}`);
+}
+
 function killProcessTree(childProcess) {
     if (!childProcess || childProcess.killed) {
         return;
@@ -99,9 +176,9 @@ function shutdown(exitCode = 0) {
     }
 
     isShuttingDown = true;
-    console.log('\nShutting down dev servers...');
+    console.log('\nShutting down dev processes...');
     killProcessTree(frontend);
-    killProcessTree(backend);
+    killProcessTree(electron);
 
     setTimeout(() => process.exit(exitCode), 300);
 }
@@ -129,18 +206,29 @@ function bindChildExit(childProcess, label) {
 
 async function startAll() {
     await cleanupExistingDevProcesses();
-
-    // 개발환경에서는 run-all 자체가 프로세스 생명주기를 관리하므로
-    // 워치독(start.cjs) 대신 실제 서버 엔트리포인트를 직접 실행한다.
-    backend = spawnCommand('node', ['server.cjs'], {
-        env: { ...process.env },
-    });
+    // Start the Vite frontend HMR server.
     frontend = spawnCommand(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'dev'], {
         env: { ...process.env },
     });
-
-    bindChildExit(backend, 'backend');
     bindChildExit(frontend, 'frontend');
+    await waitForFrontendReady();
+    // Run the local Electron binary directly to avoid npx resolution issues.
+    let electronCmd = process.platform === 'win32'
+        ? path.join(__dirname, 'node_modules', '.bin', 'electron.cmd')
+        : path.join(__dirname, 'node_modules', '.bin', 'electron');
+    // Quote the path on Windows when the project path contains spaces.
+    if (process.platform === 'win32' && electronCmd.includes(' ')) {
+        electronCmd = `"${electronCmd}"`;
+    }
+
+    if (!isShuttingDown) {
+        console.log('[Electron] Starting app with DevTools...');
+        electron = spawnCommand(electronCmd, ['.'], {
+            env: buildElectronEnv(),
+        });
+        bindChildExit(electron, 'electron');
+        await waitForBackendReady();
+    }
 
     process.on('SIGINT', () => shutdown(0));
     process.on('SIGTERM', () => shutdown(0));
@@ -150,3 +238,4 @@ startAll().catch((error) => {
     console.error(`Failed to start dev servers: ${error.message}`);
     shutdown(1);
 });
+

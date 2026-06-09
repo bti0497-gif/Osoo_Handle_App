@@ -1,1 +1,1 @@
-export { default as MemberManagementView } from './MemberManagementView';
+export { default as MyInfoView } from './MyInfoView';

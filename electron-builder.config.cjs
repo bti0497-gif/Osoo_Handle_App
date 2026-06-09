@@ -5,10 +5,8 @@
 module.exports = {
   appId: 'com.osoo.handle-app',
   productName: 'Osoo Handle App',
-  npmRebuild: true,
+  npmRebuild: false,
   nodeGypRebuild: false,
-  /** NSIS installSection.nsh 에서 SetDetailsPrint none 제거(상세 로그 표시). `scripts/patch-nsis-install-section.cjs` */
-  beforePack: './scripts/patch-nsis-install-section.cjs',
   directories: {
     output: 'release',
     buildResources: 'build',
@@ -47,7 +45,6 @@ module.exports = {
   nsis: {
     oneClick: false,
     allowToChangeInstallationDirectory: true,
-    include: 'electron/installer.nsh',
     installerIcon: 'public/icon.ico',
     uninstallerIcon: 'public/icon.ico',
     installerHeaderIcon: 'public/icon.ico',

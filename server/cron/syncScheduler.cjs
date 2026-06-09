@@ -1,7 +1,7 @@
 ﻿const bigQuerySyncService = require('../services/bigQuerySyncService.cjs');
 
-// ?ㅼ젙: ?숆린??二쇨린 (諛由ъ큹 ?⑥쐞)
-// 湲곕낯媛? 10遺?(10 * 60 * 1000)
+// 설정: 동기화 주기 (밀리초 단위)
+// 기본값: 10분 (10 * 60 * 1000)
 const SYNC_INTERVAL_MS = 10 * 60 * 1000;
 
 let intervalId = null;
@@ -9,22 +9,22 @@ let isSyncing = false;
 
 async function runSync() {
   if (isSyncing) {
-    console.log('[Scheduler] ?댁쟾 ?숆린???묒뾽???꾩쭅 吏꾪뻾 以묒엯?덈떎. 嫄대꼫?곷땲??');
+    console.log('[Scheduler] 이전 동기화 작업이 아직 진행 중입니다. 건너뜁니다.');
     return;
   }
 
   isSyncing = true;
   try {
-    // console.log('[Scheduler] BigQuery ?숆린???쒖옉...');
+    // console.log('[Scheduler] BigQuery 동기화 시작...');
     const results = await bigQuerySyncService.syncAll();
     
-    // ?꾩넚???곗씠?곌? ?덉쓣 ?뚮쭔 濡쒓렇 異쒕젰
+    // 전송된 데이터가 있을 때만 로그 출력
     const totalCount = Object.values(results).reduce((sum, res) => sum + (res.count || 0), 0);
     if (totalCount > 0) {
-      console.log(`[Scheduler] 珥?${totalCount}嫄댁쓽 ?곗씠?곌? BigQuery濡??꾩넚?섏뿀?듬땲??`);
+      console.log(`[Scheduler] 총 ${totalCount}건의 데이터가 BigQuery로 전송되었습니다.`);
     }
   } catch (err) {
-    console.error('[Scheduler] ?숆린??以??ㅻ쪟 諛쒖깮:', err);
+    console.error('[Scheduler] 동기화 중 오류 발생:', err);
   } finally {
     isSyncing = false;
   }
@@ -33,10 +33,10 @@ async function runSync() {
 function start() {
   if (intervalId) return;
   
-  console.log(`[Scheduler] 諛깃렇?쇱슫???숆린???ㅼ?以꾨윭 ?쒖옉 (二쇨린: ${SYNC_INTERVAL_MS / 1000 / 60}遺?`);
-  // ?쒕쾭 ?쒖옉 吏곹썑 10珥??ㅼ뿉 ??踰??ㅽ뻾 (珥덇린 ?곗씠???곸옱)
+  console.log(`[Scheduler] 백그라운드 동기화 스케줄러 시작 (주기: ${SYNC_INTERVAL_MS / 1000 / 60}분)`);
+  // 서버 시작 직후 10초 뒤에 한 번 실행 (초기 데이터 적재)
   setTimeout(runSync, 10000);
-  // ?댄썑 二쇨린?곸쑝濡??ㅽ뻾
+    // 전송된 데이터가 있을 때만 로그 출력
   intervalId = setInterval(runSync, SYNC_INTERVAL_MS);
 }
 
@@ -44,7 +44,7 @@ function stop() {
   if (intervalId) {
     clearInterval(intervalId);
     intervalId = null;
-    console.log('[Scheduler] ?ㅼ?以꾨윭 以묒???);
+    console.log('[Scheduler] 스케줄러 중지');
   }
 }
 

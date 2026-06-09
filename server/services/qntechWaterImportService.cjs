@@ -8,7 +8,7 @@ const RANGE_IMPORT_DELAY_MS = 250;
 function normalizeDateInput(date) {
   const normalized = String(date || '').trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    throw new Error('?좎쭨 ?뺤떇? YYYY-MM-DD ?댁뼱???⑸땲??');
+    throw new Error('날짜 형식은 YYYY-MM-DD 이어야 합니다.');
   }
   return normalized;
 }
@@ -34,7 +34,7 @@ function enumerateDates(startDate, endDate) {
   const start = new Date(`${normalizeDateInput(startDate)}T00:00:00`);
   const end = new Date(`${normalizeDateInput(endDate)}T00:00:00`);
   if (start > end) {
-    throw new Error('?쒖옉?쇱? 醫낅즺?쇰낫????쓣 ???놁뒿?덈떎.');
+    throw new Error('시작일은 종료일보다 클 수 없습니다.');
   }
 
   const dates = [];
@@ -55,30 +55,26 @@ function persistWaterRows(db, importedRows) {
   const metadata = getCurrentRecordMetadata(db);
   const existingRowStmt = db.prepare(`
     SELECT 1
-    FROM water_quality
-    WHERE date = ? AND measurement_group = ? AND location = ?
+    FROM qntech_water_quality
+    WHERE date = ? AND measurement_group = ? AND location = ? AND item_code = ?
     LIMIT 1
   `);
 
   const stmt = db.prepare(`
-    INSERT INTO water_quality (
+    INSERT INTO qntech_water_quality (
       date, measurement_group, measurement_order, source_type, source_label, qntech_project_id,
-      location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss,
+      location, item_name, item_code, result_value, result_numeric, unit,
       site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(date, measurement_group, location) DO UPDATE SET
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET
       measurement_order = excluded.measurement_order,
       source_type = excluded.source_type,
       source_label = excluded.source_label,
       qntech_project_id = excluded.qntech_project_id,
-      nh3_n = COALESCE(excluded.nh3_n, nh3_n),
-      no3_n = COALESCE(excluded.no3_n, no3_n),
-      po4_p = COALESCE(excluded.po4_p, po4_p),
-      alkalinity = COALESCE(excluded.alkalinity, alkalinity),
-      tn = COALESCE(excluded.tn, tn),
-      tp = COALESCE(excluded.tp, tp),
-      cod = COALESCE(excluded.cod, cod),
-      ss = COALESCE(excluded.ss, ss),
+      item_name = excluded.item_name,
+      result_value = excluded.result_value,
+      result_numeric = excluded.result_numeric,
+      unit = excluded.unit,
       site_id = excluded.site_id,
       site_name = excluded.site_name,
       author = excluded.author,
@@ -90,7 +86,7 @@ function persistWaterRows(db, importedRows) {
   const runInsert = db.transaction((rows) => {
     rows.forEach((item) => {
       const measurementGroup = item.measurement_group || `manual:${item.date}`;
-      if (!existingRowStmt.get(item.date, measurementGroup, item.location || '?좎엯??)) {
+      if (!existingRowStmt.get(item.date, measurementGroup, item.location || '유입수', item.item_code || '')) {
         insertedRowCount += 1;
       }
 
@@ -101,15 +97,12 @@ function persistWaterRows(db, importedRows) {
         item.source_type || 'manual',
         item.source_label ?? null,
         item.qntech_project_id ?? null,
-        item.location || '?좎엯??,
-        item.nh3_n ?? null,
-        item.no3_n ?? null,
-        item.po4_p ?? null,
-        item.alkalinity ?? null,
-        item.tn ?? null,
-        item.tp ?? null,
-        item.cod ?? null,
-        item.ss ?? null,
+        item.location || '유입수',
+        item.item_name || item.item_code || '측정항목',
+        item.item_code || '',
+        item.result_value ?? null,
+        item.result_numeric ?? null,
+        item.unit || null,
         metadata.siteId,
         metadata.siteName,
         metadata.author,
@@ -130,7 +123,7 @@ function persistWaterRows(db, importedRows) {
 async function fetchProjectsForDateWithClient(client, normalizedDate) {
   const sites = client.me?.sites || [];
   if (!sites.length) {
-    throw new Error('QnTECH?먯꽌 ?묎렐 媛?ν븳 ?꾩옣??李얠? 紐삵뻽?듬땲??');
+    throw new Error('QnTECH에서 접근 가능한 현장을 찾지 못했습니다.');
   }
 
   const site = sites[0];
@@ -247,7 +240,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
     totalDates: dates.length,
     completedDates: 0,
     currentDate: null,
-    message: `珥?${dates.length}???곗씠?곕? 以鍮꾪븯??以?..`
+    message: `총 ${dates.length}일 데이터를 준비하는 중...`
   });
 
   for (const [index, date] of dates.entries()) {
@@ -260,7 +253,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
       totalDates: dates.length,
       completedDates: index,
       currentDate: date,
-      message: `${date} ?곗씠?곕? 遺덈윭?ㅻ뒗 以?..`
+      message: `${date} 데이터를 불러오는 중...`
     });
 
     const context = await fetchProjectsForDateWithClient(client, date);
@@ -305,7 +298,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
       totalDates: dates.length,
       completedDates: index + 1,
       currentDate: date,
-      message: `${date} ?곗씠??泥섎━瑜??꾨즺?덉뒿?덈떎.`
+      message: `${date} 데이터 처리를 완료했습니다.`
     });
   }
 

@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { MedicineInModel } from './MedicineInModel';
 import { useDialog } from '../../components/common/DialogContext';
 import { getApiBase } from '../../core/api/serverConfig.js';
 
 const currentYear = new Date().getFullYear();
 const currentMonth = new Date().getMonth() + 1;
+const BASE_MED_NAMES = ['중탄산나트륨', '포도당', '팩(PAC)'];
 
 const todayStr = () => {
   const d = new Date();
@@ -13,104 +14,146 @@ const todayStr = () => {
   return `${d.getFullYear()}-${mm}-${dd}`;
 };
 
-/** Electron 환경에서 실제 파일 경로, 웹 환경에서는 null 반환 */
+const toMonthStart = (year, month) => `${year}-${String(month).padStart(2, '0')}-01`;
+
+const isDateInMonth = (value, year, month) => {
+  const mm = String(month).padStart(2, '0');
+  return String(value || '').startsWith(`${year}-${mm}-`);
+};
+
 const getFilePath = (file) => (file?.path && file.path !== '') ? file.path : null;
 
-export function useMedicineInViewModel() {
-  const { showToast } = useDialog();
+export function useMedicineInViewModel(currentUser) {
+  const { showToast, showConfirm } = useDialog();
 
   const [year, setYear] = useState(currentYear);
   const [month, setMonth] = useState(currentMonth);
-  const [tab, setTab] = useState('medicine'); // 'medicine' | 'kit'
-
-  // 날짜
+  const [tab, setTab] = useState('medicine');
   const [medicineDate, setMedicineDate] = useState(todayStr());
   const [kitDate, setKitDate] = useState(todayStr());
-
-  // 로딩 상태
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-
-  // 데이터
   const [siteName, setSiteName] = useState('');
-  const [medicineItems, setMedicineItems] = useState([]); // [{name, purchase, photoFile, previewUrl}]
-  const [kitItems, setKitItems] = useState([]);            // [{name, purchase, photoFile, previewUrl}]
+  const [medicineItems, setMedicineItems] = useState([]);
+  const [kitItems, setKitItems] = useState([]);
   const [tradePhotoFile, setTradePhotoFile] = useState(null);
   const [tradePreviewUrl, setTradePreviewUrl] = useState(null);
 
-  // 해당 월 저장 데이터 로드 (월 변경 시 항상 DB 데이터로 초기화, 사진은 재선택 필요)
+  const requestContext = useMemo(() => ({
+    siteId: currentUser?.site_id || '',
+    siteName: currentUser?.site_name1 || '',
+    author: currentUser?.name || '',
+  }), [currentUser?.site_id, currentUser?.site_name1, currentUser?.name]);
+
   const loadDefaults = useCallback(async () => {
     setIsLoading(true);
     try {
-      const result = await MedicineInModel.fetchDefaults(year, month);
+      const result = await MedicineInModel.fetchDefaults(year, month, requestContext);
       if (!result?.success) throw new Error(result?.error || '데이터 로드 실패');
 
       setSiteName(result.siteName || '');
 
+      const fallbackDate = toMonthStart(year, month);
+      setMedicineDate((prev) => (
+        isDateInMonth(prev, year, month) ? prev : (result.latestMedicineDate || fallbackDate)
+      ));
+      setKitDate((prev) => (
+        isDateInMonth(prev, year, month) ? prev : (result.latestKitDate || fallbackDate)
+      ));
+
       const apiBase = getApiBase();
       const toAbsUrl = (url) => (url ? `${apiBase}${url}` : null);
 
-      // 당월 저장량이 있으면 표시, 없으면 전달 기본값, 없으면 기본 입고량 설정값
-      setMedicineItems(
-        (result.medicines || []).map(m => ({
-          name: m.name,
-          purchase: m.currPurchase != null ? m.currPurchase : (m.prevPurchase || m.defaultAmount || 0),
-          photoFile: null,
-          previewUrl: toAbsUrl(m.photoUrl),
-        }))
-      );
+      setMedicineItems((result.medicines || []).map((item) => ({
+        name: item.name,
+        purchase: item.currPurchase != null ? item.currPurchase : (item.prevPurchase || item.defaultAmount || 0),
+        photoFile: null,
+        previewUrl: toAbsUrl(item.photoUrl),
+      })));
 
-      setKitItems(
-        (result.kits || []).map(k => ({
-          name: k.name,
-          purchase: k.currPurchase != null ? k.currPurchase : (k.prevPurchase || k.defaultAmount || 0),
-          photoFile: null,
-          previewUrl: toAbsUrl(k.photoUrl),
-        }))
-      );
+      setKitItems((result.kits || []).map((item) => ({
+        name: item.name,
+        purchase: item.currPurchase != null ? item.currPurchase : (item.prevPurchase || item.defaultAmount || 0),
+        photoFile: null,
+        previewUrl: toAbsUrl(item.photoUrl),
+      })));
 
-      // 거래명세서 사진도 자동 복원 (사진 선택 안했으면 서버 URL 사용)
       setTradePhotoFile(null);
       setTradePreviewUrl(toAbsUrl(result.tradePhotoUrl));
+
+      const maybeRestore = async ({ targetTab, date, items }) => {
+        const missingNames = items
+          .filter((item) => !item.previewUrl)
+          .map((item) => item.name)
+          .filter(Boolean);
+        if (!missingNames.length || !date) return;
+        const check = await MedicineInModel.checkRemotePhotos({ date, itemNames: missingNames });
+        if (!check?.success || !check.count) return;
+        const confirmed = await showConfirm?.('사진이 서버에 있습니다. 내려받을까요?');
+        if (!confirmed) return;
+        const restored = await MedicineInModel.restoreRemotePhotos({
+          date,
+          itemNames: check.items.map((item) => item.name),
+          tab: targetTab,
+        });
+        if (restored?.success && restored.count > 0) {
+          showToast(`${restored.count}개 사진을 내려받았습니다.`);
+          await loadDefaults();
+        }
+      };
+
+      setTimeout(() => {
+        maybeRestore({
+          targetTab: 'medicine',
+          date: result.latestMedicineDate || fallbackDate,
+          items: result.medicines || [],
+        }).catch((err) => console.warn('[medicine-in] 약품 사진 복구 확인 실패:', err.message));
+        maybeRestore({
+          targetTab: 'kit',
+          date: result.latestKitDate || fallbackDate,
+          items: result.kits || [],
+        }).catch((err) => console.warn('[medicine-in] 키트 사진 복구 확인 실패:', err.message));
+      }, 0);
     } catch (err) {
       showToast(err.message || '데이터를 불러오지 못했습니다.', 'error');
     } finally {
       setIsLoading(false);
     }
-  }, [year, month, showToast]);
+  }, [year, month, showToast, showConfirm, requestContext]);
 
-  useEffect(() => { loadDefaults(); }, [loadDefaults]);
+  useEffect(() => {
+    loadDefaults();
+  }, [loadDefaults]);
 
-  // 약품 입력값 변경
   const updateMedicinePurchase = useCallback((name, value) => {
-    setMedicineItems(prev => prev.map(i => i.name === name ? { ...i, purchase: value } : i));
+    setMedicineItems((prev) => prev.map((item) => (
+      item.name === name ? { ...item, purchase: value } : item
+    )));
   }, []);
 
-  // 약품 사진 선택
   const updateMedicinePhoto = useCallback((name, file) => {
     if (!file) return;
     const url = URL.createObjectURL(file);
-    setMedicineItems(prev => prev.map(i =>
-      i.name === name ? { ...i, photoFile: file, previewUrl: url } : i
-    ));
+    setMedicineItems((prev) => prev.map((item) => (
+      item.name === name ? { ...item, photoFile: file, previewUrl: url } : item
+    )));
   }, []);
 
-  // 키트 입력값 변경
   const updateKitPurchase = useCallback((name, value) => {
-    setKitItems(prev => prev.map(i => i.name === name ? { ...i, purchase: value } : i));
+    setKitItems((prev) => prev.map((item) => (
+      item.name === name ? { ...item, purchase: value } : item
+    )));
   }, []);
 
-  // 키트 사진 선택
   const updateKitPhoto = useCallback((name, file) => {
     if (!file) return;
     const url = URL.createObjectURL(file);
-    setKitItems(prev => prev.map(i =>
-      i.name === name ? { ...i, photoFile: file, previewUrl: url } : i
-    ));
+    setKitItems((prev) => prev.map((item) => (
+      item.name === name ? { ...item, photoFile: file, previewUrl: url } : item
+    )));
   }, []);
 
-  // 거래명세서 사진
   const updateTradePhoto = useCallback((file) => {
     if (!file) return;
     const url = URL.createObjectURL(file);
@@ -118,12 +161,45 @@ export function useMedicineInViewModel() {
     setTradePreviewUrl(url);
   }, []);
 
-  // 저장 (현재 탭의 데이터만 DB에 저장, 전체 0이면 건너뜀)
+  const uploadBrowserOnlyPhotos = async (date, entries = []) => {
+    for (const { name, file } of entries) {
+      const res = await MedicineInModel.uploadPhoto(date, name, file);
+      if (!res?.success) {
+        console.warn(`[medicine-in] 사진 업로드 실패 ${name}:`, res?.error);
+      }
+    }
+  };
+
+  const collectPhotoPathsByName = (targetTab) => {
+    const photoPathsByName = {};
+    const uploadTargets = [];
+    const sourceItems = targetTab === 'medicine' ? medicineItems : kitItems;
+
+    sourceItems.forEach((item) => {
+      if (!item.photoFile) return;
+      const fp = getFilePath(item.photoFile);
+      if (fp) {
+        photoPathsByName[item.name] = fp;
+      } else {
+        uploadTargets.push({ name: item.name, file: item.photoFile });
+      }
+    });
+
+    if (targetTab === 'medicine' && tradePhotoFile) {
+      const fp = getFilePath(tradePhotoFile);
+      if (fp) {
+        photoPathsByName['거래명세서'] = fp;
+      } else {
+        uploadTargets.push({ name: '거래명세서', file: tradePhotoFile });
+      }
+    }
+
+    return { photoPathsByName, uploadTargets };
+  };
+
   const handleSave = useCallback(async () => {
     const targetItems = tab === 'medicine' ? medicineItems : kitItems;
-
-    // 전체 0이면 저장 의미 없음
-    const allZero = targetItems.every(i => Number(i.purchase) === 0);
+    const allZero = targetItems.every((item) => Number(item.purchase) === 0);
     if (allZero) {
       showToast('입고량이 입력된 항목이 없습니다.', 'error');
       return;
@@ -132,109 +208,89 @@ export function useMedicineInViewModel() {
     setIsSaving(true);
     try {
       const date = tab === 'medicine' ? medicineDate : kitDate;
+      const { photoPathsByName, uploadTargets } = collectPhotoPathsByName(tab);
 
-      // 사진 저장: Electron이면 file.path, 웹이면 FormData 업로드
-      const photoPathsByName = {};
-      const uploadTargets = [];
+      await uploadBrowserOnlyPhotos(date, uploadTargets);
 
-      if (tab === 'medicine') {
-        medicineItems.forEach(item => {
-          if (!item.photoFile) return;
-          const fp = item.photoFile.path || null;
-          if (fp) { photoPathsByName[item.name] = fp; }
-          else { uploadTargets.push({ name: item.name, file: item.photoFile }); }
-        });
-        if (tradePhotoFile) {
-          const fp = tradePhotoFile.path || null;
-          if (fp) { photoPathsByName['거래명세서'] = fp; }
-          else { uploadTargets.push({ name: '거래명세서', file: tradePhotoFile }); }
-        }
-      } else {
-        kitItems.forEach(item => {
-          if (!item.photoFile) return;
-          const fp = item.photoFile.path || null;
-          if (fp) { photoPathsByName[item.name] = fp; }
-          else { uploadTargets.push({ name: item.name, file: item.photoFile }); }
-        });
-      }
-
-      // 웹 모드: 파일 직접 업로드
-      for (const { name, file } of uploadTargets) {
-        const res = await MedicineInModel.uploadPhoto(date, name, file);
-        if (!res?.success) console.warn(`[사진 업로드 실패] ${name}:`, res?.error);
-      }
-
-      const items = targetItems.map(i => ({ name: i.name, purchase: Number(i.purchase) || 0 }));
-      const payload = {
-        tab, date, items,
+      const items = targetItems.map((item) => ({ name: item.name, purchase: Number(item.purchase) || 0 }));
+      const result = await MedicineInModel.saveItems({
+        tab,
+        date,
+        items,
+        ...requestContext,
         ...(Object.keys(photoPathsByName).length > 0 && { photoPaths: photoPathsByName }),
-      };
-      const result = await MedicineInModel.saveItems(payload);
+      });
+
       if (!result?.success) throw new Error(result?.error || '저장 실패');
-      showToast(tab === 'medicine' ? '약품 구매량이 저장되었습니다.' : '키트 구매량이 저장되었습니다.');
+      showToast(tab === 'medicine' ? '약품 입고량이 저장되었습니다.' : '키트 입고량이 저장되었습니다.');
     } catch (err) {
       showToast(err.message || '저장에 실패했습니다.', 'error');
     } finally {
       setIsSaving(false);
     }
-  }, [tab, medicineItems, kitItems, medicineDate, kitDate, tradePhotoFile, showToast]);
+  }, [tab, medicineItems, kitItems, medicineDate, kitDate, tradePhotoFile, showToast, requestContext]);
 
-  // 생성하기: 양쪽 모두 저장 + HWPX 생성
   const handleExport = useCallback(async () => {
     setIsExporting(true);
     try {
-      // 1. 약품 구매량 저장
-      const medItems = medicineItems.map(i => ({ name: i.name, purchase: Number(i.purchase) || 0 }));
-      await MedicineInModel.saveItems({ tab: 'medicine', date: medicineDate, items: medItems });
+      const medItems = medicineItems.map((item) => ({ name: item.name, purchase: Number(item.purchase) || 0 }));
+      const kitSaveItems = kitItems.map((item) => ({ name: item.name, purchase: Number(item.purchase) || 0 }));
 
-      // 2. 키트 구매량 저장
-      const kItems = kitItems.map(i => ({ name: i.name, purchase: Number(i.purchase) || 0 }));
-      await MedicineInModel.saveItems({ tab: 'kit', date: kitDate, items: kItems });
+      const medPhotos = collectPhotoPathsByName('medicine');
+      const kitPhotos = collectPhotoPathsByName('kit');
 
-      // 3. 사진 경로 수집 (Electron: file.path 사용)
+      await uploadBrowserOnlyPhotos(medicineDate, medPhotos.uploadTargets);
+      await uploadBrowserOnlyPhotos(kitDate, kitPhotos.uploadTargets);
+
+      await MedicineInModel.saveItems({
+        tab: 'medicine',
+        date: medicineDate,
+        items: medItems,
+        ...requestContext,
+        ...(Object.keys(medPhotos.photoPathsByName).length > 0 && { photoPaths: medPhotos.photoPathsByName }),
+      });
+      await MedicineInModel.saveItems({
+        tab: 'kit',
+        date: kitDate,
+        items: kitSaveItems,
+        ...requestContext,
+        ...(Object.keys(kitPhotos.photoPathsByName).length > 0 && { photoPaths: kitPhotos.photoPathsByName }),
+      });
+
       const photoPaths = {};
-      const BASE_MED_NAMES = ['포도당', '중탄산나트륨', '팩(PAC)'];
-      const extraIdx = [];
-      medicineItems.forEach((item, i) => {
-        if (BASE_MED_NAMES.includes(item.name)) {
-          const pos = BASE_MED_NAMES.indexOf(item.name);
-          const key = `{{약${pos + 1}사진}}`;
-          const fp = getFilePath(item.photoFile);
-          if (fp) photoPaths[key] = fp;
-        } else {
-          extraIdx.push(i);
+      medicineItems.forEach((item) => {
+        const fp = getFilePath(item.photoFile);
+        if (!fp) return;
+        const baseIndex = BASE_MED_NAMES.indexOf(item.name);
+        if (baseIndex >= 0) {
+          photoPaths[`{{기본${baseIndex + 1}사진}}`] = fp;
         }
       });
-      // 추가 약품 사진
-      const extraMeds = medicineItems.filter(i => !BASE_MED_NAMES.includes(i.name));
-      extraMeds.forEach((item, idx) => {
-        if (idx < 2) {
-          const key = `{{추${idx + 1}사진}}`;
+
+      medicineItems
+        .filter((item) => !BASE_MED_NAMES.includes(item.name))
+        .slice(0, 2)
+        .forEach((item, idx) => {
           const fp = getFilePath(item.photoFile);
-          if (fp) photoPaths[key] = fp;
-        }
-      });
-      // 거래명세서 사진
+          if (fp) photoPaths[`{{추가${idx + 1}사진}}`] = fp;
+        });
+
       const tradeFp = getFilePath(tradePhotoFile);
       if (tradeFp) photoPaths['{{거래사진}}'] = tradeFp;
 
-      // 키트 사진
-      kitItems.forEach((item, idx) => {
-        if (idx < 2) {
-          const key = `{{키${idx + 1}사진}}`;
-          const fp = getFilePath(item.photoFile);
-          if (fp) photoPaths[key] = fp;
-        }
+      kitItems.slice(0, 2).forEach((item, idx) => {
+        const fp = getFilePath(item.photoFile);
+        if (fp) photoPaths[`{{키트${idx + 1}사진}}`] = fp;
       });
 
-      // 4. HWPX 생성
-      const result = await MedicineInModel.exportDoc({
+      const result = await MedicineInModel.exportExcel({
         year,
         month,
         medicineDate,
         kitDate,
         medicineItems: medItems,
-        kitItems: kItems,
+        kitItems: kitSaveItems,
+        ...requestContext,
         photoPaths: Object.keys(photoPaths).length > 0 ? photoPaths : undefined,
       });
 
@@ -245,17 +301,22 @@ export function useMedicineInViewModel() {
     } finally {
       setIsExporting(false);
     }
-  }, [year, month, medicineDate, kitDate, medicineItems, kitItems, tradePhotoFile, showToast]);
+  }, [year, month, medicineDate, kitDate, medicineItems, kitItems, tradePhotoFile, showToast, requestContext]);
 
   const yearOptions = Array.from({ length: 4 }, (_, i) => currentYear - 2 + i);
   const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1);
 
   return {
-    year, setYear,
-    month, setMonth,
-    tab, setTab,
-    medicineDate, setMedicineDate,
-    kitDate, setKitDate,
+    year,
+    setYear,
+    month,
+    setMonth,
+    tab,
+    setTab,
+    medicineDate,
+    setMedicineDate,
+    kitDate,
+    setKitDate,
     siteName,
     medicineItems,
     kitItems,

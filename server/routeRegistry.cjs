@@ -1,53 +1,55 @@
-﻿/**
+/**
  * server/routeRegistry.cjs
  *
- * 紐⑤뱺 API ?쇱슦???깅줉 ?뺣낫瑜???怨녹뿉 紐⑥? ?덉??ㅽ듃由ъ엯?덈떎.
- * 怨꾩링蹂꾨줈 遺꾨쪟?섏뼱 ?덉쑝硫? server/index.cjs??registerLazyApplication()?? * ???뚯씪???쒗쉶?섎ŉ Express ?깆뿉 ?먮룞 ?깅줉?⑸땲??
+ * 모든 API 라우터 등록 정보를 한 곳에 모은 엔트리입니다.
+ * 계층별로 분류되어 있으면 server/index.cjs의 registerLazyApplication()이
+ * 이 파일을 조회하여 Express 등에 자동 등록합니다.
  *
- * ???쇱슦??異붽? 諛⑸쾿:
- *   ??諛곗뿴????ぉ ?섎굹留?異붽??섎㈃ ?⑸땲??
+ * 새 라우터 추가 방법:
+ *   이 배열에 항목 하나만 추가하면 됩니다
  *   { tier: 2, path: '/api/new-feature', module: './routes/newFeatureRoutes.cjs', args: ['db', 'appDataPath'] }
  *
  * tier:
- *   0 = 利됱떆 ?깅줉 (濡쒓렇???놁씠???꾩슂??API, auth留?
- *   1 = preload-trigger ??200ms 媛꾧꺽 ?꾨━濡쒕뱶
- *   2 = 泥?HTTP ?붿껌 ??濡쒕뱶 (makeLazy)
+ *   0 = 즉시 등록 (로그인 없이 필요한 API, auth만)
+ *   1 = 로그인 성공 시 (preload-trigger) 200ms 간격 프리로드
+ *   2 = 첫 HTTP 요청 시 로드 (makeLazy)
  *
- * watch: true ??BigQuery 利됱떆 ?숆린??媛먯떆 ??? * args: ['db', 'appDataPath', 'BASE_DIR'] 以??대떦 ?쇱슦?멸? ?꾩슂濡??섎뒗 寃껊쭔 紐낆떆
- *        resolveArgs()媛 ctx?먯꽌 ?먮룞 留ㅽ븨?⑸땲??
+ * watch: true는 BigQuery 즉시 동기화 감시 대상
+ * args: ['db', 'appDataPath', 'BASE_DIR'] 중 해당 라우터가 필요로 하는 것만 명시
+ *        resolveArgs()가 ctx에서 자동 매핑됩니다
  */
 const routeRegistry = [
   // ==================================================================
-  // Tier 0: 利됱떆 ?깅줉
+  // Tier 0: 즉시 등록
   // ==================================================================
   { tier: 0, path: '/api/auth',          module: './routes/authRoutes.cjs',           args: ['db'] },
 
   // ==================================================================
-  // Tier 1: 濡쒓렇???깃났 ??preload-trigger) 200ms 媛꾧꺽?쇰줈 ?꾨━濡쒕뱶
+  // Tier 1: 로그인 성공 시 (preload-trigger) 200ms 간격으로 프리로드
   // ==================================================================
-  // ??waterQualityRoutes.cjs 寃利??꾨즺:
+  // 이 waterQualityRoutes.cjs 검증 완료:
   //    module.exports = function (db, baseDir) { ... }
-  //    ???대??먯꽌 baseDir??importQntechWaterPhotos(), buildManualPhotoDirectory()???꾨떖?섎?濡?BASE_DIR ?꾩슂
-  { tier: 1, path: '/api/flows',          module: './routes/flowRoutes.cjs',           args: ['db'],           watch: true },
-  { tier: 1, path: '/api/water-quality',  module: './routes/waterQualityRoutes.cjs',   args: ['db', 'BASE_DIR'], watch: true },
-  { tier: 1, path: '/api/medicines',      module: './routes/medicineRoutes.cjs',       args: ['db'],           watch: true },
-  { tier: 1, path: '/api/kits',           module: './routes/kitRoutes.cjs',            args: ['db'],           watch: true },
-  { tier: 1, path: '/api/facilities',     module: './routes/facilityRoutes.cjs',       args: ['db'],           watch: true },
+  //    이미 baseDir에서 importQntechWaterPhotos(), buildManualPhotoDirectory()를 호출하므로 BASE_DIR 필요
+  { tier: 1, path: '/',                   module: './routes/flowRoutes.cjs',           args: ['db'],           watch: true },
+  { tier: 1, path: '/',                   module: './routes/waterQualityRoutes.cjs',   args: ['db', 'BASE_DIR'], watch: true },
+  { tier: 1, path: '/',                   module: './routes/medicineRoutes.cjs',       args: ['db'],           watch: true },
+  { tier: 1, path: '/',                   module: './routes/kitRoutes.cjs',            args: ['db'],           watch: true },
+  { tier: 1, path: '/',                   module: './routes/facilityRoutes.cjs',       args: ['db'],           watch: true },
 
   // ==================================================================
-  // Tier 2: 泥?HTTP ?붿껌???ㅼ뼱????濡쒕뱶 (makeLazy)
+  // Tier 2: 첫 HTTP 요청이 들어올 때 로드 (makeLazy)
   // ==================================================================
-  { tier: 2, path: '/api/settings',       module: './routes/settingsRoutes.cjs',       args: ['db', 'BASE_DIR', 'appDataPath'] },
-  { tier: 2, path: '/api/board',          module: './routes/boardRoutes.cjs',          args: ['db'] },
-  { tier: 2, path: '/api/upload',         module: './routes/uploadRoutes.cjs',         args: ['appDataPath'] },
-  { tier: 2, path: '/api/logs',           module: './routes/excelRoutes.cjs',          args: ['db', 'BASE_DIR', 'appDataPath'] },
-  { tier: 2, path: '/api/hwp',            module: './routes/hwpRoutes.cjs',            args: ['db', 'BASE_DIR', 'appDataPath'] },
-  { tier: 2, path: '/api/sludge-photos',  module: './routes/sludgePhotoRoutes.cjs',    args: ['db', 'BASE_DIR', 'appDataPath'], watch: true },
-  { tier: 2, path: '/api/medicine-in',    module: './routes/medicineInRoutes.cjs',     args: ['db', 'BASE_DIR', 'appDataPath'], watch: true },
-  { tier: 2, path: '/api/medicine-register', module: './routes/medicineRegisterRoutes.cjs', args: ['db', 'BASE_DIR', 'appDataPath'] },
-  { tier: 2, path: '/api/certificates',   module: './routes/certificateRoutes.cjs',    args: ['db'] },
-  { tier: 2, path: '/api/location',       module: './routes/locationRoutes.cjs',       args: ['BASE_DIR'] },
-  { tier: 2, path: '/api/daily-work-log', module: './routes/dailyWorkLogRoutes.cjs',   args: ['db', 'BASE_DIR', 'appDataPath'] },
+  { tier: 2, path: '/',                   module: './routes/settingsRoutes.cjs',       args: ['db', 'BASE_DIR', 'appDataPath'] },
+  { tier: 2, path: '/',                   module: './routes/boardRoutes.cjs',          args: ['db'] },
+  { tier: 2, path: '/',                   module: './routes/uploadRoutes.cjs',         args: ['appDataPath'] },
+  { tier: 2, path: '/',                   module: './routes/excelRoutes.cjs',          args: ['db', 'BASE_DIR', 'appDataPath'] },
+  { tier: 2, path: '/',                   module: './routes/sludgePhotoRoutes.cjs',    args: ['db', 'BASE_DIR', 'appDataPath'], watch: true },
+  { tier: 2, path: '/',                   module: './routes/medicineInRoutes.cjs',     args: ['db', 'BASE_DIR', 'appDataPath'], watch: true },
+  { tier: 2, path: '/',                   module: './routes/medicineRegisterRoutes.cjs', args: ['db', 'BASE_DIR', 'appDataPath'] },
+  { tier: 2, path: '/',                   module: './routes/certificateRoutes.cjs',    args: ['db'] },
+  { tier: 2, path: '/',                   module: './routes/locationRoutes.cjs',       args: ['BASE_DIR'] },
+  { tier: 2, path: '/',                   module: './routes/dailyWorkLogRoutes.cjs',   args: ['db', 'BASE_DIR', 'appDataPath'] },
+  { tier: 2, path: '/',                   module: './routes/roadworkHelperRoutes.cjs', args: ['db'] },
 ];
 
 module.exports = routeRegistry;

@@ -1,0 +1,299 @@
+[
+  {
+    "category": "panels",
+    "file": "InventoryMappingPanel.jsx",
+    "hasBOM": false,
+    "size": 8137,
+    "garbled": 0,
+    "korean": 33,
+    "status": "OK"
+  },
+  {
+    "category": "panels",
+    "file": "MedicinePanel.jsx",
+    "hasBOM": false,
+    "size": 649,
+    "garbled": 0,
+    "korean": 88,
+    "status": "OK"
+  },
+  {
+    "category": "panels",
+    "file": "KitPanel.jsx",
+    "hasBOM": false,
+    "size": 638,
+    "garbled": 0,
+    "korean": 88,
+    "status": "OK"
+  },
+  {
+    "category": "panels",
+    "file": "FlowMappingPanel.jsx",
+    "hasBOM": false,
+    "size": 13540,
+    "garbled": 0,
+    "korean": 276,
+    "status": "OK"
+  },
+  {
+    "category": "panels",
+    "file": "WaterMappingPanel.jsx",
+    "hasBOM": false,
+    "size": 10345,
+    "garbled": 0,
+    "korean": 174,
+    "status": "OK"
+  },
+  {
+    "category": "panels",
+    "file": "WebAppPanel.jsx",
+    "hasBOM": false,
+    "size": 14561,
+    "garbled": 0,
+    "korean": 238,
+    "status": "OK"
+  },
+  {
+    "category": "panels",
+    "file": "LogMappingPanel.jsx",
+    "hasBOM": false,
+    "size": 10427,
+    "garbled": 0,
+    "korean": 187,
+    "status": "OK"
+  },
+  {
+    "category": "panels",
+    "file": "BasicSitePanel.jsx",
+    "hasBOM": false,
+    "size": 3646,
+    "garbled": 0,
+    "korean": 66,
+    "status": "OK"
+  },
+  {
+    "category": "panels",
+    "file": "TemplateFilePanel.jsx",
+    "hasBOM": false,
+    "size": 3271,
+    "garbled": 0,
+    "korean": 104,
+    "status": "OK"
+  },
+  {
+    "category": "panels",
+    "file": "BasicSiteHeaderPanel.jsx",
+    "hasBOM": false,
+    "size": 5348,
+    "garbled": 0,
+    "korean": 83,
+    "status": "OK"
+  },
+  {
+    "category": "panels",
+    "file": "ItemManagementPanel.jsx",
+    "hasBOM": false,
+    "size": 2795,
+    "garbled": 0,
+    "korean": 0,
+    "status": "OK"
+  },
+  {
+    "category": "panels",
+    "file": "MeasurementPlacePanel.jsx",
+    "hasBOM": false,
+    "size": 1054,
+    "garbled": 0,
+    "korean": 23,
+    "status": "OK"
+  },
+  {
+    "category": "panels",
+    "file": "SludgeExportPanel.jsx",
+    "hasBOM": false,
+    "size": 4480,
+    "garbled": 0,
+    "korean": 67,
+    "status": "OK"
+  },
+  {
+    "category": "widgets",
+    "file": "ItemActiveGrid.jsx",
+    "hasBOM": false,
+    "size": 1392,
+    "garbled": 0,
+    "korean": 0,
+    "status": "OK"
+  },
+  {
+    "category": "widgets",
+    "file": "TemplateUploadCard.jsx",
+    "hasBOM": false,
+    "size": 5700,
+    "garbled": 0,
+    "korean": 63,
+    "status": "OK"
+  },
+  {
+    "category": "widgets",
+    "file": "CredentialCard.jsx",
+    "hasBOM": false,
+    "size": 8027,
+    "garbled": 0,
+    "korean": 40,
+    "status": "OK"
+  },
+  {
+    "category": "widgets",
+    "file": "ExcelCellMapper.jsx",
+    "hasBOM": false,
+    "size": 3223,
+    "garbled": 0,
+    "korean": 45,
+    "status": "OK"
+  },
+  {
+    "category": "widgets",
+    "file": "MappingPreviewTable.jsx",
+    "hasBOM": false,
+    "size": 1713,
+    "garbled": 0,
+    "korean": 11,
+    "status": "OK"
+  },
+  {
+    "category": "widgets",
+    "file": "LocationOrderEditor.jsx",
+    "hasBOM": false,
+    "size": 4537,
+    "garbled": 0,
+    "korean": 9,
+    "status": "OK"
+  },
+  {
+    "category": "hooks",
+    "file": "useExternalServiceSettings.js",
+    "hasBOM": false,
+    "size": 7728,
+    "garbled": 0,
+    "korean": 133,
+    "status": "OK"
+  },
+  {
+    "category": "hooks",
+    "file": "useTemplateSettings.js",
+    "hasBOM": false,
+    "size": 4298,
+    "garbled": 0,
+    "korean": 49,
+    "status": "OK"
+  },
+  {
+    "category": "hooks",
+    "file": "useMappingSettings.js",
+    "hasBOM": false,
+    "size": 2613,
+    "garbled": 0,
+    "korean": 0,
+    "status": "OK"
+  },
+  {
+    "category": "hooks",
+    "file": "useDefaultAmountSettings.js",
+    "hasBOM": false,
+    "size": 4905,
+    "garbled": 0,
+    "korean": 148,
+    "status": "OK"
+  },
+  {
+    "category": "hooks",
+    "file": "useItemSettings.js",
+    "hasBOM": false,
+    "size": 5772,
+    "garbled": 0,
+    "korean": 35,
+    "status": "OK"
+  },
+  {
+    "category": "hooks",
+    "file": "useBasicSiteSettings.js",
+    "hasBOM": false,
+    "size": 4588,
+    "garbled": 0,
+    "korean": 147,
+    "status": "OK"
+  },
+  {
+    "category": "hooks",
+    "file": "useMeasurementPlaceSettings.js",
+    "hasBOM": false,
+    "size": 2199,
+    "garbled": 0,
+    "korean": 29,
+    "status": "OK"
+  },
+  {
+    "category": "services",
+    "file": "defaultSettingsService.cjs",
+    "hasBOM": false,
+    "size": 2518,
+    "garbled": 0,
+    "korean": 28,
+    "status": "OK"
+  },
+  {
+    "category": "services",
+    "file": "externalCredentialService.cjs",
+    "hasBOM": false,
+    "size": 1701,
+    "garbled": 0,
+    "korean": 18,
+    "status": "OK"
+  },
+  {
+    "category": "services",
+    "file": "mappingSettingsService.cjs",
+    "hasBOM": false,
+    "size": 14394,
+    "garbled": 0,
+    "korean": 103,
+    "status": "OK"
+  },
+  {
+    "category": "services",
+    "file": "templateSettingsService.cjs",
+    "hasBOM": false,
+    "size": 3628,
+    "garbled": 0,
+    "korean": 47,
+    "status": "OK"
+  },
+  {
+    "category": "services",
+    "file": "siteSettingsService.cjs",
+    "hasBOM": false,
+    "size": 13186,
+    "garbled": 0,
+    "korean": 110,
+    "status": "OK"
+  },
+  {
+    "category": "services",
+    "file": "initialSyncService.cjs",
+    "hasBOM": false,
+    "size": 2119,
+    "garbled": 0,
+    "korean": 58,
+    "status": "OK"
+  },
+  {
+    "category": "services",
+    "file": "appSettingsService.cjs",
+    "hasBOM": false,
+    "size": 7857,
+    "garbled": 0,
+    "korean": 123,
+    "status": "OK"
+  }
+]

@@ -1,10 +1,10 @@
-﻿const DEFAULT_LOCATION_ORDER = ['?좊웾議곗젙議?, '臾댁궛?뚯“', '?ш린議?, '移⑥쟾議?, '諛⑸쪟議?];
+﻿const DEFAULT_LOCATION_ORDER = ['유량조정조', '무산소조', '폭기조', '침전조', '방류조'];
 
-const ITEM_NAME_TO_FIELD = new Map([
-  ['?붾え?덉븘??吏덉냼', 'nh3_n'],
-  ['吏덉궛??吏덉냼', 'no3_n'],
-  ['?ㅻⅤ???몄궛??, 'po4_p'],
-  ['?뚯뭡由щ룄', 'alkalinity']
+const ITEM_NAME_TO_DEFINITION = new Map([
+  ['암모니아성 질소', { itemCode: 'nh3_n', itemName: '암모니아성질소(NH3-N)', unit: 'mg/L' }],
+  ['질산성 질소', { itemCode: 'no3_n', itemName: '질산성질소(NO3-N)', unit: 'mg/L' }],
+  ['오르토인산염', { itemCode: 'po4_p', itemName: '인산염인(PO4-P)', unit: 'mg/L' }],
+  ['알칼리도', { itemCode: 'alkalinity', itemName: '알칼리도(ALK)', unit: 'mg/L' }]
 ]);
 
 const PROJECTS_QUERY = `query Projects($data: SelectProjectInput!) {
@@ -88,11 +88,11 @@ function buildDirectLocationMap(activeLocations, configuredSampleMappings = []) 
     const normalized = normalizeSampleName(sampleName);
     if (configuredMap.has(normalized)) return configuredMap.get(normalized);
     if (candidates.has(normalized)) return candidates.get(normalized);
-    if (normalized.includes('?좊웾')) return '?좊웾議곗젙議?;
-    if (normalized.includes('臾댁궛??)) return '臾댁궛?뚯“';
-    if (normalized.includes('?ш린') || normalized.includes('?멸린')) return '?ш린議?;
-    if (normalized.includes('移⑥쟾')) return '移⑥쟾議?;
-    if (normalized.includes('諛⑸쪟') || normalized.includes('留됱뿬怨?)) return '諛⑸쪟議?;
+    if (normalized.includes('유량')) return '유량조정조';
+    if (normalized.includes('무산')) return '무산소조';
+    if (normalized.includes('폭기') || normalized.includes('포기')) return '폭기조';
+    if (normalized.includes('침전')) return '침전조';
+    if (normalized.includes('방류') || normalized.includes('말단')) return '방류조';
     return null;
   };
 }
@@ -134,10 +134,15 @@ function normalizeMeasurementValue(value) {
 
   const normalized = String(value).trim();
   if (['-1', '-1.0', '-1.00'].includes(normalized)) {
-    return '珥덇낵';
+    return '초과';
   }
 
   return normalized;
+}
+
+function toNumericMeasurementValue(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function normalizeProjectDate(projectRegDt, fallbackDate) {
@@ -174,7 +179,7 @@ function buildSourceLabel(project, measurementOrder, totalForDate) {
 
   if (analysisProcess) return analysisProcess;
   if (note) return note;
-  if (totalForDate > 1) return `${measurementOrder}李?;
+  if (totalForDate > 1) return `${measurementOrder}차`;
   return '';
 }
 
@@ -203,8 +208,8 @@ function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappi
     const resolver = buildSampleLocationResolver(project.measurements || [], activeLocations, configuredSampleMappings);
 
     (project.measurements || []).forEach((measurement) => {
-      const field = ITEM_NAME_TO_FIELD.get(measurement?.item?.name || '');
-      if (!field) return;
+      const definition = ITEM_NAME_TO_DEFINITION.get(measurement?.item?.name || '');
+      if (!definition) return;
 
       const targetLocation = resolver(measurement?.sample?.name || '');
       if (!targetLocation) {
@@ -212,7 +217,7 @@ function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappi
         return;
       }
 
-      const rowKey = `${projectDate}|${measurementGroup}|${targetLocation}`;
+      const rowKey = `${projectDate}|${measurementGroup}|${targetLocation}|${definition.itemCode}`;
       const row = rowMap.get(rowKey) || {
         date: projectDate,
         measurement_group: measurementGroup,
@@ -220,10 +225,14 @@ function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappi
         source_type: 'qntech',
         source_label: sourceLabel || null,
         qntech_project_id: toTrimmedString(project?.id) || null,
-        location: targetLocation
+        location: targetLocation,
+        item_name: definition.itemName,
+        item_code: definition.itemCode,
+        unit: definition.unit
       };
 
-      row[field] = normalizeMeasurementValue(measurement.ppm);
+      row.result_value = normalizeMeasurementValue(measurement.ppm);
+      row.result_numeric = toNumericMeasurementValue(row.result_value);
       rowMap.set(rowKey, row);
     });
   });

@@ -1,0 +1,417 @@
+.roadwork-page {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #f1f5f9;
+  overflow: hidden;
+  position: relative;
+}
+
+.roadwork-webview {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.roadwork-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.roadwork-dev-panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 19;
+  width: min(420px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.97);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+  color: #0f172a;
+}
+
+.roadwork-dev-panel strong {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.roadwork-dev-panel p {
+  margin: 2px 0;
+  font-size: 12px;
+  color: #334155;
+}
+
+.roadwork-dev-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.roadwork-dev-message {
+  margin-top: 8px !important;
+  color: #1d4ed8 !important;
+  font-weight: 700;
+}
+
+.roadwork-floating-open {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 18;
+  height: 38px;
+  border: 1px solid #1d4ed8;
+  border-radius: 6px;
+  background: #1d4ed8;
+  color: #ffffff;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 12px 28px rgba(29, 78, 216, 0.28);
+}
+
+.roadwork-load-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 25;
+  width: min(420px, calc(100vw - 32px));
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.2);
+  text-align: center;
+  color: #111827;
+}
+
+.roadwork-load-error .material-icons {
+  font-size: 44px;
+  color: #dc2626;
+}
+
+.roadwork-load-error h3 {
+  margin: 8px 0;
+  font-size: 17px;
+}
+
+.roadwork-load-error p {
+  margin: 0 0 16px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.roadwork-load-error button {
+  height: 34px;
+  border: 0;
+  border-radius: 4px;
+  background: #2563eb;
+  color: #ffffff;
+  padding: 0 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.roadwork-helper-panel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 20;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.22);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #111827;
+}
+
+.roadwork-helper-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f8fafc;
+}
+
+.roadwork-helper-header h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.3;
+  font-weight: 800;
+}
+
+.roadwork-helper-header span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.roadwork-icon-btn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.roadwork-icon-btn:hover {
+  background: #e2e8f0;
+}
+
+.roadwork-helper-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #ffffff;
+}
+
+.roadwork-helper-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #334155;
+}
+
+.roadwork-date-input {
+  height: 32px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 0 8px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.roadwork-toolbar-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.roadwork-btn-primary,
+.roadwork-btn-secondary {
+  height: 32px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #334155;
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.roadwork-btn-primary {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+
+.roadwork-btn-primary:hover {
+  background: #1e40af;
+}
+
+.roadwork-btn-secondary:hover {
+  background: #f1f5f9;
+}
+
+.roadwork-btn-secondary.compact {
+  height: 28px;
+  padding: 0 8px;
+}
+
+.roadwork-helper-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid #e5e7eb;
+  background: #f8fafc;
+}
+
+.roadwork-helper-tabs button {
+  height: 36px;
+  border: 0;
+  border-right: 1px solid #e5e7eb;
+  background: transparent;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.roadwork-helper-tabs button:last-child {
+  border-right: 0;
+}
+
+.roadwork-helper-tabs button.active {
+  background: #ffffff;
+  color: #1d4ed8;
+  box-shadow: inset 0 -2px 0 #1d4ed8;
+}
+
+.roadwork-helper-content {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 14px;
+}
+
+.roadwork-alert-error,
+.roadwork-alert-info {
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.roadwork-alert-error {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.roadwork-alert-info {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.roadwork-helper-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.roadwork-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.roadwork-section-header h3 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.3;
+  font-weight: 900;
+}
+
+.roadwork-grid-shell {
+  overflow: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #ffffff;
+  max-height: 360px;
+}
+
+.roadwork-copy-grid {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.roadwork-copy-grid th,
+.roadwork-copy-grid td {
+  padding: 7px 8px;
+  border-right: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.roadwork-copy-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #eef2f7;
+  color: #111827;
+  font-weight: 900;
+}
+
+.roadwork-copy-grid td {
+  color: #334155;
+  font-weight: 600;
+}
+
+.roadwork-copy-grid tr:nth-child(even) td {
+  background: #fafafa;
+}
+
+.roadwork-copy-grid .text-left {
+  text-align: left;
+}
+
+.roadwork-copy-grid .text-right {
+  text-align: right;
+}
+
+.roadwork-copy-grid .strong {
+  color: #111827;
+  font-weight: 900;
+}
+
+.roadwork-grid-empty {
+  text-align: center;
+  color: #94a3b8;
+  padding: 24px 8px;
+}
+
+.roadwork-helper-footer {
+  padding: 10px 14px;
+  border-top: 1px solid #e5e7eb;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 760px) {
+  .roadwork-helper-panel {
+    left: 10px;
+    right: 10px;
+    top: 10px;
+    width: auto;
+  }
+
+  .roadwork-helper-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

@@ -1,20 +1,97 @@
-﻿const express = require('express');
-const { syncAttendanceLogs } = require('../services/attendanceBigQueryService.cjs');
-const { getMembers, upsertMember, deleteMember, isSheetsConfigured } = require('../services/membersSheetsService.cjs');
-const { detectRemoteSession } = require('../services/remoteSessionDetectService.cjs');
-const { triggerSync: triggerBigQuerySync } = require('../services/bigQueryTriggerService.cjs');
-const { syncRecentCertificateCacheForSite } = require('../services/certificateCacheSyncService.cjs');
+const express = require('express');
+// Lazy require wrappers keep startup validation light.
+function syncAttendanceLogs(...args) {
+  return require('../services/attendanceBigQueryService.cjs').syncAttendanceLogs(...args);
+}
+function getMembers(...args) {
+  return require('../services/membersSheetsService.cjs').getMembers(...args);
+}
+function upsertMember(...args) {
+  return require('../services/membersSheetsService.cjs').upsertMember(...args);
+}
+function deleteMember(...args) {
+  return require('../services/membersSheetsService.cjs').deleteMember(...args);
+}
+function isSheetsConfigured(...args) {
+  return require('../services/membersSheetsService.cjs').isSheetsConfigured(...args);
+}
+function detectRemoteSession(...args) {
+  return require('../services/remoteSessionDetectService.cjs').detectRemoteSession(...args);
+}
+function triggerBigQuerySync(...args) {
+  return require('../services/bigQueryTriggerService.cjs').triggerSync(...args);
+}
+function syncRecentCertificateCacheForSite(...args) {
+  return require('../services/certificateCacheSyncService.cjs').syncRecentCertificateCacheForSite(...args);
+}
 
 module.exports = (db) => {
     const router = express.Router();
 
-    // ?꾩옱 ?좎쭨 KST 湲곗??쇰줈 援ы븯湲?(YYYY-MM-DD)
+    // Return today's date in KST (YYYY-MM-DD).
     const getTodayKST = () => {
         return new Date(new Date().getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
     };
 
+    const buildAutoLogoutTime = (dateKST) => {
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(String(dateKST || ''))
+            ? String(dateKST)
+            : getTodayKST();
+        return new Date(`${date}T20:00:00+09:00`).toISOString();
+    };
+
+    const isWithinSiteRadius = (site, lat, lng) => {
+        const targetLat = Number(site?.target_lat);
+        const targetLng = Number(site?.target_lng);
+        const currentLat = Number(lat);
+        const currentLng = Number(lng);
+        if (![targetLat, targetLng, currentLat, currentLng].every(Number.isFinite)) return false;
+
+        const radiusM = Number.isFinite(Number(site?.radius_m)) ? Number(site.radius_m) : 500;
+        const earthRadiusM = 6371e3;
+        const phi1 = (currentLat * Math.PI) / 180;
+        const phi2 = (targetLat * Math.PI) / 180;
+        const deltaPhi = ((targetLat - currentLat) * Math.PI) / 180;
+        const deltaLambda = ((targetLng - currentLng) * Math.PI) / 180;
+        const a = Math.sin(deltaPhi / 2) ** 2
+            + Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) ** 2;
+        const distanceM = earthRadiusM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return distanceM <= radiusM;
+    };
+
+    const closeStaleOpenSessions = (member) => {
+        if (!member?.id || String(member.role || 'user') !== 'user') return;
+        const today = getTodayKST();
+        const rows = db.prepare(`
+            SELECT id, date
+            FROM attendance
+            WHERE member_id = ?
+              AND logout_time IS NULL
+              AND date < ?
+        `).all(member.id, today);
+
+        if (!rows.length) return;
+        const stmt = db.prepare(`
+            UPDATE attendance
+            SET logout_time = ?, auto_logout = 1, is_synced = 0
+            WHERE id = ?
+        `);
+        db.transaction(() => {
+            for (const row of rows) {
+                stmt.run(buildAutoLogoutTime(row.date), row.id);
+            }
+        })();
+    };
+
     const upsertLocalMember = (member) => {
         if (!member?.id || !member?.name) {
+            return;
+        }
+
+        const role = String(member.role || '').trim();
+        const name = String(member.name || '').trim();
+        if (role === 'admin' || role === 'group_admin' || name === 'admin') {
+            db.prepare('DELETE FROM members WHERE id = ? OR name = ?').run(member.id, member.name);
             return;
         }
 
@@ -127,7 +204,7 @@ module.exports = (db) => {
         const role = String(member.role || 'user');
         if (role === 'admin' || role === 'group_admin') {
             const allSites = db.prepare(`
-                SELECT id, site_name, manager_name
+                SELECT id, site_name, manager_name, target_lat, target_lng, radius_m
                 FROM sites
                 WHERE COALESCE(is_active, 1) = 1
                 ORDER BY site_name ASC
@@ -136,12 +213,15 @@ module.exports = (db) => {
                 id: row.id,
                 site_name: row.site_name,
                 manager_name: row.manager_name || '',
+                target_lat: row.target_lat,
+                target_lng: row.target_lng,
+                radius_m: row.radius_m,
                 is_primary: false
             }));
         }
 
         const rows = db.prepare(`
-            SELECT s.id, s.site_name, s.manager_name, ms.is_primary
+            SELECT s.id, s.site_name, s.manager_name, s.target_lat, s.target_lng, s.radius_m, ms.is_primary
             FROM member_sites ms
             JOIN sites s ON s.id = ms.site_id
             WHERE ms.member_id = ? AND COALESCE(s.is_active, 1) = 1
@@ -153,6 +233,9 @@ module.exports = (db) => {
                 id: row.id,
                 site_name: row.site_name,
                 manager_name: row.manager_name || '',
+                target_lat: row.target_lat,
+                target_lng: row.target_lng,
+                radius_m: row.radius_m,
                 is_primary: Boolean(row.is_primary)
             }));
         }
@@ -160,13 +243,16 @@ module.exports = (db) => {
         const name = String(member.site_name1 || '').trim();
         if (!name) return [];
 
-        const byName = db.prepare('SELECT id, site_name, manager_name FROM sites WHERE site_name = ? AND COALESCE(is_active, 1) = 1 LIMIT 1').get(name);
+        const byName = db.prepare('SELECT id, site_name, manager_name, target_lat, target_lng, radius_m FROM sites WHERE site_name = ? AND COALESCE(is_active, 1) = 1 LIMIT 1').get(name);
         if (!byName) return [];
 
         return [{
             id: byName.id,
             site_name: byName.site_name,
             manager_name: byName.manager_name || '',
+            target_lat: byName.target_lat,
+            target_lng: byName.target_lng,
+            radius_m: byName.radius_m,
             is_primary: true
         }];
     };
@@ -175,7 +261,7 @@ module.exports = (db) => {
         const memberName = String(member?.name || '').trim();
         if (!memberName) return [];
         const rows = db.prepare(`
-            SELECT id, site_name, manager_name
+            SELECT id, site_name, manager_name, target_lat, target_lng, radius_m
             FROM sites
             WHERE COALESCE(is_active, 1) = 1
               AND manager_name = ?
@@ -185,6 +271,9 @@ module.exports = (db) => {
             id: row.id,
             site_name: row.site_name,
             manager_name: row.manager_name || '',
+            target_lat: row.target_lat,
+            target_lng: row.target_lng,
+            radius_m: row.radius_m,
             is_primary: idx === 0
         }));
     };
@@ -208,6 +297,9 @@ module.exports = (db) => {
             ...member,
             site_id: activeSite?.id || null,
             site_name1: activeSite?.site_name || member?.site_name1 || '',
+            target_lat: activeSite?.target_lat ?? member?.target_lat ?? null,
+            target_lng: activeSite?.target_lng ?? member?.target_lng ?? null,
+            radius_m: activeSite?.radius_m ?? member?.radius_m ?? 500,
             managed_sites: managedSites
         };
     };
@@ -244,7 +336,7 @@ module.exports = (db) => {
         return String(fallback?.name || '').trim();
     };
 
-    // 1. 濡쒖뺄 濡쒓렇??
+    // 1. Local login.
     router.post('/local-login', async (req, res) => {
         const { name, password } = req.body;
         try {
@@ -253,8 +345,9 @@ module.exports = (db) => {
                     const members = await getMembers();
                     const member = members.find((item) => item.name === name && item.password === password);
                     if (member) {
-                        // ?⑤씪??泥?濡쒓렇???뺤긽 濡쒓렇????濡쒖뺄 罹먯떆 媛깆떊
+                        // Refresh the local member cache after a successful online login.
                         upsertLocalMember(member);
+                        closeStaleOpenSessions(member);
                         try {
                             await syncRecentCertificateCacheForSite({
                                 db,
@@ -262,19 +355,24 @@ module.exports = (db) => {
                                 months: 2,
                             });
                         } catch (syncErr) {
-                            console.warn('[auth/local-login] ?깆쟻??罹먯떆 ?숆린???ㅽ뙣(sheets):', syncErr.message);
+                            console.warn('[auth/local-login] certificate cache sync failed (sheets):', syncErr.message);
                         }
                         triggerBigQuerySync('login-success:sheets');
                         return res.json({ success: true, member: enrichMemberWithSites(member), source: 'sheets' });
                     }
                 } catch (sheetErr) {
-                    // ?쒗듃 議고쉶 ?ㅽ뙣(?ㅽ듃?뚰겕/沅뚰븳 ?ㅻ쪟) ??濡쒖뺄 罹먯떆濡??먮룞 fallback
-                    console.warn('[auth/local-login] Sheets 議고쉶 ?ㅽ뙣, 濡쒖뺄 罹먯떆 濡쒓렇?몄쑝濡?fallback:', sheetErr.message);
+                    // Fall back to the local cache when Sheets lookup fails.
+                    console.warn('[auth/local-login] Sheets lookup failed, falling back to local cache:', sheetErr.message);
                 }
             }
 
             const member = db.prepare('SELECT * FROM members WHERE name = ? AND password = ?').get(name, password);
             if (member) {
+                if (String(member.role || '').trim() === 'admin' || String(member.role || '').trim() === 'group_admin' || String(member.name || '').trim() === 'admin') {
+                    db.prepare('DELETE FROM members WHERE id = ? OR name = ?').run(member.id, member.name);
+                    return res.status(401).json({ success: false, message: 'admin 계정은 로컬 캐시 로그인을 사용할 수 없습니다.' });
+                }
+                closeStaleOpenSessions(member);
                 try {
                     await syncRecentCertificateCacheForSite({
                         db,
@@ -282,19 +380,19 @@ module.exports = (db) => {
                         months: 2,
                     });
                 } catch (syncErr) {
-                    console.warn('[auth/local-login] ?깆쟻??罹먯떆 ?숆린???ㅽ뙣(local):', syncErr.message);
+                    console.warn('[auth/local-login] certificate cache sync failed (local):', syncErr.message);
                 }
                 triggerBigQuerySync('login-success:local');
                 res.json({ success: true, member: enrichMemberWithSites(member) });
             } else {
-                res.status(401).json({ success: false, message: '?대쫫 ?먮뒗 鍮꾨?踰덊샇媛 ?쇱튂?섏? ?딆뒿?덈떎.' });
+                res.status(401).json({ success: false, message: '이름 또는 비밀번호가 일치하지 않습니다.' });
             }
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
         }
     });
 
-    // 濡쒓렇???붾㈃ 湲곕낯媛??꾩옣愿由ъ옄 ?대쫫) ?쒓났
+    // Provide the default login name for the site manager.
     router.get('/login-hint', (req, res) => {
         try {
             const name = resolveLoginHintName();
@@ -304,12 +402,12 @@ module.exports = (db) => {
         }
     });
 
-    // 2. 愿由ъ옄媛 ?대젮諛쏆? ?ъ슜???곗씠?곕? 濡쒖뺄 DB??????숆린??
+    // 2. Sync member data downloaded by admin into the local DB.
     router.post('/sync-member', (req, res) => {
         const { id, name, password, role, site_name1, phone, notes } = req.body;
         try {
             if (name === 'admin') {
-                return res.json({ success: true, message: 'admin? 濡쒖뺄????ν븯吏 ?딆뒿?덈떎.' });
+                return res.json({ success: true, message: 'admin 계정은 로컬에 저장하지 않습니다.' });
             }
 
             const existing = db.prepare('SELECT id FROM members WHERE id = ? OR name = ?').get(id, name);
@@ -340,7 +438,7 @@ module.exports = (db) => {
         }
     });
 
-    // 3. ?쒖꽦 ?몄뀡(吏꾪뻾 以묒씤 異쒓렐 湲곕줉) 李얘린
+    // 3. Find the active attendance session.
     router.post('/session', (req, res) => {
         const { memberId } = req.body;
         const dateKST = getTodayKST();
@@ -352,7 +450,7 @@ module.exports = (db) => {
         }
     });
 
-    // 3b. ?쇱옄蹂?異쒓껐 紐⑸줉 (濡쒖뺄 SQLite)
+    // 3b. List attendance logs by date from local SQLite.
     router.get('/attendance', (req, res) => {
         const dateParam = String(req.query.date || '').trim();
         const dateKST = dateParam || getTodayKST();
@@ -368,16 +466,30 @@ module.exports = (db) => {
         }
     });
 
-    // 4. 異쒓렐 泥섎━
+    // 4. Check-in.
     router.post('/attendance', (req, res) => {
         const { memberId, memberName, lat, lng, locationMatched } = req.body;
         const dateKST = getTodayKST();
         const loginTime = new Date().toISOString();
 
         try {
-            const site = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get() || {};
+            const site = db.prepare(`
+                SELECT app_settings.site_id, app_settings.site_name, sites.target_lat, sites.target_lng, sites.radius_m
+                FROM app_settings
+                LEFT JOIN sites ON sites.id = app_settings.site_id
+                WHERE app_settings.id = 1
+            `).get() || {};
             const remote = detectRemoteSession();
-            // ?대? ?쒖꽦 ?몄뀡???덈뒗吏 ?뺤씤
+            const siteHasLocation = Number.isFinite(Number(site.target_lat)) && Number.isFinite(Number(site.target_lng));
+            const matchedBySite = isWithinSiteRadius(site, lat, lng);
+            const effectiveLocationMatched = siteHasLocation ? matchedBySite : Boolean(locationMatched);
+            const effectiveRemoteDetected = remote.detected || !effectiveLocationMatched;
+            const effectiveRemoteType = effectiveLocationMatched ? (remote.sessionType || 'local') : 'abnormal_location';
+            const effectiveEvidence = [
+                remote.evidence || '',
+                !effectiveLocationMatched ? 'site_location_mismatch' : ''
+            ].filter(Boolean).join('; ');
+            // Reuse an existing active session if one already exists.
             let activeSession = db.prepare('SELECT * FROM attendance WHERE member_id = ? AND date = ? AND logout_time IS NULL').get(memberId, dateKST);
 
             if (!activeSession) {
@@ -394,10 +506,10 @@ module.exports = (db) => {
                     loginTime,
                     lat,
                     lng,
-                    locationMatched ? 1 : 0,
-                    remote.detected ? 1 : 0,
-                    remote.sessionType || 'local',
-                    remote.evidence || ''
+                    effectiveLocationMatched ? 1 : 0,
+                    effectiveRemoteDetected ? 1 : 0,
+                    effectiveRemoteType,
+                    effectiveEvidence
                 );
 
                 activeSession = db.prepare('SELECT * FROM attendance WHERE id = ?').get(result.lastInsertRowid);
@@ -409,7 +521,7 @@ module.exports = (db) => {
         }
     });
 
-    // 5. ?닿렐 泥섎━
+    // 5. Check-out.
     router.post('/logout', (req, res) => {
         const { memberId, autoLogout } = req.body;
         const dateKST = getTodayKST();
@@ -428,7 +540,7 @@ module.exports = (db) => {
         }
     });
 
-    // 6. 濡쒖뺄????λ맂 誘몃룞湲고솕 異쒓껐 湲곕줉 紐⑸줉 諛섑솚
+    // 6. Return unsynced attendance logs from local storage.
     router.get('/unsynced-attendance', (req, res) => {
         try {
             const logs = db.prepare('SELECT * FROM attendance WHERE is_synced = 0 ORDER BY login_time ASC').all();
@@ -438,7 +550,7 @@ module.exports = (db) => {
         }
     });
 
-    // 7. ?숆린???꾨즺 留덊궧
+    // 7. Mark attendance logs as synced.
     router.post('/mark-attendance-synced', (req, res) => {
         const { ids } = req.body; // Array of IDs
         try {
@@ -452,7 +564,7 @@ module.exports = (db) => {
         }
     });
 
-    // 8. 異쒓껐 湲곕줉 ??BigQuery ?숆린??
+    // 8. Sync attendance logs to BigQuery.
     router.post('/sync-attendance-bq', async (req, res) => {
         try {
             const siteRow = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get();
@@ -475,11 +587,11 @@ module.exports = (db) => {
         }
     });
 
-    // 9. ?뚯썝 紐⑸줉 議고쉶 (Google Sheets)
+    // 9. List members from Google Sheets.
     router.get('/members', async (req, res) => {
         try {
             if (!isSheetsConfigured()) {
-                return res.status(400).json({ success: false, error: 'Google Sheets媛 ?ㅼ젙?섏? ?딆븯?듬땲??' });
+                return res.status(400).json({ success: false, error: 'Google Sheets가 설정되지 않았습니다.' });
             }
             const members = await getMembers();
             res.json({ success: true, members, source: 'sheets' });
@@ -488,12 +600,12 @@ module.exports = (db) => {
         }
     });
 
-    // 10. ?뚯썝 upsert (Google Sheets)
+    // 10. Member upsert (Google Sheets)
     router.post('/members', async (req, res) => {
         const member = req.body;
         try {
             if (!isSheetsConfigured()) {
-                return res.status(400).json({ success: false, error: 'Google Sheets媛 ?ㅼ젙?섏? ?딆븯?듬땲??' });
+                return res.status(400).json({ success: false, error: 'Google Sheets가 설정되지 않았습니다.' });
             }
             await upsertMember(member);
             res.json({ success: true });
@@ -502,23 +614,23 @@ module.exports = (db) => {
         }
     });
 
-    // 11. ?뚯썝 ??젣 (Google Sheets)
+    // 11. Delete a member from Google Sheets.
     router.delete('/members/:id', async (req, res) => {
         const { id } = req.params;
         try {
             if (!isSheetsConfigured()) {
-                return res.status(400).json({ success: false, error: 'Google Sheets媛 ?ㅼ젙?섏? ?딆븯?듬땲??' });
+                return res.status(400).json({ success: false, error: 'Google Sheets가 설정되지 않았습니다.' });
             }
             const members = await getMembers();
             const matched = members.find((member) => String(member.id) === String(id));
             const target = matched ? { name: matched.name } : null;
 
             if (!target) {
-                return res.status(404).json({ success: false, error: '????뚯썝??李얠쓣 ???놁뒿?덈떎.' });
+                return res.status(404).json({ success: false, error: '대상 회원을 찾을 수 없습니다.' });
             }
 
             if (target.name === 'admin') {
-                return res.status(400).json({ success: false, error: '理쒓퀬愿由ъ옄(admin) 怨꾩젙? ??젣?????놁뒿?덈떎.' });
+                return res.status(400).json({ success: false, error: '최고관리자(admin) 계정은 삭제할 수 없습니다.' });
             }
 
             await deleteMember(id);
@@ -530,3 +642,4 @@ module.exports = (db) => {
 
     return router;
 };
+

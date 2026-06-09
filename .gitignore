@@ -6,6 +6,8 @@ yarn-debug.log*
 
 # Google 서비스 계정 키 파일 (절대 커밋 금지)
 server/config/google-key.json
+server/config/work-jindan-*.json
+server/config/firebase-service-account.json
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
@@ -21,6 +23,10 @@ dist-ssr
 # Build output
 build/
 dist/
+release/
+
+# Testing & temporary files
+garbled_results.json
 
 # Editor directories and files
 .vscode/*

@@ -3,8 +3,16 @@ import { AuthModel } from './AuthModel';
 import { apiClient } from '../../core/api';
 import { ADMIN_ROLES, FIELD_WORKER_AUTO_LOGOUT_HOUR_KST } from '../../core/constants';
 
+const LOGIN_GEO_CHECK_ENABLED = String(import.meta.env?.VITE_LOGIN_GEO_CHECK_ENABLED || 'false') === 'true';
+
 function isFieldWorker(member) {
     return !ADMIN_ROLES.includes(String(member?.role || 'user'));
+}
+
+function hideAppToTray() {
+    window.electronAPI?.hideToTray?.().catch((err) => {
+        console.warn('[Auto logout] hide to tray failed:', err);
+    });
 }
 
 /** 한국 시간 기준 자동 퇴근 시각이 되었는지 */
@@ -116,6 +124,7 @@ export const useAuthViewModel = () => {
             }
             AuthModel.clearSession();
             setUser(null);
+            hideAppToTray();
             try {
                 const result = await AuthModel.syncAttendanceBQ();
                 console.log(`[자동 퇴근] BigQuery 출결 동기화 완료 (${result?.syncedCount ?? 0}건)`);
@@ -191,12 +200,12 @@ export const useAuthViewModel = () => {
 
                 if (field && !activeSession) {
                     try {
-                        const coords = await getCurrentCoords();
+                        const coords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null;
                         const lat = coords?.latitude || null;
                         const lng = coords?.longitude || null;
-                        const matched = checkLocationMatched(freshData, coords);
+                        const matched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(freshData, coords) : true;
                         await AuthModel.recordAttendance(freshData, lat, lng, matched);
-                        restoredUser.isRemote = !matched;
+                        restoredUser.isRemote = LOGIN_GEO_CHECK_ENABLED ? !matched : false;
                         restoredUser.loginLat = lat;
                         restoredUser.loginLng = lng;
                     } catch (attErr) {
@@ -251,7 +260,7 @@ export const useAuthViewModel = () => {
     const login = async (name, password) => {
         setIsLoading(true);
         try {
-            const currentCoords = await getCurrentCoords();
+            const currentCoords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null;
 
             let userData = await AuthModel.localLogin(name, password);
             if (!userData) {
@@ -264,7 +273,7 @@ export const useAuthViewModel = () => {
                 if (field) {
                     const loginLat = currentCoords?.latitude || null;
                     const loginLng = currentCoords?.longitude || null;
-                    const locationMatched = checkLocationMatched(userData, currentCoords);
+                    const locationMatched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(userData, currentCoords) : true;
 
                     try {
                         await AuthModel.recordAttendance(userData, loginLat, loginLng, locationMatched);
@@ -272,7 +281,7 @@ export const useAuthViewModel = () => {
                         console.warn('출석 기록 실패 (로그인은 계속 진행):', attErr.message);
                     }
 
-                    const enrichedUser = { ...userData, isRemote: !locationMatched, loginLat, loginLng };
+                    const enrichedUser = { ...userData, isRemote: LOGIN_GEO_CHECK_ENABLED ? !locationMatched : false, loginLat, loginLng };
 
                     AuthModel.saveSession(enrichedUser);
                     setUser(enrichedUser);
@@ -282,7 +291,7 @@ export const useAuthViewModel = () => {
                     return { success: true, user: enrichedUser, locationMatched };
                 }
 
-                AuthModel.saveSession(userData);
+                AuthModel.clearSession();
                 setUser(userData);
 
                 setIsLoading(false);
@@ -337,7 +346,11 @@ export const useAuthViewModel = () => {
                     site_id: nextSiteId,
                     site_name1: nextSiteName,
                 };
-                AuthModel.saveSession(updated);
+                if (isFieldWorker(updated)) {
+                    AuthModel.saveSession(updated);
+                } else {
+                    AuthModel.clearSession();
+                }
                 return updated;
             });
 

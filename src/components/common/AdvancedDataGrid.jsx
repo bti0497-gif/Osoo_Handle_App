@@ -903,7 +903,7 @@ const AdvancedDataGrid = ({
                                                         {sc.label}
                                                         {sortable && sortState.colId === sc.id && (
                                                             <span style={{ fontSize: 9, color: '#E42313' }}>
-                                                                {sortState.direction === 'asc' ? '▲' : '▼'}
+                                                {sortState.direction === 'asc' ? '▲' : '▼'}
                                                             </span>
                                                         )}
                                                         {/* Resize handle */}

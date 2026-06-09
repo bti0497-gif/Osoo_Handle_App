@@ -10,7 +10,7 @@ export const AttendanceModel = {
         return rows.map((log) => ({
             ...log,
             member_name: log.member_name || log.name,
-            is_remote: !log.location_matched,
+            is_remote: Boolean(log.remote_session_detected),
         }));
     }
 };

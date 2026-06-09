@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { SludgePhotoModel } from './SludgePhotoModel';
 import { useDialog } from '../../components/common/DialogContext';
 
-const currentYear  = new Date().getFullYear();
+const currentYear = new Date().getFullYear();
 const currentMonth = new Date().getMonth() + 1;
 
 const todayStr = (() => {
   const d = new Date();
-  const m  = String(d.getMonth() + 1).padStart(2, '0');
+  const m = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${m}-${dd}`;
 })();
@@ -46,38 +46,68 @@ function itemToEntry(item) {
 
 export function useSludgePhotoViewModel() {
   const { showToast, showConfirm } = useDialog();
-
-  const [year,  setYear]  = useState(currentYear);
+  const [year, setYear] = useState(currentYear);
   const [month, setMonth] = useState(currentMonth);
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [editEntry, setEditEntry] = useState(makeEmptyEntry(todayStr));
   const [savedItems, setSavedItems] = useState([]);
-  const [isLoading,   setIsLoading]   = useState(false);
-  const [isSaving,    setIsSaving]    = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isLedgerExporting, setIsLedgerExporting] = useState(false);
 
-  const activeDates = new Set(savedItems.map(i => i.date));
+  const activeDates = new Set(savedItems.map((item) => item.date));
 
   useEffect(() => {
-    const found = savedItems.find(i => i.date === selectedDate);
+    const found = savedItems.find((item) => item.date === selectedDate);
     setEditEntry(found ? itemToEntry(found) : makeEmptyEntry(selectedDate));
   }, [selectedDate, savedItems]);
+
+  const checkRemotePhotoRestore = useCallback(async (items) => {
+    for (const item of items) {
+      const types = [
+        !item.sludge_photo_url ? 'sludge' : '',
+        !item.certificate_photo_url ? 'certificate' : '',
+      ].filter(Boolean);
+      if (!item.date || types.length === 0) continue;
+      const check = await SludgePhotoModel.checkRemotePhotos({ date: item.date, types });
+      if (!check?.success || !check.count) continue;
+      const ok = await showConfirm?.('사진이 서버에 있습니다. 내려받을까요?');
+      if (!ok) return false;
+      const restored = await SludgePhotoModel.restoreRemotePhotos({
+        date: item.date,
+        types: check.items.map((row) => row.type),
+      });
+      if (restored?.success && restored.count > 0) {
+        showToast(`${restored.count}개 사진을 내려받았습니다.`, 'success');
+        return true;
+      }
+    }
+    return false;
+  }, [showConfirm, showToast]);
 
   const loadMonth = useCallback(async () => {
     setIsLoading(true);
     try {
       const result = await SludgePhotoModel.fetchByMonth(year, month);
       if (!result?.success) throw new Error(result?.error || '데이터 로드 실패');
-      setSavedItems(result.items || []);
+      const items = result.items || [];
+      setSavedItems(items);
+      const restored = await checkRemotePhotoRestore(items);
+      if (restored) {
+        const refreshed = await SludgePhotoModel.fetchByMonth(year, month);
+        if (refreshed?.success) setSavedItems(refreshed.items || []);
+      }
     } catch (err) {
       showToast(err.message || '데이터를 불러오지 못했습니다.', 'error');
     } finally {
       setIsLoading(false);
     }
-  }, [year, month, showToast]);
+  }, [year, month, showToast, checkRemotePhotoRestore]);
 
-  useEffect(() => { loadMonth(); }, [loadMonth]);
+  useEffect(() => {
+    loadMonth();
+  }, [loadMonth]);
 
   const handleCalendarMonthChange = useCallback(({ activeStartDate }) => {
     if (!activeStartDate) return;
@@ -94,30 +124,27 @@ export function useSludgePhotoViewModel() {
   }, []);
 
   const handleAmountChange = useCallback((value) => {
-    setEditEntry(prev => ({ ...prev, sludge_amount: value, isSaved: false }));
+    setEditEntry((prev) => ({ ...prev, sludge_amount: value, isSaved: false }));
   }, []);
 
   const handleSludgePhoto = useCallback((file) => {
     if (!file) return;
     const url = URL.createObjectURL(file);
-    setEditEntry(prev => ({ ...prev, sludgePhotoFile: file, sludgePhotoUrl: url, isSaved: false }));
+    setEditEntry((prev) => ({ ...prev, sludgePhotoFile: file, sludgePhotoUrl: url, isSaved: false }));
   }, []);
 
   const handleCertPhoto = useCallback((file) => {
     if (!file) return;
     const url = URL.createObjectURL(file);
-    setEditEntry(prev => ({ ...prev, certPhotoFile: file, certPhotoUrl: url, isSaved: false }));
+    setEditEntry((prev) => ({ ...prev, certPhotoFile: file, certPhotoUrl: url, isSaved: false }));
   }, []);
 
   const handleSave = useCallback(async () => {
     if (!editEntry.date) {
-      showToast('날짜를 선택해주세요.', 'warning');
+      showToast('날짜를 선택해 주세요.', 'warning');
       return;
     }
-    const hasData =
-      editEntry.sludge_amount !== '' ||
-      editEntry.sludgePhotoFile != null ||
-      editEntry.certPhotoFile != null;
+    const hasData = editEntry.sludge_amount !== '' || editEntry.sludgePhotoFile != null || editEntry.certPhotoFile != null;
     if (!hasData) {
       showToast('저장할 내용이 없습니다.', 'info');
       return;
@@ -171,10 +198,10 @@ export function useSludgePhotoViewModel() {
     setIsExporting(true);
     try {
       const result = await SludgePhotoModel.export(year, month);
-      if (!result?.success) throw new Error(result?.error || '엑셀 출력 실패');
+      if (!result?.success) throw new Error(result?.error || '사진대지 출력 실패');
       showToast('사진대지를 열었습니다.', 'success');
     } catch (err) {
-      showToast(err.message || '엑셀 출력 실패', 'error');
+      showToast(err.message || '사진대지 출력 실패', 'error');
     } finally {
       setIsExporting(false);
     }
@@ -204,9 +231,17 @@ export function useSludgePhotoViewModel() {
   );
 
   return {
-    year, month, selectedDate,
-    editEntry, savedItems, activeDates,
-    isLoading, isSaving, isExporting, isLedgerExporting, hasChanges,
+    year,
+    month,
+    selectedDate,
+    editEntry,
+    savedItems,
+    activeDates,
+    isLoading,
+    isSaving,
+    isExporting,
+    isLedgerExporting,
+    hasChanges,
     handleCalendarMonthChange,
     handleCalendarDayClick,
     handleRowClick,

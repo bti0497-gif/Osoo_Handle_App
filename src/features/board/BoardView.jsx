@@ -209,7 +209,7 @@ const BoardView = ({ currentUser }) => {
             <div className="dynamic-panel w-[850px] shadow-2xl border-slate-200">
 
                 {/* ════════════════════════════════════════════ */}
-                {/* ── 목록 모드 ── */}
+                {/* ════════════════════════════════════════════ */}
                 {/* ════════════════════════════════════════════ */}
                 {viewMode === 'list' ? (
                     <>
@@ -345,7 +345,7 @@ const BoardView = ({ currentUser }) => {
                     </>
 
                     /* ════════════════════════════════════════════ */
-                    /* ── 상세보기 모드 ── */
+                    /* ════════════════════════════════════════════ */
                     /* ════════════════════════════════════════════ */
                 ) : viewMode === 'detail' && selectedPost ? (
                     <>
@@ -407,7 +407,7 @@ const BoardView = ({ currentUser }) => {
                                 )}
                             </div>
 
-                            {/* ── 댓글 영역 ── */}
+                            {/* 첨부파일 */}
                             <div style={{ marginTop: '1.5rem', borderTop: '2px solid #e2e8f0', paddingTop: '1rem' }}>
                                 <div style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#1e293b', marginBottom: '0.75rem' }}>
                                     💬 댓글 {comments.length}개

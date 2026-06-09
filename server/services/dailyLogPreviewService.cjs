@@ -205,7 +205,7 @@ function listPageGroups(db, startDate, endDate, siteName) {
       COUNT(*) AS rowCount,
       COUNT(DISTINCT location) AS locationCount,
       MAX(COALESCE(last_modified, created_at, '')) AS lastModified
-    FROM water_quality
+    FROM qntech_water_quality
     WHERE date BETWEEN ? AND ?
   `;
   let params = [startDate, endDate];
@@ -402,12 +402,13 @@ function buildPhotoSelection(photoFiles, page) {
 }
 
 function getPageRows(db, page) {
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT *
-    FROM water_quality
+    FROM qntech_water_quality
     WHERE date = ? AND measurement_group = ?
-    ORDER BY measurement_order ASC, created_at ASC, id ASC, location ASC
+    ORDER BY measurement_order ASC, created_at ASC, id ASC, location ASC, item_code ASC
   `).all(page.date, page.measurementGroup);
+  return pivotQntechWaterRows(rows);
 }
 
 function getTemplateSignature(templatePath) {
@@ -419,7 +420,7 @@ function buildPageContext(db, baseDir, page, siteName) {
   const activeLocations = getActiveLocations(db);
   
   // 1. 해당 측정 그룹의 모든 데이터 조회
-  let query = 'SELECT * FROM water_quality WHERE date = ? AND measurement_group = ?';
+  let query = 'SELECT * FROM qntech_water_quality WHERE date = ? AND measurement_group = ?';
   let params = [page.date, page.measurementGroup];
 
   if (siteName) {
@@ -427,7 +428,7 @@ function buildPageContext(db, baseDir, page, siteName) {
     params.push(siteName);
   }
 
-  const baseRows = db.prepare(query).all(...params);
+  const baseRows = pivotQntechWaterRows(db.prepare(query).all(...params));
   const rows = sortRowsByLocation(baseRows, activeLocations);
   const photoFiles = listPhotoFiles(baseDir, getConfiguredPhotoRoot(db), page.date);
   const photoSelection = buildPhotoSelection(photoFiles, page);
@@ -680,6 +681,32 @@ async function addNormalizedImageToNamedCell(workbook, worksheet, namedCell, ima
     ext: { width: fixedWidth, height: fixedHeight },
     editAs: 'oneCell',
   });
+}
+
+function pivotQntechWaterRows(rows = []) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const key = [row.date, row.measurement_group || '', row.location || ''].join('|');
+    const target = grouped.get(key) || {
+      id: row.id,
+      date: row.date,
+      measurement_group: row.measurement_group,
+      measurement_order: row.measurement_order,
+      source_type: row.source_type,
+      source_label: row.source_label,
+      qntech_project_id: row.qntech_project_id,
+      location: row.location,
+      site_name: row.site_name,
+      last_modified: row.last_modified,
+      created_at: row.created_at,
+    };
+    if (row.item_code) target[row.item_code] = row.result_value;
+    if (row.last_modified && (!target.last_modified || row.last_modified > target.last_modified)) {
+      target.last_modified = row.last_modified;
+    }
+    grouped.set(key, target);
+  }
+  return Array.from(grouped.values());
 }
 
 function stripTemplateImages(workbook) {
@@ -981,7 +1008,7 @@ async function buildBatchExportExcel({ db, baseDir, appDataPath, templateInfo, m
 }
 
 function getActiveDates(db, startDate, endDate, siteName) {
-  let query = 'SELECT DISTINCT date FROM water_quality WHERE date BETWEEN ? AND ?';
+  let query = 'SELECT DISTINCT date FROM qntech_water_quality WHERE date BETWEEN ? AND ?';
   let params = [startDate, endDate];
 
   if (siteName) {

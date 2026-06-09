@@ -1,12 +1,12 @@
 ﻿/**
  * excelOpenService.cjs
  *
- * ?묒? ?뚯씪 ?앹꽦 怨듯넻 ?좏떥由ы떚
- * - parseNamedRanges(wb)          : ExcelJS Workbook -> named range 留?
- * - getMergedCellExtent(ws, ...)  : 蹂묓빀 ? 踰붿쐞 諛섑솚
- * - insertImageToCell(...)        : sharp 由ъ궗?댁쫰 ??????대?吏 ?쎌엯
- * - buildExcelTempPath(sub, name) : ?꾩떆 異쒕젰 寃쎈줈 ?앹꽦
- * - openExcelFile(filePath)       : start "" "寃쎈줈" 濡?Excel ?ㅽ뵂
+ *
+ * - parseNamedRanges(wb)          : ExcelJS Workbook -> named range 맵
+ * - getMergedCellExtent(ws, ...)  : 병합 셀 범위 반환
+ * - insertImageToCell(...)        : sharp 리사이즈 후 셀에 이미지 삽입
+ * - buildExcelTempPath(sub, name) : 임시 출력 경로 생성
+ * - openExcelFile(filePath)       : start "" "경로" 로 Excel 오픈
  */
 
 'use strict';
@@ -16,11 +16,11 @@ const fs       = require('fs');
 const os       = require('os');
 const { exec } = require('child_process');
 
-// ??? Named Range ?뚯떛 ????????????????????????????????????????????????????????
+// ─── Named Range 파싱 ────────────────────────────────────────────────────────
 
 /**
- * ExcelJS wb.definedNames.model (諛곗뿴) ??{ ?대쫫: { sheetName, col, row, address } }
- * ExcelJS ??model ??諛곗뿴([{ name, ranges: [...] }]) ?뺥깭??
+ * ExcelJS wb.definedNames.model (배열) → { 이름: { sheetName, col, row, address } }
+ * ExcelJS 는 model 이 배열([{ name, ranges: [...] }]) 형태임
  */
 function parseNamedRanges(wb) {
   const model = wb.definedNames?.model;
@@ -35,7 +35,7 @@ function parseNamedRanges(wb) {
 }
 
 /**
- * "'?쒗듃紐?!$C$5"  ?먮뒗  "?쒗듃紐?$C$5"  ??{ sheetName, col, row, address }
+ * "'시트명'!$C$5"  또는  "시트명!$C$5"  → { sheetName, col, row, address }
  * $??optional
  */
 function _parseRangeStr(rangeStr) {
@@ -49,10 +49,10 @@ function _parseRangeStr(rangeStr) {
   return { sheetName, col, row, address: `${col}${row}` };
 }
 
-// ??? 蹂묓빀 ? 踰붿쐞 ????????????????????????????????????????????????????????????
+// ─── 병합 셀 범위 ────────────────────────────────────────────────────────────
 
 /**
- * 而щ읆 臾몄옄 ??1-index 踰덊샇 (A=1, B=2, ...)
+ * 컬럼 문자 → 1-index 번호 (A=1, B=2, ...)
  */
 function colLetterToNumber(letter) {
   let n = 0;
@@ -63,9 +63,9 @@ function colLetterToNumber(letter) {
 }
 
 /**
- * ws ?댁뿉??(colLetter, row) 瑜??ы븿?섎뒗 蹂묓빀 踰붿쐞瑜?諛섑솚
- * 諛섑솚: { startCol, startRow, endCol, endRow }  (1-indexed)
- * 蹂묓빀 ?놁쑝硫??⑥씪 ? 踰붿쐞 諛섑솚
+ * ws 내에서 (colLetter, row) 를 포함하는 병합 범위를 반환
+ * 반환: { startCol, startRow, endCol, endRow }  (1-indexed)
+ * 병합 없으면 단일 셀 범위 반환
  */
 function getMergedCellExtent(ws, colLetter, row) {
   const ci    = colLetterToNumber(colLetter);
@@ -118,31 +118,31 @@ function pixelToRow(ws, yPx) {
   return maxRows - 1;
 }
 
-// ??? ?대?吏 ?쎌엯 ????????????????????????????????????????????????????????????
+// ─── 이미지 삽입 ────────────────────────────────────────────────────────────
 
 /**
- * 濡쒖뺄 ?뚯씪 寃쎈줈(filePath) ?먮뒗 Buffer 瑜?? 踰붿쐞??由ъ궗?댁쫰 ???쎌엯
+ * 로컬 파일 경로(filePath) 또는 Buffer 를 셀 범위에 리사이즈 후 삽입
  *
  * opts:
- *   fitBy   : 'width' | 'height'  ??湲곗? 異?(湲곕낯: 'height')
- *   pct     : 0~1                 ??湲곗? 異?鍮꾩쑉 (湲곕낯: 0.9)
- *   cellW   : number (px)         ??? ??吏곸젒 吏??(?앸왂 ???쒗듃?먯꽌 怨꾩궛)
- *   cellH   : number (px)         ??? ?믪씠 吏곸젒 吏??(?앸왂 ???쒗듃?먯꽌 怨꾩궛)
+ *   fitBy   : 'width' | 'height'  — 기준 축 (기본: 'height')
+ *   pct     : 0~1                 — 기준 축 비율 (기본: 0.9)
+ *   cellW   : number (px)         — 셀 폭 직접 지정 (생략 시 시트에서 계산)
+ *   cellH   : number (px)         — 셀 높이 직접 지정 (생략 시 시트에서 계산)
  *
- * ??罹붾쾭???⑹꽦 ?놁씠 ext(?쎌? 紐낆떆) + tl 遺꾩닔 ?ㅽ봽?뗭쑝濡?以묒븰 諛곗튂
- *    ??? ?뚮몢由щ? 媛由ъ? ?딆쓬
+ * ※ 캔버스 합성 없이 ext(픽셀 명시) + tl 분수 오프셋으로 중앙 배치
+ *
  *
  * @param {ExcelJS.Workbook} wb
  * @param {ExcelJS.Worksheet} ws
- * @param {{ startCol, startRow, endCol, endRow }} extent  (getMergedCellExtent 諛섑솚)
- * @param {string|Buffer} imgSource  ?뚯씪 寃쎈줈 or Buffer
+ * @param {{ startCol, startRow, endCol, endRow }} extent  (getMergedCellExtent 반환)
+ * @param {string|Buffer} imgSource  파일 경로 or Buffer
  * @param {{ fitBy?: 'width'|'height', pct?: number, cellW?: number, cellH?: number, leftPt?: number, topPt?: number, boxWidthPt?: number, boxHeightPt?: number }} [opts]
  */
 async function insertImageToCell(wb, ws, extent, imgSource, opts = {}) {
   const sharp = require('sharp');
 
-  // ?? 1. ? ?꾩껜 ?쎌? ?ш린 (opts濡?吏곸젒 吏?뺥븯嫄곕굹 ?쒗듃?먯꽌 怨꾩궛) ??????????
-  // ?묒? column.width ?⑥쐞: "臾몄옄 ??(?? px/?⑥쐞), row.height ?⑥쐞: pt(1pt ??1.333 px)
+  // ── 1. 셀 전체 픽셀 크기 (opts로 직접 지정하거나 시트에서 계산) ──────────
+  // 엑셀 column.width 단위: "문자 폭"(≈7 px/단위), row.height 단위: pt(1pt ≈ 1.333 px)
   const hasAbsoluteBox = opts.leftPt != null && opts.topPt != null
     && opts.boxWidthPt != null && opts.boxHeightPt != null;
 
@@ -165,7 +165,7 @@ async function insertImageToCell(wb, ws, extent, imgSource, opts = {}) {
     cellH = Math.max(20, cellH);
   }
 
-  // ?? 2. 由ъ궗?댁쫰 紐⑺몴 ?ш린 寃곗젙 ??????????????????????????????????????????
+  // ── 2. 리사이즈 목표 크기 결정 ──────────────────────────────────────────
   const fitBy = opts.fitBy || (opts.widthPct != null ? 'width' : 'height');
   const rawPct = opts.pct != null
     ? opts.pct
@@ -181,7 +181,7 @@ async function insertImageToCell(wb, ws, extent, imgSource, opts = {}) {
     resizeOpts.height = Math.round(cellH * pct);
   }
 
-  // ?? 3. ?대?吏 由ъ궗?댁쫰 ??????????????????????????????????????????????????
+  // ── 3. 이미지 리사이즈 ──────────────────────────────────────────────────
   const srcBuf = typeof imgSource === 'string' ? fs.readFileSync(imgSource) : imgSource;
   const isBmp  = srcBuf[0] === 0x42 && srcBuf[1] === 0x4D;
 
@@ -199,9 +199,9 @@ async function insertImageToCell(wb, ws, extent, imgSource, opts = {}) {
     .png()
     .toBuffer({ resolveWithObject: true });
 
-  // ?? 4. 以묒븰 諛곗튂: ?쎌? 留덉쭊 ??? 遺꾩닔 ?ㅽ봽??蹂????????????????????????
-  // ExcelJS tl: { col, row } ?먯꽌 ?뚯닔???댄븯??"?대떦 ? ?덉쓽 鍮꾩쑉"
-  // marginX ?쎌? / ?쒖옉 ? ???쎌? = ?대떦 ? ??鍮꾩쑉
+  // ── 4. 중앙 배치: 픽셀 마진 → 셀 분수 오프셋 변환 ──────────────────────
+  // ExcelJS tl: { col, row } 에서 소수점 이하는 "해당 셀 안의 비율"
+  // marginX 픽셀 / 시작 셀 폭 픽셀 = 해당 셀 내 비율
   const marginX = Math.max(0, (cellW - info.width)  / 2);
   const marginY = Math.max(0, (cellH - info.height) / 2);
   let tlCol;
@@ -220,7 +220,7 @@ async function insertImageToCell(wb, ws, extent, imgSource, opts = {}) {
     tlRow = extent.startRow - 1 + rowFrac;
   }
 
-  // ?? 5. ?대?吏 ?쎌엯 (ext濡??ш린 紐낆떆 ??? ?뚮몢由?遺덇?移? ??????????????????
+  // ── 5. 이미지 삽입 (ext로 크기 명시 → 셀 테두리 불가침) ──────────────────
   const imageId = wb.addImage({ buffer: imgBuf, extension: 'png' });
   ws.addImage(imageId, {
     tl: { col: tlCol, row: tlRow },
@@ -229,7 +229,7 @@ async function insertImageToCell(wb, ws, extent, imgSource, opts = {}) {
   });
 }
 
-// ??? BMP ?붿퐫????????????????????????????????????????????????????????????????
+// ─── BMP 디코딩 ──────────────────────────────────────────────────────────────
 
 function _decodeBmpToRgb(buf) {
   const dataOffset   = buf.readUInt32LE(10);
@@ -238,8 +238,8 @@ function _decodeBmpToRgb(buf) {
   const height       = Math.abs(rawHeight);
   const bpp          = buf.readUInt16LE(28);
   const compression  = buf.readUInt32LE(30);
-  if (compression !== 0) throw new Error(`?뺤텞 BMP 誘몄???(compression=${compression})`);
-  if (bpp !== 24 && bpp !== 32) throw new Error(`BMP ${bpp}bpp 誘몄???);
+  if (compression !== 0) throw new Error(`압축 BMP 미지원 (compression=${compression})`);
+  if (bpp !== 24 && bpp !== 32) throw new Error(`BMP ${bpp}bpp 미지원`);
 
   const channels  = bpp >>> 3;
   const rowSize   = Math.floor((bpp * width + 31) / 32) * 4;
@@ -260,10 +260,10 @@ function _decodeBmpToRgb(buf) {
   return { data: out, width, height };
 }
 
-// ??? ?꾩떆 寃쎈줈 / ?뚯씪 ?닿린 ???????????????????????????????????????????????????
+// ─── 임시 경로 / 파일 열기 ───────────────────────────────────────────────────
 
 /**
- * ?꾩떆 異쒕젰 ?뚯씪 寃쎈줈 諛섑솚
+ * 임시 출력 파일 경로 반환
  * @param {string} subDir  e.g. 'osoo-sludge-photo'
  * @param {string} fileName
  */
@@ -274,19 +274,19 @@ function buildExcelTempPath(subDir, fileName) {
 }
 
 /**
- * Windows?먯꽌 ?대떦 寃쎈줈 ?뚯씪???곌껐 ?꾨줈洹몃옩?쇰줈 ?닿린
- * (Excel ?뚯씪?대㈃ Excel, HWP ?뚯씪?대㈃ HWP ??OS 湲곕낯 ?깆쑝濡??ㅽ뻾)
+ * Windows에서 해당 경로 파일을 연결 프로그램으로 열기
+ * (Excel 파일이면 Excel, HWP 파일이면 HWP 등 OS 기본 앱으로 실행)
  */
 function openExcelFile(filePath) {
   return new Promise((resolve) => {
     exec(`start "" "${filePath}"`, { shell: 'cmd.exe' }, (err) => {
-      if (err) console.warn('[excelOpenService] ?뚯씪 ?닿린 ?ㅽ뙣:', err.message);
+      if (err) console.warn('[excelOpenService] 파일 열기 실패:', err.message);
       resolve(!err);
     });
   });
 }
 
-// ?????????????????????????????????????????????????????????????????????????????
+// ─────────────────────────────────────────────────────────────────────────────
 
 module.exports = {
   parseNamedRanges,

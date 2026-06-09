@@ -9,4 +9,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateError: (callback) => ipcRenderer.on('update:error', (_event, err) => callback(err)),
   savePdf: (options) => ipcRenderer.invoke('pdf:save', options),
   openFile: (filePath) => ipcRenderer.invoke('shell:openFile', filePath),
+  checkVersionChanged: () => ipcRenderer.invoke('app:checkVersionChanged'),
+  clearVersionMarker: () => ipcRenderer.invoke('app:clearVersionMarker'),
+  hideToTray: () => ipcRenderer.invoke('app:hideToTray'),
+  invokeRoadwork: (channel, ...args) => {
+    const allowed = [
+      'roadwork:getPreloadPath',
+      'roadwork:dumpHtml',
+      'roadwork:generateNewPassword',
+      'roadwork:confirmPasswordChange',
+      'roadwork:getRoadworkUrl',
+      'roadwork:getCredentials',
+      'roadwork:getCredentialStatus'
+    ];
+    if (allowed.includes(channel)) {
+      return ipcRenderer.invoke(channel, ...args);
+    }
+    return Promise.reject(new Error('Unauthorized channel'));
+  }
 });

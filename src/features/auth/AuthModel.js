@@ -1,12 +1,16 @@
-import { getApiBase } from '../../core/api/serverConfig';
+import { apiClient } from '../../core/api';
 
 const SESSION_KEY = 'osoo_user_session';
+const ADMIN_ROLES = ['admin', 'group_admin'];
+
+function isAdminUser(userData) {
+    return ADMIN_ROLES.includes(String(userData?.role || 'user'));
+}
 
 export const AuthModel = {
     async getLoginHint() {
         try {
-            const res = await fetch(`${getApiBase()}/api/auth/login-hint`);
-            const data = await res.json();
+            const data = await apiClient.get('/api/auth/login-hint');
             if (!data.success) return '';
             return String(data.name || '').trim();
         } catch (e) {
@@ -17,12 +21,7 @@ export const AuthModel = {
 
     async localLogin(name, password) {
         try {
-            const res = await fetch(`${getApiBase()}/api/auth/local-login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, password })
-            });
-            const data = await res.json();
+            const data = await apiClient.post('/api/auth/local-login', { name, password });
             if (!data.success) {
                 console.error("Login failed:", data.message);
                 return null;
@@ -40,12 +39,7 @@ export const AuthModel = {
 
     async findActiveSession(memberId) {
         try {
-            const res = await fetch(`${getApiBase()}/api/auth/session`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ memberId })
-            });
-            const data = await res.json();
+            const data = await apiClient.post('/api/auth/session', { memberId });
             return data.success ? data.session : null;
         } catch (e) {
             console.error("Error finding active session:", e);
@@ -55,18 +49,13 @@ export const AuthModel = {
 
     async recordAttendance(member, lat, lng, locationMatched) {
         try {
-            const res = await fetch(`${getApiBase()}/api/auth/attendance`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    memberId: member.id,
-                    memberName: member.name,
-                    lat,
-                    lng,
-                    locationMatched
-                })
+            const data = await apiClient.post('/api/auth/attendance', {
+                memberId: member.id,
+                memberName: member.name,
+                lat,
+                lng,
+                locationMatched
             });
-            const data = await res.json();
             if (!data.success) throw new Error(data.error);
             return data.session;
         } catch (e) {
@@ -77,15 +66,10 @@ export const AuthModel = {
 
     async recordLogout(member, autoLogout = false) {
         try {
-            const res = await fetch(`${getApiBase()}/api/auth/logout`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    memberId: member.id,
-                    autoLogout
-                })
+            const data = await apiClient.post('/api/auth/logout', {
+                memberId: member.id,
+                autoLogout
             });
-            const data = await res.json();
             if (!data.success) throw new Error(data.error);
         } catch (e) {
             console.error("Error recording logout:", e);
@@ -95,11 +79,7 @@ export const AuthModel = {
 
     async syncAttendanceBQ() {
         try {
-            const res = await fetch(`${getApiBase()}/api/auth/sync-attendance-bq`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            const data = await res.json();
+            const data = await apiClient.post('/api/auth/sync-attendance-bq', {});
             return data;
         } catch (e) {
             console.error('[AuthModel] BQ 동기화 오류:', e);
@@ -108,12 +88,7 @@ export const AuthModel = {
 
     async switchActiveSite(siteId) {
         try {
-            const res = await fetch(`${getApiBase()}/api/settings/select-site`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId })
-            });
-            const data = await res.json();
+            const data = await apiClient.post('/api/settings/select-site', { siteId });
             if (!data.success) throw new Error(data.message || '현장 전환 실패');
             return data;
         } catch (e) {
@@ -124,6 +99,10 @@ export const AuthModel = {
 
     saveSession(userData) {
         try {
+            if (isAdminUser(userData)) {
+                localStorage.removeItem(SESSION_KEY);
+                return;
+            }
             const session = {
                 user: userData,
                 savedAt: new Date().toISOString(),
@@ -144,8 +123,8 @@ export const AuthModel = {
             const now = new Date();
             const savedAt = new Date(session.savedAt);
 
-            // 새벽 4시 자동 로그아웃 로직 (옵션)
-            if (session.loggedOut || (now.getHours() >= 4 && now.getDate() !== savedAt.getDate())) {
+            // 날짜가 바뀌면 자동 로그인을 허용하지 않고 다시 비밀번호를 받습니다.
+            if (session.loggedOut || now.toDateString() !== savedAt.toDateString()) {
                 this.clearSession();
                 return null;
             }

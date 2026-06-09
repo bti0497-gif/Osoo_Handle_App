@@ -22,7 +22,7 @@ export const DailyLogModel = {
         return { flows, medicines, waterQuality, facilities };
     },
 
-    async fetchActiveDates(startDate, endDate, templateName, siteName) {
+    async fetchActiveDates(startDate, endDate, templateName, siteName, context = {}) {
         if (!startDate || !endDate) return [];
         try {
             const result = await apiClient.get(`${getApiPrefix(templateName)}/active-dates`, {
@@ -30,6 +30,7 @@ export const DailyLogModel = {
                 endDate,
                 templateName,
                 siteName,
+                ...context,
             });
             if (result && result.activeDates && Array.isArray(result.activeDates)) {
                 return result.activeDates;
@@ -41,22 +42,23 @@ export const DailyLogModel = {
         }
     },
 
-    async fetchPreviewManifest(startDate, endDate, templateName, siteName) {
+    async fetchPreviewManifest(startDate, endDate, templateName, siteName, context = {}) {
         const prefix = getApiPrefix(templateName);
-        return apiClient.get(`${prefix}/preview-manifest`, { startDate, endDate, templateName, siteName });
+        return apiClient.get(`${prefix}/preview-manifest`, { startDate, endDate, templateName, siteName, ...context });
     },
 
-    async fetchPreviewPageData({ startDate, endDate, pageKey, templateName, siteName }) {
+    async fetchPreviewPageData({ startDate, endDate, pageKey, templateName, siteName, ...context }) {
         const prefix = getApiPrefix(templateName);
-        return apiClient.get(`${prefix}/preview-page-data`, { startDate, endDate, pageKey, templateName, siteName });
+        return apiClient.get(`${prefix}/preview-page-data`, { startDate, endDate, pageKey, templateName, siteName, ...context });
     },
-    fetchExportExcel: async (dateString, templateName, siteName) => {
+    fetchExportExcel: async (dateString, templateName, siteName, context = {}) => {
         let url;
         const encodedTemplateName = templateName ? encodeURIComponent(templateName) : '';
         const ranges = dateString.split(',');
 
         if (templateName === '일일업무일지') {
-            const baseParam = `templateName=${encodedTemplateName}${siteName ? `&siteName=${encodeURIComponent(siteName)}` : ''}`;
+            const contextParam = new URLSearchParams(Object.entries(context).filter(([, value]) => value != null && value !== '')).toString();
+            const baseParam = `templateName=${encodedTemplateName}${siteName ? `&siteName=${encodeURIComponent(siteName)}` : ''}${contextParam ? `&${contextParam}` : ''}`;
             if (ranges.length === 1) {
                 const encodedDate = encodeURIComponent(ranges[0].trim());
                 url = `/api/daily-work-log/export?date=${encodedDate}&${baseParam}`;
@@ -66,7 +68,8 @@ export const DailyLogModel = {
                 url = `/api/daily-work-log/export?startDate=${encodedStartDate}&endDate=${encodedEndDate}&${baseParam}`;
             }
         } else {
-            const baseParam = `templateName=${encodedTemplateName}${siteName ? `&siteName=${encodeURIComponent(siteName)}` : ''}`;
+            const contextParam = new URLSearchParams(Object.entries(context).filter(([, value]) => value != null && value !== '')).toString();
+            const baseParam = `templateName=${encodedTemplateName}${siteName ? `&siteName=${encodeURIComponent(siteName)}` : ''}${contextParam ? `&${contextParam}` : ''}`;
             if (ranges.length === 1) {
                 const encodedDate = encodeURIComponent(ranges[0].trim());
                 url = `/api/logs/export?date=${encodedDate}&${baseParam}`;

@@ -1,11 +1,10 @@
-import { getApiBase } from '../../core/api/serverConfig';
+import { apiClient } from '../../core/api';
 
 export const SyncService = {
     async syncMembers() {
         try {
             // Google Sheets(또는 로컬 DB 폴백)에서 최신 회원 목록 가져오기
-            const res = await fetch(`${getApiBase()}/api/auth/members`);
-            const data = await res.json();
+            const data = await apiClient.get('/api/auth/members');
             if (!data.success) {
                 console.error('[SyncService] 회원 로드 실패:', data.error);
                 return;
@@ -13,11 +12,7 @@ export const SyncService = {
             // 로컬 DB에 병합
             for (const member of data.members || []) {
                 try {
-                    await fetch(`${getApiBase()}/api/auth/sync-member`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(member)
-                    });
+                    await apiClient.post('/api/auth/sync-member', member);
                 } catch (e) {
                     console.error('[SyncService] 멤버 로컬 동기화 실패:', member.name, e);
                 }
@@ -31,11 +26,7 @@ export const SyncService = {
     async syncAttendance() {
         try {
             // 로컬 미동기화 출결 → BigQuery 전송
-            const res = await fetch(`${getApiBase()}/api/auth/sync-attendance-bq`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            const data = await res.json();
+            const data = await apiClient.post('/api/auth/sync-attendance-bq', {});
             if (data.success) {
                 console.log(`[SyncService] 출결 BigQuery 동기화 완료 (${data.syncedCount}건)`);
             } else {

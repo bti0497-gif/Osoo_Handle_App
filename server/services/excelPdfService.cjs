@@ -78,7 +78,7 @@ function runExcelToPdfConversion(sourcePath, outputPath) {
         }
 
         if (!fs.existsSync(outputAbsolutePath)) {
-          reject(new Error('Excel PDF 蹂?섏씠 ?꾨즺?섏? ?딆븯?듬땲??'));
+          reject(new Error('Excel PDF 변환이 완료되지 않았습니다.'));
           return;
         }
 

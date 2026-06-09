@@ -18,5 +18,5 @@ If you are developing a production application, we recommend using TypeScript wi
 
 # 백엔드, 프런트앤드 동시 실행 명령어..
 npm run dev:all
-http://localhost:8900/
+http://localhost:18735/
 

@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from 'react';
+import { startTransition, useEffect, useMemo, useState } from 'react';
 import { DailyLogModel } from './DailyLogModel';
 import { SettingsModel } from '../settings/SettingsModel';
 
@@ -59,6 +59,10 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
     const [siteName, setSiteName] = useState('');
     const [dashboardRows, setDashboardRows] = useState([]);
     const [isDashboardLoading, setIsDashboardLoading] = useState(false);
+    const requestContext = useMemo(() => ({
+        siteId: currentUser?.site_id || '',
+        author: currentUser?.name || '',
+    }), [currentUser?.site_id, currentUser?.name]);
     
     // 달력 표시 기준이 되는 년/월
     const [calendarActiveStartDate, setCalendarActiveStartDate] = useState(new Date(today));
@@ -91,7 +95,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
             const endDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
             
             try {
-                const dates = await DailyLogModel.fetchActiveDates(startDate, endDate, templateName, siteName);
+                const dates = await DailyLogModel.fetchActiveDates(startDate, endDate, templateName, siteName, requestContext);
                 if (!isDisposed) {
                     setActiveDates(dates);
                 }
@@ -105,7 +109,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         return () => {
             isDisposed = true;
         }
-    }, [calendarActiveStartDate, templateName, siteName]);
+    }, [calendarActiveStartDate, templateName, siteName, requestContext]);
 
     useEffect(() => {
         let isDisposed = false;
@@ -122,7 +126,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
             setManifestErrorCode('');
 
             try {
-                const result = await DailyLogModel.fetchPreviewManifest(computedStartDate, computedEndDate, templateName, siteName);
+                const result = await DailyLogModel.fetchPreviewManifest(computedStartDate, computedEndDate, templateName, siteName, requestContext);
                 if (isDisposed) {
                     return;
                 }
@@ -157,7 +161,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         return () => {
             isDisposed = true;
         };
-    }, [selectedDates, computedStartDate, computedEndDate, templateName, siteName]);
+    }, [selectedDates, computedStartDate, computedEndDate, templateName, siteName, requestContext]);
 
     const currentPage = pages[currentPageIndex] || null;
 
@@ -180,6 +184,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
                     pageKey: currentPage.pageKey,
                     templateName,
                     siteName,
+                    ...requestContext,
                 });
 
                 if (!isDisposed) {
@@ -201,7 +206,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         return () => {
             isDisposed = true;
         };
-    }, [currentPage, computedEndDate, computedStartDate, templateName, siteName]);
+    }, [currentPage, computedEndDate, computedStartDate, templateName, siteName, requestContext]);
 
     useEffect(() => {
         let isDisposed = false;
@@ -229,6 +234,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
                                 pageKey: page.pageKey,
                                 templateName,
                                 siteName,
+                                ...requestContext,
                             });
                             renderPage = result.page || null;
                         } catch {
@@ -294,7 +300,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         return () => {
             isDisposed = true;
         };
-    }, [pages, currentPage, pageRenderData, computedStartDate, computedEndDate, templateName, siteName, expectedPhotoCountPerSheet, isDailyWorkLog]);
+    }, [pages, currentPage, pageRenderData, computedStartDate, computedEndDate, templateName, siteName, expectedPhotoCountPerSheet, isDailyWorkLog, requestContext]);
 
     const formatFormatDateForState = (d) => {
         const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -365,7 +371,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
 
         try {
             setIsOutputProcessing(true);
-            const result = await DailyLogModel.fetchExportExcel(dateRangeStr, templateName, siteName);
+            const result = await DailyLogModel.fetchExportExcel(dateRangeStr, templateName, siteName, requestContext);
             if (result && result.success) {
                 const fileList = Array.isArray(result.files) && result.files.length
                     ? `\n${result.files.join('\n')}`

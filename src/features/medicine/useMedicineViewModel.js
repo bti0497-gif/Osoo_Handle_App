@@ -7,11 +7,17 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
     const [loading, setLoading] = useState(false);
     const [pendingChanges, setPendingChanges] = useState({});
     const [medicineTypes, setMedicineTypes] = useState([]);
+    const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+    const [purchaseDate, setPurchaseDate] = useState('');
+    const [purchaseItems, setPurchaseItems] = useState([]);
+    const [isSavingPurchase, setIsSavingPurchase] = useState(false);
     const pendingChangesRef = useRef({});
 
     useEffect(() => {
         loadLogs();
     }, []);
+
+    const toDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
     const correctData = (data) => {
         if (!data) return { purchase: null, usage: null, inventory: null, error: null };
@@ -224,10 +230,57 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
         }
     };
 
+    const openPurchaseModal = async (baseDateText) => {
+        const today = new Date();
+        const defaultDate = baseDateText || toDateStr(today);
+        try {
+            const res = await SettingsModel.getMedicineDefaults();
+            const defaults = new Map();
+            if (res?.success && Array.isArray(res.items)) {
+                res.items.forEach((item) => {
+                    defaults.set(String(item.item_name || '').trim(), Number(item.default_amount) || 0);
+                });
+            }
+            setPurchaseItems(medicineTypes.map((name) => ({
+                medicineName: name,
+                purchaseAmount: defaults.get(name) ?? 0
+            })));
+        } catch {
+            setPurchaseItems(medicineTypes.map((name) => ({ medicineName: name, purchaseAmount: 0 })));
+        }
+        setPurchaseDate(defaultDate);
+        setShowPurchaseModal(true);
+    };
+
+    const savePurchase = async () => {
+        if (!purchaseDate) {
+            showAlert?.('날짜를 선택하세요.');
+            return;
+        }
+        setIsSavingPurchase(true);
+        try {
+            const result = await MedicineModel.savePurchase(purchaseDate, purchaseItems);
+            if (!result?.success) throw new Error(result?.error || '입고 저장 실패');
+            setShowPurchaseModal(false);
+            await loadLogs();
+            showAlert?.(`약품 입고 저장 완료 (${purchaseDate})`);
+        } catch (err) {
+            showAlert?.('약품 입고 저장 실패: ' + err.message);
+        } finally {
+            setIsSavingPurchase(false);
+        }
+    };
+
     return {
         history,
         loading,
         medicineTypes,
+        showPurchaseModal, setShowPurchaseModal,
+        purchaseDate, setPurchaseDate,
+        purchaseItems, setPurchaseItems,
+        isSavingPurchase,
+        openPurchaseModal,
+        savePurchase,
         correctData,
         updateAmount,
         submitBatch,

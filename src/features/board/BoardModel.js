@@ -14,6 +14,15 @@ function userPayload(currentUser) {
     };
 }
 
+function userQuery(currentUser) {
+    const u = userPayload(currentUser)._user;
+    return new URLSearchParams({
+        _role: u.role,
+        _site: u.site,
+        _name: u.name
+    }).toString();
+}
+
 export const BoardModel = {
     async fetchPosts(currentUser) {
         const u = userPayload(currentUser)._user;
@@ -26,8 +35,13 @@ export const BoardModel = {
         return res.data;
     },
 
-    async fetchPost(id) {
-        const res = await apiClient.get(`/api/board/posts/${id}`);
+    async fetchPost(id, currentUser) {
+        const u = userPayload(currentUser)._user;
+        const res = await apiClient.get(`/api/board/posts/${id}`, {
+            _role: u.role,
+            _site: u.site,
+            _name: u.name
+        });
         if (!res.success) throw new Error(res.message || '게시글 로드 실패');
         return res.data;
     },
@@ -45,14 +59,20 @@ export const BoardModel = {
         }
     },
 
-    async deletePost(id) {
-        const res = await apiClient.delete(`/api/board/posts/${id}`);
+    async deletePost(id, currentUser) {
+        const query = userQuery(currentUser);
+        const res = await apiClient.delete(`/api/board/posts/${id}?${query}`);
         if (!res.success) throw new Error(res.message || '삭제 실패');
         return res.data;
     },
 
-    async fetchComments(postId) {
-        const res = await apiClient.get(`/api/board/posts/${postId}/comments`);
+    async fetchComments(postId, currentUser) {
+        const u = userPayload(currentUser)._user;
+        const res = await apiClient.get(`/api/board/posts/${postId}/comments`, {
+            _role: u.role,
+            _site: u.site,
+            _name: u.name
+        });
         if (!res.success) throw new Error(res.message || '댓글 로드 실패');
         return res.data;
     },
@@ -64,8 +84,9 @@ export const BoardModel = {
         return res.data;
     },
 
-    async deleteComment(id) {
-        const res = await apiClient.delete(`/api/board/comments/${id}`);
+    async deleteComment(id, currentUser) {
+        const query = userQuery(currentUser);
+        const res = await apiClient.delete(`/api/board/comments/${id}?${query}`);
         if (!res.success) throw new Error(res.message || '댓글 삭제 실패');
         return res.data;
     },

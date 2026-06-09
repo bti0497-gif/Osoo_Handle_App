@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { MedicineRegisterModel } from './MedicineRegisterModel';
 import { useDialog } from '../../components/common/DialogContext';
 
 const currentYear = new Date().getFullYear();
 const currentMonth = new Date().getMonth() + 1;
 
-export function useMedicineRegisterViewModel() {
+export function useMedicineRegisterViewModel(currentUser) {
   const [year, setYear] = useState(currentYear);
   const [month, setMonth] = useState(currentMonth);
 
@@ -15,12 +15,17 @@ export function useMedicineRegisterViewModel() {
   const [error, setError] = useState(null);
   const [exportError, setExportError] = useState(null);
   const { showToast } = useDialog();
+  const requestContext = useMemo(() => ({
+    siteId: currentUser?.site_id || '',
+    siteName: currentUser?.site_name1 || '',
+    author: currentUser?.name || '',
+  }), [currentUser?.site_id, currentUser?.site_name1, currentUser?.name]);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await MedicineRegisterModel.fetchMonthlyData(year, month);
+      const result = await MedicineRegisterModel.fetchMonthlyData(year, month, requestContext);
       setData(result);
     } catch (err) {
       setError(err.message || '데이터를 불러오지 못했습니다.');
@@ -28,7 +33,7 @@ export function useMedicineRegisterViewModel() {
     } finally {
       setIsLoading(false);
     }
-  }, [year, month]);
+  }, [year, month, requestContext]);
 
   useEffect(() => {
     loadData();
@@ -38,7 +43,7 @@ export function useMedicineRegisterViewModel() {
     setIsExporting(true);
     setExportError(null);
     try {
-      const result = await MedicineRegisterModel.exportExcel(year, month);
+      const result = await MedicineRegisterModel.exportExcel(year, month, requestContext);
 
       if (!result?.success) {
         throw new Error(result?.userMessage || result?.error || '엑셀 생성 실패');
@@ -50,7 +55,7 @@ export function useMedicineRegisterViewModel() {
     } finally {
       setIsExporting(false);
     }
-  }, [year, month, showToast]);
+  }, [year, month, showToast, requestContext]);
 
   // 연도 선택 목록 (현재 연도 - 2 ~ 현재 연도 + 1)
   const yearOptions = Array.from({ length: 4 }, (_, i) => currentYear - 2 + i);

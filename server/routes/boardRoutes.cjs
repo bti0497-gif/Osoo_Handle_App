@@ -1,21 +1,22 @@
-﻿'use strict';
+'use strict';
 
 /**
  * boardRoutes.cjs
- * ?????????????????????????????????????????????????????????????????????
- * 寃뚯떆??REST API (BigQuery 諛깆뿏??
+ * ─────────────────────────────────────────────────────────────────────
+ * 게시판 REST API (BigQuery 백엔드)
  *
- * GET    /api/board/posts              寃뚯떆湲 紐⑸줉
- * POST   /api/board/posts              寃뚯떆湲 ?묒꽦
- * PUT    /api/board/posts/:id          寃뚯떆湲 ?섏젙
- * DELETE /api/board/posts/:id          寃뚯떆湲 ??젣 (?뚰봽??
- * GET    /api/board/posts/:id          寃뚯떆湲 ?④굔
- * GET    /api/board/posts/:id/comments ?볤? 紐⑸줉
- * POST   /api/board/posts/:id/comments ?볤? ?묒꽦
- * DELETE /api/board/comments/:id       ?볤? ??젣 (?뚰봽??
+ * GET    /api/board/posts              게시글 목록
+ * POST   /api/board/posts              게시글 작성
+ * PUT    /api/board/posts/:id          게시글 수정
+ * DELETE /api/board/posts/:id          게시글 삭제 (소프트)
+ * GET    /api/board/posts/:id          게시글 단건
+ * GET    /api/board/posts/:id/comments 댓글 목록
+ * POST   /api/board/posts/:id/comments 댓글 작성
+ * DELETE /api/board/comments/:id       댓글 삭제 (소프트)
  *
- * ?붿껌 ?ㅻ뜑: x-user-role, x-user-site, x-user-name
- * (?꾨줎?몄뿏??apiClient媛 ?꾩옱 濡쒓렇???ъ슜???뺣낫瑜??ㅻ뜑???ы븿?쒕떎)
+ *
+ * 요청 헤더: x-user-role, x-user-site, x-user-name
+ * (프론트엔드 apiClient가 현재 로그인 사용자 정보를 헤더에 포함한다)
  */
 
 const express = require('express');
@@ -23,10 +24,10 @@ const router  = express.Router();
 const {
   getPosts, getPost, createPost, updatePost, deletePost,
   getComments, createComment, deleteComment
-} = require('../services/boardBigQueryService.cjs');
+} = require('../services/boardService.cjs');
 
-// ?? ?붿껌?먯꽌 ?꾩옱 ?ъ슜??異붿텧 ??????????????????????????????????????
-// ?곗꽑?쒖쐞: ?ㅻ뜑 > body._user > query params
+// ── 요청에서 현재 사용자 추출 ──────────────────────────────────────
+// 우선순위: 헤더 > body._user > query params
 function extractUser(req) {
   const u = req.body?._user || {};
   return {
@@ -36,15 +37,49 @@ function extractUser(req) {
   };
 }
 
-// ?? ?ㅻ쪟 ?묐떟 ?ы띁 ????????????????????????????????????????????????
 function handleError(res, err, context) {
   console.error(`[BoardRoutes] ${context}:`, err.message);
-  res.status(500).json({ success: false, message: err.message });
+  res.status(err.status || 500).json({ success: false, message: err.message });
+}
+
+function isAdmin(user) {
+  return String(user?.role || '').trim() === 'admin';
+}
+
+function canViewPost(user, post) {
+  if (!post || post.is_deleted) return false;
+  if (isAdmin(user)) return true;
+
+  const userSite = String(user?.site || '').trim();
+  const visibleSites = Array.isArray(post.visible_sites) ? post.visible_sites.map((v) => String(v).trim()) : null;
+  if (visibleSites) {
+    return visibleSites.includes('ALL') || (userSite && visibleSites.includes(userSite));
+  }
+
+  const authorSite = String(post.author_site || '').trim();
+  const targetSite = String(post.target_site || '').trim();
+  const authorRole = String(post.author_role || '').trim();
+  return authorSite === userSite || (authorRole === 'admin' && (!targetSite || targetSite === userSite));
+}
+
+function normalizeAttachments(value) {
+  if (Array.isArray(value)) return JSON.stringify(value);
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return '[]';
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? JSON.stringify(parsed) : '[]';
+    } catch (_) {
+      return '[]';
+    }
+  }
+  return '[]';
 }
 
 module.exports = function () {
 
-  // 1. 寃뚯떆湲 紐⑸줉
+  // 1. 게시글 목록
   router.get('/api/board/posts', async (req, res) => {
     const user = extractUser(req);
     try {
@@ -53,16 +88,20 @@ module.exports = function () {
     } catch (err) { handleError(res, err, 'getPosts'); }
   });
 
-  // 2. 寃뚯떆湲 ?④굔
+  // 2. 게시글 단건
   router.get('/api/board/posts/:id', async (req, res) => {
+    const user = extractUser(req);
     try {
       const post = await getPost(req.params.id);
-      if (!post) return res.status(404).json({ success: false, message: '寃뚯떆湲 ?놁쓬' });
+      if (!post) return res.status(404).json({ success: false, message: '게시글 없음' });
+      if (!canViewPost(user, post)) {
+        return res.status(403).json({ success: false, message: '게시글 조회 권한 없음' });
+      }
       res.json({ success: true, data: post });
     } catch (err) { handleError(res, err, 'getPost'); }
   });
 
-  // 3. 寃뚯떆湲 ?묒꽦
+  // 3. 게시글 작성
   router.post('/api/board/posts', async (req, res) => {
     const user = extractUser(req);
     const body = req.body || {};
@@ -71,80 +110,98 @@ module.exports = function () {
         author:      user.name,
         author_role: user.role,
         author_site: user.role === 'admin' ? 'CENTRAL' : user.site,
-        target_site: body.target_site  ?? '',   // '' = ?꾩껜, ?뱀젙 ?꾩옣紐?= ?寃?
+        target_site: body.target_site  ?? '',   // '' = 전체, 특정 현장명 = 타겟
         title:       body.title        || '',
         content:     body.content      || '',
         is_notice:   Boolean(body.is_notice),
-        attachments: JSON.stringify(body.attachments || []),
+        attachments: normalizeAttachments(body.attachments),
         parent_id:   body.parent_id    || null
       });
       res.json({ success: true, data: post });
     } catch (err) { handleError(res, err, 'createPost'); }
   });
 
-  // 4. 寃뚯떆湲 ?섏젙 (?묒꽦??or admin留??덉슜)
+  // 4. 게시글 수정 (작성자 or admin만 허용)
   router.put('/api/board/posts/:id', async (req, res) => {
     const user = extractUser(req);
     const body = req.body || {};
     try {
-      // 沅뚰븳 ?뺤씤: ?먭? 議고쉶
+      // 권한 확인: 원글 조회
       const existing = await getPost(req.params.id);
-      if (!existing) return res.status(404).json({ success: false, message: '寃뚯떆湲 ?놁쓬' });
+      if (!existing) return res.status(404).json({ success: false, message: '게시글 없음' });
+      if (!canViewPost(user, existing)) {
+        return res.status(403).json({ success: false, message: '게시글 조회 권한 없음' });
+      }
       if (user.role !== 'admin' && existing.author !== user.name) {
-        return res.status(403).json({ success: false, message: '?섏젙 沅뚰븳 ?놁쓬' });
+        return res.status(403).json({ success: false, message: '수정 권한 없음' });
       }
 
       await updatePost(req.params.id, {
         title:       body.title,
         content:     body.content,
         is_notice:   body.is_notice,
-        attachments: body.attachments != null ? JSON.stringify(body.attachments) : undefined,
+        attachments: body.attachments != null ? normalizeAttachments(body.attachments) : undefined,
         target_site: body.target_site
       });
       res.json({ success: true });
     } catch (err) { handleError(res, err, 'updatePost'); }
   });
 
-  // 5. 寃뚯떆湲 ??젣
+  // 5. 게시글 삭제
   router.delete('/api/board/posts/:id', async (req, res) => {
     const user = extractUser(req);
     try {
       const existing = await getPost(req.params.id);
-      if (!existing) return res.status(404).json({ success: false, message: '寃뚯떆湲 ?놁쓬' });
+      if (!existing) return res.status(404).json({ success: false, message: '게시글 없음' });
+      if (!canViewPost(user, existing)) {
+        return res.status(403).json({ success: false, message: '게시글 조회 권한 없음' });
+      }
       if (user.role !== 'admin' && existing.author !== user.name) {
-        return res.status(403).json({ success: false, message: '??젣 沅뚰븳 ?놁쓬' });
+        return res.status(403).json({ success: false, message: '수정 권한 없음' });
       }
       await deletePost(req.params.id);
       res.json({ success: true });
     } catch (err) { handleError(res, err, 'deletePost'); }
   });
 
-  // 6. ?볤? 紐⑸줉
+  // 6. 댓글 목록
   router.get('/api/board/posts/:id/comments', async (req, res) => {
+    const user = extractUser(req);
     try {
+      const post = await getPost(req.params.id);
+      if (!post) return res.status(404).json({ success: false, message: '게시글 없음' });
+      if (!canViewPost(user, post)) {
+        return res.status(403).json({ success: false, message: '댓글 조회 권한 없음' });
+      }
       const comments = await getComments(req.params.id);
       res.json({ success: true, data: comments });
     } catch (err) { handleError(res, err, 'getComments'); }
   });
 
-  // 7. ?볤? ?묒꽦
+  // 7. 댓글 작성
   router.post('/api/board/posts/:id/comments', async (req, res) => {
     const user = extractUser(req);
     const body = req.body || {};
     try {
+      const post = await getPost(req.params.id);
+      if (!post) return res.status(404).json({ success: false, message: '게시글 없음' });
+      if (!canViewPost(user, post)) {
+        return res.status(403).json({ success: false, message: '댓글 작성 권한 없음' });
+      }
       const comment = await createComment(req.params.id, {
         author:  user.name,
-        content: body.content || ''
+        content: body.content || '',
+        parent_id: body.parent_id || null
       });
       res.json({ success: true, data: comment });
     } catch (err) { handleError(res, err, 'createComment'); }
   });
 
-  // 8. ?볤? ??젣
+  // 8. 댓글 삭제
   router.delete('/api/board/comments/:id', async (req, res) => {
     const user = extractUser(req);
     try {
-      await deleteComment(req.params.id);
+      await deleteComment(req.params.id, user);
       res.json({ success: true });
     } catch (err) { handleError(res, err, 'deleteComment'); }
   });

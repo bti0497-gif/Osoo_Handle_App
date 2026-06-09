@@ -1,11 +1,11 @@
-﻿const crypto = require('crypto');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { db } = require('../database.cjs');
 const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
 
-// 3. ?꾩옣 ?뺣낫(?꾩옣紐? 愿由ъ옄紐? 媛?몄삤湲?
+// 3. 현장 정보(현장명, 관리자명) 가져오기
 function getSiteInfo() {
   try {
     const row = db.prepare('SELECT site_name, manager_name, site_id FROM app_settings WHERE id = 1').get();
@@ -25,8 +25,8 @@ function getSiteInfo() {
 }
 
 function getRowSiteInfo(row, defaults) {
-  // TODO(site-id): 李④린 ?ㅼ쨷?꾩옣 ?꾪솚 ??activeSiteId 而⑦뀓?ㅽ듃瑜?諛쏆븘
-  // row.site_id媛 鍮꾩뼱?덈뒗 legacy ?곗씠?곕룄 site ?⑥쐞濡?媛뺤젣 遺꾨━ ?꾩넚?쒕떎.
+  // TODO(site-id): 차기 다중현장 전환 시 activeSiteId 컨텍스트를 받아
+  // row.site_id가 비어있는 legacy 데이터도 site 단위로 강제 분리 전송한다.
   return {
     siteName: row.site_name || defaults.siteName,
     authorName: row.author || defaults.authorName,
@@ -70,7 +70,7 @@ function extractCertificateFileMeta(row) {
   };
 }
 
-// 4. ?뚯씠釉붾퀎 留ㅽ븨 ?뺤쓽 (Local DB Row -> BigQuery Row)
+// 4. 테이블별 매핑 정의 (Local DB Row -> BigQuery Row)
 const TABLE_MAPPINGS = {
   flow_readings: (row, siteName, authorName, siteId) => ({
     site_id: siteId,
@@ -103,7 +103,7 @@ const TABLE_MAPPINGS = {
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
   }),
-  water_quality: (row, siteName, authorName, siteId) => ({
+  qntech_water_quality: (row, siteName, authorName, siteId) => ({
     site_id: siteId,
     site_name: siteName,
     author: authorName,
@@ -116,14 +116,11 @@ const TABLE_MAPPINGS = {
     source_label: row.source_label,
     qntech_project_id: row.qntech_project_id,
     location: row.location,
-    nh3_n: row.nh3_n,
-    no3_n: row.no3_n,
-    po4_p: row.po4_p,
-    alkalinity: row.alkalinity,
-    tn: row.tn,
-    tp: row.tp,
-    cod: row.cod,
-    ss: row.ss,
+    item_name: row.item_name,
+    item_code: row.item_code,
+    result_value: row.result_value,
+    result_numeric: row.result_numeric,
+    unit: row.unit,
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
   }),
@@ -157,36 +154,10 @@ const TABLE_MAPPINGS = {
     notes: row.notes,
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
-  }),
-  certificate_water_quality: (row, siteName, _authorName, siteId) => ({
-    ...extractCertificateFileMeta(row),
-    site_id: row.site_id || siteId,
-    site_name: row.site_name || siteName,
-    site_name_raw: row.site_name_raw || null,
-    local_id: row.id,
-    report_date: row.report_date,
-    ss: row.ss,
-    bod: row.bod,
-    tn: row.tn,
-    tp: row.tp,
-    total_coliform: row.total_coliform,
-    mlss: row.mlss,
-    do: row.do,
-    ph: row.ph,
-    source_pdf_name: row.source_pdf_name || null,
-    source_page_index: row.source_page_index ?? null,
-    ai_confidence: row.ai_confidence ?? null,
-    site_match_confidence: row.site_match_confidence ?? null,
-    manual_review_required: Boolean(row.manual_review_required),
-    warnings_json: row.warnings_json || null,
-    source_payload_json: row.source_payload_json || null,
-    created_at: row.created_at,
-    updated_at: row.last_modified,
-    uploaded_at: new Date().toISOString()
   })
 };
 
-// 5. ?⑥씪 ?뚯씠釉??숆린???⑥닔
+// 5. 단일 테이블 동기화 함수
 async function syncTable(tableName) {
   const bq = getBigQueryClient();
   if (!bq) return { success: false, message: 'BigQuery client not ready' };
@@ -197,54 +168,54 @@ async function syncTable(tableName) {
     return { success: false, count: 0 };
   }
 
-  // 5-1. ?숆린??'吏꾪뻾 以? (is_synced = 2)?쇰줈 ?곹깭 蹂寃?
+  // 5-1. 동기화 '진행 중' (is_synced = 2)으로 상태 변경
   const markAsSyncing = db.prepare(`UPDATE ${tableName} SET is_synced = 2 WHERE is_synced = 0`);
   const changes = markAsSyncing.run();
   if (changes.changes === 0) {
     return { success: true, count: 0 };
   }
   
-  // 5-2. '吏꾪뻾 以? ?곹깭???곗씠??議고쉶
+  // 5-2. '진행 중' 상태의 데이터 조회
   const rows = db.prepare(`SELECT * FROM ${tableName} WHERE is_synced = 2`).all();
   if (rows.length === 0) return { success: true, count: 0 };
 
   const { siteName, authorName, siteId } = getSiteInfo();
   
-  // 5-3. ?곗씠??蹂??
+  // 5-3. 데이터 변환
   const bqRows = rows.map(row => {
     const rowSiteInfo = getRowSiteInfo(row, { siteName, authorName, siteId });
     return mapper(row, rowSiteInfo.siteName, rowSiteInfo.authorName, rowSiteInfo.siteId);
   });
   const rowIds = rows.map(r => r.id);
 
-  // NDJSON ?꾩떆 ?뚯씪 ?앹꽦
+  // NDJSON 임시 파일 생성
   const tmpFile = path.join(os.tmpdir(), `bq_sync_${tableName}_${Date.now()}.ndjson`);
   try {
     fs.writeFileSync(tmpFile, bqRows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf8');
   } catch (writeErr) {
-    console.error(`[BigQuery] ${tableName} ?꾩떆 ?뚯씪 ?곌린 ?ㅽ뙣:`, writeErr.message);
+    console.error(`[BigQuery] ${tableName} 임시 파일 쓰기 실패:`, writeErr.message);
     const rollbackStmt = db.prepare(`UPDATE ${tableName} SET is_synced = 0 WHERE id = ?`);
     db.transaction(() => { for (const id of rowIds) rollbackStmt.run(id); })();
     return { success: false, error: writeErr.message };
   }
 
   try {
-    // 5-4. BigQuery ?꾩넚 (Load Job - 濡쒖뺄 ?뚯씪 ?낅줈??
+    // 5-4. BigQuery 전송 (Load Job - 로컬 파일 업로드)
     const [job] = await bq.dataset(DATASET_ID).table(tableName).load(
       tmpFile,
       { sourceFormat: 'NEWLINE_DELIMITED_JSON', writeDisposition: 'WRITE_APPEND' }
     );
 
-    // ?꾩떆 ?뚯씪 ??젣
+    // 임시 파일 삭제
     try { fs.unlinkSync(tmpFile); } catch (_) {}
 
-    // job ?ㅻ쪟 ?뺤씤 (job? ?꾨즺??job metadata 媛앹껜)
+    // job 오류 확인 (job은 완료된 job metadata 객체)
     const jobError = job && job.status && job.status.errorResult;
     if (jobError) {
       throw new Error(jobError.message || JSON.stringify(jobError));
     }
 
-    // 5-5. 濡쒖뺄 ?곹깭 '?꾨즺' (is_synced = 1)濡??낅뜲?댄듃
+    // 5-5. 로컬 상태 '완료' (is_synced = 1)로 업데이트
     const updateStmt = db.prepare(`UPDATE ${tableName} SET is_synced = 1 WHERE id = ?`);
     db.transaction(() => {
       for (const id of rowIds) updateStmt.run(id);
@@ -254,10 +225,10 @@ async function syncTable(tableName) {
     return { success: true, count: rows.length };
 
   } catch (err) {
-    // ?꾩떆 ?뚯씪 ?뺣━
+    // 임시 파일 삭제
     try { fs.unlinkSync(tmpFile); } catch (_) {}
 
-    // 5-6. ?ㅽ뙣 ??濡쒖뺄 ?곹깭 '?湲? (is_synced = 0)濡?濡ㅻ갚
+    // 5-6. 실패 시 로컬 상태 '대기' (is_synced = 0)로 롤백
     const rollbackStmt = db.prepare(`UPDATE ${tableName} SET is_synced = 0 WHERE id = ?`);
     db.transaction(() => {
       for (const id of rowIds) rollbackStmt.run(id);
@@ -270,12 +241,12 @@ async function syncTable(tableName) {
   }
 }
 
-// 6. ?꾩껜 ?뚯씠釉??숆린???⑥닔 (?ㅼ?以꾨윭?먯꽌 ?몄텧)
+// 6. 전체 테이블 동기화 함수 (스케줄러에서 호출)
 async function syncAll() {
   const results = {};
   for (const tableName of Object.keys(TABLE_MAPPINGS)) {
-    // ?쒕쾭 ?쒖옉 ??'吏꾪뻾 以? ?곹깭(is_synced=2)濡??⑥븘?덈뒗 ?덉퐫?쒓? ?덈떎硫?
-    // ?댁쟾 ?숆린?붽? 鍮꾩젙??醫낅즺??寃껋씠誘濡? ?ㅼ떆 '?湲? ?곹깭(is_synced=0)濡??섎룎???ъ떆???좊룄
+    // 서버 시작 시 '진행 중' 상태(is_synced=2)로 남아있는 레코드가 있다면
+    // 이전 동기화가 비정상 종료된 것이므로, 다시 '대기' 상태(is_synced=0)로 되돌려 재시도 유도
     db.prepare(`UPDATE ${tableName} SET is_synced = 0 WHERE is_synced = 2`).run();
     results[tableName] = await syncTable(tableName);
   }

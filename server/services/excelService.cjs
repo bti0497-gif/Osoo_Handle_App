@@ -41,13 +41,13 @@ function cellToString(cellValue) {
 async function parseAndStoreExcel(db, filePath) {
   const startMs = Date.now();
   const fileName = path.basename(filePath);
-  console.log(`[Excel] ?뚯떛 ?쒖옉: ${fileName}`);
+  console.log(`[Excel] 파싱 시작: ${fileName}`);
 
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(filePath);
 
   const sheetsToProcess = workbook.worksheets.slice(0, 3);
-  console.log(`[Excel] 泥섎━???쒗듃 ${sheetsToProcess.length}媛? ${sheetsToProcess.map(s => s.name).join(', ')}`);
+  console.log(`[Excel] 처리할 시트 ${sheetsToProcess.length}개: ${sheetsToProcess.map(s => s.name).join(', ')}`);
 
   db.prepare('DELETE FROM excel_raw_data').run();
   db.prepare('DELETE FROM excel_sheets').run();
@@ -59,7 +59,7 @@ async function parseAndStoreExcel(db, filePath) {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = formatDate(yesterday);
-  console.log(`[Excel] 湲곗? ?좎쭨 (?댁젣): ${yesterdayStr}`);
+  console.log(`[Excel] 기준 날짜 (어제): ${yesterdayStr}`);
 
   const START_ROW = 3;
 
@@ -75,7 +75,7 @@ async function parseAndStoreExcel(db, filePath) {
     }
 
     if (maxDataRow < START_ROW) {
-      console.log(`[Excel] ?쒗듃 "${ws.name}": A?댁뿉???좏슚???좎쭨瑜?李얠? 紐삵븿, ?ㅻ뜑(1~2??留????);
+      console.log('[Excel] sheet "' + ws.name + '": no valid date in column A, keeping header rows only (1~2)');
       maxDataRow = Math.min(ws.rowCount, 2);
     }
 
@@ -114,10 +114,10 @@ async function parseAndStoreExcel(db, filePath) {
     }
 
     insertSheet.run(ws.name, maxDataRow, now);
-    console.log(`[Excel] ?쒗듃 "${ws.name}": ${START_ROW}~${maxDataRow}??????꾨즺 (?댁젣 ${yesterdayStr}源뚯?)`);
+    console.log('[Excel] sheet "' + ws.name + '": rows ' + START_ROW + '~' + maxDataRow + ' cleaned (through ' + yesterdayStr + ')');
   }
 
-  console.log(`[Excel] ?꾩껜 ?뚯떛 ?꾨즺: ${Date.now() - startMs}ms`);
+  console.log('[Excel] all sheets processed in ' + (Date.now() - startMs) + 'ms');
 
   return sheetsToProcess.map(ws => ws.name);
 }

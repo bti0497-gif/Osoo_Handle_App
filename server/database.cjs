@@ -98,27 +98,58 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS water_quality (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_date DATE NOT NULL,
+    site_id TEXT,
+    site_name TEXT,
+    site_name_raw TEXT,
+    items TEXT,
+    results TEXT,
+    ss REAL,
+    bod REAL,
+    tn REAL,
+    tp REAL,
+    total_coliform REAL,
+    mlss REAL,
+    do REAL,
+    ph REAL,
+    source_pdf_name TEXT,
+    source_page_index INTEGER,
+    ai_confidence REAL,
+    site_match_confidence REAL,
+    manual_review_required INTEGER DEFAULT 0,
+    warnings_json TEXT,
+    source_payload_json TEXT,
+    certificate_category TEXT,
+    certificate_file_name TEXT,
+    certificate_original_file_name TEXT,
+    drive_file_id TEXT,
+    drive_web_view_link TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+    is_synced INTEGER DEFAULT 0,
+    UNIQUE(site_id, report_date, source_page_index)
+  );
+  CREATE TABLE IF NOT EXISTS qntech_water_quality (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     date DATE NOT NULL,
+    site_id TEXT,
+    site_name TEXT,
     measurement_group TEXT NOT NULL DEFAULT '',
     measurement_order INTEGER DEFAULT 1,
     source_type TEXT DEFAULT 'manual',
     source_label TEXT,
     qntech_project_id TEXT,
     location TEXT,
-    nh3_n TEXT,
-    no3_n TEXT,
-    po4_p TEXT,
-    alkalinity TEXT,
-    tn TEXT,
-    tp TEXT,
-    cod TEXT,
-    ss TEXT,
-    site_name TEXT,
+    item_name TEXT NOT NULL,
+    item_code TEXT NOT NULL,
+    result_value TEXT,
+    result_numeric REAL,
+    unit TEXT,
     author TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
     is_synced INTEGER DEFAULT 0,
-    UNIQUE(date, measurement_group, location)
+    UNIQUE(date, measurement_group, location, item_code)
   );
   CREATE TABLE IF NOT EXISTS sludge_photo_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -257,6 +288,9 @@ db.exec(`
     manager_name TEXT,
     method TEXT,
     series TEXT,
+    target_lat REAL,
+    target_lng REAL,
+    radius_m REAL DEFAULT 500,
     is_active INTEGER DEFAULT 1,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -348,107 +382,208 @@ if (!membersCols.includes('notes')) db.prepare('ALTER TABLE members ADD COLUMN n
 if (!membersCols.includes('updated_at')) db.prepare('ALTER TABLE members ADD COLUMN updated_at TEXT').run();
 db.prepare("UPDATE members SET radius_m = COALESCE(radius_m, 500), updated_at = COALESCE(updated_at, datetime('now', 'localtime'))").run();
 
+const sitesCols = db.prepare("PRAGMA table_info(sites)").all().map(c => c.name);
+if (!sitesCols.includes('target_lat')) db.prepare('ALTER TABLE sites ADD COLUMN target_lat REAL').run();
+if (!sitesCols.includes('target_lng')) db.prepare('ALTER TABLE sites ADD COLUMN target_lng REAL').run();
+if (!sitesCols.includes('radius_m')) db.prepare('ALTER TABLE sites ADD COLUMN radius_m REAL DEFAULT 500').run();
+db.prepare("UPDATE sites SET radius_m = COALESCE(radius_m, 500)").run();
+
 const sludgePhotoCols = db.prepare("PRAGMA table_info(sludge_photo_logs)").all().map(c => c.name);
 if (!sludgePhotoCols.includes('site_id')) {
   db.prepare('ALTER TABLE sludge_photo_logs ADD COLUMN site_id TEXT').run();
 }
-const waterCols = db.prepare("PRAGMA table_info(water_quality)").all().map(c => c.name);
-['tn', 'tp', 'cod', 'ss'].forEach(col => {
-  if (!waterCols.includes(col)) db.prepare(`ALTER TABLE water_quality ADD COLUMN ${col} TEXT`).run();
-});
+
+function ensureColumn(tableName, columnName, definition) {
+  const cols = db.prepare(`PRAGMA table_info(${tableName})`).all().map((c) => c.name);
+  if (!cols.includes(columnName)) {
+    db.prepare(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`).run();
+  }
+}
+
+function createCertificateWaterQualityTable() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS water_quality (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      report_date DATE NOT NULL,
+      site_id TEXT,
+      site_name TEXT,
+      site_name_raw TEXT,
+      items TEXT,
+      results TEXT,
+      ss REAL,
+      bod REAL,
+      tn REAL,
+      tp REAL,
+      total_coliform REAL,
+      mlss REAL,
+      do REAL,
+      ph REAL,
+      source_pdf_name TEXT,
+      source_page_index INTEGER,
+      ai_confidence REAL,
+      site_match_confidence REAL,
+      manual_review_required INTEGER DEFAULT 0,
+      warnings_json TEXT,
+      source_payload_json TEXT,
+      certificate_category TEXT,
+      certificate_file_name TEXT,
+      certificate_original_file_name TEXT,
+      drive_file_id TEXT,
+      drive_web_view_link TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+      is_synced INTEGER DEFAULT 0,
+      UNIQUE(site_id, report_date, source_page_index)
+    );
+  `);
+}
+
+function normalizeLegacyQntechValueExpression(columnName) {
+  return `CASE WHEN ${columnName} IN ('-1', '-1.0', '-1.00') THEN '초과' ELSE CAST(${columnName} AS TEXT) END`;
+}
 
 const waterColumnInfo = db.prepare("PRAGMA table_info(water_quality)").all();
-const requiredWaterTextColumns = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity', 'tn', 'tp', 'cod', 'ss'];
-const requiredWaterIdentityColumns = ['measurement_group', 'measurement_order', 'source_type', 'source_label', 'qntech_project_id'];
-const legacyWaterColumns = new Set(waterColumnInfo.map((item) => item.name));
+const waterColumnNames = waterColumnInfo.map((item) => item.name);
+const hasOperationalWaterColumns = waterColumnNames.includes('measurement_group') || waterColumnNames.includes('nh3_n');
 
-const waterQualitySchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='water_quality'").get()?.sql || '';
-const hasCorrectUniqueConstraint = waterQualitySchema.includes('UNIQUE(date, measurement_group, location)') || waterQualitySchema.includes('UNIQUE (date, measurement_group, location)');
-
-const shouldRebuildWaterQuality = !hasCorrectUniqueConstraint || requiredWaterTextColumns.some((column) => {
-  const info = waterColumnInfo.find((item) => item.name === column);
-  return info && String(info.type || '').toUpperCase() !== 'TEXT';
-}) || requiredWaterIdentityColumns.some((column) => !waterColumnInfo.some((item) => item.name === column));
-
-if (shouldRebuildWaterQuality) {
+if (hasOperationalWaterColumns) {
   db.transaction(() => {
-    const legacySelect = {
-      site_name: legacyWaterColumns.has('site_name') ? 'site_name' : 'NULL',
-      author: legacyWaterColumns.has('author') ? 'author' : 'NULL',
-      created_at: legacyWaterColumns.has('created_at') ? 'created_at' : "datetime('now', 'localtime')",
-      last_modified: legacyWaterColumns.has('last_modified') ? 'last_modified' : "datetime('now', 'localtime')",
-      is_synced: legacyWaterColumns.has('is_synced') ? 'COALESCE(is_synced, 0)' : '0'
-    };
+    const selectOrNull = (columnName) => waterColumnNames.includes(columnName) ? columnName : 'NULL';
+    const selectOrDefault = (columnName, fallback) => waterColumnNames.includes(columnName) ? columnName : fallback;
+    const itemMappings = [
+      ['암모니아성질소(NH3-N)', 'nh3_n', 'mg/L'],
+      ['질산성질소(NO3-N)', 'no3_n', 'mg/L'],
+      ['인산염인(PO4-P)', 'po4_p', 'mg/L'],
+      ['알칼리도(ALK)', 'alkalinity', 'mg/L'],
+      ['TN', 'tn', 'mg/L'],
+      ['TP', 'tp', 'mg/L'],
+      ['COD', 'cod', 'mg/L'],
+      ['SS', 'ss', 'mg/L'],
+    ].filter(([, columnName]) => waterColumnNames.includes(columnName));
 
-    db.prepare('ALTER TABLE water_quality RENAME TO water_quality_old').run();
-    db.exec(`
-      CREATE TABLE water_quality (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date DATE NOT NULL,
-        measurement_group TEXT NOT NULL DEFAULT '',
-        measurement_order INTEGER DEFAULT 1,
-        source_type TEXT DEFAULT 'manual',
-        source_label TEXT,
-        qntech_project_id TEXT,
-        location TEXT,
-        nh3_n TEXT,
-        no3_n TEXT,
-        po4_p TEXT,
-        alkalinity TEXT,
-        tn TEXT,
-        tp TEXT,
-        cod TEXT,
-        ss TEXT,
-        site_name TEXT,
-        author TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
-        is_synced INTEGER DEFAULT 0,
-        UNIQUE(date, measurement_group, location)
-      );
+    const insertLegacy = db.prepare(`
+      INSERT INTO qntech_water_quality (
+        date, site_id, site_name, measurement_group, measurement_order, source_type, source_label,
+        qntech_project_id, location, item_name, item_code, result_value, result_numeric, unit,
+        author, created_at, last_modified, is_synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET
+        measurement_order = excluded.measurement_order,
+        source_type = excluded.source_type,
+        source_label = excluded.source_label,
+        qntech_project_id = excluded.qntech_project_id,
+        result_value = excluded.result_value,
+        result_numeric = excluded.result_numeric,
+        unit = excluded.unit,
+        site_id = excluded.site_id,
+        site_name = excluded.site_name,
+        author = excluded.author,
+        last_modified = excluded.last_modified,
+        is_synced = excluded.is_synced
     `);
-    db.prepare(`
-      INSERT INTO water_quality (
-        id, date, measurement_group, measurement_order, source_type, source_label, qntech_project_id,
-        location, nh3_n, no3_n, po4_p, alkalinity, tn, tp, cod, ss,
-        site_name, author, created_at, last_modified, is_synced
-      )
+
+    const rows = db.prepare(`
       SELECT
-        id,
-        date,
-        'legacy:' || date,
-        1,
-        'legacy',
-        NULL,
-        NULL,
-        location,
-        CAST(nh3_n AS TEXT),
-        CAST(no3_n AS TEXT),
-        CAST(po4_p AS TEXT),
-        CAST(alkalinity AS TEXT),
-        CAST(tn AS TEXT),
-        CAST(tp AS TEXT),
-        CAST(cod AS TEXT),
-        CAST(ss AS TEXT),
-        ${legacySelect.site_name},
-        ${legacySelect.author},
-        ${legacySelect.created_at},
-        ${legacySelect.last_modified},
-        ${legacySelect.is_synced}
-      FROM water_quality_old
-    `).run();
-    db.prepare('DROP TABLE water_quality_old').run();
+        ${selectOrDefault('date', "''")} AS date,
+        ${selectOrNull('site_id')} AS site_id,
+        ${selectOrNull('site_name')} AS site_name,
+        ${selectOrDefault('measurement_group', "''")} AS measurement_group,
+        ${selectOrDefault('measurement_order', '1')} AS measurement_order,
+        ${selectOrDefault('source_type', "'legacy'")} AS source_type,
+        ${selectOrNull('source_label')} AS source_label,
+        ${selectOrNull('qntech_project_id')} AS qntech_project_id,
+        ${selectOrDefault('location', "'기본'")} AS location,
+        ${itemMappings.map(([, columnName]) => `${normalizeLegacyQntechValueExpression(columnName)} AS ${columnName}`).join(', ')},
+        ${selectOrNull('author')} AS author,
+        ${selectOrDefault('created_at', "datetime('now', 'localtime')")} AS created_at,
+        ${selectOrDefault('last_modified', "datetime('now', 'localtime')")} AS last_modified,
+        ${selectOrDefault('is_synced', '0')} AS is_synced
+      FROM water_quality
+    `).all();
+
+    for (const row of rows) {
+      if (!row.date) continue;
+      const measurementGroup = row.measurement_group || `legacy:${row.date}`;
+      for (const [itemName, itemCode, unit] of itemMappings) {
+        const value = row[itemCode];
+        if (value === null || value === undefined || value === '') continue;
+        const numeric = Number(value);
+        insertLegacy.run(
+          row.date,
+          row.site_id || null,
+          row.site_name || null,
+          measurementGroup,
+          Number(row.measurement_order) || 1,
+          row.source_type || 'legacy',
+          row.source_label || null,
+          row.qntech_project_id || null,
+          row.location || '기본',
+          itemName,
+          itemCode,
+          String(value),
+          Number.isFinite(numeric) ? numeric : null,
+          unit,
+          row.author || null,
+          row.created_at || new Date().toISOString(),
+          row.last_modified || new Date().toISOString(),
+          0
+        );
+      }
+    }
+
+    db.prepare('DROP TABLE IF EXISTS water_quality_operational_legacy').run();
+    db.prepare('ALTER TABLE water_quality RENAME TO water_quality_operational_legacy').run();
+    createCertificateWaterQualityTable();
   })();
 }
 
-// QnTECH sentinel migration: -1 怨꾩뿴? ?ㅼ젣 ?붾㈃ ?섎???'珥덇낵'濡????
-['nh3_n', 'no3_n', 'po4_p', 'alkalinity', 'tn', 'tp', 'cod', 'ss'].forEach((column) => {
-  db.prepare(`
-    UPDATE water_quality
-    SET ${column} = '珥덇낵'
-    WHERE ${column} IN ('-1', '-1.0', '-1.00')
-  `).run();
-});
+[
+  ['site_id', 'TEXT'],
+  ['site_name', 'TEXT'],
+  ['site_name_raw', 'TEXT'],
+  ['items', 'TEXT'],
+  ['results', 'TEXT'],
+  ['ss', 'REAL'],
+  ['bod', 'REAL'],
+  ['tn', 'REAL'],
+  ['tp', 'REAL'],
+  ['total_coliform', 'REAL'],
+  ['mlss', 'REAL'],
+  ['do', 'REAL'],
+  ['ph', 'REAL'],
+  ['source_pdf_name', 'TEXT'],
+  ['source_page_index', 'INTEGER'],
+  ['ai_confidence', 'REAL'],
+  ['site_match_confidence', 'REAL'],
+  ['manual_review_required', 'INTEGER DEFAULT 0'],
+  ['warnings_json', 'TEXT'],
+  ['source_payload_json', 'TEXT'],
+  ['certificate_category', 'TEXT'],
+  ['certificate_file_name', 'TEXT'],
+  ['certificate_original_file_name', 'TEXT'],
+  ['drive_file_id', 'TEXT'],
+  ['drive_web_view_link', 'TEXT'],
+  ['created_at', 'TEXT'],
+  ['last_modified', 'TEXT'],
+  ['is_synced', 'INTEGER DEFAULT 0'],
+].forEach(([columnName, definition]) => ensureColumn('water_quality', columnName, definition));
+
+db.prepare(`
+  INSERT OR IGNORE INTO water_quality (
+    report_date, site_id, site_name, site_name_raw,
+    ss, bod, tn, tp, total_coliform, mlss, do, ph,
+    source_pdf_name, source_page_index, ai_confidence, site_match_confidence,
+    manual_review_required, warnings_json, source_payload_json,
+    created_at, last_modified, is_synced
+  )
+  SELECT
+    report_date, site_id, site_name, site_name_raw,
+    ss, bod, tn, tp, total_coliform, mlss, do, ph,
+    source_pdf_name, source_page_index, ai_confidence, site_match_confidence,
+    manual_review_required, warnings_json, source_payload_json,
+    created_at, last_modified, is_synced
+  FROM certificate_water_quality
+`).run();
 
 const settingsCols = db.prepare("PRAGMA table_info(app_settings)").all().map(c => c.name);
 [
@@ -475,14 +610,14 @@ if (!sludgeCols.includes('sludge_photo_taken_at')) {
   db.prepare('ALTER TABLE sludge_photo_logs ADD COLUMN sludge_photo_taken_at TEXT').run();
 }
 
-// --- 슬러지 諛섏텧愿由щ???湲곕낯?ㅼ젙 ?뚯씠釉??쒕뱶 ---
+// --- 슬러지 반출관리대장 기본설정 테이블 시드 ---
 db.prepare(`
   INSERT OR IGNORE INTO sludge_export_settings (id, company_name, default_amount, updated_at)
   VALUES (1, '', 0, datetime('now', 'localtime'))
 `).run();
 
 // --- Seeds ---
-db.prepare("INSERT OR IGNORE INTO app_settings (id, site_name) VALUES (1, '???꾩옣')").run();
+db.prepare("INSERT OR IGNORE INTO app_settings (id, site_name) VALUES (1, '새 현장')").run();
 
 const settingsExists = db.prepare('SELECT id FROM app_settings WHERE id = 1').get();
 if (!settingsExists) {
@@ -580,8 +715,8 @@ if (db.prepare('SELECT count(*) as count FROM config_items').get().count === 0) 
 }
 
 // --- Sync Columns Migration (BigQuery Synchronization) ---
-// ?숆린??????뚯씠釉?紐⑸줉
-const syncTables = ['flow_readings', 'medicine_logs', 'water_quality', 'kit_logs', 'facility_logs'];
+// 동기화 대상 테이블 목록
+const syncTables = ['flow_readings', 'medicine_logs', 'qntech_water_quality', 'kit_logs', 'facility_logs'];
 const syncDefaults = db.prepare('SELECT site_name, manager_name FROM app_settings WHERE id = 1').get() || {};
 const defaultSiteName = syncDefaults.site_name || 'Unknown Site';
 const defaultAuthor = syncDefaults.manager_name || 'Unknown Author';
@@ -602,14 +737,14 @@ syncTables.forEach(tableName => {
   if (!cols.includes('is_synced')) {
     console.log(`Adding 'is_synced' column to ${tableName}`);
     db.prepare(`ALTER TABLE ${tableName} ADD COLUMN is_synced INTEGER DEFAULT 0`).run();
-    // 湲곗〈 ?곗씠?곕뒗 紐⑤몢 誘몃룞湲고솕(0) ?곹깭濡?珥덇린?뷀븯??理쒖큹 ?숆린???좊룄
+    // 기존 데이터는 모두 미동기화(0) 상태로 초기화하여 최초 동기화 유도
     db.prepare(`UPDATE ${tableName} SET is_synced = 0`).run();
   }
 
   if (!cols.includes('last_modified')) {
     console.log(`Adding 'last_modified' column to ${tableName}`);
     db.prepare(`ALTER TABLE ${tableName} ADD COLUMN last_modified TEXT`).run();
-    // 湲곗〈 ?곗씠?곗쓽 ?섏젙 ?쒓컖???꾩옱 ?쒓컙?쇰줈 珥덇린??
+// 동기화 대상 테이블 목록
     db.prepare(`UPDATE ${tableName} SET last_modified = datetime('now', 'localtime') WHERE last_modified IS NULL`).run();
   }
 
@@ -629,14 +764,14 @@ syncTables.forEach(tableName => {
   `).run(defaultSiteName, defaultAuthor);
 });
 
-// attendance ?뚯씠釉붿? ?대? is_synced媛 ?덉쑝誘濡?last_modified留??뺤씤
+// attendance 테이블은 이미 is_synced가 있으므로 last_modified만 확인
 const attendanceSyncCols = db.prepare("PRAGMA table_info(attendance)").all().map(c => c.name);
 if (!attendanceSyncCols.includes('last_modified')) {
   db.prepare('ALTER TABLE attendance ADD COLUMN last_modified TEXT').run();
   db.prepare("UPDATE attendance SET last_modified = datetime('now', 'localtime') WHERE last_modified IS NULL").run();
 }
 
-// --- ?꾩옣/?뚯썝 湲곗? ?뚯씠釉??몃뜳??諛?諛깊븘 ---
+// --- 현장/회원 기준 테이블 인덱스 및 백필 ---
 db.prepare('CREATE INDEX IF NOT EXISTS idx_sites_active_name ON sites (is_active, site_name)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_member_sites_member ON member_sites (member_id)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_member_sites_site ON member_sites (site_id)').run();
@@ -645,19 +780,19 @@ db.prepare('CREATE INDEX IF NOT EXISTS idx_attendance_site_date ON attendance (s
 db.prepare('CREATE INDEX IF NOT EXISTS idx_attendance_member_date ON attendance (member_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_sludge_photo_logs_site_date ON sludge_photo_logs (site_id, date)').run();
 
-// --- Facility Logs: location 而щ읆 異붽? ---
+// --- Facility Logs: location 컬럼 추가 ---
 const facilityCols = db.prepare("PRAGMA table_info(facility_logs)").all().map(c => c.name);
 if (!facilityCols.includes('location')) {
   db.prepare('ALTER TABLE facility_logs ADD COLUMN location TEXT').run();
 }
 
-// --- Config Items: default_amount 而щ읆 異붽? ---
+// --- Config Items: default_amount 컬럼 추가 ---
 const configItemsCols = db.prepare("PRAGMA table_info(config_items)").all().map(c => c.name);
 if (!configItemsCols.includes('default_amount')) {
   db.prepare('ALTER TABLE config_items ADD COLUMN default_amount REAL DEFAULT 0').run();
 }
 
-// --- photo_url 留덉씠洹몃젅?댁뀡 (medicine_logs, kit_logs) ---
+// --- photo_url 마이그레이션 (medicine_logs, kit_logs) ---
 const photoTables = ['medicine_logs', 'kit_logs'];
 photoTables.forEach(tableName => {
   const tCols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
@@ -666,15 +801,15 @@ photoTables.forEach(tableName => {
   }
 });
 
-// --- site_id 留덉씠洹몃젅?댁뀡 (?닿쾶?뚮퀎 怨좎쑀 ?앸퀎?? ---
-// app_settings ??site_id 而щ읆 異붽? 諛?UUID ?쒕뱶
+// --- site_id 마이그레이션 (휴게소별 고유 식별자) ---
+// app_settings 에 site_id 컬럼 추가 및 UUID 시드
 const appSettingsCols = db.prepare("PRAGMA table_info(app_settings)").all().map(c => c.name);
 if (!appSettingsCols.includes('site_id')) {
   db.prepare('ALTER TABLE app_settings ADD COLUMN site_id TEXT').run();
 }
 db.prepare("UPDATE app_settings SET site_id = ? WHERE id = 1 AND (site_id IS NULL OR TRIM(site_id) = '')").run(crypto.randomUUID());
 
-// app_settings??湲곕낯 ?꾩옣 ?뺣낫 ??sites ?뚯씠釉?留덉씠洹몃젅?댁뀡 (site_id ?ㅼ젙 ??
+// app_settings의 기본 현장 정보 → sites 테이블 마이그레이션 (site_id 설정 후)
 const settingsSeed = db.prepare('SELECT site_id, site_name, manager_name, method, series FROM app_settings WHERE id = 1').get();
 if (settingsSeed?.site_id) {
   db.prepare(`
@@ -686,14 +821,14 @@ if (settingsSeed?.site_id) {
       method = excluded.method,
       series = excluded.series,
       updated_at = datetime('now', 'localtime')
-  `).run(settingsSeed.site_id, settingsSeed.site_name || '???꾩옣', settingsSeed.manager_name || '愿由ъ옄', settingsSeed.method || 'A2O', settingsSeed.series || '1怨꾩뿴');
+  `).run(settingsSeed.site_id, settingsSeed.site_name || '새 현장', settingsSeed.manager_name || '관리자', settingsSeed.method || 'A2O', settingsSeed.series || '1계열');
 
   db.prepare('UPDATE attendance SET site_id = COALESCE(site_id, ?)').run(settingsSeed.site_id);
-  db.prepare('UPDATE attendance SET site_name = COALESCE(NULLIF(site_name, \'\'), ?)').run(settingsSeed.site_name || '???꾩옣');
+  db.prepare('UPDATE attendance SET site_name = COALESCE(NULLIF(site_name, \'\'), ?)').run(settingsSeed.site_name || '새 현장');
   db.prepare('UPDATE sludge_photo_logs SET site_id = COALESCE(site_id, ?)').run(settingsSeed.site_id);
 }
 
-// 5媛??숆린???뚯씠釉붿뿉 site_id 異붽? 諛?湲곗〈 ?곗씠??諛깊븘
+// 5개 동기화 테이블에 site_id 추가 및 기존 데이터 백필
 const currentSiteId = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || null;
 syncTables.forEach(tableName => {
   const tCols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
@@ -705,19 +840,21 @@ syncTables.forEach(tableName => {
   }
 });
 
-// 濡쒓렇???뚯씠釉?site_id + date 議고쉶 ?몃뜳??(?ㅼ쨷?꾩옣 ?꾪솚 ?鍮?
+// 로그성 테이블 site_id + date 조회 인덱스 (다중현장 전환 대비)
 db.prepare('CREATE INDEX IF NOT EXISTS idx_flow_readings_site_date ON flow_readings (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_medicine_logs_site_date ON medicine_logs (site_id, date)').run();
-db.prepare('CREATE INDEX IF NOT EXISTS idx_water_quality_site_date ON water_quality (site_id, date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_water_quality_site_date ON water_quality (site_id, report_date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_qntech_water_quality_site_date ON qntech_water_quality (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_kit_logs_site_date ON kit_logs (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_facility_logs_site_date ON facility_logs (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_certificate_wq_site_date ON certificate_water_quality (site_id, report_date)').run();
 
-// site_id 諛깊븘: 湲곗〈 ?곗씠?곌? ?덉쑝硫?app_settings.site_id濡?梨꾩?
+// site_id 백필: 기존 데이터가 있으면 app_settings.site_id로 채움
 if (currentSiteId) {
   db.prepare('UPDATE flow_readings SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE medicine_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE water_quality SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
+  db.prepare('UPDATE qntech_water_quality SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE kit_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE facility_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE sludge_photo_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);

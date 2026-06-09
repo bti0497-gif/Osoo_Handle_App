@@ -1,6 +1,5 @@
 import React from 'react';
 import { useDialog } from '../../components/common/DialogContext';
-import { BatchProgressDialog } from '../../components/common/BatchProgressDialog';
 import { useCertificateViewModel } from './useCertificateViewModel';
 
 const headerWrapStyle = {
@@ -23,6 +22,19 @@ const selectStyle = {
     outline: 'none',
 };
 
+const iconButtonStyle = {
+    width: '30px',
+    height: '30px',
+    borderRadius: '8px',
+    border: '1px solid #cbd5e1',
+    background: '#ffffff',
+    color: '#334155',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+};
+
 const CertificateView = ({ currentUser }) => {
     const { showToast, showAlert } = useDialog();
     const {
@@ -41,13 +53,12 @@ const CertificateView = ({ currentUser }) => {
         monthOptions,
         moveMonth,
         siteOptions,
-        fileInputRef,
-        openFileDialog,
-        handleUploadFiles,
         handleDownload,
-        handlePrint,
-        batchProcess,
-        selectedRecord,
+        selectedRecords,
+        selectedCertificateIds,
+        toggleCertificateSelection,
+        toggleAllVisibleSelection,
+        allVisibleSelected,
     } = useCertificateViewModel(currentUser, { showToast, showAlert });
 
     return (
@@ -62,15 +73,6 @@ const CertificateView = ({ currentUser }) => {
             gap: '10px',
             minHeight: 0,
         }}>
-            <input
-                ref={fileInputRef}
-                type="file"
-                accept=".zip,application/zip"
-                multiple
-                style={{ display: 'none' }}
-                onChange={handleUploadFiles}
-            />
-
             <div style={headerWrapStyle}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span className="material-icons" style={{ fontSize: '18px', color: '#475569' }}>description</span>
@@ -102,7 +104,7 @@ const CertificateView = ({ currentUser }) => {
             }}>
                 <div style={{
                     display: 'grid',
-                    gridTemplateColumns: '1fr',
+                    gridTemplateColumns: '42px 1fr',
                     borderBottom: '1px solid #e2e8f0',
                     background: '#f8fafc',
                     fontSize: '12px',
@@ -110,6 +112,15 @@ const CertificateView = ({ currentUser }) => {
                     color: '#475569',
                     padding: '10px 12px',
                 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <input
+                            type="checkbox"
+                            checked={allVisibleSelected}
+                            onChange={toggleAllVisibleSelection}
+                            disabled={visibleRecords.length === 0}
+                            aria-label="전체 선택"
+                        />
+                    </div>
                     <div>파일명</div>
                 </div>
 
@@ -130,6 +141,7 @@ const CertificateView = ({ currentUser }) => {
                     ) : (
                         visibleRecords.map((item) => {
                             const selected = item.id === selectedId;
+                            const checked = selectedCertificateIds.has(item.id);
                             return (
                                 <button
                                     key={item.id}
@@ -142,13 +154,25 @@ const CertificateView = ({ currentUser }) => {
                                         borderBottom: '1px solid #f1f5f9',
                                         padding: '10px 12px',
                                         display: 'grid',
-                                        gridTemplateColumns: '1fr',
+                                        gridTemplateColumns: '42px 1fr',
                                         textAlign: 'left',
                                         cursor: 'pointer',
                                         fontSize: '12px',
                                         color: '#1e293b',
                                     }}
                                 >
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={(event) => {
+                                                event.stopPropagation();
+                                                toggleCertificateSelection(item.id);
+                                            }}
+                                            onClick={(event) => event.stopPropagation()}
+                                            aria-label={`${item.fileName} 선택`}
+                                        />
+                                    </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                         <span style={{ fontWeight: 700 }}>{item.fileName}</span>
                                     </div>
@@ -168,23 +192,7 @@ const CertificateView = ({ currentUser }) => {
                 gap: '8px',
             }}>
                 <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button
-                        type="button"
-                        onClick={() => moveMonth(-1)}
-                        style={{
-                            width: '30px',
-                            height: '30px',
-                            borderRadius: '8px',
-                            border: '1px solid #cbd5e1',
-                            background: '#ffffff',
-                            color: '#334155',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                        }}
-                        aria-label="이전 달"
-                    >
+                    <button type="button" onClick={() => moveMonth(-1)} style={iconButtonStyle} aria-label="이전 달">
                         <span className="material-icons" style={{ fontSize: '18px' }}>chevron_left</span>
                     </button>
 
@@ -208,94 +216,31 @@ const CertificateView = ({ currentUser }) => {
                         ))}
                     </select>
 
-                    <button
-                        type="button"
-                        onClick={() => moveMonth(1)}
-                        style={{
-                            width: '30px',
-                            height: '30px',
-                            borderRadius: '8px',
-                            border: '1px solid #cbd5e1',
-                            background: '#ffffff',
-                            color: '#334155',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                        }}
-                        aria-label="다음 달"
-                    >
+                    <button type="button" onClick={() => moveMonth(1)} style={iconButtonStyle} aria-label="다음 달">
                         <span className="material-icons" style={{ fontSize: '18px' }}>chevron_right</span>
                     </button>
                 </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                        type="button"
-                        onClick={handleDownload}
-                        disabled={!selectedRecord?.downloadUrl}
-                        style={{
-                            height: '34px',
-                            minWidth: '96px',
-                            borderRadius: '8px',
-                            border: '1px solid #cbd5e1',
-                            background: selectedRecord?.downloadUrl ? '#ffffff' : '#f8fafc',
-                            color: selectedRecord?.downloadUrl ? '#334155' : '#94a3b8',
-                            fontWeight: 800,
-                            fontSize: '12px',
-                            cursor: selectedRecord?.downloadUrl ? 'pointer' : 'default',
-                        }}
-                    >
-                        다운받기
-                    </button>
-                    <button
-                        type="button"
-                        onClick={handlePrint}
-                        disabled={!selectedRecord?.downloadUrl}
-                        style={{
-                            height: '34px',
-                            minWidth: '80px',
-                            borderRadius: '8px',
-                            border: '1px solid #cbd5e1',
-                            background: selectedRecord?.downloadUrl ? '#ffffff' : '#f8fafc',
-                            color: selectedRecord?.downloadUrl ? '#334155' : '#94a3b8',
-                            fontWeight: 800,
-                            fontSize: '12px',
-                            cursor: selectedRecord?.downloadUrl ? 'pointer' : 'default',
-                        }}
-                    >
-                        인쇄
-                    </button>
-                    {isPrivileged && (
-                        <button
-                            type="button"
-                            onClick={openFileDialog}
-                            style={{
-                                height: '34px',
-                                minWidth: '110px',
-                                borderRadius: '8px',
-                                border: 'none',
-                                background: '#1e293b',
-                                color: '#ffffff',
-                                fontWeight: 800,
-                                fontSize: '12px',
-                                cursor: 'pointer',
-                            }}
-                        >
-                            추출 ZIP 업로드
-                        </button>
-                    )}
-                </div>
-            </div>
 
-            <BatchProgressDialog
-                isOpen={batchProcess.tasks.length > 0}
-                title="성적서 ZIP 일괄 업로드"
-                tasks={batchProcess.tasks}
-                progress={batchProcess.progress}
-                isProcessing={batchProcess.isProcessing}
-                isFinished={batchProcess.isFinished}
-                onClose={() => batchProcess.resetBatch()}
-            />
+                <button
+                    type="button"
+                    onClick={handleDownload}
+                    disabled={selectedRecords.length === 0}
+                    title="체크한 성적서를 PDF로 다운로드"
+                    style={{
+                        height: '34px',
+                        minWidth: '128px',
+                        borderRadius: '8px',
+                        border: '1px solid #cbd5e1',
+                        background: selectedRecords.length > 0 ? '#ffffff' : '#f8fafc',
+                        color: selectedRecords.length > 0 ? '#334155' : '#94a3b8',
+                        fontWeight: 800,
+                        fontSize: '12px',
+                        cursor: selectedRecords.length > 0 ? 'pointer' : 'default',
+                    }}
+                >
+                    PDF 다운로드{selectedRecords.length > 0 ? ` (${selectedRecords.length})` : ''}
+                </button>
+            </div>
         </div>
     );
 };

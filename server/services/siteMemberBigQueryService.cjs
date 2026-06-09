@@ -57,7 +57,7 @@ async function ensureTableSchema(table, tableName, schema) {
 
 async function ensureSiteMemberTables() {
   const bq = getBigQueryClient();
-  if (!bq) return { success: false, message: 'BigQuery ?대씪?댁뼵??珥덇린???ㅽ뙣' };
+  if (!bq) return { success: false, message: 'BigQuery 클라이언트 초기화 실패' };
 
   const dataset = bq.dataset(DATASET_ID);
   for (const [tableName, schema] of Object.entries(SCHEMAS)) {
@@ -69,7 +69,7 @@ async function ensureSiteMemberTables() {
 
 async function upsertSiteMemberSnapshot(payload) {
   const bq = getBigQueryClient();
-  if (!bq) return { success: false, message: 'BigQuery ?대씪?댁뼵??珥덇린???ㅽ뙣' };
+  if (!bq) return { success: false, message: 'BigQuery 클라이언트 초기화 실패' };
 
   const ensured = await ensureSiteMemberTables();
   if (!ensured.success) return ensured;

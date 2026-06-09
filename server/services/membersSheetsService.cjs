@@ -2,21 +2,21 @@
 
 /**
  * membersSheetsService.cjs
- * ?????????????????????????????????????????????????????????????????????
- * 援ш? ?ㅽ봽?덈뱶?쒗듃 ?뚯썝 愿由??쒕퉬??(?쒕퉬??怨꾩젙 ?몄쬆)
+ * ─────────────────────────────────────────────────────────────────────
+ * 구글 스프레드시트 회원 관리 서비스 (서비스 계정 인증)
  *
- * ?ㅽ봽?덈뱶?쒗듃 援ъ“ (?쒗듃紐? Wastewater_Member, 1??= ?ㅻ뜑):
+ * 스프레드시트 구조 (시트명: Wastewater_Member, 1행 = 헤더):
  *   A: id  B: name  C: password  D: role  E: site_name1  F: phone
  *   G: target_lat  H: target_lng  I: radius_m  J: notes
  *
- * ?섍꼍蹂??
- *   GOOGLE_MEMBERS_SHEET_ID ???ㅽ봽?덈뱶?쒗듃 ?뚯씪 ID (?щ윭 ?쒗듃 ?ы븿)
+ * ─────────────────────────────────────────────────────────────────────
+ *   GOOGLE_MEMBERS_SHEET_ID — 스프레드시트 파일 ID (여러 시트 포함)
  *
- * 泥??ㅼ젙 諛⑸쾿:
- *   1. Google Sheets?????ㅽ봽?덈뱶?쒗듃 ?앹꽦
- *   2. 泥?踰덉㎏ ?쒗듃 ?대쫫??'Wastewater_Member'濡?蹂寃?
- *   3. ?뚯씪 ID瑜?.env.local??GOOGLE_MEMBERS_SHEET_ID=... 濡?異붽?
- *   4. ?ㅽ봽?덈뱶?쒗듃瑜??쒕퉬??怨꾩젙 ?대찓?쇱뿉 ?몄쭛?먮줈 怨듭쑀
+ * 환경변수:
+ *   1. Google Sheets에 새 스프레드시트 생성
+ *   2. 첫 번째 시트 이름을 'Wastewater_Member'로 변경
+ *   3. 파일 ID를 .env.local에 GOOGLE_MEMBERS_SHEET_ID=... 로 추가
+ *   4. 스프레드시트를 서비스 계정 이메일에 편집자로 공유
  *      (osoo-handler-service@gen-lang-client-0937938814.iam.gserviceaccount.com)
  */
 
@@ -29,7 +29,7 @@ const SHEET_NAME = 'Wastewater_Member';
 const HEADER_ROW = ['id', 'name', 'password', 'role', 'site_name1', 'phone', 'target_lat', 'target_lng', 'radius_m', 'notes'];
 const HEADER_IDX = Object.fromEntries(HEADER_ROW.map((h, i) => [h, i]));
 
-// ?쒕퉬??怨꾩젙 ?몄쬆
+// 서비스 계정 인증
 const auth = new google.auth.GoogleAuth({
   keyFile: KEY_FILE,
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],
@@ -39,7 +39,7 @@ const sheets = google.sheets({ version: 'v4', auth });
 
 function getSheetId() {
   const id = String(process.env.GOOGLE_MEMBERS_SHEET_ID || '').trim();
-  if (!id) throw new Error('GOOGLE_MEMBERS_SHEET_ID ?섍꼍蹂?섍? ?ㅼ젙?섏? ?딆븯?듬땲??');
+  if (!id) throw new Error('GOOGLE_MEMBERS_SHEET_ID 환경변수가 설정되지 않았습니다.');
   return id;
 }
 
@@ -51,29 +51,29 @@ function isSheetsConfigured() {
   );
 }
 
-/** ??諛곗뿴 ???뚯썝 媛앹껜 蹂??*/
+/** 행 배열 → 회원 객체 변환 */
 function rowToMember(row) {
-  // 援ы삎 ?쒗듃(10?? site_name2 ?ы븿) ???좏삎 ?쒗듃(10?? phone ?ы븿) 留덉씠洹몃젅?댁뀡 吏??
+  // 구형 시트(10열, site_name2 포함) → 신형 시트(10열, phone 포함) 마이그레이션 지원
   const getAt = (index) => row[index] ?? '';
   const isOldFormat = Array.isArray(row) && row.length >= 11; // 11???댁긽 = site_name2 ?덉쓬
 
   let id, name, password, role, site_name1, phone, target_lat, target_lng, radius_m, notes;
 
   if (isOldFormat) {
-    // 援ы삎 (11?? site_name2 ?ы븿): id, name, password, role, site_name1, site_name2, target_lat, target_lng, radius_m, notes
+    // 구형 (11열, site_name2 포함): id, name, password, role, site_name1, site_name2, target_lat, target_lng, radius_m, notes
     id = getAt(0);
     name = getAt(1);
     password = getAt(2);
     role = getAt(3) || 'user';
     site_name1 = getAt(4);
-    // site_name2??臾댁떆 (getAt(5))
+    // site_name2는 무시 (getAt(5))
     target_lat = parseFloat(getAt(6)) || null;
     target_lng = parseFloat(getAt(7)) || null;
     radius_m = parseFloat(getAt(8)) || null;
     notes = getAt(9);
-    phone = ''; // 援ы삎?먮뒗 phone???놁쑝誘濡?鍮덇컪
+    phone = ''; // 구형에는 phone이 없으므로 빈값
   } else {
-    // ?좏삎 (10?? phone ?ы븿): id, name, password, role, site_name1, phone, target_lat, target_lng, radius_m, notes
+    // 신형 (10열, phone 포함): id, name, password, role, site_name1, phone, target_lat, target_lng, radius_m, notes
     id = getAt(0);
     name = getAt(1);
     password = getAt(2);
@@ -100,7 +100,7 @@ function rowToMember(row) {
   };
 }
 
-/** ?뚯썝 媛앹껜 ????諛곗뿴 蹂??*/
+/** 회원 객체 → 행 배열 변환 */
 function memberToRow(member) {
   return HEADER_ROW.map(col => {
     const v = member[col];
@@ -109,10 +109,10 @@ function memberToRow(member) {
 }
 
 /**
- * ?ㅻ뜑 ??珥덇린??諛?留덉씠洹몃젅?댁뀡
- * - ?ㅻ뜑 ?놁쓬: HEADER_ROW ?앹꽦
- * - 援ы삎(site_name2 ?ы븿): phone?쇰줈 留덉씠洹몃젅?댁뀡
- * - ?좏삎(phone ?ы븿): ?ㅽ궢
+ * 헤더 행 초기화 및 마이그레이션
+ * - 헤더 없음: HEADER_ROW 생성
+ * - 구형(site_name2 포함): phone으로 마이그레이션
+ * - 신형(phone 포함): 스킵
  */
 async function ensureHeader(sheetId) {
   const res = await sheets.spreadsheets.values.get({
@@ -121,7 +121,7 @@ async function ensureHeader(sheetId) {
   });
   const existing = (res.data.values || [])[0] || [];
   
-  // ?ㅻ뜑媛 ?놁쑝硫??앹꽦
+  // 헤더가 없으면 생성
   if (!existing[0] || existing[0] !== 'id') {
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
@@ -132,28 +132,28 @@ async function ensureHeader(sheetId) {
     return;
   }
   
-  // 援ы삎(site_name2 ?덉쓬) ???좏삎(phone?쇰줈) 留덉씠洹몃젅?댁뀡
-  // 援ы삎 ?ㅻ뜑(11??: id, name, password, role, site_name1, site_name2, target_lat, target_lng, radius_m, notes
-  // ?좏삎 ?ㅻ뜑(10??: id, name, password, role, site_name1, phone, target_lat, target_lng, radius_m, notes
+  // 구형(site_name2 있음) → 신형(phone으로) 마이그레이션
+  // 구형 헤더(11열): id, name, password, role, site_name1, site_name2, target_lat, target_lng, radius_m, notes
+  // 신형 헤더(10열): id, name, password, role, site_name1, phone, target_lat, target_lng, radius_m, notes
   const hasSiteName2 = existing[5] === 'site_name2';
   const hasPhone = existing[5] === 'phone';
   
   if (hasSiteName2 && !hasPhone) {
-    // 留덉씠洹몃젅?댁뀡 ?꾩슂: F??site_name2)??phone?쇰줈 蹂寃쏀븯怨? ?섎㉧吏 而щ읆 ?뺣젹
-    console.log('[membersSheetsService] 援ы삎?믪떊???ㅽ궎留?留덉씠洹몃젅?댁뀡 ?쒖옉...');
+    // 마이그레이션 필요: F열(site_name2)을 phone으로 변경하고, 나머지 컬럼 정렬
+    console.log('[membersSheetsService] 구형→신형 스키마 마이그레이션 시작...');
     
-    // ?꾩껜 ?곗씠???쎄린
+  // 헤더가 없으면 생성
     const dataRes = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
       range: `${SHEET_NAME}!A:J`
     });
     const allRows = dataRes.data.values || [];
     
-    // ?좏삎?쇰줈 蹂?? 媛??됱뿉??site_name2(F) ?쒓굅, phone(F) 異붽?
+    // 신형으로 변환: 각 행에서 site_name2(F) 제거, phone(F) 추가
     const migratedRows = [
-      HEADER_ROW, // ???ㅻ뜑
+      HEADER_ROW, // 새 헤더
       ...allRows.slice(1).map(row => {
-        // 援ы삎: [id, name, password, role, site_name1, site_name2, target_lat, target_lng, radius_m, notes, ...]
+        // 구형: [id, name, password, role, site_name1, site_name2, target_lat, target_lng, radius_m, notes, ...]
         // ?좏삎: [id, name, password, role, site_name1, phone, target_lat, target_lng, radius_m, notes]
         return [
           row[0] || '',        // id
@@ -161,7 +161,7 @@ async function ensureHeader(sheetId) {
           row[2] || '',        // password
           row[3] || '',        // role
           row[4] || '',        // site_name1
-          '',                  // phone (鍮꾩썙??
+          '',                  // phone (비워둠)
           row[6] || '',        // target_lat
           row[7] || '',        // target_lng
           row[8] || '',        // radius_m
@@ -170,7 +170,7 @@ async function ensureHeader(sheetId) {
       })
     ];
     
-    // A1:J濡??섎굹??諛곗튂 ?낅뜲?댄듃
+    // A1:J로 하나의 배치 업데이트
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
       range: `${SHEET_NAME}!A1`,
@@ -178,12 +178,12 @@ async function ensureHeader(sheetId) {
       requestBody: { values: migratedRows }
     });
     
-    console.log('[membersSheetsService] 留덉씠洹몃젅?댁뀡 ?꾨즺');
+    console.log('[membersSheetsService] 마이그레이션 완료');
   }
 }
 
 /**
- * ?쒗듃 ?꾩껜 ?쎄린 (2??) ???뚯썝 諛곗뿴 諛섑솚
+ * 시트 전체 읽기 (2단계) 의 ?뚯썝 배열 반환
  */
 async function getMembers() {
   if (!isSheetsConfigured()) return [];
@@ -196,30 +196,30 @@ async function getMembers() {
   });
 
   return (res.data.values || [])
-    .filter(row => row[0])        // id 鍮꾩뼱?덈뒗 ???쒖쇅
+    .filter(row => row[0])        // id 비어있는 행 제외
     .map(rowToMember);
 }
 
 /**
- * ?뚯썝 upsert (id濡?湲곗〈 ??寃?????놁쑝硫?append, ?덉쑝硫?update)
+ * 회원 upsert (id로 기존 행 검색 → 없으면 append, 있으면 update)
  */
 async function upsertMember(member) {
-  if (!isSheetsConfigured()) throw new Error('Google Sheets媛 ?ㅼ젙?섏? ?딆븯?듬땲??');
+  if (!isSheetsConfigured()) throw new Error('Google Sheets가 설정되지 않았습니다.');
   const sheetId = getSheetId();
   await ensureHeader(sheetId);
 
-  // ?꾩껜 議고쉶 ??id 寃??
+  // 전체 조회 후 id 검색
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: `${SHEET_NAME}!A2:A`   // id 而щ읆留?(?ㅻ뜑 ?쒖쇅)
+    range: `${SHEET_NAME}!A2:A`   // id 컬럼만 (헤더 제외)
   });
-  const idCol = ['id', ...(res.data.values || []).map(r => r[0] || '')];  // ?ㅻ뜑 異붽?
+  const idCol = ['id', ...(res.data.values || []).map(r => r[0] || '')];  // 헤더 추가
   const rowIndex = idCol.indexOf(String(member.id));   // 0-based
 
   const newRow = memberToRow(member);
 
   if (rowIndex <= 0) {
-    // ????異붽? (append)
+    // 새 행 추가 (append)
     await sheets.spreadsheets.values.append({
       spreadsheetId: sheetId,
       range: `${SHEET_NAME}!A:J`,
@@ -228,7 +228,7 @@ async function upsertMember(member) {
       requestBody: { values: [newRow] }
     });
   } else {
-    // 湲곗〈 ???낅뜲?댄듃 (1-based ?쒗듃 ??踰덊샇 = rowIndex + 1)
+    // 기존 행 업데이트 (1-based 시트 행 번호 = rowIndex + 1)
     const sheetRow = rowIndex + 1;
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
@@ -240,11 +240,11 @@ async function upsertMember(member) {
 }
 
 /**
- * ?뚯썝 ??젣 (?대떦 id ?됱쓣 怨듬갚?쇰줈 ?대━?????ㅼ젣 ????젣??Sheet API batchUpdate ?꾩슂)
- * 媛꾨떒??id 而щ읆??鍮꾩썙 getMembers()???꾪꽣?먯꽌 ?쒖쇅?섎룄濡?泥섎━
+ * 회원 삭제 (해당 id 행을 공백으로 클리어 — 실제 행 삭제는 Sheet API batchUpdate 필요)
+ * 간단히 id 컬럼을 비워 getMembers()의 필터에서 제외되도록 처리
  */
 async function deleteMember(id) {
-  if (!isSheetsConfigured()) throw new Error('Google Sheets媛 ?ㅼ젙?섏? ?딆븯?듬땲??');
+  if (!isSheetsConfigured()) throw new Error('Google Sheets가 설정되지 않았습니다.');
   const sheetId = getSheetId();
 
   const res = await sheets.spreadsheets.values.get({
@@ -253,7 +253,7 @@ async function deleteMember(id) {
   });
   const idCol = (res.data.values || []).map(r => r[0] || '');
   const rowIndex = idCol.indexOf(String(id));
-  if (rowIndex <= 0) return;   // ?ㅻ뜑(0) ?먮뒗 ?놁쓬
+  if (rowIndex <= 0) return;   // 헤더(0) 또는 없음
 
   const sheetRow = rowIndex + 1;
   await sheets.spreadsheets.values.clear({

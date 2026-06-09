@@ -33,6 +33,10 @@ export const SettingsModel = {
         return apiClient.upload('/api/settings/upload', formData);
     },
 
+    async openLocalFolder(target) {
+        return apiClient.post('/api/settings/open-local-folder', { target });
+    },
+
     async getExcelPreview(sheet, row) {
         return apiClient.post('/api/settings/excel-preview', { sheet, row });
     },

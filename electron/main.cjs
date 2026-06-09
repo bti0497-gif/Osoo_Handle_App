@@ -1,15 +1,89 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
 const { setupAutoUpdater, checkForUpdates } = require('./updater.cjs');
 
+function isBrokenPipeError(error) {
+  return error && (error.code === 'EPIPE' || /EPIPE|broken pipe/i.test(String(error.message || '')));
+}
+
+function setupSafeConsole() {
+  process.stdout?.on?.('error', (error) => {
+    if (!isBrokenPipeError(error)) {
+      throw error;
+    }
+  });
+  process.stderr?.on?.('error', (error) => {
+    if (!isBrokenPipeError(error)) {
+      throw error;
+    }
+  });
+
+  for (const method of ['log', 'warn', 'error']) {
+    const original = console[method].bind(console);
+    console[method] = (...args) => {
+      try {
+        original(...args);
+      } catch (error) {
+        if (!isBrokenPipeError(error)) {
+          throw error;
+        }
+      }
+    };
+  }
+}
+
+setupSafeConsole();
+
 let mainWindow = null;
 let serverProcess = null;
+let tray = null;
+let isQuitting = false;
 
 const isDev = !app.isPackaged;
+const useExternalServer = isDev && process.env.OSOO_EXTERNAL_SERVER === '1';
 
+function handleVersionMigration() {
+  const userDataPath = app.getPath('userData');
+  const versionFilePath = path.join(userDataPath, 'version.json');
+  const currentVersion = app.getVersion();
+
+  let lastVersion = null;
+  try {
+    if (fs.existsSync(versionFilePath)) {
+      const versionData = JSON.parse(fs.readFileSync(versionFilePath, 'utf-8'));
+      lastVersion = versionData.version;
+    }
+  } catch (err) {
+    console.warn('[Migration] Failed to read previous version file:', err.message);
+  }
+
+  if (lastVersion !== currentVersion) {
+    console.log(`[Migration] Version change detected: ${lastVersion || 'first-run'} -> ${currentVersion}`);
+    try {
+      const migrationMarker = path.join(userDataPath, '.version-changed');
+      fs.writeFileSync(migrationMarker, currentVersion, 'utf-8');
+      console.log('[Migration] Marker file created:', migrationMarker);
+    } catch (err) {
+      console.error('[Migration] Failed to create marker file:', err);
+    }
+  }
+
+  try {
+    if (!fs.existsSync(userDataPath)) {
+      fs.mkdirSync(userDataPath, { recursive: true });
+    }
+    fs.writeFileSync(versionFilePath, JSON.stringify({ version: currentVersion, timestamp: new Date().toISOString() }, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('[Migration] Failed to save version file:', err);
+  }
+}
 function startServer() {
+  if (useExternalServer) {
+    console.log('[Electron] External dev server mode: skip embedded server start');
+    return;
+  }
   if (serverProcess) return;
 
   const appRootPath = isDev ? path.join(__dirname, '..') : app.getAppPath();
@@ -17,7 +91,10 @@ function startServer() {
   const serverScriptPath = !isDev && fs.existsSync(unpackedServerScript)
     ? unpackedServerScript
     : path.join(appRootPath, 'server.cjs');
-  const serverWorkingDirectory = isDev ? path.join(__dirname, '..') : process.resourcesPath;
+  // In packaged builds, force cwd to app.asar.unpacked for native modules and assets.
+  const serverWorkingDirectory = isDev
+    ? path.join(__dirname, '..')
+    : path.join(process.resourcesPath, 'app.asar.unpacked');
 
   serverProcess = fork(serverScriptPath, [], {
     cwd: serverWorkingDirectory,
@@ -45,6 +122,7 @@ function startServer() {
 }
 
 function stopServer() {
+  if (useExternalServer) return;
   if (serverProcess) {
     serverProcess.kill();
     serverProcess = null;
@@ -61,12 +139,13 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'Osoo Handle App',
+    title: 'PDF로 저장',
     icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
+      webviewTag: true,
     },
     show: false,
     autoHideMenuBar: true,
@@ -77,11 +156,19 @@ function createWindow() {
   });
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:8900');
+    mainWindow.loadURL('http://localhost:18735');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
+
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      mainWindow.hide();
+      return false;
+    }
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -142,9 +229,55 @@ async function buildPdfBufferFromHtml(htmlContent, printBackground) {
   }
 }
 
+function createTray() {
+  const iconPath = isDev
+    ? path.join(__dirname, '..', 'public', 'icon.ico')
+    : path.join(process.resourcesPath, 'app.asar.unpacked', 'public', 'icon.ico');
+
+  tray = new Tray(iconPath);
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: '열기',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }
+    },
+    { type: 'separator' },
+    {
+      label: '종료',
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+
+  tray.setToolTip('Osoo Handle App');
+  tray.setContextMenu(contextMenu);
+
+  tray.on('double-click', () => {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 app.whenReady().then(() => {
+  try {
+    require('./roadworkDumpHelper.cjs')(ipcMain, app, { isDev });
+    console.log('[Roadwork] IPC handlers loaded.');
+  } catch (error) {
+    console.warn('[Roadwork] Failed to load IPC handlers:', error.message);
+  }
+
+  handleVersionMigration();
   startServer();
   createWindow();
+  createTray();
 
   if (!isDev) {
     setupAutoUpdater(mainWindow);
@@ -161,6 +294,35 @@ app.on('before-quit', () => {
 });
 
 ipcMain.handle('app:getVersion', () => app.getVersion());
+ipcMain.handle('app:checkVersionChanged', async () => {
+  const userDataPath = app.getPath('userData');
+  const markerPath = path.join(userDataPath, '.version-changed');
+  try {
+    const exists = fs.existsSync(markerPath);
+    if (exists) {
+      const version = fs.readFileSync(markerPath, 'utf-8').trim();
+      return { versionChanged: true, version };
+    }
+    return { versionChanged: false };
+  } catch (err) {
+    console.error('[IPC] Failed to check version marker:', err);
+    return { versionChanged: false, error: err.message };
+  }
+});
+ipcMain.handle('app:clearVersionMarker', async () => {
+  const userDataPath = app.getPath('userData');
+  const markerPath = path.join(userDataPath, '.version-changed');
+  try {
+    if (fs.existsSync(markerPath)) {
+      fs.unlinkSync(markerPath);
+      console.log('[IPC] Version marker cleared');
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error('[IPC] Failed to clear version marker:', err);
+    return { ok: false, error: err.message };
+  }
+});
 ipcMain.handle('shell:openFile', async (_event, filePath) => {
   const err = await shell.openPath(filePath);
   if (err) throw new Error(err);
@@ -168,6 +330,13 @@ ipcMain.handle('shell:openFile', async (_event, filePath) => {
 });
 ipcMain.handle('app:checkForUpdates', () => {
   return checkForUpdates();
+});
+
+ipcMain.handle('app:hideToTray', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.hide();
+  }
+  return { ok: true };
 });
 
 ipcMain.handle('pdf:save', async (_event, options = {}) => {
@@ -197,3 +366,4 @@ ipcMain.handle('pdf:save', async (_event, options = {}) => {
   fs.writeFileSync(filePath, pdfBuffer);
   return { canceled: false, filePath };
 });
+

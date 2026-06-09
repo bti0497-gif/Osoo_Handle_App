@@ -311,7 +311,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
             await loadLogs();
             showAlert?.(`분석키트 구매 저장 완료 (${purchaseDate})`);
         } catch (err) {
-            showAlert?.('분析키트 구매 저장 실패: ' + err.message);
+            showAlert?.('분석키트 구매 저장 실패: ' + err.message);
         } finally {
             setIsSavingPurchase(false);
         }
@@ -337,8 +337,8 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
             const updated = result.summary?.updatedCellCount || 0;
             const matched = result.summary?.alreadyMatchedCellCount || 0;
             const msg = updated > 0
-                ? `분析키트 동기화 완료: ${result.summary?.unsyncedDateCount || 0}일 신규 반영 (${updated}셀)`
-                : `분析키트 동기화 완료: 변경할 내용 없음 (${matched}셀 이미 일치)`;
+                ? `분석키트 동기화 완료: ${result.summary?.unsyncedDateCount || 0}일 신규 반영 (${updated}셀)`
+                : `분석키트 동기화 완료: 변경할 내용 없음 (${matched}셀 이미 일치)`;
             showAlert?.(msg);
             return result;
         } catch (err) {

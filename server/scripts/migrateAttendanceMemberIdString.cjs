@@ -45,40 +45,40 @@ async function getMemberIdType(table) {
 
 async function main() {
   const bq = getBigQueryClient();
-  if (!bq) throw new Error('BigQuery ?대씪?댁뼵?몃? 珥덇린?뷀븷 ???놁뒿?덈떎.');
+  if (!bq) throw new Error('BigQuery 클라이언트를 초기화할 수 없습니다.');
 
   const dataset = bq.dataset(DATASET_ID);
   const table = dataset.table(TABLE_ID);
   const [exists] = await table.exists();
-  if (!exists) throw new Error(`BigQuery ?뚯씠釉붿씠 ?놁뒿?덈떎: ${DATASET_ID}.${TABLE_ID}`);
+  if (!exists) throw new Error(`BigQuery 테이블이 없습니다: ${DATASET_ID}.${TABLE_ID}`);
 
   const memberId = await getMemberIdType(table);
-  if (!memberId) throw new Error('attendance.member_id 而щ읆??李얠쓣 ???놁뒿?덈떎.');
+  if (!memberId) throw new Error('attendance.member_id 컬럼을찾을 수 없습니다.');
 
-  console.log(`?꾩옱 ${DATASET_ID}.${TABLE_ID}.member_id: ${memberId.type} / ${memberId.mode || 'NULLABLE'}`);
+  console.log(`현재 ${DATASET_ID}.${TABLE_ID}.member_id: ${memberId.type} / ${memberId.mode || 'NULLABLE'}`);
   if (String(memberId.type).toUpperCase() === 'STRING') {
-    console.log('?대? STRING ??낆씠誘濡?留덉씠洹몃젅?댁뀡???꾩슂 ?놁뒿?덈떎.');
+    console.log('이미 STRING 타입이므로 마이그레이션을 진행할 필요가 없습니다.');
     return;
   }
 
   const backupId = backupTableId();
-  console.log(`諛깆뾽 ?덉젙 ?뚯씠釉? ${DATASET_ID}.${backupId}`);
+  console.log(`백업 지정 테이블 ${DATASET_ID}.${backupId}`);
 
   if (!apply) {
-    console.log('\n?ㅼ젣 諛섏쁺? ?ㅼ쓬 紐낅졊?쇰줈 ?ㅽ뻾?섏꽭?? node server/scripts/migrateAttendanceMemberIdString.cjs --apply');
+    console.log('\n실제 반영은 다음 명령으로 실행하세요 node server/scripts/migrateAttendanceMemberIdString.cjs --apply');
     return;
   }
 
   await bq.query(`CREATE TABLE ${quoteTable(backupId)} AS SELECT * FROM ${quoteTable(TABLE_ID)}`);
-  console.log(`諛깆뾽 ?꾨즺: ${DATASET_ID}.${backupId}`);
+  console.log(`백업 완료: ${DATASET_ID}.${backupId}`);
 
   await table.delete();
-  console.log(`湲곗〈 ?뚯씠釉???젣 ?꾨즺: ${DATASET_ID}.${TABLE_ID}`);
+  console.log(`기존 테이블 삭제 완료: ${DATASET_ID}.${TABLE_ID}`);
 
   await dataset.createTable(TABLE_ID, {
     schema: { fields: attendanceSchema }
   });
-  console.log(`STRING ?ㅽ궎留??뚯씠釉??앹꽦 ?꾨즺: ${DATASET_ID}.${TABLE_ID}`);
+  console.log(`STRING 스키마테이블생성 완료: ${DATASET_ID}.${TABLE_ID}`);
 
   const selectColumns = columns.map((column) => {
     if (column === 'member_id') return 'CAST(member_id AS STRING) AS member_id';
@@ -92,7 +92,7 @@ async function main() {
   `);
 
   const migratedMemberId = await getMemberIdType(table);
-  console.log(`留덉씠洹몃젅?댁뀡 ?꾨즺: member_id = ${migratedMemberId.type} / ${migratedMemberId.mode || 'NULLABLE'}`);
+  console.log(`마이그레이션 완료: member_id = ${migratedMemberId.type} / ${migratedMemberId.mode || 'NULLABLE'}`);
 }
 
 main().catch((err) => {

@@ -55,7 +55,12 @@ const AttendanceView = ({ currentUser }) => {
                                     </td>
                                     <td className="px-6 py-4">
                                         {log.is_remote ? (
-                                            <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-[10px] font-black border-2 border-blue-200">원격 접속</span>
+                                            <span
+                                                className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-[10px] font-black border-2 border-blue-200"
+                                                title={log.remote_session_evidence || log.remote_session_type || ''}
+                                            >
+                                                원격 의심
+                                            </span>
                                         ) : (
                                             <span className="bg-emerald-50 text-emerald-600 px-2 py-1 rounded text-[10px] font-black border-2 border-emerald-200">현장 출석</span>
                                         )}
@@ -74,8 +79,8 @@ const AttendanceView = ({ currentUser }) => {
                         <div className="flex gap-3 text-slate-400">
                             <span className="material-icons text-lg">info</span>
                             <p className="text-[10px] leading-relaxed font-bold">
-                                * 시스템은 GPS 위치 정보를 기반으로 출석을 기록합니다. <br />
-                                * 사전 지정된 사업장 반경(500m) 밖 접속 시 '원격 접속'으로 자동 분류됩니다.
+                                * 원격 프로그램 또는 RDP 세션이 감지되면 '원격 의심'으로 기록됩니다. <br />
+                                * 위치 확인은 현재 기본 비활성화되어 있으며, 필요 시 설정으로 다시 활성화할 수 있습니다.
                             </p>
                         </div>
                     </div>

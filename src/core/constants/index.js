@@ -38,13 +38,13 @@ export const MENUS = [
       { id: 'log_water', label: '수질분석일지' },
       { id: 'log_med_mgmt', label: '약품관리대장' },
       { id: 'log_med_in', label: '약품입고일지' },
-      { id: 'log_sludge_photo', label: '슬러지사진대지' }
+      { id: 'log_sludge_photo', label: '슬러지사진대지' },
+      { id: 'log_roadwork_helper', label: '공사 입력 도우미' }
     ]
   },
   { id: 'board', label: '소통게시판', icon: 'forum' },
 ];
 export const ADMIN_MENUS = [
-  { id: 'members', label: '회원 및 현장 관리', icon: 'admin_panel_settings' },
   { id: 'settings', label: '설정', icon: 'settings' },
 ];
 
@@ -65,6 +65,7 @@ export const TAB_LABELS = {
   log_med_in: '약품입고일지',
   log_sludge_out: '슬러지반출관리대장',
   log_sludge_photo: '슬러지사진대지',
+  log_roadwork_helper: '공사 입력 도우미',
   board: '소통게시판',
   members: '회원 및 현장 관리',
   myinfo: '내 정보 수정',
