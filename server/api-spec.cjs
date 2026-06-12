@@ -150,7 +150,11 @@ const apiSpec = {
     tier: 2,
     path: '/api/certificates',
     endpoints: [
-      { method: 'GET', path: '', description: '인증서 목록' },
+      { method: 'GET', path: '', description: '성적서 목록 조회' },
+      { method: 'POST', path: '/sync-cache', description: '성적서 BigQuery 캐시 동기화' },
+      { method: 'POST', path: '/download-selected-pdf', description: '선택 성적서 PDF 병합 다운로드' },
+      { method: 'GET', path: '/:id/download', description: '성적서 다운로드 URL 조회' },
+      { method: 'GET', path: '/files/:id', description: '성적서 원본 파일 다운로드' },
     ],
   },
 

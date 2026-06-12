@@ -1,15 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AttendanceModel } from './AttendanceModel';
-import { DriveSyncService } from '../../services/DriveSyncService';
 
-// 한국 시간(KST) 기준 오늘 날짜 구하기 (YYYY-MM-DD)
-const getTodayKST = () => {
-    const kstDate = new Date(new Date().getTime() + (9 * 60 * 60 * 1000));
-    return kstDate.toISOString().split('T')[0];
+const pad2 = (value) => String(value).padStart(2, '0');
+
+const getTodayLocal = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
 };
 
 export const useAttendanceViewModel = (currentUser, initialDate) => {
-    const [date, setDate] = useState(initialDate || getTodayKST());
+    const [date, setDate] = useState(initialDate || getTodayLocal());
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(false);
 

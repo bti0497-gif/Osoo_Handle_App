@@ -1,17 +1,15 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { getTodayKST } from '../../core/constants';
 import { WaterQualityModel } from './WaterQualityModel';
 
 const WATER_FIELDS = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity', 'tn', 'tp', 'cod', 'ss'];
 
-const buildManualMeasurementGroup = (date) => `manual:${date}`;
-
+const buildManualMeasurementGroup = (date, order = 1) => `manual:${date}:${order}`;
 const buildRowKey = (date, measurementGroup) => `${date}__${measurementGroup}`;
 
 const normalizeMeasurementOrder = (value) => {
     const numeric = Number(value);
-    if (Number.isFinite(numeric) && numeric > 0) {
-        return Math.floor(numeric);
-    }
+    if (Number.isFinite(numeric) && numeric > 0) return Math.floor(numeric);
     return 1;
 };
 
@@ -23,7 +21,7 @@ const resolveMeasurementGroup = (record = {}) => {
     const projectId = String(record.qntech_project_id || '').trim();
     if (projectId) return `qntech:${projectId}`;
 
-    return buildManualMeasurementGroup(date);
+    return buildManualMeasurementGroup(date, normalizeMeasurementOrder(record.measurement_order));
 };
 
 const buildRowIdentity = (record = {}) => {
@@ -40,40 +38,36 @@ const buildRowIdentity = (record = {}) => {
         qntechProjectId: record.qntech_project_id ? String(record.qntech_project_id) : null,
         createdAt: record.created_at || null,
         lastModified: record.last_modified || null,
-        isFuture: Boolean(record.isFuture)
+        isFuture: Boolean(record.isFuture),
     };
 };
 
 const createPlaceholderRow = (date, options = {}) => ({
     ...buildRowIdentity({
         date,
-        measurement_group: options.measurementGroup || buildManualMeasurementGroup(date),
+        measurement_group: options.measurementGroup || buildManualMeasurementGroup(date, options.measurementOrder || 1),
         measurement_order: options.measurementOrder || 1,
         source_type: options.sourceType || 'manual',
         source_label: options.sourceLabel || '',
         qntech_project_id: options.qntechProjectId || null,
-        isFuture: options.isFuture || false
+        isFuture: options.isFuture || false,
     }),
     displayLabel: options.displayLabel || '',
-    isFuture: Boolean(options.isFuture)
+    isFuture: Boolean(options.isFuture),
 });
 
-const sortHistoryRows = (rows = []) => {
-    rows.sort((a, b) => {
-        const dateCompare = a.date.localeCompare(b.date);
-        if (dateCompare !== 0) return dateCompare;
+const sortHistoryRows = (rows = []) => rows.sort((a, b) => {
+    const dateCompare = a.date.localeCompare(b.date);
+    if (dateCompare !== 0) return dateCompare;
 
-        const orderCompare = normalizeMeasurementOrder(a.measurementOrder) - normalizeMeasurementOrder(b.measurementOrder);
-        if (orderCompare !== 0) return orderCompare;
+    const orderCompare = normalizeMeasurementOrder(a.measurementOrder) - normalizeMeasurementOrder(b.measurementOrder);
+    if (orderCompare !== 0) return orderCompare;
 
-        const createdCompare = String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
-        if (createdCompare !== 0) return createdCompare;
+    const createdCompare = String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+    if (createdCompare !== 0) return createdCompare;
 
-        return a.rowKey.localeCompare(b.rowKey);
-    });
-
-    return rows;
-};
+    return a.rowKey.localeCompare(b.rowKey);
+});
 
 const applyDisplayLabels = (rows = []) => {
     const countByDate = new Map();
@@ -89,32 +83,57 @@ const applyDisplayLabels = (rows = []) => {
 
         return {
             ...row,
-            displayLabel: row.sourceLabel || ((countByDate.get(row.date) || 0) > 1 ? `${nextOrder}차` : '')
+            displayLabel: row.sourceLabel || ((countByDate.get(row.date) || 0) > 1 ? `${nextOrder}회차` : ''),
         };
     });
 };
 
+const normalizeWaterValue = (value) => {
+    if (value === null || value === undefined || value === '') return value ?? null;
+    if (typeof value === 'number' && Number.isNaN(value)) return '초과';
+
+    const normalized = String(value).trim();
+    if (['-1', '-1.0', '-1.00', 'NaN', 'nan'].includes(normalized)) return '초과';
+    return normalized;
+};
+
+const buildBulkSaveItems = (rows = []) => {
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+
+    return rows.map((item) => ({
+        date: item.date,
+        measurement_group: resolveMeasurementGroup(item),
+        measurement_order: normalizeMeasurementOrder(item.measurement_order),
+        source_type: String(item.source_type || '').trim() || (item.qntech_project_id ? 'qntech' : 'manual'),
+        source_label: item.source_label ?? null,
+        qntech_project_id: item.qntech_project_id ?? null,
+        location: item.location,
+        nh3_n: item.nh3_n ?? null,
+        no3_n: item.no3_n ?? null,
+        po4_p: item.po4_p ?? null,
+        alkalinity: item.alkalinity ?? null,
+        tn: item.tn ?? null,
+        tp: item.tp ?? null,
+        cod: item.cod ?? null,
+        ss: item.ss ?? null,
+    }));
+};
+
+const normalizeModalSaveValue = (value) => {
+    if (value === undefined || value === null) return null;
+    const text = String(value).trim();
+    return text === '' ? null : text;
+};
+
 export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
     const historyRef = useRef([]);
+    const pendingChangesRef = useRef({});
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(false);
     const [pendingChanges, setPendingChanges] = useState({});
     const [isImportingFromQntech, setIsImportingFromQntech] = useState(false);
     const [lastImportSummary, setLastImportSummary] = useState(null);
     const [lastRangeImportSummary, setLastRangeImportSummary] = useState(null);
-    const pendingChangesRef = useRef({});
-
-    const normalizeWaterValue = (value) => {
-        if (value === null || value === undefined || value === '') return value ?? null;
-        if (typeof value === 'number' && Number.isNaN(value)) return '초과';
-
-        const normalized = String(value).trim();
-        if (['-1', '-1.0', '-1.00', 'NaN', 'nan'].includes(normalized)) {
-            return '초과';
-        }
-
-        return normalized;
-    };
 
     const waterTypes = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity'];
 
@@ -123,76 +142,76 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
         setHistory(rows);
     };
 
-    const loadReadings = useCallback(async () => {
+    const loadReadings = useCallback(async (options = {}) => {
         setLoading(true);
         try {
-            const today = new Date();
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStr = getTodayKST();
+            const today = new Date(`${todayStr}T12:00:00`);
 
-            const historyData = await WaterQualityModel.fetchHistory();
-            if (historyData.success) {
-                const histRaw = Array.isArray(historyData.history) ? historyData.history : [];
-                const histMap = new Map();
+            const historyData = await WaterQualityModel.fetchHistory({ force: options.force });
+            if (!historyData.success) return;
 
-                histRaw.forEach((record) => {
-                    const identity = buildRowIdentity(record);
-                    if (!identity.date) return;
+            const histRaw = Array.isArray(historyData.history) ? historyData.history : [];
+            const histMap = new Map();
 
-                    const existingRow = histMap.get(identity.rowKey) || { ...identity };
-                    const loc = record.location || '기본';
+            histRaw.forEach((record) => {
+                const identity = buildRowIdentity(record);
+                if (!identity.date) return;
 
-                    WATER_FIELDS.forEach((field) => {
-                        if (record[field] !== null && record[field] !== undefined) {
-                            existingRow[`${field}_${loc}`] = normalizeWaterValue(record[field]);
-                        }
-                    });
+                const existingRow = histMap.get(identity.rowKey) || { ...identity };
+                const loc = record.location || '기본';
 
-                    histMap.set(identity.rowKey, existingRow);
+                WATER_FIELDS.forEach((field) => {
+                    if (record[field] !== null && record[field] !== undefined) {
+                        existingRow[`${field}_${loc}`] = normalizeWaterValue(record[field]);
+                    }
                 });
 
-                let hist = sortHistoryRows(Array.from(histMap.values()));
+                histMap.set(identity.rowKey, existingRow);
+            });
 
-                if (hist.length > 0) {
-                    const firstDateStr = hist[0].date > todayStr ? todayStr : hist[0].date;
-                    let currentDate = new Date(firstDateStr);
-                    const todayDate = new Date(todayStr);
-                    const existingDates = new Set(hist.map((row) => row.date));
+            let hist = sortHistoryRows(Array.from(histMap.values()));
 
-                    while (currentDate < todayDate) {
-                        const dateString = currentDate.toISOString().split('T')[0];
-                        if (!existingDates.has(dateString)) {
-                            hist.push(createPlaceholderRow(dateString));
-                            existingDates.add(dateString);
-                        }
-                        currentDate.setDate(currentDate.getDate() + 1);
+            if (hist.length > 0) {
+                const firstDateStr = hist[0].date > todayStr ? todayStr : hist[0].date;
+                let currentDate = new Date(firstDateStr);
+                const todayDate = new Date(todayStr);
+                const existingDates = new Set(hist.map((row) => row.date));
+
+                while (currentDate < todayDate) {
+                    const dateString = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`;
+                    if (!existingDates.has(dateString)) {
+                        hist.push(createPlaceholderRow(dateString));
+                        existingDates.add(dateString);
                     }
+                    currentDate.setDate(currentDate.getDate() + 1);
                 }
-
-                if (!hist.some((row) => row.date === todayStr)) {
-                    hist.push(createPlaceholderRow(todayStr));
-                }
-
-                for (let index = 1; index <= 5; index += 1) {
-                    const futureDate = new Date(today);
-                    futureDate.setDate(today.getDate() + index);
-                    const dateString = futureDate.toISOString().split('T')[0];
-                    if (!hist.some((row) => row.date === dateString)) {
-                        hist.push(createPlaceholderRow(dateString, { isFuture: true }));
-                    }
-                }
-
-                hist = applyDisplayLabels(sortHistoryRows(hist));
-
-                commitHistoryState(hist);
-                setPendingChanges({});
-                pendingChangesRef.current = {};
             }
+
+            if (!hist.some((row) => row.date === todayStr)) {
+                hist.push(createPlaceholderRow(todayStr));
+            }
+
+            for (let index = 1; index <= 5; index += 1) {
+                const futureDate = new Date(today);
+                futureDate.setDate(today.getDate() + index);
+                const dateString = `${futureDate.getFullYear()}-${String(futureDate.getMonth() + 1).padStart(2, '0')}-${String(futureDate.getDate()).padStart(2, '0')}`;
+                if (!hist.some((row) => row.date === dateString)) {
+                    hist.push(createPlaceholderRow(dateString, { isFuture: true }));
+                }
+            }
+
+            hist = applyDisplayLabels(sortHistoryRows(hist));
+            commitHistoryState(hist);
+            setPendingChanges({});
+            pendingChangesRef.current = {};
         } catch (err) {
             console.error(err);
+            showToast?.(`수질 데이터 조회 실패: ${err.message}`, 'error');
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [showToast]);
 
     useEffect(() => {
         loadReadings();
@@ -210,14 +229,14 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
             nextHistory[index] = {
                 ...nextHistory[index],
                 [colKey]: normalizedValue,
-                [`${colKey}_error`]: null
+                [`${colKey}_error`]: null,
             };
 
             setPendingChanges((currentPending) => {
                 const rowChanges = currentPending[rowKey] || {};
                 const nextPending = {
                     ...currentPending,
-                    [rowKey]: { ...rowChanges, [colKey]: normalizedValue }
+                    [rowKey]: { ...rowChanges, [colKey]: normalizedValue },
                 };
                 pendingChangesRef.current = nextPending;
                 return nextPending;
@@ -264,28 +283,6 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
         });
     };
 
-    const buildBulkSaveItems = (rows = []) => {
-        if (!Array.isArray(rows) || rows.length === 0) return [];
-
-        return rows.map((item) => ({
-            date: item.date,
-            measurement_group: resolveMeasurementGroup(item),
-            measurement_order: normalizeMeasurementOrder(item.measurement_order),
-            source_type: String(item.source_type || '').trim() || (item.qntech_project_id ? 'qntech' : 'manual'),
-            source_label: item.source_label ?? null,
-            qntech_project_id: item.qntech_project_id ?? null,
-            location: item.location,
-            nh3_n: item.nh3_n ?? null,
-            no3_n: item.no3_n ?? null,
-            po4_p: item.po4_p ?? null,
-            alkalinity: item.alkalinity ?? null,
-            tn: item.tn ?? null,
-            tp: item.tp ?? null,
-            cod: item.cod ?? null,
-            ss: item.ss ?? null,
-        }));
-    };
-
     const persistImportedRows = async (rows = []) => {
         const items = buildBulkSaveItems(rows);
         if (items.length === 0) return;
@@ -313,7 +310,7 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
                 driveUploadedPhotoCount: result.summary?.driveUploadedPhotoCount || 0,
                 photoDirectory: result.photoDirectory,
                 driveFolderUrl: result.driveFolderUrl || '',
-                unmatchedSamples: result.unmatchedSamples || []
+                unmatchedSamples: result.unmatchedSamples || [],
             });
             setLastRangeImportSummary(null);
 
@@ -330,9 +327,7 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
             }
             return result;
         } catch (err) {
-            if (!silent) {
-                showToast?.(`QnTECH 불러오기 실패: ${err.message}`, 'error');
-            }
+            if (!silent) showToast?.(`QnTECH 불러오기 실패: ${err.message}`, 'error');
             throw err;
         } finally {
             setIsImportingFromQntech(false);
@@ -340,8 +335,6 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
     };
 
     const handleImportRangeFromQntech = async (startDate, endDate) => {
-        // 기존의 기간 불러오기(단일 API 호출)를 남겨두되,
-        // 뷰에서는 handleImportFromQntech를 개별적으로 루프돌면서 호출하도록 변경됨
         const result = await WaterQualityModel.importRangeFromQntech(startDate, endDate);
         if (!result?.success) {
             throw new Error(result?.error || 'QnTECH 기간 데이터 불러오기에 실패했습니다.');
@@ -359,7 +352,7 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
             insertedDates: result.insertedDates || [],
             photoRoot: result.photoRoot,
             driveFolderUrl: result.driveFolderUrl || '',
-            summaryRows: result.summaryRows || []
+            summaryRows: result.summaryRows || [],
         });
         setLastImportSummary(null);
 
@@ -396,9 +389,7 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
                     const paramId = colKey.substring(0, lastUnderscore);
                     const locName = colKey.substring(lastUnderscore + 1);
 
-                    if (!locValues[locName]) {
-                        locValues[locName] = { location: locName };
-                    }
+                    if (!locValues[locName]) locValues[locName] = { location: locName };
                     locValues[locName][paramId] = value;
                 });
 
@@ -418,7 +409,7 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
                         tn: locData.tn,
                         tp: locData.tp,
                         cod: locData.cod,
-                        ss: locData.ss
+                        ss: locData.ss,
                     });
                 });
             });
@@ -429,7 +420,6 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
             }
 
             if (!silent) showToast?.('데이터가 성공적으로 저장되었습니다.');
-
             await loadReadings();
         } catch (err) {
             if (!silent) showToast?.(`저장 실패: ${err.message}`, 'error');
@@ -438,19 +428,76 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
         }
     };
 
+    const saveModalDraft = useCallback(async ({
+        date,
+        items = [],
+        measurementOrder = 1,
+        measurementGroup,
+        sourceType = 'manual',
+        sourceLabel,
+        qntechProjectId,
+    } = {}) => {
+        if (!date) {
+            showToast?.('저장할 날짜가 없습니다.', 'error');
+            return { success: false };
+        }
+
+        const safeOrder = normalizeMeasurementOrder(measurementOrder);
+        const group = measurementGroup || buildManualMeasurementGroup(date, safeOrder);
+        const rows = items
+            .map(({ item, values }) => {
+                const row = {
+                    date,
+                    measurement_group: group,
+                    measurement_order: safeOrder,
+                    source_type: sourceType || 'manual',
+                    source_label: sourceLabel || `${safeOrder}회차`,
+                    qntech_project_id: qntechProjectId || null,
+                    location: item?.key || item?.label,
+                    nh3_n: normalizeModalSaveValue(values?.nh3_n),
+                    no3_n: normalizeModalSaveValue(values?.no3_n),
+                    po4_p: item?.po4pApplicable === false ? null : normalizeModalSaveValue(values?.po4_p),
+                    alkalinity: normalizeModalSaveValue(values?.alkalinity),
+                };
+
+                return row;
+            })
+            .filter((row) => row.location);
+
+        if (rows.length === 0) {
+            showToast?.('저장할 수질 데이터가 없습니다.', 'error');
+            return { success: false };
+        }
+
+        setLoading(true);
+        try {
+            const res = await WaterQualityModel.bulkSave(rows);
+            if (!res?.success) throw new Error(res?.error || '수질 데이터 저장에 실패했습니다.');
+            showToast?.('수질분석 데이터가 저장되었습니다.');
+            await loadReadings();
+            return { success: true };
+        } catch (err) {
+            showToast?.(`저장 실패: ${err.message}`, 'error');
+            return { success: false, error: err.message };
+        } finally {
+            setLoading(false);
+        }
+    }, [loadReadings, showToast]);
+
     return {
         history,
         loading,
         waterTypes,
         updateReading,
         submitBatch,
-        refresh: loadReadings,
+        refresh: () => loadReadings({ force: true }),
         pendingChanges,
         isImportingFromQntech,
         lastImportSummary,
         lastRangeImportSummary,
         handleImportFromQntech,
         handleImportRangeFromQntech,
-        applyImportedWaterValues
+        applyImportedWaterValues,
+        saveModalDraft,
     };
 };

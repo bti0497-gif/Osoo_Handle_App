@@ -28,16 +28,21 @@ function syncRecentCertificateCacheForSite(...args) {
 module.exports = (db) => {
     const router = express.Router();
 
-    // Return today's date in KST (YYYY-MM-DD).
-    const getTodayKST = () => {
-        return new Date(new Date().getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const pad2 = (value) => String(value).padStart(2, '0');
+
+    // Return today's date using the PC's local clock (YYYY-MM-DD).
+    const getTodayLocal = () => {
+        const now = new Date();
+        return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
     };
 
-    const buildAutoLogoutTime = (dateKST) => {
-        const date = /^\d{4}-\d{2}-\d{2}$/.test(String(dateKST || ''))
-            ? String(dateKST)
-            : getTodayKST();
-        return new Date(`${date}T20:00:00+09:00`).toISOString();
+    // Store attendance time as local wall-clock time, not UTC.
+    const getLocalTime = (date = new Date()) => {
+        return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+    };
+
+    const buildAutoLogoutTime = () => {
+        return '20:00:00';
     };
 
     const isWithinSiteRadius = (site, lat, lng) => {
@@ -61,7 +66,7 @@ module.exports = (db) => {
 
     const closeStaleOpenSessions = (member) => {
         if (!member?.id || String(member.role || 'user') !== 'user') return;
-        const today = getTodayKST();
+        const today = getTodayLocal();
         const rows = db.prepare(`
             SELECT id, date
             FROM attendance
@@ -441,7 +446,7 @@ module.exports = (db) => {
     // 3. Find the active attendance session.
     router.post('/session', (req, res) => {
         const { memberId } = req.body;
-        const dateKST = getTodayKST();
+        const dateKST = getTodayLocal();
         try {
             const activeSession = db.prepare('SELECT * FROM attendance WHERE member_id = ? AND date = ? AND logout_time IS NULL').get(memberId, dateKST);
             res.json({ success: true, session: activeSession || null });
@@ -453,7 +458,7 @@ module.exports = (db) => {
     // 3b. List attendance logs by date from local SQLite.
     router.get('/attendance', (req, res) => {
         const dateParam = String(req.query.date || '').trim();
-        const dateKST = dateParam || getTodayKST();
+        const dateKST = dateParam || getTodayLocal();
         try {
             const rows = db.prepare(`
                 SELECT * FROM attendance
@@ -469,8 +474,8 @@ module.exports = (db) => {
     // 4. Check-in.
     router.post('/attendance', (req, res) => {
         const { memberId, memberName, lat, lng, locationMatched } = req.body;
-        const dateKST = getTodayKST();
-        const loginTime = new Date().toISOString();
+        const dateKST = getTodayLocal();
+        const loginTime = getLocalTime();
 
         try {
             const site = db.prepare(`
@@ -481,13 +486,15 @@ module.exports = (db) => {
             `).get() || {};
             const remote = detectRemoteSession();
             const siteHasLocation = Number.isFinite(Number(site.target_lat)) && Number.isFinite(Number(site.target_lng));
+            const requestHasLocation = Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
             const matchedBySite = isWithinSiteRadius(site, lat, lng);
-            const effectiveLocationMatched = siteHasLocation ? matchedBySite : Boolean(locationMatched);
+            const effectiveLocationMatched = siteHasLocation && requestHasLocation ? matchedBySite : Boolean(locationMatched);
             const effectiveRemoteDetected = remote.detected || !effectiveLocationMatched;
             const effectiveRemoteType = effectiveLocationMatched ? (remote.sessionType || 'local') : 'abnormal_location';
             const effectiveEvidence = [
                 remote.evidence || '',
-                !effectiveLocationMatched ? 'site_location_mismatch' : ''
+                siteHasLocation && requestHasLocation && !effectiveLocationMatched ? 'site_location_mismatch' : '',
+                siteHasLocation && !requestHasLocation && !locationMatched ? 'site_location_unavailable' : ''
             ].filter(Boolean).join('; ');
             // Reuse an existing active session if one already exists.
             let activeSession = db.prepare('SELECT * FROM attendance WHERE member_id = ? AND date = ? AND logout_time IS NULL').get(memberId, dateKST);
@@ -495,8 +502,8 @@ module.exports = (db) => {
             if (!activeSession) {
                 const result = db.prepare(`
           INSERT INTO attendance 
-                    (member_id, member_name, site_id, site_name, date, login_time, login_lat, login_lng, location_matched, remote_session_detected, remote_session_type, remote_session_evidence) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (member_id, member_name, site_id, site_name, date, login_time, location_matched, remote_session_detected, remote_session_type, remote_session_evidence) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `).run(
                     memberId,
                     memberName,
@@ -504,8 +511,6 @@ module.exports = (db) => {
                     site.site_name || '',
                     dateKST,
                     loginTime,
-                    lat,
-                    lng,
                     effectiveLocationMatched ? 1 : 0,
                     effectiveRemoteDetected ? 1 : 0,
                     effectiveRemoteType,
@@ -524,8 +529,8 @@ module.exports = (db) => {
     // 5. Check-out.
     router.post('/logout', (req, res) => {
         const { memberId, autoLogout } = req.body;
-        const dateKST = getTodayKST();
-        const logoutTime = new Date().toISOString();
+        const dateKST = getTodayLocal();
+        const logoutTime = getLocalTime();
 
         try {
             db.prepare(`

@@ -71,8 +71,6 @@ export async function runStoredSessionRestore() {
     const restoredUser = {
         ...freshData,
         isRemote: savedUser.isRemote ?? false,
-        loginLat: savedUser.loginLat ?? null,
-        loginLng: savedUser.loginLng ?? null,
     };
 
     if (field && !activeSession) {
@@ -83,8 +81,6 @@ export async function runStoredSessionRestore() {
             const matched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(freshData, coords) : true;
             await AuthModel.recordAttendance(freshData, lat, lng, matched);
             restoredUser.isRemote = LOGIN_GEO_CHECK_ENABLED ? !matched : false;
-            restoredUser.loginLat = lat;
-            restoredUser.loginLng = lng;
         } catch (attErr) {
             console.warn('세션 복원 중 출석 기록 실패:', attErr.message);
         }

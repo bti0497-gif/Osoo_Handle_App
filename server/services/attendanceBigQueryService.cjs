@@ -12,6 +12,56 @@
 
 const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
 
+async function getAttendanceTimeColumnType(bq) {
+  try {
+    const [metadata] = await bq.dataset(DATASET_ID).table('attendance').getMetadata();
+    const field = (metadata.schema.fields || []).find((item) => item.name === 'login_time');
+    return String(field?.type || 'TIMESTAMP').toUpperCase();
+  } catch (_) {
+    return 'TIMESTAMP';
+  }
+}
+
+function buildTimeExpression(jsonPath, targetType) {
+  const raw = `JSON_VALUE(item, '${jsonPath}')`;
+  const normalized = `REPLACE(${raw}, 'T', ' ')`;
+  const hasTimezone = `REGEXP_CONTAINS(IFNULL(${raw}, ''), r'(Z|[+-]\\d{2}:\\d{2})$')`;
+  const isTimeOnly = `REGEXP_CONTAINS(IFNULL(${raw}, ''), r'^\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?$')`;
+  const sourceDate = `SAFE_CAST(JSON_VALUE(item, '$.date') AS DATE)`;
+
+  if (targetType === 'TIME') {
+    return `
+          CASE
+            WHEN ${raw} IS NULL OR TRIM(${raw}) = '' THEN NULL
+            WHEN ${isTimeOnly} THEN SAFE_CAST(${raw} AS TIME)
+            WHEN ${hasTimezone} THEN TIME(DATETIME(SAFE_CAST(${raw} AS TIMESTAMP), 'Asia/Seoul'))
+            ELSE TIME(SAFE_CAST(${normalized} AS DATETIME))
+          END`;
+  }
+
+  if (targetType === 'DATETIME') {
+    return `
+          CASE
+            WHEN ${raw} IS NULL OR TRIM(${raw}) = '' THEN NULL
+            WHEN ${isTimeOnly}
+              THEN DATETIME(${sourceDate}, SAFE_CAST(${raw} AS TIME))
+            WHEN ${hasTimezone}
+              THEN DATETIME(SAFE_CAST(${raw} AS TIMESTAMP), 'Asia/Seoul')
+            ELSE SAFE_CAST(${normalized} AS DATETIME)
+          END`;
+  }
+
+  return `
+          CASE
+            WHEN ${raw} IS NULL OR TRIM(${raw}) = '' THEN NULL
+            WHEN ${isTimeOnly}
+              THEN TIMESTAMP(DATETIME(${sourceDate}, SAFE_CAST(${raw} AS TIME)), 'Asia/Seoul')
+            WHEN ${hasTimezone}
+              THEN SAFE_CAST(${raw} AS TIMESTAMP)
+            ELSE TIMESTAMP(SAFE_CAST(${normalized} AS DATETIME), 'Asia/Seoul')
+          END`;
+}
+
 /**
  * ─────────────────────────────────────────────────────────────────────
  * @param {Array}  logs      SQLite attendance 레코드 배열
@@ -27,6 +77,9 @@ async function syncAttendanceLogs(logs, siteMeta = {}) {
   const defaultSiteId = siteMeta.siteId ? String(siteMeta.siteId) : null;
 
   const now = new Date().toISOString();
+  const timeColumnType = await getAttendanceTimeColumnType(bq);
+  const loginTimeExpression = buildTimeExpression('$.login_time', timeColumnType);
+  const logoutTimeExpression = buildTimeExpression('$.logout_time', timeColumnType);
   const rows = logs.map(log => {
     const rowSiteName = String(log.site_name || defaultSiteName || '');
     return {
@@ -38,10 +91,6 @@ async function syncAttendanceLogs(logs, siteMeta = {}) {
       date:             log.date         || '',
       login_time:       log.login_time   || null,
       logout_time:      log.logout_time  || null,
-      login_lat:        log.login_lat    != null ? Number(log.login_lat)  : null,
-      login_lng:        log.login_lng    != null ? Number(log.login_lng)  : null,
-      logout_lat:       log.logout_lat   != null ? Number(log.logout_lat) : null,
-      logout_lng:       log.logout_lng   != null ? Number(log.logout_lng) : null,
       location_matched: Boolean(log.location_matched),
       remote_session_detected: Boolean(log.remote_session_detected),
       remote_session_type: log.remote_session_type || 'local',
@@ -66,12 +115,8 @@ async function syncAttendanceLogs(logs, siteMeta = {}) {
           JSON_VALUE(item, '$.member_id') AS member_id,
           JSON_VALUE(item, '$.member_name') AS member_name,
           SAFE_CAST(JSON_VALUE(item, '$.date') AS DATE) AS date,
-          SAFE_CAST(JSON_VALUE(item, '$.login_time') AS TIMESTAMP) AS login_time,
-          SAFE_CAST(JSON_VALUE(item, '$.logout_time') AS TIMESTAMP) AS logout_time,
-          SAFE_CAST(JSON_VALUE(item, '$.login_lat') AS FLOAT64) AS login_lat,
-          SAFE_CAST(JSON_VALUE(item, '$.login_lng') AS FLOAT64) AS login_lng,
-          SAFE_CAST(JSON_VALUE(item, '$.logout_lat') AS FLOAT64) AS logout_lat,
-          SAFE_CAST(JSON_VALUE(item, '$.logout_lng') AS FLOAT64) AS logout_lng,
+          ${loginTimeExpression} AS login_time,
+          ${logoutTimeExpression} AS logout_time,
           SAFE_CAST(JSON_VALUE(item, '$.location_matched') AS BOOL) AS location_matched,
           SAFE_CAST(JSON_VALUE(item, '$.remote_session_detected') AS BOOL) AS remote_session_detected,
           JSON_VALUE(item, '$.remote_session_type') AS remote_session_type,
@@ -92,14 +137,12 @@ async function syncAttendanceLogs(logs, siteMeta = {}) {
 
         INSERT INTO \`${DATASET_ID}.attendance\` (
           id, site_id, site_name, member_id, member_name, date,
-          login_time, logout_time, login_lat, login_lng, logout_lat, logout_lng,
-          location_matched, remote_session_detected, remote_session_type,
+          login_time, logout_time, location_matched, remote_session_detected, remote_session_type,
           remote_session_evidence, auto_logout, uploaded_at
         )
         SELECT
           id, site_id, site_name, member_id, member_name, date,
-          login_time, logout_time, login_lat, login_lng, logout_lat, logout_lng,
-          location_matched, remote_session_detected, remote_session_type,
+          login_time, logout_time, location_matched, remote_session_detected, remote_session_type,
           remote_session_evidence, auto_logout, uploaded_at
         FROM source_rows;
       `,

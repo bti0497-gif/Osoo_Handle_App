@@ -1,6 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { KitModel } from './KitModel';
 import { SettingsModel } from '../settings/SettingsModel';
+import { getTodayKST } from '../../core/constants';
+
+const toNumberOrZero = (value) => {
+    if (value === '' || value === null || value === undefined) return 0;
+    const parsed = Number(String(value).replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+};
 
 export const useKitViewModel = (currentUser, { showAlert } = {}) => {
     const [history, setHistory] = useState([]);
@@ -57,11 +64,11 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
         }
     };
 
-    const loadLogs = useCallback(async () => {
+    const loadLogs = useCallback(async (options = {}) => {
         setLoading(true);
         try {
-            const today = new Date();
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStr = getTodayKST();
+            const today = new Date(`${todayStr}T12:00:00`);
 
             // 설정에서 활성화된 키트 항목 가져오기
             const settingsData = await SettingsModel.getSettings();
@@ -76,7 +83,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
             }
             setKitTypes(dynamicTypes);
 
-            const historyData = await KitModel.fetchHistory();
+            const historyData = await KitModel.fetchHistory({ force: options.force });
             if (historyData.success) {
                 const histRaw = historyData.history;
 
@@ -107,7 +114,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
                     const existingDates = new Set(hist.map(h => h.date));
 
                     while (currentDate < todayDate) {
-                        const ds = currentDate.toISOString().split('T')[0];
+                        const ds = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`;
                         if (!existingDates.has(ds)) {
                             const emptyRow = { date: ds };
                             dynamicTypes.forEach(t => { emptyRow[t] = { purchase: null, usage: null, inventory: null }; });
@@ -129,7 +136,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
                 for (let i = 1; i <= 1; i++) {
                     const d = new Date(today);
                     d.setDate(today.getDate() + i);
-                    const ds = d.toISOString().split('T')[0];
+                    const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
                     if (!hist.find(h => h.date === ds)) {
                         const emptyRow = { date: ds, isFuture: true };
                         dynamicTypes.forEach(t => { emptyRow[t] = { purchase: null, usage: null, inventory: null }; });
@@ -317,6 +324,46 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
         }
     };
 
+    const saveModalDraft = useCallback(async ({ date, items = [] } = {}) => {
+        if (!date) {
+            showAlert?.('저장할 날짜가 없습니다.');
+            return { success: false };
+        }
+
+        const payloadItems = items
+            .map(({ item, values }) => {
+                const kitName = item?.key || item?.name || item?.label;
+                if (!kitName) return null;
+                return {
+                    kit_name: kitName,
+                    date,
+                    purchase_amount: toNumberOrZero(values?.purchase),
+                    usage_amount: toNumberOrZero(values?.usage),
+                    current_inventory: toNumberOrZero(values?.inventory),
+                };
+            })
+            .filter(Boolean);
+
+        if (payloadItems.length === 0) {
+            showAlert?.('저장할 키트 데이터가 없습니다.');
+            return { success: false };
+        }
+
+        setLoading(true);
+        try {
+            const res = await KitModel.bulkSave(payloadItems);
+            if (!res.success) throw new Error(res.error || '키트 데이터 저장에 실패했습니다.');
+            showAlert?.('키트 데이터가 저장되었습니다.');
+            await loadLogs();
+            return res;
+        } catch (err) {
+            showAlert?.('저장 실패: ' + err.message);
+            return { success: false, error: err.message };
+        } finally {
+            setLoading(false);
+        }
+    }, [loadLogs, showAlert]);
+
     const syncAnalysisKits = async (baseDateText) => {
         setIsSyncingAnalysisKits(true);
         try {
@@ -364,8 +411,9 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
         savePurchase,
         updateAmount,
         submitBatch,
+        saveModalDraft,
         syncAnalysisKits,
-        refresh: loadLogs,
+        refresh: () => loadLogs({ force: true }),
         pendingChanges
     };
 };

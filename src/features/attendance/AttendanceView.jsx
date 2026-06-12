@@ -1,6 +1,15 @@
 import React from 'react';
 import { useAttendanceViewModel } from './useAttendanceViewModel';
 
+const formatAttendanceTime = (value) => {
+    if (!value) return '-';
+    const text = String(value);
+    const timeOnly = text.match(/^(\d{2}:\d{2}(?::\d{2})?)/);
+    if (timeOnly) return timeOnly[1];
+    const date = new Date(text);
+    return Number.isNaN(date.getTime()) ? text : date.toLocaleTimeString();
+};
+
 const AttendanceView = ({ currentUser }) => {
     const {
         date,
@@ -48,10 +57,10 @@ const AttendanceView = ({ currentUser }) => {
                                 <tr key={log.id} className="hover:bg-slate-50 transition-colors">
                                     <td className="px-6 py-4 font-black text-slate-700">{log.member_name}</td>
                                     <td className="px-6 py-4 text-slate-600 font-bold">
-                                        {log.login_time ? new Date(log.login_time).toLocaleTimeString() : '-'}
+                                        {formatAttendanceTime(log.login_time)}
                                     </td>
                                     <td className="px-6 py-4 text-slate-600 font-bold">
-                                        {log.logout_time ? new Date(log.logout_time).toLocaleTimeString() : <span className="text-orange-500 font-black animate-pulse">근무 중</span>}
+                                        {log.logout_time ? formatAttendanceTime(log.logout_time) : <span className="text-orange-500 font-black animate-pulse">근무 중</span>}
                                     </td>
                                     <td className="px-6 py-4">
                                         {log.is_remote ? (

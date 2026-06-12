@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CertificateModel } from './CertificateModel';
-import { getApiBase } from '../../core/api/serverConfig.js';
 
 const PRIVILEGED_ROLES = new Set(['admin', 'super_admin', 'central_admin', 'group_admin']);
 
@@ -30,14 +29,6 @@ function buildCertificateAuthHeaders(user) {
     };
 }
 
-function absolutizeApiUrl(url) {
-    const s = String(url || '').trim();
-    if (!s) return '';
-    if (/^https?:\/\//i.test(s)) return s;
-    const base = String(getApiBase() || '').replace(/\/$/, '');
-    return `${base}${s.startsWith('/') ? s : `/${s}`}`;
-}
-
 function safeDownloadFileName(name) {
     const raw = String(name || 'certificate').trim() || 'certificate';
     return raw.replace(/["\r\n\\/:*?<>|]+/g, '_').slice(0, 180);
@@ -56,7 +47,7 @@ function normalizeRecord(item) {
         sortDate,
         sampledAt: toDisplayDate(item.sampledAt || item.sampled_at),
         issuedAt: toDisplayDate(item.issuedAt || item.issued_at),
-        downloadUrl: absolutizeApiUrl(item.downloadUrl || item.download_url || ''),
+        downloadUrl: item.downloadUrl || item.download_url || '',
     };
 }
 
@@ -83,12 +74,6 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
             const siteName = selectedSite === 'ALL' ? undefined : selectedSite;
             const month = String(selectedMonth).padStart(2, '0');
 
-            try {
-                await CertificateModel.syncCache({ siteName, year: selectedYear, month }, authHeaders);
-            } catch (syncErr) {
-                console.warn('[Certificate] 캐시 동기화 실패:', syncErr?.message || syncErr);
-            }
-
             const res = await CertificateModel.fetchList({ siteName, year: selectedYear, month }, authHeaders);
             const list = Array.isArray(res?.items) ? res.items.map(normalizeRecord) : [];
             setRecords(list);
@@ -109,7 +94,7 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
         } finally {
             setIsLoading(false);
         }
-    }, [currentUser, selectedSite, selectedYear, selectedMonth, selectedId, showToast]);
+    }, [currentUser, isPrivileged, selectedSite, selectedYear, selectedMonth, selectedId, showToast]);
 
     useEffect(() => {
         loadRecords();
@@ -242,7 +227,13 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
             document.body.appendChild(a);
             a.click();
             a.remove();
-            setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+
+            const opened = window.open(objectUrl, '_blank', 'noopener,noreferrer');
+            showToast?.(
+                opened ? '성적서 PDF를 다운로드하고 새 창으로 열었습니다.' : '성적서 PDF를 다운로드했습니다.',
+                'success'
+            );
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 300_000);
         } catch (err) {
             console.error(err);
             const msg = err?.data?.userMessage || err?.data?.message || err?.message || '다운로드 처리 중 오류가 발생했습니다.';

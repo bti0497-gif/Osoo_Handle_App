@@ -98,36 +98,22 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS water_quality (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uploaded_at TEXT,
     report_date DATE NOT NULL,
-    site_id TEXT,
+    category TEXT,
     site_name TEXT,
     site_name_raw TEXT,
-    items TEXT,
-    results TEXT,
-    ss REAL,
     bod REAL,
+    ss REAL,
     tn REAL,
     tp REAL,
-    total_coliform REAL,
     mlss REAL,
-    do REAL,
-    ph REAL,
+    total_coliform REAL,
+    drive_file_name TEXT,
     source_pdf_name TEXT,
-    source_page_index INTEGER,
-    ai_confidence REAL,
-    site_match_confidence REAL,
-    manual_review_required INTEGER DEFAULT 0,
-    warnings_json TEXT,
-    source_payload_json TEXT,
-    certificate_category TEXT,
-    certificate_file_name TEXT,
-    certificate_original_file_name TEXT,
-    drive_file_id TEXT,
-    drive_web_view_link TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
-    is_synced INTEGER DEFAULT 0,
-    UNIQUE(site_id, report_date, source_page_index)
+    is_synced INTEGER DEFAULT 0
   );
   CREATE TABLE IF NOT EXISTS qntech_water_quality (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -194,31 +180,6 @@ db.exec(`
     notes TEXT,
     site_name TEXT,
     author TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
-    is_synced INTEGER DEFAULT 0
-  );
-  CREATE TABLE IF NOT EXISTS certificate_water_quality (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    report_date DATE NOT NULL,
-    site_id TEXT,
-    site_name TEXT,
-    site_name_raw TEXT,
-    ss REAL,
-    bod REAL,
-    tn REAL,
-    tp REAL,
-    total_coliform REAL,
-    mlss REAL,
-    do REAL,
-    ph REAL,
-    source_pdf_name TEXT,
-    source_page_index INTEGER,
-    ai_confidence REAL,
-    site_match_confidence REAL,
-    manual_review_required INTEGER DEFAULT 0,
-    warnings_json TEXT,
-    source_payload_json TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
     is_synced INTEGER DEFAULT 0
@@ -312,12 +273,8 @@ db.exec(`
     site_id TEXT,
     site_name TEXT,
     date DATE NOT NULL,
-    login_time DATETIME,
-    logout_time DATETIME,
-    login_lat REAL,
-    login_lng REAL,
-    logout_lat REAL,
-    logout_lng REAL,
+    login_time TEXT,
+    logout_time TEXT,
     location_matched BOOLEAN DEFAULT 0,
     remote_session_detected BOOLEAN DEFAULT 0,
     remote_session_type TEXT,
@@ -340,18 +297,6 @@ if (!attendanceCols.includes('site_id')) {
 }
 if (!attendanceCols.includes('site_name')) {
   db.prepare('ALTER TABLE attendance ADD COLUMN site_name TEXT').run();
-}
-if (!attendanceCols.includes('login_lat')) {
-  db.prepare('ALTER TABLE attendance ADD COLUMN login_lat REAL').run();
-}
-if (!attendanceCols.includes('login_lng')) {
-  db.prepare('ALTER TABLE attendance ADD COLUMN login_lng REAL').run();
-}
-if (!attendanceCols.includes('logout_lat')) {
-  db.prepare('ALTER TABLE attendance ADD COLUMN logout_lat REAL').run();
-}
-if (!attendanceCols.includes('logout_lng')) {
-  db.prepare('ALTER TABLE attendance ADD COLUMN logout_lng REAL').run();
 }
 if (!attendanceCols.includes('location_matched')) {
   db.prepare('ALTER TABLE attendance ADD COLUMN location_matched BOOLEAN DEFAULT 0').run();
@@ -404,36 +349,22 @@ function createCertificateWaterQualityTable() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS water_quality (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uploaded_at TEXT,
       report_date DATE NOT NULL,
-      site_id TEXT,
+      category TEXT,
       site_name TEXT,
       site_name_raw TEXT,
-      items TEXT,
-      results TEXT,
-      ss REAL,
       bod REAL,
+      ss REAL,
       tn REAL,
       tp REAL,
-      total_coliform REAL,
       mlss REAL,
-      do REAL,
-      ph REAL,
+      total_coliform REAL,
+      drive_file_name TEXT,
       source_pdf_name TEXT,
-      source_page_index INTEGER,
-      ai_confidence REAL,
-      site_match_confidence REAL,
-      manual_review_required INTEGER DEFAULT 0,
-      warnings_json TEXT,
-      source_payload_json TEXT,
-      certificate_category TEXT,
-      certificate_file_name TEXT,
-      certificate_original_file_name TEXT,
-      drive_file_id TEXT,
-      drive_web_view_link TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
-      is_synced INTEGER DEFAULT 0,
-      UNIQUE(site_id, report_date, source_page_index)
+      is_synced INTEGER DEFAULT 0
     );
   `);
 }
@@ -441,6 +372,50 @@ function createCertificateWaterQualityTable() {
 function normalizeLegacyQntechValueExpression(columnName) {
   return `CASE WHEN ${columnName} IN ('-1', '-1.0', '-1.00') THEN '초과' ELSE CAST(${columnName} AS TEXT) END`;
 }
+
+function migrateLegacyWaterQualitySchema() {
+  const waterColumnInfo = db.prepare("PRAGMA table_info(water_quality)").all();
+  const waterColumnNames = waterColumnInfo.map((item) => item.name);
+  const needsLegacyMigration = waterColumnNames.some((name) => [
+    'items', 'results', 'site_id', 'do', 'ph', 'source_page_index', 'ai_confidence', 'site_match_confidence',
+    'manual_review_required', 'warnings_json', 'source_payload_json', 'certificate_category',
+    'certificate_file_name', 'certificate_original_file_name', 'drive_file_id', 'drive_web_view_link'
+  ].includes(name));
+
+  if (!needsLegacyMigration) return;
+
+  db.exec('ALTER TABLE water_quality RENAME TO water_quality_legacy_backup');
+  createCertificateWaterQualityTable();
+  db.exec(`
+    INSERT INTO water_quality (
+      id, uploaded_at, report_date, category, site_name, site_name_raw,
+      bod, ss, tn, tp, mlss, total_coliform, drive_file_name, source_pdf_name,
+      created_at, last_modified, is_synced
+    )
+    SELECT
+      id,
+      created_at AS uploaded_at,
+      report_date,
+      COALESCE(certificate_category, json_extract(source_payload_json, '$.certificate_file.category')) AS category,
+      site_name,
+      site_name_raw,
+      bod,
+      ss,
+      tn,
+      tp,
+      mlss,
+      total_coliform,
+      COALESCE(certificate_file_name, json_extract(source_payload_json, '$.certificate_file.file_name')) AS drive_file_name,
+      source_pdf_name,
+      created_at,
+      last_modified,
+      is_synced
+    FROM water_quality_legacy_backup
+  `);
+  db.exec('DROP TABLE water_quality_legacy_backup');
+}
+
+migrateLegacyWaterQualitySchema();
 
 const waterColumnInfo = db.prepare("PRAGMA table_info(water_quality)").all();
 const waterColumnNames = waterColumnInfo.map((item) => item.name);
@@ -538,52 +513,22 @@ if (hasOperationalWaterColumns) {
 }
 
 [
-  ['site_id', 'TEXT'],
+  ['uploaded_at', 'TEXT'],
+  ['category', 'TEXT'],
   ['site_name', 'TEXT'],
   ['site_name_raw', 'TEXT'],
-  ['items', 'TEXT'],
-  ['results', 'TEXT'],
-  ['ss', 'REAL'],
   ['bod', 'REAL'],
+  ['ss', 'REAL'],
   ['tn', 'REAL'],
   ['tp', 'REAL'],
-  ['total_coliform', 'REAL'],
   ['mlss', 'REAL'],
-  ['do', 'REAL'],
-  ['ph', 'REAL'],
+  ['total_coliform', 'REAL'],
+  ['drive_file_name', 'TEXT'],
   ['source_pdf_name', 'TEXT'],
-  ['source_page_index', 'INTEGER'],
-  ['ai_confidence', 'REAL'],
-  ['site_match_confidence', 'REAL'],
-  ['manual_review_required', 'INTEGER DEFAULT 0'],
-  ['warnings_json', 'TEXT'],
-  ['source_payload_json', 'TEXT'],
-  ['certificate_category', 'TEXT'],
-  ['certificate_file_name', 'TEXT'],
-  ['certificate_original_file_name', 'TEXT'],
-  ['drive_file_id', 'TEXT'],
-  ['drive_web_view_link', 'TEXT'],
   ['created_at', 'TEXT'],
   ['last_modified', 'TEXT'],
   ['is_synced', 'INTEGER DEFAULT 0'],
 ].forEach(([columnName, definition]) => ensureColumn('water_quality', columnName, definition));
-
-db.prepare(`
-  INSERT OR IGNORE INTO water_quality (
-    report_date, site_id, site_name, site_name_raw,
-    ss, bod, tn, tp, total_coliform, mlss, do, ph,
-    source_pdf_name, source_page_index, ai_confidence, site_match_confidence,
-    manual_review_required, warnings_json, source_payload_json,
-    created_at, last_modified, is_synced
-  )
-  SELECT
-    report_date, site_id, site_name, site_name_raw,
-    ss, bod, tn, tp, total_coliform, mlss, do, ph,
-    source_pdf_name, source_page_index, ai_confidence, site_match_confidence,
-    manual_review_required, warnings_json, source_payload_json,
-    created_at, last_modified, is_synced
-  FROM certificate_water_quality
-`).run();
 
 const settingsCols = db.prepare("PRAGMA table_info(app_settings)").all().map(c => c.name);
 [
@@ -716,7 +661,7 @@ if (db.prepare('SELECT count(*) as count FROM config_items').get().count === 0) 
 
 // --- Sync Columns Migration (BigQuery Synchronization) ---
 // 동기화 대상 테이블 목록
-const syncTables = ['flow_readings', 'medicine_logs', 'qntech_water_quality', 'kit_logs', 'facility_logs'];
+const syncTables = ['flow_readings', 'medicine_logs', 'water_quality', 'qntech_water_quality', 'kit_logs', 'facility_logs'];
 const syncDefaults = db.prepare('SELECT site_name, manager_name FROM app_settings WHERE id = 1').get() || {};
 const defaultSiteName = syncDefaults.site_name || 'Unknown Site';
 const defaultAuthor = syncDefaults.manager_name || 'Unknown Author';
@@ -728,29 +673,26 @@ syncTables.forEach(tableName => {
     console.log(`Adding 'site_name' column to ${tableName}`);
     db.prepare(`ALTER TABLE ${tableName} ADD COLUMN site_name TEXT`).run();
   }
-
   if (!cols.includes('author')) {
     console.log(`Adding 'author' column to ${tableName}`);
     db.prepare(`ALTER TABLE ${tableName} ADD COLUMN author TEXT`).run();
   }
-
   if (!cols.includes('is_synced')) {
     console.log(`Adding 'is_synced' column to ${tableName}`);
     db.prepare(`ALTER TABLE ${tableName} ADD COLUMN is_synced INTEGER DEFAULT 0`).run();
-    // 기존 데이터는 모두 미동기화(0) 상태로 초기화하여 최초 동기화 유도
-    db.prepare(`UPDATE ${tableName} SET is_synced = 0`).run();
   }
-
   if (!cols.includes('last_modified')) {
     console.log(`Adding 'last_modified' column to ${tableName}`);
     db.prepare(`ALTER TABLE ${tableName} ADD COLUMN last_modified TEXT`).run();
-// 동기화 대상 테이블 목록
-    db.prepare(`UPDATE ${tableName} SET last_modified = datetime('now', 'localtime') WHERE last_modified IS NULL`).run();
   }
-
   if (!cols.includes('created_at')) {
     console.log(`Adding 'created_at' column to ${tableName}`);
     db.prepare(`ALTER TABLE ${tableName} ADD COLUMN created_at TEXT`).run();
+  }
+
+  const updatedCols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
+  if (!updatedCols.includes('site_name') || !updatedCols.includes('author')) {
+    return;
   }
 
   db.prepare(`
@@ -769,6 +711,43 @@ const attendanceSyncCols = db.prepare("PRAGMA table_info(attendance)").all().map
 if (!attendanceSyncCols.includes('last_modified')) {
   db.prepare('ALTER TABLE attendance ADD COLUMN last_modified TEXT').run();
   db.prepare("UPDATE attendance SET last_modified = datetime('now', 'localtime') WHERE last_modified IS NULL").run();
+}
+
+const obsoleteAttendanceLocationCols = ['login_lat', 'login_lng', 'logout_lat', 'logout_lng'];
+const currentAttendanceCols = db.prepare("PRAGMA table_info(attendance)").all().map(c => c.name);
+if (obsoleteAttendanceLocationCols.some((column) => currentAttendanceCols.includes(column))) {
+  db.exec(`
+    DROP TABLE IF EXISTS attendance_compact;
+    CREATE TABLE IF NOT EXISTS attendance_compact (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      member_id TEXT NOT NULL,
+      member_name TEXT NOT NULL,
+      site_id TEXT,
+      site_name TEXT,
+      date DATE NOT NULL,
+      login_time TEXT,
+      logout_time TEXT,
+      location_matched BOOLEAN DEFAULT 0,
+      remote_session_detected BOOLEAN DEFAULT 0,
+      remote_session_type TEXT,
+      remote_session_evidence TEXT,
+      auto_logout BOOLEAN DEFAULT 0,
+      is_synced BOOLEAN DEFAULT 0,
+      last_modified TEXT
+    );
+    INSERT INTO attendance_compact (
+      id, member_id, member_name, site_id, site_name, date, login_time, logout_time,
+      location_matched, remote_session_detected, remote_session_type, remote_session_evidence,
+      auto_logout, is_synced, last_modified
+    )
+    SELECT
+      id, member_id, member_name, site_id, site_name, date, login_time, logout_time,
+      location_matched, remote_session_detected, remote_session_type, remote_session_evidence,
+      auto_logout, is_synced, last_modified
+    FROM attendance;
+    DROP TABLE attendance;
+    ALTER TABLE attendance_compact RENAME TO attendance;
+  `);
 }
 
 // --- 현장/회원 기준 테이블 인덱스 및 백필 ---
@@ -847,7 +826,6 @@ db.prepare('CREATE INDEX IF NOT EXISTS idx_water_quality_site_date ON water_qual
 db.prepare('CREATE INDEX IF NOT EXISTS idx_qntech_water_quality_site_date ON qntech_water_quality (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_kit_logs_site_date ON kit_logs (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_facility_logs_site_date ON facility_logs (site_id, date)').run();
-db.prepare('CREATE INDEX IF NOT EXISTS idx_certificate_wq_site_date ON certificate_water_quality (site_id, report_date)').run();
 
 // site_id 백필: 기존 데이터가 있으면 app_settings.site_id로 채움
 if (currentSiteId) {

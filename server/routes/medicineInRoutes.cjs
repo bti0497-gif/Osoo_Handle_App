@@ -27,6 +27,40 @@ const BASE_KITS = ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '�
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']);
 
+function recalculateInventory(db, { tableName, nameColumn, itemName, metadata }) {
+  const rows = db.prepare(`
+    SELECT id, COALESCE(purchase_amount, 0) AS purchase_amount, COALESCE(usage_amount, 0) AS usage_amount
+    FROM ${tableName}
+    WHERE ${nameColumn} = ?
+    ORDER BY date ASC, id ASC
+  `).all(itemName);
+
+  const updateStmt = db.prepare(`
+    UPDATE ${tableName}
+    SET current_inventory = ?,
+        site_id = ?,
+        site_name = ?,
+        author = ?,
+        last_modified = ?,
+        is_synced = ?
+    WHERE id = ?
+  `);
+
+  let runningInventory = 0;
+  for (const row of rows) {
+    runningInventory = Math.round((runningInventory + Number(row.purchase_amount || 0) - Number(row.usage_amount || 0)) * 10) / 10;
+    updateStmt.run(
+      runningInventory,
+      metadata.siteId,
+      metadata.siteName,
+      metadata.author,
+      metadata.lastModified,
+      metadata.isSynced,
+      row.id
+    );
+  }
+}
+
 /** 파일명에 사용 불가한 문자 제거 */
 function sanitizeName(name) {
   return String(name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
@@ -342,6 +376,7 @@ module.exports = function (db, baseDir, appDataPath) {
       }
 
       const metadata = getCurrentRecordMetadata(db, req.body);
+      const affectedNames = new Set();
 
       if (tab === 'medicine') {
         const stmt = db.prepare(`
@@ -360,6 +395,7 @@ module.exports = function (db, baseDir, appDataPath) {
             if (!item.name || item.purchase == null) continue;
             stmt.run(item.name, date, Number(item.purchase),
               metadata.siteId, metadata.siteName, metadata.author, metadata.createdAt, metadata.lastModified);
+            affectedNames.add(item.name);
           }
         })(items);
       } else if (tab === 'kit') {
@@ -379,11 +415,26 @@ module.exports = function (db, baseDir, appDataPath) {
             if (!item.name || item.purchase == null) continue;
             stmt.run(item.name, date, Number(item.purchase),
               metadata.siteId, metadata.siteName, metadata.author, metadata.createdAt, metadata.lastModified);
+            affectedNames.add(item.name);
           }
         })(items);
       } else {
         return res.status(400).json({ success: false, error: '유효하지 않은 tab 값' });
       }
+
+      const recalculateConfig = tab === 'medicine'
+        ? { tableName: 'medicine_logs', nameColumn: 'medicine_name' }
+        : { tableName: 'kit_logs', nameColumn: 'kit_name' };
+
+      db.transaction(() => {
+        for (const itemName of affectedNames) {
+          recalculateInventory(db, {
+            ...recalculateConfig,
+            itemName,
+            metadata,
+          });
+        }
+      })();
 
       // 사진 로컬 저장 (photoPaths: { 약품명: 'C:\\...\\file.jpg' })
       if (photoPaths && typeof photoPaths === 'object') {

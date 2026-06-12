@@ -45,25 +45,29 @@ function msUntilKstTodayAutoLogout(now = new Date()) {
  */
 function shouldForceEodLogoutForOpenSession(loginTimeIso) {
     if (!loginTimeIso) return false;
-    const login = new Date(loginTimeIso);
+    const loginText = String(loginTimeIso);
+    const loginTimeOnly = loginText.match(/^(\d{2}):(\d{2})/);
+    const login = loginTimeOnly ? null : new Date(loginText.replace(' ', 'T'));
     const now = new Date();
     if (!isKstAtOrPastAutoLogoutHour(now)) return false;
 
-    const loginDateKst = new Intl.DateTimeFormat('sv-SE', {
-        timeZone: 'Asia/Seoul',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    }).format(login);
-    const todayKst = new Intl.DateTimeFormat('sv-SE', {
-        timeZone: 'Asia/Seoul',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    }).format(now);
-    if (loginDateKst !== todayKst) return false;
+    if (!loginTimeOnly) {
+        const loginDateKst = new Intl.DateTimeFormat('sv-SE', {
+            timeZone: 'Asia/Seoul',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        }).format(login);
+        const todayKst = new Intl.DateTimeFormat('sv-SE', {
+            timeZone: 'Asia/Seoul',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        }).format(now);
+        if (loginDateKst !== todayKst) return false;
+    }
 
-    const loginHour = parseInt(
+    const loginHour = loginTimeOnly ? Number(loginTimeOnly[1]) : parseInt(
         new Intl.DateTimeFormat('en-GB', {
             timeZone: 'Asia/Seoul',
             hour: '2-digit',
@@ -71,7 +75,7 @@ function shouldForceEodLogoutForOpenSession(loginTimeIso) {
         }).format(login),
         10
     );
-    const loginMin = parseInt(
+    const loginMin = loginTimeOnly ? Number(loginTimeOnly[2]) : parseInt(
         new Intl.DateTimeFormat('en-GB', {
             timeZone: 'Asia/Seoul',
             minute: '2-digit',
@@ -194,8 +198,6 @@ export const useAuthViewModel = () => {
                 const restoredUser = {
                     ...freshData,
                     isRemote: savedUser.isRemote ?? false,
-                    loginLat: savedUser.loginLat ?? null,
-                    loginLng: savedUser.loginLng ?? null,
                 };
 
                 if (field && !activeSession) {
@@ -206,8 +208,6 @@ export const useAuthViewModel = () => {
                         const matched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(freshData, coords) : true;
                         await AuthModel.recordAttendance(freshData, lat, lng, matched);
                         restoredUser.isRemote = LOGIN_GEO_CHECK_ENABLED ? !matched : false;
-                        restoredUser.loginLat = lat;
-                        restoredUser.loginLng = lng;
                     } catch (attErr) {
                         console.warn('세션 복원 중 출석 기록 실패:', attErr.message);
                     }
@@ -281,7 +281,7 @@ export const useAuthViewModel = () => {
                         console.warn('출석 기록 실패 (로그인은 계속 진행):', attErr.message);
                     }
 
-                    const enrichedUser = { ...userData, isRemote: LOGIN_GEO_CHECK_ENABLED ? !locationMatched : false, loginLat, loginLng };
+                    const enrichedUser = { ...userData, isRemote: LOGIN_GEO_CHECK_ENABLED ? !locationMatched : false };
 
                     AuthModel.saveSession(enrichedUser);
                     setUser(enrichedUser);

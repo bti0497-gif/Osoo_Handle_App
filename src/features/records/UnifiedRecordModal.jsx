@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 const TAB_META = [
     { id: 'flow', label: '유량관리' },
@@ -7,11 +7,27 @@ const TAB_META = [
     { id: 'kit', label: '키트관리' },
 ];
 
+const WATER_FIELD_META = [
+    { id: 'nh3_n', label: '암모니아성질소', code: 'NH3-N' },
+    { id: 'no3_n', label: '질산성질소', code: 'NO3-N' },
+    { id: 'po4_p', label: '인산염인', code: 'PO4-P' },
+    { id: 'alkalinity', label: '알칼리도', code: 'ALK' },
+];
+
+const WATER_LOCATION_COLUMNS = ['유량조정조', '무산소조', '포기조', '침전조', '방류조'];
+
+const emptyWaterDraft = () => WATER_FIELD_META.reduce((acc, field) => {
+    acc[field.id] = '';
+    return acc;
+}, {});
+
 const toNumberOrNull = (value) => {
     if (value === '' || value === null || value === undefined) return null;
     const parsed = Number(String(value).replace(/,/g, ''));
     return Number.isFinite(parsed) ? parsed : null;
 };
+
+const round1 = (value) => Math.round(value * 10) / 10;
 
 const formatValue = (value) => {
     if (value === null || value === undefined || value === '') return '-';
@@ -20,7 +36,7 @@ const formatValue = (value) => {
 };
 
 const inputStyle = {
-    height: 36,
+    height: 34,
     border: '1px solid #cbd5e1',
     borderRadius: 6,
     padding: '0 10px',
@@ -37,14 +53,128 @@ const labelStyle = {
     color: '#475569',
 };
 
-function buildInitialDraft(tabId, item) {
+const buttonBaseStyle = {
+    height: 34,
+    borderRadius: 7,
+    border: '1px solid #cbd5e1',
+    background: '#fff',
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 900,
+    color: '#334155',
+};
+
+function DateOnlyInput({ value, onChange, style }) {
+    const pickerRef = useRef(null);
+
+    const openPicker = () => {
+        const picker = pickerRef.current;
+        if (!picker) return;
+        if (typeof picker.showPicker === 'function') {
+            picker.showPicker();
+            return;
+        }
+        picker.click();
+    };
+
+    return (
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', ...style }}>
+            <input
+                type="text"
+                value={value || ''}
+                onChange={(e) => onChange?.(e.target.value)}
+                placeholder="YYYY-MM-DD"
+                style={{
+                    ...inputStyle,
+                    width: '100%',
+                    height: style?.height || inputStyle.height,
+                    textAlign: 'left',
+                    boxSizing: 'border-box',
+                    paddingRight: 34,
+                }}
+            />
+            <button
+                type="button"
+                onClick={openPicker}
+                style={{
+                    position: 'absolute',
+                    right: 6,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: 24,
+                    height: 24,
+                    border: 0,
+                    background: 'transparent',
+                    color: '#0f172a',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 0,
+                }}
+                aria-label="날짜 선택"
+            >
+                <span className="material-icons" style={{ fontSize: 19 }}>calendar_today</span>
+            </button>
+            <input
+                ref={pickerRef}
+                type="date"
+                value={value || ''}
+                onChange={(e) => onChange?.(e.target.value)}
+                tabIndex={-1}
+                aria-hidden="true"
+                style={{
+                    position: 'absolute',
+                    right: 0,
+                    bottom: 0,
+                    width: 1,
+                    height: 1,
+                    opacity: 0,
+                    pointerEvents: 'none',
+                }}
+            />
+        </div>
+    );
+}
+
+function normalizeRoundOptions(rounds = [], fallbackOrder = 1) {
+    if (Array.isArray(rounds) && rounds.length === 0) return [];
+
+    const normalized = rounds
+        .map((round) => {
+            const value = Number(round.value ?? round.order ?? round.measurementOrder);
+            if (!Number.isFinite(value) || value <= 0) return null;
+            const order = Math.floor(value);
+            return {
+                value: order,
+                label: round.label || `${order}회차`,
+                sourceType: round.sourceType || round.source_type || 'manual',
+                measurementGroup: round.measurementGroup || round.measurement_group || '',
+                qntechProjectId: round.qntechProjectId || round.qntech_project_id || null,
+                isNewManual: Boolean(round.isNewManual),
+            };
+        })
+        .filter(Boolean);
+
+    if (normalized.length > 0) return normalized;
+
+    const safeOrder = Number.isFinite(Number(fallbackOrder)) && Number(fallbackOrder) > 0
+        ? Math.floor(Number(fallbackOrder))
+        : 1;
+
+    return [{ value: safeOrder, label: `${safeOrder}회차`, sourceType: 'manual', measurementGroup: '' }];
+}
+
+function buildInitialDraft(tabId, item, roundValue) {
     if (!item) return {};
+
     if (tabId === 'flow') {
         return {
             reading: item.values?.reading ?? '',
             calculatedFlow: item.values?.flow ?? '',
         };
     }
+
     if (tabId === 'medicine' || tabId === 'kit') {
         return {
             purchase: item.values?.purchase ?? '',
@@ -52,9 +182,13 @@ function buildInitialDraft(tabId, item) {
             inventory: item.values?.inventory ?? '',
         };
     }
-    return {
-        result: item.values?.result ?? '',
-    };
+
+    const roundValues = item.valuesByRound?.[roundValue];
+    const values = roundValues || item.values || {};
+    return WATER_FIELD_META.reduce((acc, field) => {
+        acc[field.id] = values[field.id] ?? '';
+        return acc;
+    }, {});
 }
 
 export default function UnifiedRecordModal({
@@ -63,27 +197,64 @@ export default function UnifiedRecordModal({
     initialTab = 'flow',
     initialDate = '',
     contexts = {},
+    isImportingQntech = false,
+    isSyncingAnalysisKits = false,
     onClose,
     onSaveDraft,
+    onImportQntech,
+    onImportQntechRange,
+    onSyncAnalysisKits,
+    onValidationError,
+    onConfirmPartialSave,
+    onDateChange,
 }) {
     const [activeTab, setActiveTab] = useState(initialTab);
     const [date, setDate] = useState(initialDate);
     const [selectedByTab, setSelectedByTab] = useState({});
     const [draft, setDraft] = useState({});
+    const [defaultPurchaseAppliedByTab, setDefaultPurchaseAppliedByTab] = useState({});
+    const [waterRounds, setWaterRounds] = useState([{ value: 1, label: '1회차' }]);
+    const [selectedWaterRound, setSelectedWaterRound] = useState(1);
+    const [rangeStartDate, setRangeStartDate] = useState(initialDate);
+    const [rangeEndDate, setRangeEndDate] = useState(initialDate);
+    const [waterInputMode, setWaterInputMode] = useState('manual');
 
     useEffect(() => {
         if (!isOpen) return;
+        const waterContext = contexts.water || {};
+        const rounds = normalizeRoundOptions(waterContext.rounds, waterContext.measurementOrder || 1);
         setActiveTab(initialTab);
         setDate(initialDate);
+        setRangeStartDate(initialDate);
+        setRangeEndDate(initialDate);
         setSelectedByTab({});
         setDraft({});
-    }, [isOpen, initialTab, initialDate]);
+        setDefaultPurchaseAppliedByTab({});
+        setWaterRounds(rounds);
+        setSelectedWaterRound(rounds[0]?.value || 1);
+        setWaterInputMode('manual');
+    }, [isOpen, initialTab, initialDate, contexts]);
 
-    const currentItems = useMemo(() => contexts[activeTab]?.items || [], [contexts, activeTab]);
+    const tabContext = contexts[activeTab] || {};
+    const currentItems = useMemo(() => tabContext.items || [], [tabContext]);
     const selectedKey = selectedByTab[activeTab] || currentItems[0]?.key || '';
     const selectedItem = currentItems.find((item) => item.key === selectedKey) || currentItems[0] || null;
-    const draftKey = `${activeTab}:${selectedItem?.key || ''}`;
-    const currentDraft = draft[draftKey] || buildInitialDraft(activeTab, selectedItem);
+    const draftKey = `${activeTab}:${selectedItem?.key || ''}:${activeTab === 'water' ? selectedWaterRound : 'base'}`;
+    const currentDraft = draft[draftKey] || buildInitialDraft(activeTab, selectedItem, selectedWaterRound);
+    const selectedRound = waterRounds.find((round) => round.value === selectedWaterRound) || waterRounds[0] || null;
+    const waterLocationNameSet = useMemo(() => (
+        new Set(currentItems.map((item) => String(item.label || item.key || '').trim()))
+    ), [currentItems]);
+    const isWaterMbrLayout = activeTab === 'water' && !waterLocationNameSet.has('침전조');
+
+    const isPo4pInputEnabled = (item) => {
+        if (!item) return false;
+        const locationName = String(item.label || item.key || '').trim();
+        if (locationName === '유량조정조' || locationName === '방류조') return true;
+        if (locationName === '포기조') return isWaterMbrLayout || item.po4pApplicable === true;
+        if (locationName === '침전조') return !isWaterMbrLayout || item.po4pApplicable === true;
+        return item.po4pApplicable === true;
+    };
 
     useEffect(() => {
         if (!selectedItem) return;
@@ -92,48 +263,370 @@ export default function UnifiedRecordModal({
 
     if (!isOpen) return null;
 
+    const getDraftKeyForItem = (tabId, item, roundValue = selectedWaterRound) => (
+        `${tabId}:${item?.key || ''}:${tabId === 'water' ? roundValue : 'base'}`
+    );
+
+    const getDraftForItem = (tabId, item, roundValue = selectedWaterRound) => {
+        const key = getDraftKeyForItem(tabId, item, roundValue);
+        return draft[key] || buildInitialDraft(tabId, item, roundValue);
+    };
+
+    const recalculateInventoryDraft = (item, values) => {
+        const previousInventory = toNumberOrNull(item?.previous?.inventory) || 0;
+        const purchase = toNumberOrNull(values.purchase) || 0;
+        const usage = toNumberOrNull(values.usage) || 0;
+        return {
+            ...values,
+            inventory: round1(previousInventory + purchase - usage),
+        };
+    };
+
+    const collectCurrentTabDrafts = (options = {}) => currentItems.map((item) => {
+        const values = { ...getDraftForItem(activeTab, item) };
+        if (options.fillMissingWaterWithZero && activeTab === 'water') {
+            WATER_FIELD_META.forEach((field) => {
+                if (field.id === 'po4_p' && !isPo4pInputEnabled(item)) return;
+                if (values[field.id] === '' || values[field.id] === null || values[field.id] === undefined) {
+                    values[field.id] = '0';
+                }
+            });
+        }
+        return {
+            item: activeTab === 'water'
+                ? { ...item, po4pApplicable: isPo4pInputEnabled(item) }
+                : item,
+            values,
+        };
+    });
+
     const setDraftField = (field, value) => {
         setDraft((prev) => {
             const nextDraft = {
-                ...(prev[draftKey] || buildInitialDraft(activeTab, selectedItem)),
+                ...(prev[draftKey] || buildInitialDraft(activeTab, selectedItem, selectedWaterRound)),
                 [field]: value,
             };
 
-            if (activeTab === 'flow' && field === 'reading') {
+            if (activeTab === 'flow' && mode !== 'edit' && field === 'reading') {
                 const reading = toNumberOrNull(value);
                 const previousReading = toNumberOrNull(selectedItem?.previous?.reading);
                 if (reading !== null && previousReading !== null) {
-                    nextDraft.calculatedFlow = Math.round((reading - previousReading) * 10) / 10;
+                    nextDraft.calculatedFlow = round1(reading - previousReading);
+                }
+            }
+
+            if (activeTab === 'flow' && mode !== 'edit' && field === 'calculatedFlow') {
+                const calculatedFlow = toNumberOrNull(value);
+                const previousReading = toNumberOrNull(selectedItem?.previous?.reading);
+                if (calculatedFlow !== null && previousReading !== null) {
+                    nextDraft.reading = round1(previousReading + calculatedFlow);
                 }
             }
 
             if ((activeTab === 'medicine' || activeTab === 'kit') && (field === 'purchase' || field === 'usage')) {
+                Object.assign(nextDraft, recalculateInventoryDraft(selectedItem, nextDraft));
+            }
+
+            if ((activeTab === 'medicine' || activeTab === 'kit') && field === 'inventory') {
+                const inventory = toNumberOrNull(value);
                 const previousInventory = toNumberOrNull(selectedItem?.previous?.inventory) || 0;
-                const purchase = toNumberOrNull(field === 'purchase' ? value : nextDraft.purchase) || 0;
-                const usage = toNumberOrNull(field === 'usage' ? value : nextDraft.usage) || 0;
-                nextDraft.inventory = Math.round((previousInventory + purchase - usage) * 10) / 10;
+                const purchase = toNumberOrNull(nextDraft.purchase) || 0;
+                if (inventory !== null) {
+                    nextDraft.usage = round1(previousInventory + purchase - inventory);
+                }
             }
 
             return { ...prev, [draftKey]: nextDraft };
         });
     };
 
+    const setWaterDraftField = (item, field, value) => {
+        setDraft((prev) => {
+            const key = getDraftKeyForItem('water', item, selectedWaterRound);
+            return {
+                ...prev,
+                [key]: {
+                    ...(prev[key] || buildInitialDraft('water', item, selectedWaterRound)),
+                    [field]: value,
+                },
+            };
+        });
+    };
+
+    const handleToggleDefaultPurchases = () => {
+        if (activeTab !== 'medicine' && activeTab !== 'kit') return;
+        const nextApplied = !defaultPurchaseAppliedByTab[activeTab];
+
+        setDraft((prev) => {
+            const next = { ...prev };
+            currentItems.forEach((item) => {
+                const key = getDraftKeyForItem(activeTab, item);
+                const current = next[key] || buildInitialDraft(activeTab, item);
+                const updated = {
+                    ...current,
+                    purchase: nextApplied ? (Number(item.defaultPurchase) || 0) : '',
+                };
+                next[key] = recalculateInventoryDraft(item, updated);
+            });
+            return next;
+        });
+
+        setDefaultPurchaseAppliedByTab((prev) => ({ ...prev, [activeTab]: nextApplied }));
+    };
+
     const handleSelectItem = (key) => {
         setSelectedByTab((prev) => ({ ...prev, [activeTab]: key }));
     };
 
-    const handleSave = () => {
+    const handleAddWaterRound = () => {
+        const nextOrder = Math.max(0, ...waterRounds.map((round) => Number(round.value) || 0)) + 1;
+        const nextRound = {
+            value: nextOrder,
+            label: `${nextOrder}회차`,
+            sourceType: 'manual',
+            measurementGroup: `manual:${date}:${nextOrder}`,
+            qntechProjectId: null,
+            isNewManual: true,
+        };
+        setWaterRounds((prev) => [...prev, nextRound]);
+        setSelectedWaterRound(nextOrder);
+        setDraft((prev) => {
+            const next = { ...prev };
+            currentItems.forEach((item) => {
+                next[getDraftKeyForItem('water', item, nextOrder)] = emptyWaterDraft();
+            });
+            return next;
+        });
+    };
+
+    const findMissingInput = () => {
+        if (mode === 'edit') return null;
+
+        for (const item of currentItems) {
+            const values = getDraftForItem(activeTab, item);
+            const itemLabel = item.label || item.key;
+
+            if (activeTab === 'flow') {
+                if (toNumberOrNull(values.reading) === null) return { item, message: `${itemLabel}의 검침값이 빠졌습니다.` };
+                if (toNumberOrNull(values.calculatedFlow) === null) return { item, message: `${itemLabel}의 유량 계산값이 빠졌습니다.` };
+            }
+
+            if (activeTab === 'medicine' || activeTab === 'kit') {
+                const purchaseLabel = activeTab === 'kit' ? '구매' : '입고';
+                if (toNumberOrNull(values.purchase) === null) return { item, message: `${itemLabel}의 ${purchaseLabel}값이 빠졌습니다.` };
+                if (toNumberOrNull(values.usage) === null) return { item, message: `${itemLabel}의 사용값이 빠졌습니다.` };
+                if (toNumberOrNull(values.inventory) === null) return { item, message: `${itemLabel}의 재고값이 빠졌습니다.` };
+            }
+        }
+
+        return null;
+    };
+
+    const getWaterInputStatus = () => {
+        let hasAnyValue = false;
+        const missing = [];
+
+        currentItems.forEach((item) => {
+            const values = getDraftForItem('water', item);
+            WATER_FIELD_META.forEach((field) => {
+                if (field.id === 'po4_p' && !isPo4pInputEnabled(item)) return;
+                const value = values[field.id];
+                if (toNumberOrNull(value) === null) {
+                    missing.push({ item, field });
+                } else {
+                    hasAnyValue = true;
+                }
+            });
+        });
+
+        return { hasAnyValue, missing };
+    };
+
+    const notifyValidation = (message, item) => {
+        if (onValidationError) onValidationError(message);
+        else window.alert(message);
+        if (item?.key) setSelectedByTab((prev) => ({ ...prev, [activeTab]: item.key }));
+    };
+
+    const validateBeforeSave = () => {
+        const missing = findMissingInput();
+        if (!missing) return true;
+
+        notifyValidation(missing.message, missing.item);
+        return false;
+    };
+
+    const handleSave = async () => {
+        if (activeTab !== 'water' && !validateBeforeSave()) return;
+
+        let fillMissingWaterWithZero = false;
+        if (activeTab === 'water' && mode !== 'edit') {
+            const { hasAnyValue, missing } = getWaterInputStatus();
+            if (!hasAnyValue) {
+                notifyValidation(`${selectedWaterRound}회차 입력 데이터가 없습니다.`, currentItems[0]);
+                return;
+            }
+            if (missing.length > 0) {
+                const first = missing[0];
+                const message = `${first.item.label || first.item.key}의 ${first.field.label} 값이 없습니다. 그대로 저장하시겠습니까?`;
+                const confirmed = onConfirmPartialSave
+                    ? await onConfirmPartialSave(message)
+                    : window.confirm(message);
+                if (!confirmed) {
+                    notifyValidation(`${first.item.label || first.item.key}의 ${first.field.label} 값을 입력해 주세요.`, first.item);
+                    return;
+                }
+                fillMissingWaterWithZero = true;
+            }
+        }
+
+        const selectedRound = waterRounds.find((round) => round.value === selectedWaterRound) || null;
+        const resolvedMeasurementGroup = selectedRound?.sourceType === 'qntech'
+            ? selectedRound?.measurementGroup
+            : `manual:${date}:${selectedWaterRound}`;
+
         onSaveDraft?.({
             mode,
             tab: activeTab,
             date,
             item: selectedItem,
             values: currentDraft,
+            items: collectCurrentTabDrafts({ fillMissingWaterWithZero }),
+            measurementOrder: activeTab === 'water' ? selectedWaterRound : undefined,
+            measurementGroup: activeTab === 'water' ? resolvedMeasurementGroup : undefined,
+            sourceType: activeTab === 'water' ? (selectedRound?.sourceType || 'manual') : undefined,
+            sourceLabel: activeTab === 'water' ? selectedRound?.label : undefined,
+            qntechProjectId: activeTab === 'water' ? selectedRound?.qntechProjectId : undefined,
         });
     };
 
+    const renderWaterSidebar = () => {
+        if (activeTab !== 'water') return null;
+
+        return (
+            <div style={{ minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, padding: 10, borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                    {[
+                        ['manual', '수동입력'],
+                        ['qntech', '자동입력'],
+                    ].map(([modeValue, label]) => {
+                        const isActive = waterInputMode === modeValue;
+                        return (
+                            <button
+                                key={modeValue}
+                                type="button"
+                                onClick={() => setWaterInputMode(modeValue)}
+                                style={{
+                                    ...buttonBaseStyle,
+                                    height: 32,
+                                    borderColor: isActive ? '#1e293b' : '#cbd5e1',
+                                    background: isActive ? '#1e293b' : '#fff',
+                                    color: isActive ? '#fff' : '#475569',
+                                }}
+                            >
+                                {label}
+                            </button>
+                        );
+                    })}
+                </div>
+
+                {waterInputMode === 'manual' ? (
+                    <>
+                        <div style={{ overflowY: 'auto', padding: 10, display: 'grid', alignContent: 'start', gap: 6, flex: 1, minHeight: 0 }}>
+                            {waterRounds.length === 0 && (
+                                <div style={{ padding: '18px 8px', color: '#94a3b8', fontSize: 12, fontWeight: 800, textAlign: 'center' }}>
+                                    등록된 회차가 없습니다.
+                                </div>
+                            )}
+                            {waterRounds.map((round) => {
+                                const isSelected = round.value === selectedWaterRound;
+                                return (
+                                    <button
+                                        key={`${round.value}-${round.measurementGroup}`}
+                                        type="button"
+                                        onClick={() => setSelectedWaterRound(round.value)}
+                                        style={{
+                                            border: `1px solid ${isSelected ? '#2563eb' : '#e2e8f0'}`,
+                                            background: isSelected ? '#eff6ff' : '#fff',
+                                            color: isSelected ? '#1d4ed8' : '#334155',
+                                            borderRadius: 8,
+                                            padding: '9px 11px',
+                                            cursor: 'pointer',
+                                            textAlign: 'left',
+                                            fontSize: 13,
+                                            fontWeight: 850,
+                                        }}
+                                    >
+                                        <div>{round.label}</div>
+                                        <div style={{ marginTop: 2, fontSize: 10, color: '#94a3b8', fontWeight: 700 }}>
+                                            {round.sourceType === 'qntech' ? 'QnTECH' : '수동입력'}
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <div style={{ padding: 10, borderTop: '1px solid #e2e8f0', background: '#fff' }}>
+                            <button
+                                type="button"
+                                onClick={handleAddWaterRound}
+                                style={{ ...buttonBaseStyle, width: '100%', borderColor: '#2563eb', background: '#eff6ff', color: '#1d4ed8' }}
+                            >
+                                회차 추가
+                            </button>
+                        </div>
+                    </>
+                ) : (
+                    <div style={{ display: 'grid', gap: 10, padding: 12, flex: 1, alignContent: 'start' }}>
+                        <label style={{ display: 'grid', gap: 5 }}>
+                            <span style={labelStyle}>시작 날짜</span>
+                            <DateOnlyInput value={rangeStartDate} onChange={setRangeStartDate} style={{ width: '100%' }} />
+                        </label>
+                        <label style={{ display: 'grid', gap: 5 }}>
+                            <span style={labelStyle}>종료 날짜</span>
+                            <DateOnlyInput value={rangeEndDate} onChange={setRangeEndDate} style={{ width: '100%' }} />
+                        </label>
+                        <button
+                            type="button"
+                            onClick={async () => {
+                                await onImportQntechRange?.(rangeStartDate, rangeEndDate);
+                                setWaterInputMode('manual');
+                            }}
+                            disabled={isImportingQntech || !rangeStartDate || !rangeEndDate}
+                            style={{
+                                ...buttonBaseStyle,
+                                borderColor: '#0f766e',
+                                background: '#f0fdfa',
+                                color: '#115e59',
+                                cursor: isImportingQntech || !rangeStartDate || !rangeEndDate ? 'not-allowed' : 'pointer',
+                            }}
+                        >
+                            {isImportingQntech ? '불러오는 중...' : '불러오기'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={async () => {
+                                await onImportQntech?.(date);
+                                setWaterInputMode('manual');
+                            }}
+                            disabled={isImportingQntech || !date}
+                            style={{
+                                ...buttonBaseStyle,
+                                borderColor: '#2563eb',
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                cursor: isImportingQntech || !date ? 'not-allowed' : 'pointer',
+                            }}
+                        >
+                            현재 날짜만 불러오기
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
     const renderFields = () => {
-        if (!selectedItem) {
+        if (activeTab !== 'water' && !selectedItem) {
             return (
                 <div style={{ padding: 24, color: '#94a3b8', fontWeight: 700, fontSize: 13 }}>
                     선택할 항목이 없습니다.
@@ -157,29 +650,151 @@ export default function UnifiedRecordModal({
         }
 
         if (activeTab === 'medicine' || activeTab === 'kit') {
+            const defaultButtonLabel = defaultPurchaseAppliedByTab[activeTab] ? '구매 적용 해제' : '구매 적용';
             return (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
-                    <label style={{ display: 'grid', gap: 6 }}>
-                        <span style={labelStyle}>{activeTab === 'kit' ? '구매' : '입고'}</span>
-                        <input style={inputStyle} value={currentDraft.purchase} onChange={(e) => setDraftField('purchase', e.target.value)} />
-                    </label>
-                    <label style={{ display: 'grid', gap: 6 }}>
-                        <span style={labelStyle}>사용</span>
-                        <input style={inputStyle} value={currentDraft.usage} onChange={(e) => setDraftField('usage', e.target.value)} />
-                    </label>
-                    <label style={{ display: 'grid', gap: 6 }}>
-                        <span style={labelStyle}>재고</span>
-                        <input style={{ ...inputStyle, background: '#f8fafc' }} value={currentDraft.inventory} onChange={(e) => setDraftField('inventory', e.target.value)} />
-                    </label>
+                <div style={{ display: 'grid', gap: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                        <button
+                            type="button"
+                            onClick={handleToggleDefaultPurchases}
+                            style={{
+                                ...buttonBaseStyle,
+                                padding: '0 14px',
+                                borderColor: defaultPurchaseAppliedByTab[activeTab] ? '#f59e0b' : '#2563eb',
+                                background: defaultPurchaseAppliedByTab[activeTab] ? '#fffbeb' : '#eff6ff',
+                                color: defaultPurchaseAppliedByTab[activeTab] ? '#92400e' : '#1d4ed8',
+                            }}
+                        >
+                            {defaultButtonLabel}
+                        </button>
+                        {activeTab === 'kit' && (
+                            <button
+                                type="button"
+                                onClick={() => onSyncAnalysisKits?.(date)}
+                                disabled={isSyncingAnalysisKits || !date}
+                                style={{
+                                    ...buttonBaseStyle,
+                                    padding: '0 14px',
+                                    borderColor: '#16a34a',
+                                    background: '#f0fdf4',
+                                    color: '#166534',
+                                    cursor: isSyncingAnalysisKits || !date ? 'not-allowed' : 'pointer',
+                                }}
+                            >
+                                {isSyncingAnalysisKits ? '동기화 중...' : '분석키트 동기화'}
+                            </button>
+                        )}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+                        <label style={{ display: 'grid', gap: 6 }}>
+                            <span style={labelStyle}>{activeTab === 'kit' ? '구매' : '입고'}</span>
+                            <input style={inputStyle} value={currentDraft.purchase} onChange={(e) => setDraftField('purchase', e.target.value)} />
+                        </label>
+                        <label style={{ display: 'grid', gap: 6 }}>
+                            <span style={labelStyle}>사용</span>
+                            <input style={inputStyle} value={currentDraft.usage} onChange={(e) => setDraftField('usage', e.target.value)} />
+                        </label>
+                        <label style={{ display: 'grid', gap: 6 }}>
+                            <span style={labelStyle}>재고</span>
+                            <input style={{ ...inputStyle, background: '#f8fafc' }} value={currentDraft.inventory} onChange={(e) => setDraftField('inventory', e.target.value)} />
+                        </label>
+                    </div>
                 </div>
             );
         }
 
+        const itemByLocation = new Map(
+            currentItems.map((item) => [String(item.label || item.key).trim(), item])
+        );
+        const gridTemplateColumns = '128px repeat(5, minmax(76px, 1fr))';
+
         return (
-            <label style={{ display: 'grid', gap: 6 }}>
-                <span style={labelStyle}>측정결과</span>
-                <input style={{ ...inputStyle, textAlign: 'left' }} value={currentDraft.result} onChange={(e) => setDraftField('result', e.target.value)} />
-            </label>
+            <div style={{
+                overflowX: 'auto',
+                borderRadius: 10,
+                background: '#fff',
+                boxShadow: 'inset 0 0 0 1px #e2e8f0',
+            }}>
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns,
+                    alignItems: 'center',
+                    minWidth: 620,
+                    padding: '8px 10px',
+                    background: '#f8fafc',
+                    borderBottom: '1px solid #e2e8f0',
+                    columnGap: 8,
+                }}>
+                    <div style={{ fontSize: 11, fontWeight: 950, color: '#64748b' }}>항목</div>
+                    {WATER_LOCATION_COLUMNS.map((location) => (
+                        <div
+                            key={location}
+                            style={{
+                                fontSize: 11,
+                                fontWeight: 950,
+                                color: '#334155',
+                                textAlign: 'center',
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            {location}
+                        </div>
+                    ))}
+                </div>
+
+                {WATER_FIELD_META.map((field, index) => (
+                    <div
+                        key={field.id}
+                        style={{
+                            display: 'grid',
+                            gridTemplateColumns,
+                            alignItems: 'center',
+                            minWidth: 620,
+                            padding: '10px',
+                            columnGap: 8,
+                            borderBottom: index === WATER_FIELD_META.length - 1 ? 0 : '1px solid #eef2f7',
+                        }}
+                    >
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 950, color: '#0f172a', lineHeight: 1.2 }}>
+                                {field.label}
+                            </div>
+                            <div style={{ marginTop: 2, fontSize: 10.5, fontWeight: 900, color: '#64748b' }}>
+                                {field.code}
+                            </div>
+                        </div>
+
+                        {WATER_LOCATION_COLUMNS.map((location) => {
+                            const item = itemByLocation.get(location);
+                            const enabled = Boolean(item) && (field.id !== 'po4_p' || isPo4pInputEnabled(item));
+                            const values = item ? getDraftForItem('water', item) : {};
+                            return (
+                                <div key={`${field.id}-${location}`} style={{ display: 'flex', justifyContent: 'center' }}>
+                                    <input
+                                        disabled={!enabled}
+                                        style={{
+                                            ...inputStyle,
+                                            height: 28,
+                                            width: 64,
+                                            padding: '0 6px',
+                                            fontSize: 12,
+                                            boxSizing: 'border-box',
+                                            background: enabled ? '#fff' : '#f1f5f9',
+                                            color: enabled ? '#0f172a' : '#cbd5e1',
+                                            borderColor: enabled ? '#cbd5e1' : '#e2e8f0',
+                                            cursor: enabled ? 'text' : 'not-allowed',
+                                        }}
+                                        value={enabled ? (values[field.id] ?? '') : ''}
+                                        onChange={(e) => {
+                                            if (enabled) setWaterDraftField(item, field.id, e.target.value);
+                                        }}
+                                    />
+                                </div>
+                            );
+                        })}
+                    </div>
+                ))}
+            </div>
         );
     };
 
@@ -195,8 +810,8 @@ export default function UnifiedRecordModal({
             padding: 24,
         }}>
             <div style={{
-                width: 'min(980px, 96vw)',
-                height: 'min(640px, 88vh)',
+                width: 'min(860px, 94vw)',
+                height: 'min(520px, 84vh)',
                 background: '#fff',
                 borderRadius: 12,
                 boxShadow: '0 24px 80px rgba(15, 23, 42, 0.24)',
@@ -205,88 +820,104 @@ export default function UnifiedRecordModal({
                 minWidth: 0,
                 minHeight: 0,
                 overflow: 'hidden',
+                transform: 'translateY(-6px)',
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px', borderBottom: '1px solid #e2e8f0' }}>
-                    <div>
-                        <div style={{ fontSize: 18, fontWeight: 900, color: '#0f172a' }}>
-                            통합 입력 모달
+                <div style={{ display: 'grid', gridTemplateColumns: '210px 1fr auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #e2e8f0' }}>
+                    <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 17, fontWeight: 900, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                            통합 데이터 입력
                         </div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginTop: 3 }}>
-                            저장 API 연결 전 UI/UX 확인 모드
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginTop: 2 }}>
+                            {mode === 'edit' ? '선택 행 수정' : '새 데이터 추가'}
                         </div>
                     </div>
-                    <button type="button" onClick={onClose} style={{ border: 0, background: 'transparent', cursor: 'pointer', color: '#94a3b8', padding: 6 }}>
-                        <span className="material-icons" style={{ fontSize: 26 }}>close</span>
+
+                    <div style={{ display: 'flex', gap: 4, minWidth: 0, overflowX: 'auto' }}>
+                        {TAB_META.map((tab) => {
+                            const isActive = tab.id === activeTab;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => setActiveTab(tab.id)}
+                                    style={{
+                                        height: 34,
+                                        padding: '0 14px',
+                                        border: `1px solid ${isActive ? '#1e293b' : '#e2e8f0'}`,
+                                        borderRadius: 7,
+                                        background: isActive ? '#1e293b' : '#fff',
+                                        cursor: 'pointer',
+                                        fontSize: 13,
+                                        fontWeight: 900,
+                                        color: isActive ? '#fff' : '#64748b',
+                                        whiteSpace: 'nowrap',
+                                    }}
+                                >
+                                    {tab.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    <DateOnlyInput
+                        value={date}
+                        onChange={(nextDate) => {
+                            setDate(nextDate);
+                            setRangeStartDate(nextDate);
+                            setRangeEndDate(nextDate);
+                            setSelectedByTab({});
+                            setDraft({});
+                            onDateChange?.(nextDate);
+                        }}
+                        style={{ width: 138 }}
+                    />
+
+                    <button type="button" onClick={onClose} style={{ border: 0, background: 'transparent', cursor: 'pointer', color: '#94a3b8', padding: 4, height: 34 }}>
+                        <span className="material-icons" style={{ fontSize: 25 }}>close</span>
                     </button>
                 </div>
 
-                <div style={{ display: 'flex', gap: 4, padding: '12px 18px 0', borderBottom: '1px solid #e2e8f0' }}>
-                    {TAB_META.map((tab) => {
-                        const isActive = tab.id === activeTab;
-                        return (
-                            <button
-                                key={tab.id}
-                                type="button"
-                                onClick={() => setActiveTab(tab.id)}
-                                style={{
-                                    padding: '10px 18px',
-                                    border: 0,
-                                    borderBottom: isActive ? '3px solid #1e293b' : '3px solid transparent',
-                                    background: 'transparent',
-                                    cursor: 'pointer',
-                                    fontSize: 14,
-                                    fontWeight: 900,
-                                    color: isActive ? '#0f172a' : '#94a3b8',
-                                }}
-                            >
-                                {tab.label}
-                            </button>
-                        );
-                    })}
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 0, minHeight: 0, flex: 1 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '210px 1fr', gap: 0, minHeight: 0, flex: 1 }}>
                     <aside style={{ borderRight: '1px solid #e2e8f0', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                        <div style={{ padding: '14px 16px', borderBottom: '1px solid #e2e8f0' }}>
-                            <input
-                                type="date"
-                                value={date}
-                                onChange={(e) => setDate(e.target.value)}
-                                style={{ ...inputStyle, width: '100%', textAlign: 'left', boxSizing: 'border-box' }}
-                            />
-                        </div>
-                        <div style={{ overflowY: 'auto', padding: 10, display: 'grid', gap: 6 }}>
-                            {currentItems.map((item) => {
-                                const isSelected = item.key === selectedItem?.key;
-                                return (
-                                    <button
-                                        key={item.key}
-                                        type="button"
-                                        onClick={() => handleSelectItem(item.key)}
-                                        style={{
-                                            border: `1px solid ${isSelected ? '#2563eb' : '#e2e8f0'}`,
-                                            background: isSelected ? '#eff6ff' : '#fff',
-                                            color: isSelected ? '#1d4ed8' : '#334155',
-                                            borderRadius: 8,
-                                            padding: '10px 12px',
-                                            cursor: 'pointer',
-                                            textAlign: 'left',
-                                            fontSize: 13,
-                                            fontWeight: 850,
-                                        }}
-                                    >
-                                        {item.label}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                        {activeTab === 'water' ? renderWaterSidebar() : (
+                            <div style={{ overflowY: 'auto', padding: 10, display: 'grid', alignContent: 'start', gap: 6 }}>
+                                {currentItems.map((item) => {
+                                    const isSelected = item.key === selectedItem?.key;
+                                    return (
+                                        <button
+                                            key={item.key}
+                                            type="button"
+                                            onClick={() => handleSelectItem(item.key)}
+                                            style={{
+                                                border: `1px solid ${isSelected ? '#2563eb' : '#e2e8f0'}`,
+                                                background: isSelected ? '#eff6ff' : '#fff',
+                                                color: isSelected ? '#1d4ed8' : '#334155',
+                                                borderRadius: 8,
+                                                padding: '9px 11px',
+                                                cursor: 'pointer',
+                                                textAlign: 'left',
+                                                fontSize: 13,
+                                                fontWeight: 850,
+                                            }}
+                                        >
+                                            {item.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </aside>
 
                     <main style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                        <div style={{ padding: '18px 22px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
-                            <div style={{ fontSize: 16, fontWeight: 900, color: '#0f172a' }}>{selectedItem?.label || '항목 선택'}</div>
-                            <div style={{ display: 'flex', gap: 18, marginTop: 10, flexWrap: 'wrap' }}>
-                                {(selectedItem?.summary || []).map((item) => (
+                        <div style={{ padding: '14px 18px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                            <div style={{ fontSize: 15, fontWeight: 900, color: '#0f172a' }}>
+                                {activeTab === 'water' ? `수질분석 ${selectedRound?.label || ''}` : (selectedItem?.label || '항목 선택')}
+                            </div>
+                            <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
+                                {(activeTab === 'water'
+                                    ? [{ label: '날짜', value: date }, { label: '입력방식', value: selectedRound?.sourceType === 'qntech' ? 'QnTECH' : '수동입력' }]
+                                    : (selectedItem?.summary || [])
+                                ).map((item) => (
                                     <div key={item.label} style={{ fontSize: 12, color: '#64748b', fontWeight: 800 }}>
                                         {item.label}: <span style={{ color: '#0f172a' }}>{formatValue(item.value)}</span>
                                     </div>
@@ -294,21 +925,18 @@ export default function UnifiedRecordModal({
                             </div>
                         </div>
 
-                        <div style={{ padding: 22, flex: 1, overflowY: 'auto' }}>
+                        <div style={{ padding: 18, flex: 1, overflowY: 'auto' }}>
                             {renderFields()}
-                            <div style={{ marginTop: 18, padding: 14, borderRadius: 8, background: '#f8fafc', color: '#64748b', fontSize: 12, fontWeight: 700, lineHeight: 1.55 }}>
-                                이 단계에서는 입력값이 로컬 DB에 저장되지 않습니다. 탭 전환, 항목 선택, 값 입력, 자동계산 흐름을 확인한 뒤 저장 API와 BigQuery 동기화를 연결합니다.
-                            </div>
                         </div>
                     </main>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 18px', borderTop: '1px solid #e2e8f0' }}>
-                    <button type="button" onClick={onClose} style={{ padding: '9px 18px', borderRadius: 7, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', fontWeight: 800, color: '#475569' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '12px 18px', borderTop: '1px solid #e2e8f0' }}>
+                    <button type="button" onClick={onClose} style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', fontWeight: 800, color: '#475569' }}>
                         닫기
                     </button>
-                    <button type="button" onClick={handleSave} style={{ padding: '9px 18px', borderRadius: 7, border: 0, background: '#1e293b', cursor: 'pointer', fontWeight: 900, color: '#fff' }}>
-                        저장 UX 확인
+                    <button type="button" onClick={handleSave} style={{ padding: '8px 16px', borderRadius: 7, border: 0, background: '#1e293b', cursor: 'pointer', fontWeight: 900, color: '#fff' }}>
+                        저장하기
                     </button>
                 </div>
             </div>

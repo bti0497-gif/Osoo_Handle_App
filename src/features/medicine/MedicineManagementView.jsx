@@ -5,10 +5,11 @@ import { useDialog } from '../../components/common/DialogContext';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
 import { ADVANCED_DATAGRID_READ_ONLY_PROPS } from '../../components/common/advancedDataGridPresets';
 import UnifiedRecordModal from '../records/UnifiedRecordModal';
+import { getTodayKST } from '../../core/constants';
 
 const COLORS = ['#1e3a8a', '#047857', '#b45309', '#4338ca', '#57534e'];
 
-const todayText = () => new Date().toISOString().split('T')[0];
+const todayText = () => getTodayKST();
 
 const formatNumber = (value) => {
     if (value === null || value === undefined || value === '' || Number.isNaN(Number(value))) return '';
@@ -24,11 +25,26 @@ const getPreviousInventoryCell = (history, selectedDate, name) => {
     return null;
 };
 
+const ManagementFooter = ({ count, loading, onOpen }) => (
+    <div className="flow-management-view__footer" style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '12px 20px',
+        border: '1px solid #e2e8f0',
+        borderRadius: 10,
+        backgroundColor: '#FAFAFA',
+    }}>
+        <span style={{ fontSize: 12, color: '#94A3B8', fontWeight: 700 }}>총 {count}건</span>
+        <button type="button" onClick={onOpen} disabled={loading} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #2563eb', background: '#eff6ff', color: '#1d4ed8', fontWeight: 900, cursor: loading ? 'not-allowed' : 'pointer' }}>통합 데이터 작성</button>
+    </div>
+);
+
 const MedicineManagementView = ({ currentUser }) => {
     const { showAlert } = useDialog();
     const { itemState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
-    const { history = [], loading, medicineTypes = [], refresh } = useMedicineViewModel(currentUser, { showAlert });
+    const { history = [], loading, medicineTypes = [], refresh, saveModalDraft } = useMedicineViewModel(currentUser, { showAlert });
 
     const [selectedDate, setSelectedDate] = useState(null);
     const [modalState, setModalState] = useState({ open: false, tab: 'medicine', mode: 'add' });
@@ -56,6 +72,14 @@ const MedicineManagementView = ({ currentUser }) => {
         return medicineItems.filter((item) => item.checked).map((item) => item.name);
     }, [medicineTypes, medicineItems]);
 
+    const medicineDefaultAmountMap = useMemo(() => {
+        const map = new Map();
+        medicineItems.forEach((item) => {
+            map.set(String(item.name || '').trim(), Number(item.defaultAmount) || 0);
+        });
+        return map;
+    }, [medicineItems]);
+
     const gridCols = activeMedicineNames.map((name, idx) => ({
         id: name,
         label: name,
@@ -76,6 +100,7 @@ const MedicineManagementView = ({ currentUser }) => {
                 return {
                     key: name,
                     label: name,
+                    defaultPurchase: medicineDefaultAmountMap.get(String(name).trim()) ?? 0,
                     values: {
                         purchase: cell.purchase ?? '',
                         usage: cell.usage ?? '',
@@ -102,6 +127,33 @@ const MedicineManagementView = ({ currentUser }) => {
 
     const openModal = (mode = 'add') => {
         setModalState({ open: true, tab: 'medicine', mode });
+    };
+
+    const hasSelectedRowData = () => {
+        if (!selectedRow) return false;
+        return activeMedicineNames.some((name) => {
+            const cell = selectedRow[name];
+            return cell?.purchase !== null && cell?.purchase !== undefined
+                || cell?.usage !== null && cell?.usage !== undefined
+                || cell?.inventory !== null && cell?.inventory !== undefined;
+        });
+    };
+
+    const openUnifiedModal = () => {
+        openModal(hasSelectedRowData() ? 'edit' : 'add');
+    };
+
+    const handleSaveDraft = async (payload) => {
+        if (payload.tab !== 'medicine') {
+            showAlert?.('현재 화면에서는 약품관리 데이터만 저장합니다.');
+            return;
+        }
+
+        const result = await saveModalDraft({ date: payload.date, items: payload.items });
+        if (result?.success) {
+            setSelectedDate(payload.date);
+            setModalState((prev) => ({ ...prev, open: false }));
+        }
     };
 
     const renderCell = (row, col) => {
@@ -157,37 +209,37 @@ const MedicineManagementView = ({ currentUser }) => {
     );
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', minWidth: 0, minHeight: 0, backgroundColor: '#fff' }}>
-            <AdvancedDataGrid
-                {...ADVANCED_DATAGRID_READ_ONLY_PROPS}
-                title="약품 입고/사용/재고 데이터"
-                description="그리드는 조회와 행 선택만 지원합니다. 추가와 수정은 통합 입력 모달에서 확인합니다."
-                columns={gridCols}
-                data={history}
-                keyField="date"
-                scrollToKey={didInitTodayScrollRef.current ? null : todayStr}
-                width="100%"
-                height={400}
-                showBottomBar={false}
-                selectionMode="row"
-                contextMenu={false}
-                rowHeaderWidth={84}
-                rowHeaderLabel="날짜"
-                onRowSelect={handleRowSelect}
-                onCellDoubleClick={() => openModal('edit')}
-                getRowStyle={getRowStyle}
-                renderRowHeader={renderRowHeader}
-                renderCell={renderCell}
-                onRefresh={refresh}
-            />
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', borderTop: '1px solid #e2e8f0', background: '#f8fafc', flexShrink: 0 }}>
-                <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 800 }}>총 {history.length}일</span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    <button type="button" onClick={() => openModal('add')} disabled={loading} style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid #2563eb', background: '#eff6ff', color: '#1d4ed8', fontWeight: 900, cursor: 'pointer' }}>추가</button>
-                    <button type="button" onClick={() => openModal('edit')} disabled={!selectedDate || loading} style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', color: selectedDate ? '#334155' : '#94a3b8', fontWeight: 900, cursor: selectedDate ? 'pointer' : 'not-allowed' }}>수정</button>
-                </div>
+        <div className="flow-management-view">
+            <div className="flow-management-view__grid-scroll">
+                <AdvancedDataGrid
+                    {...ADVANCED_DATAGRID_READ_ONLY_PROPS}
+                    title="약품 입고/사용/재고 데이터"
+                    description="그리드는 조회와 행 선택만 지원합니다. 추가와 수정은 통합 입력 모달에서 확인합니다."
+                    columns={gridCols}
+                    data={history}
+                    keyField="date"
+                    scrollToKey={didInitTodayScrollRef.current ? null : todayStr}
+                    width="100%"
+                    height={400}
+                    showBottomBar={false}
+                    selectionMode="row"
+                    contextMenu={false}
+                    rowHeaderWidth={84}
+                    rowHeaderLabel="날짜"
+                    onRowSelect={handleRowSelect}
+                    onCellDoubleClick={() => openModal('edit')}
+                    getRowStyle={getRowStyle}
+                    renderRowHeader={renderRowHeader}
+                    renderCell={renderCell}
+                    onRefresh={refresh}
+                />
             </div>
+
+            <ManagementFooter
+                count={history.length}
+                loading={loading}
+                onOpen={openUnifiedModal}
+            />
 
             <UnifiedRecordModal
                 isOpen={modalState.open}
@@ -196,7 +248,7 @@ const MedicineManagementView = ({ currentUser }) => {
                 initialDate={modalState.mode === 'add' ? todayStr : (selectedDate || todayStr)}
                 contexts={buildModalContexts()}
                 onClose={() => setModalState((prev) => ({ ...prev, open: false }))}
-                onSaveDraft={() => showAlert?.('저장 API 연결 전입니다. 현재는 입력 UX만 확인합니다.')}
+                onSaveDraft={handleSaveDraft}
             />
         </div>
     );

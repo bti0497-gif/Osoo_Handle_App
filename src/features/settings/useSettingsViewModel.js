@@ -13,6 +13,7 @@ import {
     DEFAULT_MEDICINE_ITEMS,
     cloneItems,
     createDefaultFlowItems,
+    createDefaultLocationItems,
     getDefaultFlowOptionBySeries,
     needsResyncFlowItemsForSite,
 } from './settingsDefaults';
@@ -235,6 +236,30 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         setKitMapping({});
     };
 
+    const normalizeLocationItemsForSite = (storedLocations = [], method = 'A2O') => {
+        const restored = storedLocations.map((item) => ({
+            name: item.item_name,
+            checked: !!item.is_active
+        }));
+        const isMbr = String(method || '').trim().toUpperCase() === 'MBR';
+        const defaultLocations = createDefaultLocationItems(method).filter((item) => item.checked);
+        const defaultNames = new Set(defaultLocations.map((item) => item.name));
+        const restoredByName = new Map(restored.map((item) => [item.name, item]));
+
+        const normalizedDefaults = defaultLocations.map((item) => {
+            const saved = restoredByName.get(item.name);
+            return saved ? { ...item, checked: saved.checked } : item;
+        });
+
+        const customLocations = restored.filter((item) => {
+            if (defaultNames.has(item.name)) return false;
+            if (isMbr && item.name === '침전조') return false;
+            return true;
+        });
+
+        return [...normalizedDefaults, ...customLocations];
+    };
+
     const loadSettings = async () => {
         try {
             setIsSiteListLoading(true);
@@ -344,7 +369,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                     if (meds.length > 0) {
                         const baseMeds = meds.filter(i => !i.item_name.endsWith('_purchase') && !i.item_name.endsWith('_usage') && !i.item_name.endsWith('_inventory'));
                         if (baseMeds.length > 0) {
-                            setMedicineItems(baseMeds.map(i => ({ name: i.item_name, checked: !!i.is_active })));
+                            setMedicineItems(baseMeds.map(i => ({ name: i.item_name, checked: !!i.is_active, defaultAmount: Number(i.default_amount) || 0 })));
                         } else {
                             // 신규/비정상 상태(기본 항목 없음)에서는 기본 3종 강제
                             setMedicineItems(cloneItems(DEFAULT_MEDICINE_ITEMS));
@@ -381,7 +406,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                     const kits = data.configItems.filter(i => i.category === 'kit');
                     if (kits.length > 0) {
                         const baseKits = kits.filter(i => !i.item_name.endsWith('_purchase') && !i.item_name.endsWith('_usage') && !i.item_name.endsWith('_inventory'));
-                        setKitItems(baseKits.map(i => ({ name: i.item_name, checked: !!i.is_active })));
+                        setKitItems(baseKits.map(i => ({ name: i.item_name, checked: !!i.is_active, defaultAmount: Number(i.default_amount) || 0 })));
 
                         const restored = {};
                         kits.forEach(i => {
@@ -393,7 +418,9 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                     }
                     const locations = data.configItems.filter(i => i.category === 'location');
                     if (locations.length > 0) {
-                        setLocationItems(locations.map(i => ({ name: i.item_name, checked: !!i.is_active })));
+                        setLocationItems(normalizeLocationItemsForSite(locations, resolvedMethod));
+                    } else {
+                        setLocationItems(createDefaultLocationItems(resolvedMethod).filter((item) => item.checked));
                     }
                 } else {
                     // 저장 설정은 있으나 config_items가 비어있는 극초기 상태 대비

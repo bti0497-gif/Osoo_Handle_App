@@ -1,6 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { MedicineModel } from './MedicineModel';
 import { SettingsModel } from '../settings/SettingsModel';
+import { getTodayKST } from '../../core/constants';
+
+const toNumberOrZero = (value) => {
+    if (value === '' || value === null || value === undefined) return 0;
+    const parsed = Number(String(value).replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+};
 
 export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
     const [history, setHistory] = useState([]);
@@ -35,11 +42,11 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
         }
     };
 
-    const loadLogs = async () => {
+    const loadLogs = async (options = {}) => {
         setLoading(true);
         try {
-            const today = new Date();
-            const todayStr = today.toISOString().split('T')[0];
+            const todayStr = getTodayKST();
+            const today = new Date(`${todayStr}T12:00:00`);
 
             // 설정에서 활성화된 약품 항목 가져오기
             const settingsData = await SettingsModel.getSettings();
@@ -55,7 +62,7 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
             }
             setMedicineTypes(dynamicTypes);
 
-            const historyData = await MedicineModel.fetchHistory();
+            const historyData = await MedicineModel.fetchHistory({ force: options.force });
             if (historyData.success) {
                 const histRaw = historyData.history;
 
@@ -88,7 +95,7 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
                     const existingDates = new Set(hist.map(h => h.date));
 
                     while (currentDate < todayDate) {
-                        const ds = currentDate.toISOString().split('T')[0];
+                        const ds = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`;
                         if (!existingDates.has(ds)) {
                             const emptyRow = { date: ds };
                             dynamicTypes.forEach(t => { emptyRow[t] = { purchase: null, usage: null, inventory: null }; });
@@ -110,7 +117,7 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
                 for (let i = 1; i <= 5; i++) {
                     const d = new Date(today);
                     d.setDate(today.getDate() + i);
-                    const ds = d.toISOString().split('T')[0];
+                    const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
                     if (!hist.find(h => h.date === ds)) {
                         const emptyRow = { date: ds, isFuture: true };
                         dynamicTypes.forEach(t => { emptyRow[t] = { purchase: null, usage: null, inventory: null }; });
@@ -271,6 +278,46 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
         }
     };
 
+    const saveModalDraft = async ({ date, items = [] } = {}) => {
+        if (!date) {
+            showAlert?.('저장할 날짜가 없습니다.');
+            return { success: false };
+        }
+
+        const payloadItems = items
+            .map(({ item, values }) => {
+                const medicineName = item?.key || item?.name || item?.label;
+                if (!medicineName) return null;
+                return {
+                    date,
+                    medicine_name: medicineName,
+                    purchase_amount: toNumberOrZero(values?.purchase),
+                    usage_amount: toNumberOrZero(values?.usage),
+                    current_inventory: toNumberOrZero(values?.inventory),
+                };
+            })
+            .filter(Boolean);
+
+        if (payloadItems.length === 0) {
+            showAlert?.('저장할 약품 데이터가 없습니다.');
+            return { success: false };
+        }
+
+        setLoading(true);
+        try {
+            const res = await MedicineModel.bulkSave(payloadItems);
+            if (!res.success) throw new Error(res.error || '약품 데이터 저장에 실패했습니다.');
+            showAlert?.('약품 데이터가 저장되었습니다.');
+            await loadLogs();
+            return res;
+        } catch (err) {
+            showAlert?.('저장 실패: ' + err.message);
+            return { success: false, error: err.message };
+        } finally {
+            setLoading(false);
+        }
+    };
+
     return {
         history,
         loading,
@@ -284,7 +331,8 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
         correctData,
         updateAmount,
         submitBatch,
-        refresh: loadLogs,
+        saveModalDraft,
+        refresh: () => loadLogs({ force: true }),
         pendingChanges,
     };
 };

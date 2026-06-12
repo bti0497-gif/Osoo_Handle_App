@@ -77,20 +77,62 @@ function streamToBuffer(stream) {
   });
 }
 
-async function downloadDriveFileWithMeta(fileId) {
-  const meta = await drive.files.get({
-    fileId,
-    fields: 'id,name,mimeType,size',
+function escapeDriveQueryValue(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'");
+}
+
+async function findDriveFileByName(fileName) {
+  const name = String(fileName || '').trim();
+  if (!name) return null;
+
+  const res = await drive.files.list({
+    q: `name='${escapeDriveQueryValue(name)}' and trashed=false`,
+    fields: 'files(id,name,mimeType,size)',
+    spaces: 'drive',
     supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+    pageSize: 10,
   });
-  const media = await drive.files.get(
-    { fileId, alt: 'media', supportsAllDrives: true },
-    { responseType: 'stream' }
-  );
-  return {
-    meta: meta.data || {},
-    buffer: await streamToBuffer(media.data),
-  };
+
+  return (res.data.files || [])[0] || null;
+}
+
+async function downloadDriveFileWithMeta(fileIdOrName) {
+  try {
+    const meta = await drive.files.get({
+      fileId: fileIdOrName,
+      fields: 'id,name,mimeType,size',
+      supportsAllDrives: true,
+    });
+    const media = await drive.files.get(
+      { fileId: fileIdOrName, alt: 'media', supportsAllDrives: true },
+      { responseType: 'stream' }
+    );
+    return {
+      meta: meta.data || {},
+      buffer: await streamToBuffer(media.data),
+    };
+  } catch (err) {
+    const found = await findDriveFileByName(fileIdOrName);
+    if (!found) throw err;
+
+    const meta = await drive.files.get({
+      fileId: found.id,
+      fields: 'id,name,mimeType,size',
+      supportsAllDrives: true,
+    });
+    const media = await drive.files.get(
+      { fileId: found.id, alt: 'media', supportsAllDrives: true },
+      { responseType: 'stream' }
+    );
+
+    return {
+      meta: meta.data || found,
+      buffer: await streamToBuffer(media.data),
+    };
+  }
 }
 
 function fitSize(width, height, maxWidth, maxHeight) {
@@ -214,20 +256,6 @@ function normalizeDateLike(value) {
     return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
   }
   return '';
-}
-
-function normalizeBigQueryDateValue(value) {
-  if (value && typeof value === 'object') {
-    if (typeof value.value === 'string') {
-      return normalizeDateLike(value.value);
-    }
-    if (typeof value.valueOf === 'function') {
-      const v = value.valueOf();
-      const normalized = normalizeDateLike(v);
-      if (normalized) return normalized;
-    }
-  }
-  return normalizeDateLike(value);
 }
 
 function resolveReportDate(raw = {}) {
@@ -632,10 +660,10 @@ async function upsertCertificateFileMeta({
 
   const [candidates] = await bq.query({
     query: `
-      SELECT local_id, site_id, site_name, site_name_raw, source_payload_json
+      SELECT id, site_name, site_name_raw, report_date
       FROM \`${DATASET_ID}.water_quality\`
       WHERE report_date = @reportDate
-      ORDER BY local_id DESC
+      ORDER BY id DESC
       LIMIT 200
     `,
     params: { reportDate },
@@ -675,27 +703,23 @@ async function upsertCertificateFileMeta({
   if (!targets.length) return 0;
 
   for (const t of targets) {
-    const localId = Number(t.local_id);
-    if (!Number.isFinite(localId)) continue;
+    const localId = String(t.id || '').trim();
+    if (!localId) continue;
     await bq.query({
       query: `
         UPDATE \`${DATASET_ID}.water_quality\`
         SET
-          certificate_category = @category,
-          certificate_file_name = @uploadedFileName,
-          certificate_original_file_name = @originalFileName,
-          drive_file_id = @driveFileId,
-          drive_web_view_link = @driveWebViewLink,
-          updated_at = @updatedAt
+          category = @category,
+          drive_file_name = @uploadedFileName,
+          source_pdf_name = @originalFileName,
+          uploaded_at = @updatedAt
         WHERE report_date = @reportDate
-          AND local_id = @localId
+          AND id = @localId
       `,
       params: {
         category: category || null,
         uploadedFileName: uploadedFileName || null,
         originalFileName: originalFileName || null,
-        driveFileId: driveFileId || null,
-        driveWebViewLink: driveWebViewLink || null,
         updatedAt: nowIso,
         reportDate,
         localId,
@@ -704,11 +728,9 @@ async function upsertCertificateFileMeta({
         category: 'STRING',
         uploadedFileName: 'STRING',
         originalFileName: 'STRING',
-        driveFileId: 'STRING',
-        driveWebViewLink: 'STRING',
         updatedAt: 'TIMESTAMP',
         reportDate: 'DATE',
-        localId: 'INT64',
+        localId: 'STRING',
       },
     });
   }
@@ -723,25 +745,20 @@ async function upsertCertificateRowToBigQuery(row, uniqueIndex) {
   const reportDate = normalizeDateLike(row.report_date || row.date || row.sampled_at);
   if (!reportDate) return { inserted: false, reason: 'invalid_date' };
   const nowIso = new Date().toISOString();
-  const localId = Number(`${Date.now()}${String(uniqueIndex % 1000).padStart(3, '0')}`);
+  const rowId = String(row.id || `${Date.now()}${String(uniqueIndex % 1000).padStart(3, '0')}`);
 
   await bq.query({
     query: `
       DELETE FROM \`${DATASET_ID}.water_quality\`
       WHERE report_date = DATE(@reportDate)
-        AND (
-          (@siteId IS NOT NULL AND site_id = @siteId)
-          OR (@siteName IS NOT NULL AND site_name = @siteName)
-        )
+        AND (@siteName IS NOT NULL AND site_name = @siteName)
     `,
     params: {
       reportDate,
-      siteId: row.site_id || null,
       siteName: row.site_name || null,
     },
     types: {
       reportDate: 'STRING',
-      siteId: 'STRING',
       siteName: 'STRING',
     },
   });
@@ -749,34 +766,20 @@ async function upsertCertificateRowToBigQuery(row, uniqueIndex) {
   await bq.query({
     query: `
       INSERT INTO \`${DATASET_ID}.water_quality\` (
-        certificate_category, certificate_file_name, certificate_original_file_name,
-        drive_file_id, drive_web_view_link,
-        site_id, site_name, site_name_raw, local_id, report_date,
-        ss, bod, tn, tp, total_coliform, mlss, do, ph,
-        source_pdf_name, source_page_index, ai_confidence, site_match_confidence,
-        manual_review_required, warnings_json, source_payload_json,
-        created_at, updated_at, uploaded_at
+        id, uploaded_at, report_date, category, site_name, site_name_raw,
+        bod, ss, tn, tp, mlss, total_coliform, drive_file_name, source_pdf_name
       )
       VALUES (
-        @certificate_category, @certificate_file_name, @certificate_original_file_name,
-        @drive_file_id, @drive_web_view_link,
-        @site_id, @site_name, @site_name_raw, @local_id, DATE(@report_date),
-        @ss, @bod, @tn, @tp, @total_coliform, @mlss, @do, @ph,
-        @source_pdf_name, @source_page_index, @ai_confidence, @site_match_confidence,
-        @manual_review_required, @warnings_json, @source_payload_json,
-        @created_at, @updated_at, @uploaded_at
+        @id, @uploaded_at, DATE(@report_date), @category, @site_name, @site_name_raw,
+        @bod, @ss, @tn, @tp, @mlss, @total_coliform, @drive_file_name, @source_pdf_name
       )
     `,
     params: {
-      certificate_category: row.certificate_category || null,
-      certificate_file_name: row.certificate_file_name || null,
-      certificate_original_file_name: row.certificate_original_file_name || null,
-      drive_file_id: row.drive_file_id || null,
-      drive_web_view_link: row.drive_web_view_link || null,
-      site_id: row.site_id || null,
+      category: row.category || row.certificate_category || null,
+      drive_file_name: row.drive_file_name || row.certificate_file_name || null,
+      id: rowId,
       site_name: row.site_name || null,
       site_name_raw: row.site_name_raw || null,
-      local_id: localId,
       report_date: reportDate,
       ss: toNullableNumber(row.ss),
       bod: toNullableNumber(row.bod),
@@ -784,29 +787,15 @@ async function upsertCertificateRowToBigQuery(row, uniqueIndex) {
       tp: toNullableNumber(row.tp),
       total_coliform: toNullableNumber(row.total_coliform),
       mlss: toNullableNumber(row.mlss),
-      do: toNullableNumber(row.do),
-      ph: toNullableNumber(row.ph),
       source_pdf_name: row.source_pdf_name || null,
-      source_page_index: row.source_page_index != null ? Number(row.source_page_index) : null,
-      ai_confidence: toNullableNumber(row.ai_confidence),
-      site_match_confidence: toNullableNumber(row.site_match_confidence),
-      manual_review_required: Boolean(row.manual_review_required),
-      warnings_json: row.warnings_json || '[]',
-      source_payload_json: row.source_payload_json || '{}',
-      created_at: row.created_at || nowIso,
-      updated_at: nowIso,
       uploaded_at: nowIso,
     },
     types: {
-      certificate_category: 'STRING',
-      certificate_file_name: 'STRING',
-      certificate_original_file_name: 'STRING',
-      drive_file_id: 'STRING',
-      drive_web_view_link: 'STRING',
-      site_id: 'STRING',
+      category: 'STRING',
+      drive_file_name: 'STRING',
       site_name: 'STRING',
       site_name_raw: 'STRING',
-      local_id: 'INT64',
+      id: 'STRING',
       report_date: 'STRING',
       ss: 'FLOAT64',
       bod: 'FLOAT64',
@@ -814,17 +803,7 @@ async function upsertCertificateRowToBigQuery(row, uniqueIndex) {
       tp: 'FLOAT64',
       total_coliform: 'FLOAT64',
       mlss: 'FLOAT64',
-      do: 'FLOAT64',
-      ph: 'FLOAT64',
       source_pdf_name: 'STRING',
-      source_page_index: 'INT64',
-      ai_confidence: 'FLOAT64',
-      site_match_confidence: 'FLOAT64',
-      manual_review_required: 'BOOL',
-      warnings_json: 'STRING',
-      source_payload_json: 'STRING',
-      created_at: 'TIMESTAMP',
-      updated_at: 'TIMESTAMP',
       uploaded_at: 'TIMESTAMP',
     },
   });
@@ -1026,65 +1005,15 @@ module.exports = function () {
       const normalizedSiteFilterKeys = new Set(
         siteNameFilters.map((name) => normalizeSiteNameKey(name)).filter(Boolean)
       );
-      let items = [];
-      const bq = getBigQueryClient();
-      if (bq) {
-        const where = [
-          "COALESCE(drive_file_id, JSON_EXTRACT_SCALAR(source_payload_json, '$.certificate_file.drive_file_id')) IS NOT NULL",
-        ];
-        const params = {};
-        const hasSingleSiteFilter = siteNameFilters.length === 1;
-        if (hasSingleSiteFilter) {
-          where.push('site_name = @siteName');
-          params.siteName = siteNameFilters[0];
-        }
-        if (year) {
-          where.push('EXTRACT(YEAR FROM report_date) = @yearNum');
-          params.yearNum = Number(year);
-        }
-        if (month) {
-          where.push('EXTRACT(MONTH FROM report_date) = @monthNum');
-          params.monthNum = Number(month);
-        }
-
-        const query = `
-          SELECT
-            report_date,
-            site_name,
-            COALESCE(certificate_file_name, JSON_EXTRACT_SCALAR(source_payload_json, '$.certificate_file.file_name')) AS file_name,
-            COALESCE(certificate_category, JSON_EXTRACT_SCALAR(source_payload_json, '$.certificate_file.category')) AS category,
-            COALESCE(drive_file_id, JSON_EXTRACT_SCALAR(source_payload_json, '$.certificate_file.drive_file_id')) AS drive_file_id
-          FROM \`${DATASET_ID}.water_quality\`
-          WHERE ${where.join(' AND ')}
-          ORDER BY report_date DESC
-          LIMIT 1000
-        `;
-        const [rows] = await bq.query({ query, params });
-        items = (rows || [])
-          .filter((row) => {
-            if (hasSingleSiteFilter || normalizedSiteFilterKeys.size === 0) return true;
-            const key = normalizeSiteNameKey(row?.site_name || '');
-            return key && normalizedSiteFilterKeys.has(key);
-          })
-          .filter((row) => row && row.drive_file_id)
-          .map((row) => {
-            const reportDate = normalizeBigQueryDateValue(row.report_date);
-            return {
-              id: row.drive_file_id,
-              fileName: row.file_name || '',
-              siteName: row.site_name || '',
-              sampledAt: reportDate,
-              issuedAt: reportDate,
-              category: row.category || '',
-              downloadUrl: `/api/certificates/files/${encodeURIComponent(row.drive_file_id)}?name=${encodeURIComponent(row.file_name || 'certificate.jpg')}`,
-            };
-          });
+      const items = [];
+      if (!drive || !CERTIFICATE_ROOT_FOLDER_ID) {
+        return res.status(400).json({ success: false, message: 'Drive 설정이 필요합니다.' });
       }
 
-      // 사용자 의도: 성적서 JPG 목록은 Drive 기준으로 보여야 한다.
-      if (drive && CERTIFICATE_ROOT_FOLDER_ID) {
+      // 성적서 메뉴의 파일 목록은 Drive를 단일 원천으로 사용한다.
+      // BigQuery water_quality는 성적서 분석값 동기화/업무일지 바인딩용이며 파일 목록에는 사용하지 않는다.
+      {
         const folders = await resolveMonthFolders({ year, month });
-        const driveItems = [];
 
         for (const folder of folders) {
           const files = await listFiles(folder.folderId);
@@ -1126,7 +1055,7 @@ module.exports = function () {
               continue;
             }
 
-            driveItems.push({
+            items.push({
               id: file.id,
               fileName: file.name,
               siteName,
@@ -1139,14 +1068,6 @@ module.exports = function () {
             });
           }
         }
-
-        const byId = new Map();
-        [...driveItems, ...items].forEach((item) => {
-          if (!item || !item.id) return;
-          byId.set(String(item.id), item);
-        });
-        items = Array.from(byId.values())
-          .filter((item) => isAllowedManualMedia(toBaseName(item.fileName || '')));
       }
 
       items.sort((a, b) => {

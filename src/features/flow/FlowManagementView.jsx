@@ -27,23 +27,44 @@ const getPreviousFlowCell = (history, selectedDate, flowName) => {
     const idx = history.findIndex((row) => row.date === selectedDate);
     for (let i = idx - 1; i >= 0; i -= 1) {
         const cell = history[i]?.[flowName];
-        if (cell?.raw !== null && cell?.raw !== undefined) {
-            return cell;
-        }
+        if (cell?.raw !== null && cell?.raw !== undefined) return cell;
     }
     return null;
 };
+
+const ManagementFooter = ({ count, loading, onOpen }) => (
+    <div className="flow-management-view__footer" style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '12px 20px',
+        border: '1px solid #e2e8f0',
+        borderRadius: 10,
+        backgroundColor: '#FAFAFA',
+    }}>
+        <span style={{ fontSize: 12, color: '#94A3B8', fontWeight: 700 }}>{count} records</span>
+        <button type="button" onClick={onOpen} disabled={loading} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #2563eb', background: '#eff6ff', color: '#1d4ed8', fontWeight: 900, cursor: loading ? 'not-allowed' : 'pointer' }}>통합 데이터 작성</button>
+    </div>
+);
 
 const FlowManagementView = ({ currentUser }) => {
     const { showAlert } = useDialog();
     const { itemState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
+
     const visibleFlowItems = useMemo(() => {
         const active = flowItems.filter((item) => item.checked);
         return active.length > 0 ? active : DEFAULT_FLOW_VIEW_ITEMS;
     }, [flowItems]);
+
     const flowMeterTypes = useMemo(() => visibleFlowItems.map((item) => item.name), [visibleFlowItems]);
-    const { history = [], loading, correctData, refresh } = useFlowViewModel(currentUser, { showAlert, flowTypes: flowMeterTypes });
+    const {
+        history = [],
+        loading,
+        correctData,
+        refresh,
+        saveModalDraft,
+    } = useFlowViewModel(currentUser, { showAlert, flowTypes: flowMeterTypes });
 
     const [selectedDate, setSelectedDate] = useState(null);
     const [modalState, setModalState] = useState({ open: false, tab: 'flow', mode: 'add' });
@@ -64,26 +85,45 @@ const FlowManagementView = ({ currentUser }) => {
         }
     }, [history.length]);
 
+    const modalDate = modalState.mode === 'add' ? todayStr : (selectedDate || todayStr);
     const selectedRow = history.find((row) => row.date === selectedDate) || null;
+    const modalRow = history.find((row) => row.date === modalDate) || null;
 
-    const gridCols = visibleFlowItems.map((item, idx) => ({
-        id: item.name,
-        label: item.name.replace('계', ''),
-        headerBgColor: FLOW_COLORS[idx % FLOW_COLORS.length],
-        headerTextColor: '#fff',
-        subCols: [
-            { id: `${item.name}_raw`, label: item.name === '슬러지' ? '반출량' : '검침값', width: 72, headerBgColor: FLOW_COLORS[idx % FLOW_COLORS.length], headerTextColor: '#fff' },
-            { id: `${item.name}_diff`, label: '유량', width: 58, headerBgColor: '#fff', headerTextColor: '#1e40af' },
-        ],
-    }));
+    const gridCols = visibleFlowItems.map((item, idx) => {
+        const color = FLOW_COLORS[idx % FLOW_COLORS.length];
+        return {
+            id: item.name,
+            label: item.name.replace('계', ''),
+            headerBgColor: color,
+            headerTextColor: '#fff',
+            subCols: [
+                {
+                    id: `${item.name}_raw`,
+                    label: item.name === '슬러지' ? '반출량' : '검침값',
+                    width: 72,
+                    headerBgColor: color,
+                    headerTextColor: '#fff',
+                },
+                {
+                    id: `${item.name}_diff`,
+                    label: '유량',
+                    width: 58,
+                    headerBgColor: '#fff',
+                    headerTextColor: '#1e40af',
+                },
+            ],
+        };
+    });
 
     const buildModalContexts = () => ({
         flow: {
             items: visibleFlowItems.map((item) => {
-                const cell = selectedRow?.[item.name]?.isUserInput
-                    ? { reading: selectedRow[item.name].raw, flow: selectedRow[item.name].diff }
-                    : correctData(selectedRow?.[item.name]);
-                const prev = getPreviousFlowCell(history, selectedDate, item.name);
+                const rawCell = modalRow?.[item.name];
+                const cell = rawCell?.isUserInput
+                    ? { reading: rawCell.raw, flow: rawCell.diff }
+                    : correctData(rawCell);
+                const prev = getPreviousFlowCell(history, modalDate, item.name);
+
                 return {
                     key: item.name,
                     label: item.name,
@@ -98,9 +138,33 @@ const FlowManagementView = ({ currentUser }) => {
                 };
             }),
         },
-        medicine: { items: medicineItems.filter((item) => item.checked).map((item) => ({ key: item.name, label: item.name, values: {}, previous: {}, summary: [] })) },
-        water: { items: locationItems.filter((item) => item.checked).map((item) => ({ key: item.name, label: item.name, values: {}, previous: {}, summary: [] })) },
-        kit: { items: kitItems.filter((item) => item.checked).map((item) => ({ key: item.name, label: item.name, values: {}, previous: {}, summary: [] })) },
+        medicine: {
+            items: medicineItems.filter((item) => item.checked).map((item) => ({
+                key: item.name,
+                label: item.name,
+                values: {},
+                previous: {},
+                summary: [],
+            })),
+        },
+        water: {
+            items: locationItems.filter((item) => item.checked).map((item) => ({
+                key: item.name,
+                label: item.name,
+                values: {},
+                previous: {},
+                summary: [],
+            })),
+        },
+        kit: {
+            items: kitItems.filter((item) => item.checked).map((item) => ({
+                key: item.name,
+                label: item.name,
+                values: {},
+                previous: {},
+                summary: [],
+            })),
+        },
     });
 
     const handleRowSelect = (row) => {
@@ -112,13 +176,41 @@ const FlowManagementView = ({ currentUser }) => {
         setModalState({ open: true, tab: 'flow', mode });
     };
 
+    const hasSelectedRowData = () => {
+        if (!selectedRow) return false;
+        return visibleFlowItems.some((item) => {
+            const cell = selectedRow[item.name];
+            return cell?.raw !== null && cell?.raw !== undefined
+                || cell?.diff !== null && cell?.diff !== undefined;
+        });
+    };
+
+    const openUnifiedModal = () => {
+        openModal(hasSelectedRowData() ? 'edit' : 'add');
+    };
+
+    const handleSaveDraft = async (payload) => {
+        if (payload.tab !== 'flow') {
+            showAlert?.('현재는 유량관리 저장부터 연결되어 있습니다.');
+            return;
+        }
+
+        const result = await saveModalDraft({ date: payload.date, items: payload.items });
+        if (result?.success) {
+            setSelectedDate(payload.date);
+            setModalState((prev) => ({ ...prev, open: false }));
+        }
+    };
+
     const renderCell = (row, col) => {
         const flowName = col.parentId;
         if (!flowName) return null;
+
         const data = row[flowName]?.isUserInput
             ? { reading: row[flowName].raw, flow: row[flowName].diff, error: row[flowName].error }
             : correctData(row[flowName]);
         const value = col.id.endsWith('_raw') ? data.reading : data.flow;
+
         return (
             <div style={{
                 position: 'absolute',
@@ -153,6 +245,7 @@ const FlowManagementView = ({ currentUser }) => {
         const isSelected = row.date === selectedDate;
         const isToday = row.date === todayStr;
         const isFuture = row.isFuture || row.date > todayStr;
+
         return (
             <div style={{
                 width: '100%',
@@ -197,34 +290,21 @@ const FlowManagementView = ({ currentUser }) => {
                 />
             </div>
 
-            <div className="flow-management-view__footer" style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '12px 20px',
-                border: '1px solid #e2e8f0',
-                borderRadius: 10,
-                backgroundColor: '#FAFAFA',
-            }}>
-                <span style={{ fontSize: 12, color: '#94A3B8', fontWeight: 700 }}>{history.length} records</span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                    <button type="button" onClick={() => openModal('add')} disabled={loading} style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid #2563eb', background: '#eff6ff', color: '#1d4ed8', fontWeight: 900, cursor: 'pointer' }}>
-                        추가
-                    </button>
-                    <button type="button" onClick={() => openModal('edit')} disabled={!selectedDate || loading} style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', color: selectedDate ? '#334155' : '#94a3b8', fontWeight: 900, cursor: selectedDate ? 'pointer' : 'not-allowed' }}>
-                        수정
-                    </button>
-                </div>
-            </div>
+            <ManagementFooter
+                count={history.length}
+                loading={loading}
+                onOpen={openUnifiedModal}
+            />
 
             <UnifiedRecordModal
                 isOpen={modalState.open}
                 mode={modalState.mode}
                 initialTab={modalState.tab}
-                initialDate={modalState.mode === 'add' ? todayStr : (selectedDate || todayStr)}
+                initialDate={modalDate}
                 contexts={buildModalContexts()}
                 onClose={() => setModalState((prev) => ({ ...prev, open: false }))}
-                onSaveDraft={() => showAlert?.('저장 API 연결 전입니다. 현재는 입력 UX만 확인합니다.')}
+                onSaveDraft={handleSaveDraft}
+                onValidationError={(message) => showAlert?.(message)}
             />
         </div>
     );

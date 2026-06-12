@@ -499,7 +499,7 @@ PendingRecoveryService
 
 현재 확인된 사항:
 
-- `flow_readings`, `medicine_logs`, `water_quality`, `kit_logs`, `facility_logs`, `certificate_water_quality`는 로컬 `id`를 BigQuery `local_id`로 보낸다.
+- `flow_readings`, `medicine_logs`, `water_quality`, `kit_logs`, `facility_logs`는 로컬 `id`를 BigQuery `local_id`로 보낸다.
 - 로컬 `is_synced`는 BigQuery로 보내지 않는다.
 - `members.password`는 BigQuery로 보내지 않는다.
 - `sludge_photo_logs`는 현재 로컬 중심이며, 서버 동기화 대상 포함 여부를 결정해야 한다.

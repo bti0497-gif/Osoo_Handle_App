@@ -1,8 +1,42 @@
 import { apiClient } from '../../core/api';
 
+let settingsCache = null;
+let settingsPromise = null;
+
+const clearSettingsCache = () => {
+    settingsCache = null;
+    settingsPromise = null;
+};
+
+const mutateSettings = async (request) => {
+    clearSettingsCache();
+    return request();
+};
+
 export const SettingsModel = {
-    async getSettings() {
-        return apiClient.get('/api/settings');
+    async getSettings(options = {}) {
+        if (!options.force && settingsCache) {
+            return settingsCache;
+        }
+
+        if (!options.force && settingsPromise) {
+            return settingsPromise;
+        }
+
+        settingsPromise = apiClient.get('/api/settings')
+            .then((result) => {
+                settingsCache = result;
+                return result;
+            })
+            .finally(() => {
+                settingsPromise = null;
+            });
+
+        return settingsPromise;
+    },
+
+    clearSettingsCache() {
+        clearSettingsCache();
     },
 
     async getSites() {
@@ -10,27 +44,27 @@ export const SettingsModel = {
     },
 
     async selectSite(siteId) {
-        return apiClient.post('/api/settings/select-site', { siteId });
+        return mutateSettings(() => apiClient.post('/api/settings/select-site', { siteId }));
     },
 
     async saveSettings(settingsData) {
-        return apiClient.post('/api/settings', settingsData);
+        return mutateSettings(() => apiClient.post('/api/settings', settingsData));
     },
 
     async saveSiteLocation(targetLat, targetLng) {
-        return apiClient.post('/api/settings/site-location', { targetLat, targetLng });
+        return mutateSettings(() => apiClient.post('/api/settings/site-location', { targetLat, targetLng }));
     },
 
     async saveWebAppCredentials(payload) {
-        return apiClient.post('/api/settings/web-app-credentials', payload);
+        return mutateSettings(() => apiClient.post('/api/settings/web-app-credentials', payload));
     },
 
     async saveQntechImportSettings(payload) {
-        return apiClient.post('/api/settings/qntech-import-settings', payload);
+        return mutateSettings(() => apiClient.post('/api/settings/qntech-import-settings', payload));
     },
 
     async uploadFiles(formData) {
-        return apiClient.upload('/api/settings/upload', formData);
+        return mutateSettings(() => apiClient.upload('/api/settings/upload', formData));
     },
 
     async openLocalFolder(target) {
@@ -42,22 +76,22 @@ export const SettingsModel = {
     },
 
     async saveFlowMapping(mappingData) {
-        return apiClient.post('/api/settings/save-flow-mapping', mappingData);
+        return mutateSettings(() => apiClient.post('/api/settings/save-flow-mapping', mappingData));
     },
 
     async saveKitMapping(mappingData) {
-        return apiClient.post('/api/settings/save-kit-mapping', mappingData);
+        return mutateSettings(() => apiClient.post('/api/settings/save-kit-mapping', mappingData));
     },
     async saveWaterMapping(mappingData) {
-        return apiClient.post('/api/settings/save-water-mapping', mappingData);
+        return mutateSettings(() => apiClient.post('/api/settings/save-water-mapping', mappingData));
     },
 
     async saveMedicineMapping(mappingData) {
-        return apiClient.post('/api/settings/save-medicine-mapping', mappingData);
+        return mutateSettings(() => apiClient.post('/api/settings/save-medicine-mapping', mappingData));
     },
 
     async saveFlowOption(flowOption) {
-        return apiClient.post('/api/settings/save-flow-option', { flowOption });
+        return mutateSettings(() => apiClient.post('/api/settings/save-flow-option', { flowOption }));
     },
 
     async getSludgeExportSettings() {
@@ -65,7 +99,7 @@ export const SettingsModel = {
     },
 
     async saveSludgeExportSettings(payload) {
-        return apiClient.post('/api/settings/sludge-export-settings', payload);
+        return mutateSettings(() => apiClient.post('/api/settings/sludge-export-settings', payload));
     },
 
     async getMedicineDefaults() {
@@ -73,7 +107,7 @@ export const SettingsModel = {
     },
 
     async saveMedicineDefaults(items) {
-        return apiClient.post('/api/settings/medicine-defaults', { items });
+        return mutateSettings(() => apiClient.post('/api/settings/medicine-defaults', { items }));
     },
 
     async getKitDefaults() {
@@ -81,7 +115,7 @@ export const SettingsModel = {
     },
 
     async saveKitDefaults(items) {
-        return apiClient.post('/api/settings/kit-defaults', { items });
+        return mutateSettings(() => apiClient.post('/api/settings/kit-defaults', { items }));
     },
 
     async getExcelStatus() {
@@ -93,10 +127,10 @@ export const SettingsModel = {
     },
 
     async addConfigItem(category, name) {
-        return apiClient.post('/api/settings/add-item', { category, name });
+        return mutateSettings(() => apiClient.post('/api/settings/add-item', { category, name }));
     },
 
     async toggleConfigItem(category, name, isActive) {
-        return apiClient.post('/api/settings/toggle-item', { category, name, isActive });
+        return mutateSettings(() => apiClient.post('/api/settings/toggle-item', { category, name, isActive }));
     },
 };

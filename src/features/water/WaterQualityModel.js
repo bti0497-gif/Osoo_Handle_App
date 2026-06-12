@@ -3,16 +3,37 @@ import { apiClient } from '../../core/api';
 const QNTECH_IMPORT_TIMEOUT_MS = 180000;
 const QNTECH_RANGE_IMPORT_TIMEOUT_MS = 600000;
 
+let historyCache = null;
+let historyPromise = null;
+
+const clearHistoryCache = () => {
+    historyCache = null;
+    historyPromise = null;
+};
+
 export const WaterQualityModel = {
-    async fetchHistory() {
-        return apiClient.get('/api/water-quality/history');
+    async fetchHistory(options = {}) {
+        if (!options.force && historyCache) return historyCache;
+        if (!options.force && historyPromise) return historyPromise;
+
+        historyPromise = apiClient.get('/api/water-quality/history')
+            .then((result) => {
+                historyCache = result;
+                return result;
+            })
+            .finally(() => {
+                historyPromise = null;
+            });
+        return historyPromise;
     },
 
     async importFromQntech(date) {
+        clearHistoryCache();
         return apiClient.post('/api/water-quality/import-from-qntech', { date }, { timeout: QNTECH_IMPORT_TIMEOUT_MS });
     },
 
     async importValuesFromQntech(date) {
+        clearHistoryCache();
         return apiClient.post('/api/water-quality/import-values-from-qntech', { date }, { timeout: QNTECH_IMPORT_TIMEOUT_MS });
     },
 
@@ -21,6 +42,7 @@ export const WaterQualityModel = {
     },
 
     async importRangeFromQntech(startDate, endDate) {
+        clearHistoryCache();
         return apiClient.post('/api/water-quality/import-range-from-qntech', { startDate, endDate }, { timeout: QNTECH_RANGE_IMPORT_TIMEOUT_MS });
     },
 
@@ -29,6 +51,7 @@ export const WaterQualityModel = {
     },
 
     async bulkSave(items) {
+        clearHistoryCache();
         return apiClient.post('/api/water-quality/bulk', { items });
     },
 
@@ -37,6 +60,9 @@ export const WaterQualityModel = {
     },
 
     async saveRecord(data) {
+        clearHistoryCache();
         return apiClient.post('/api/water-quality', data);
-    }
+    },
+
+    clearHistoryCache
 };

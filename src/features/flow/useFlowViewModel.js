@@ -1,81 +1,28 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlowModel } from './FlowModel';
 import { getTodayKST } from '../../core/constants';
 
-/** 설정 검침항목 위젯과 맞추기 전 1계열 기본(위젯에서 flowTypes 미전달 시) */
-const DEFAULT_FLOW_TYPES = ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '슬러지', '전력량계'];
+const DEFAULT_FLOW_TYPES = ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '전력량계', '슬러지'];
 
-/**
- * 해당 유량 종류에 대해 startIdx 행부터 아래로 적산(raw)은 유지한 채 누계(diff)를 연쇄 재계산한다.
- * @returns {Map<string, { raw, diff, error, isManual }>} date → 해당 type의 pending 스냅샷
- */
-function cascadeRecalculateType(newHist, startIdx, type, correctData, findPreviousSludgeCumulative, isManualAtStart) {
-    const pendingByDate = new Map();
+const toNumberOrNull = (value) => {
+    if (value === '' || value === null || value === undefined) return null;
+    const parsed = Number(String(value).replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
+};
 
-    for (let j = startIdx; j < newHist.length; j += 1) {
-        const row = newHist[j];
-        const prevCell = newHist[j][type] || {};
-        let raw = prevCell.raw != null ? Number(prevCell.raw) : null;
-        if (raw !== null && Number.isNaN(raw)) raw = null;
+const round1 = (value) => Math.round(value * 10) / 10;
 
-        let flow = null;
-        let errorMsg = null;
-
-        if (type === '슬러지') {
-            if (raw !== null && !Number.isNaN(raw)) {
-                const previousCumulative = findPreviousSludgeCumulative(newHist, j, row.date, type);
-                flow = Math.round((previousCumulative + raw) * 10) / 10;
-                if (raw > 10000) errorMsg = '입력값이 정상 범위를 초과합니다.';
-                else if (raw < 0) errorMsg = '반출량은 음수일 수 없습니다.';
-            }
-        } else if (raw !== null && !Number.isNaN(raw)) {
-            let prevReading = null;
-            for (let i = j - 1; i >= 0; i -= 1) {
-                const c = correctData(newHist[i][type]);
-                if (c.reading !== null && c.reading !== undefined) {
-                    prevReading = c.reading;
-                    break;
-                }
-            }
-            if (prevReading !== null) {
-                flow = Math.round((raw - prevReading) * 10) / 10;
-                if (raw < prevReading) errorMsg = '전일 검침값보다 작습니다.';
-                else if (flow > 5000000) errorMsg = '입력값이 비정상적으로 큽니다.';
-            }
-        }
-
-        newHist[j] = {
-            ...newHist[j],
-            [type]: {
-                ...prevCell,
-                raw,
-                diff: flow,
-                error: errorMsg,
-                isChanged: true,
-                isUserInput: j === startIdx,
-            },
-        };
-
-        const isManual = j === startIdx && isManualAtStart;
-        pendingByDate.set(row.date, {
-            raw,
-            diff: flow,
-            error: errorMsg,
-            isManual,
-        });
-    }
-
-    return pendingByDate;
+function buildEmptyRow(date, flowTypes, extra = {}) {
+    const row = { date, ...extra };
+    flowTypes.forEach((type) => {
+        row[type] = { raw: null, diff: null };
+    });
+    return row;
 }
 
-/**
- * DB에 남아 있는 1계열 type명(내부반송유량계 등)을 2계열 UI 컬럼 키(…1)로 끌어와 같은 날짜 행에서 보이게 한다.
- * 이미 …1 행에 값이 있으면 덮어쓰지 않는다. flowTypes에 레거시 이름이 그대로 있으면(1계열 UI) 병합하지 않는다.
- */
 function mergeLegacyFlowKeysForDisplay(rows, flowTypes) {
-    if (!Array.isArray(rows) || !Array.isArray(flowTypes) || flowTypes.length === 0) {
-        return rows;
-    }
+    if (!Array.isArray(rows) || !Array.isArray(flowTypes) || flowTypes.length === 0) return rows;
+
     const types = new Set(flowTypes);
     const legacyPairs = [
         { legacy: '내부반송유량계', modern: '내부반송유량계1' },
@@ -86,23 +33,89 @@ function mergeLegacyFlowKeysForDisplay(rows, flowTypes) {
 
     return rows.map((row) => {
         let touched = false;
-        const out = { ...row };
+        const next = { ...row };
+
         for (const { legacy, modern } of legacyPairs) {
-            if (!types.has(modern)) continue;
-            if (types.has(legacy)) continue;
-            const leg = row[legacy];
-            const mod = row[modern];
-            if (!cellHasData(leg)) continue;
-            if (cellHasData(mod)) continue;
-            out[modern] = { ...leg };
+            if (!types.has(modern) || types.has(legacy)) continue;
+            if (!cellHasData(row[legacy]) || cellHasData(row[modern])) continue;
+            next[modern] = { ...row[legacy] };
             touched = true;
         }
-        return touched ? out : row;
+
+        return touched ? next : row;
     });
 }
 
+function findPreviousReading(rows, currentIndex, type) {
+    for (let i = currentIndex - 1; i >= 0; i -= 1) {
+        const raw = rows[i]?.[type]?.raw;
+        const parsed = toNumberOrNull(raw);
+        if (parsed !== null) return parsed;
+    }
+    return null;
+}
+
+function findPreviousSludgeCumulative(rows, currentIndex, rowDate, type) {
+    const currentYear = String(rowDate || '').slice(0, 4);
+
+    for (let i = currentIndex - 1; i >= 0; i -= 1) {
+        if (String(rows[i].date || '').slice(0, 4) !== currentYear) break;
+        const flow = toNumberOrNull(rows[i]?.[type]?.diff);
+        if (flow !== null) return flow;
+    }
+
+    return 0;
+}
+
+function recalculateFromIndex(rows, startIndex, type, isManualAtStart) {
+    const pendingByDate = new Map();
+
+    for (let i = startIndex; i < rows.length; i += 1) {
+        const row = rows[i];
+        const previousCell = row[type] || {};
+        const raw = toNumberOrNull(previousCell.raw);
+        let diff = null;
+        let error = null;
+
+        if (type === '슬러지') {
+            if (raw !== null) {
+                diff = round1(findPreviousSludgeCumulative(rows, i, row.date, type) + raw);
+                if (raw < 0) error = '반출량은 음수일 수 없습니다.';
+                if (raw > 10000) error = '입력값이 정상 범위를 초과합니다.';
+            }
+        } else if (raw !== null) {
+            const previousReading = findPreviousReading(rows, i, type);
+            if (previousReading !== null) {
+                diff = round1(raw - previousReading);
+                if (raw < previousReading) error = '전날 검침값보다 작습니다.';
+                if (diff > 5000000) error = '입력값이 비정상적으로 큽니다.';
+            }
+        }
+
+        rows[i] = {
+            ...row,
+            [type]: {
+                ...previousCell,
+                raw,
+                diff,
+                error,
+                isChanged: true,
+                isUserInput: i === startIndex,
+            },
+        };
+
+        pendingByDate.set(row.date, {
+            raw,
+            diff,
+            error,
+            isManual: i === startIndex && isManualAtStart,
+        });
+    }
+
+    return pendingByDate;
+}
+
 export const useFlowViewModel = (currentUser, { showAlert, flowTypes: flowTypesProp } = {}) => {
-    /** 부모가 매 렌더마다 새 배열을 넘겨도, 검침 타입 목록이 같으면 동일 키 → 히스토리 재조회 1회로 제한 */
     const flowTypesKey = useMemo(() => {
         if (!Array.isArray(flowTypesProp) || flowTypesProp.length === 0) return '';
         return flowTypesProp.join('|');
@@ -118,231 +131,168 @@ export const useFlowViewModel = (currentUser, { showAlert, flowTypes: flowTypesP
     const [pendingChanges, setPendingChanges] = useState({});
     const pendingChangesRef = useRef({});
 
-    const findPreviousSludgeCumulative = (rows, currentIndex, rowDate, type) => {
-        const currentYear = String(rowDate || '').slice(0, 4);
-
-        for (let i = currentIndex - 1; i >= 0; i--) {
-            if (String(rows[i].date || '').slice(0, 4) !== currentYear) {
-                break;
-            }
-
-            const candidate = correctData(rows[i][type]);
-            if (candidate.flow !== null && candidate.flow !== undefined) {
-                return Number(candidate.flow);
-            }
-        }
-
-        return 0;
-    };
-
-    const correctData = (data) => {
+    const correctData = useCallback((data) => {
         if (!data) return { reading: null, flow: null, error: null };
         return { reading: data.raw, flow: data.diff, error: data.error };
-    };
+    }, []);
 
-    const loadReadings = useCallback(async () => {
+    const loadReadings = useCallback(async (options = {}) => {
         setLoading(true);
         try {
             const todayStr = getTodayKST();
             const todayAnchor = new Date(`${todayStr}T12:00:00`);
+            const historyData = await FlowModel.fetchHistory({ force: options.force });
 
-            const historyData = await FlowModel.fetchHistory();
-            if (historyData.success) {
-                const hist = historyData.history;
-                hist.sort((a, b) => a.date.localeCompare(b.date));
+            if (!historyData.success) return;
 
-                // 전체 기간(첫 데이터 ~ 오늘)의 빈 날짜 채우기
-                if (hist.length > 0) {
-                    const firstDateStr = hist[0].date > todayStr ? todayStr : hist[0].date;
-                    let currentDate = new Date(`${firstDateStr}T12:00:00`);
-                    const existingDates = new Set(hist.map(h => h.date));
+            const hist = Array.isArray(historyData.history) ? [...historyData.history] : [];
+            hist.sort((a, b) => a.date.localeCompare(b.date));
 
-                    while (currentDate < todayAnchor) {
-                        const ds = currentDate.toISOString().split('T')[0];
-                        if (!existingDates.has(ds)) {
-                            const emptyRow = { date: ds };
-                            flowTypesResolved.forEach((t) => { emptyRow[t] = { raw: null, diff: null }; });
-                            hist.push(emptyRow);
-                            existingDates.add(ds);
-                        }
-                        currentDate.setDate(currentDate.getDate() + 1);
+            if (hist.length > 0) {
+                const firstDateStr = hist[0].date > todayStr ? todayStr : hist[0].date;
+                const existingDates = new Set(hist.map((row) => row.date));
+                const currentDate = new Date(`${firstDateStr}T12:00:00`);
+
+                while (currentDate < todayAnchor) {
+                    const ds = currentDate.toISOString().split('T')[0];
+                    if (!existingDates.has(ds)) {
+                        hist.push(buildEmptyRow(ds, flowTypesResolved));
+                        existingDates.add(ds);
                     }
+                    currentDate.setDate(currentDate.getDate() + 1);
                 }
-
-                // 오늘이 없으면 추가
-                if (!hist.find(h => h.date === todayStr)) {
-                    const emptyRow = { date: todayStr };
-                    flowTypesResolved.forEach((t) => { emptyRow[t] = { raw: null, diff: null }; });
-                    hist.push(emptyRow);
-                }
-
-                // 미래 5일 추가
-                for (let i = 1; i <= 5; i++) {
-                    const d = new Date(todayAnchor);
-                    d.setDate(todayAnchor.getDate() + i);
-                    const ds = d.toISOString().split('T')[0];
-                    if (!hist.find(h => h.date === ds)) {
-                        const emptyRow = { date: ds, isFuture: true };
-                        flowTypesResolved.forEach((t) => { emptyRow[t] = { raw: null, diff: null }; });
-                        hist.push(emptyRow);
-                    }
-                }
-
-                // 빈 날짜들을 맨 뒤에 push했으므로 최종적으로 정렬
-                hist.sort((a, b) => a.date.localeCompare(b.date));
-
-                const histMerged = mergeLegacyFlowKeysForDisplay(hist, flowTypesResolved);
-
-                setHistory(histMerged);
-                setPendingChanges({});
-                pendingChangesRef.current = {};
             }
+
+            if (!hist.find((row) => row.date === todayStr)) {
+                hist.push(buildEmptyRow(todayStr, flowTypesResolved));
+            }
+
+            for (let i = 1; i <= 5; i += 1) {
+                const futureDate = new Date(todayAnchor);
+                futureDate.setDate(todayAnchor.getDate() + i);
+                const ds = futureDate.toISOString().split('T')[0];
+                if (!hist.find((row) => row.date === ds)) {
+                    hist.push(buildEmptyRow(ds, flowTypesResolved, { isFuture: true }));
+                }
+            }
+
+            hist.sort((a, b) => a.date.localeCompare(b.date));
+            setHistory(mergeLegacyFlowKeysForDisplay(hist, flowTypesResolved));
+            setPendingChanges({});
+            pendingChangesRef.current = {};
         } catch (err) {
             console.error(err);
+            showAlert?.(`유량 데이터 로드 실패: ${err.message}`);
         } finally {
             setLoading(false);
         }
-    }, [flowTypesResolved]);
+    }, [flowTypesResolved, showAlert]);
 
     useEffect(() => {
         loadReadings();
     }, [loadReadings]);
 
-    // 셀 편집: 적산값 입력 -> 당일 누계 + 이후 날짜 연쇄 재계산
     const updateReading = (rowDate, type, rawValue) => {
-        const parsed = rawValue === '' ? null : parseFloat(rawValue);
-        const numRaw = parsed !== null && Number.isFinite(parsed) ? parsed : null;
+        const raw = toNumberOrNull(rawValue);
         let pendingByDate = null;
 
         setHistory((prev) => {
-            const newHist = prev.map((r) => ({ ...r }));
-            const idx = newHist.findIndex((h) => h.date === rowDate);
+            const next = prev.map((row) => ({ ...row }));
+            const idx = next.findIndex((row) => row.date === rowDate);
             if (idx === -1) return prev;
 
-            const prevCell = newHist[idx][type] || {};
-            newHist[idx] = {
-                ...newHist[idx],
+            next[idx] = {
+                ...next[idx],
                 [type]: {
-                    ...prevCell,
-                    raw: numRaw,
-                    diff: prevCell.diff,
+                    ...(next[idx][type] || {}),
+                    raw,
                     isChanged: true,
                     isUserInput: true,
-                    error: prevCell.error,
                 },
             };
 
-            pendingByDate = cascadeRecalculateType(
-                newHist,
-                idx,
-                type,
-                correctData,
-                findPreviousSludgeCumulative,
-                false
-            );
-
-            return newHist;
+            pendingByDate = recalculateFromIndex(next, idx, type, false);
+            return next;
         });
 
         if (pendingByDate) {
-            setPendingChanges((p) => {
-                const nextPending = { ...p };
+            setPendingChanges((prev) => {
+                const next = { ...prev };
                 for (const [date, snap] of pendingByDate.entries()) {
-                    nextPending[date] = { ...(p[date] || {}), [type]: snap };
+                    next[date] = { ...(next[date] || {}), [type]: snap };
                 }
-                pendingChangesRef.current = nextPending;
-                return nextPending;
+                pendingChangesRef.current = next;
+                return next;
             });
         }
     };
 
-    // 셀 편집: 수동 수정 모드 (적산·누계 개별 입력). 적산(raw) 변경 시 이후 날짜 누계 연쇄 재계산.
-    const updateManualReading = (rowDate, type, field, val) => {
-        const numVal = val === '' ? null : parseFloat(val);
+    const updateManualReading = (rowDate, type, field, value) => {
+        const numValue = toNumberOrNull(value);
         let pendingByDate = null;
-        let manualDiffSnap = null;
+        let manualSnap = null;
 
         setHistory((prev) => {
-            const newHist = prev.map((r) => ({ ...r }));
-            const idx = newHist.findIndex((h) => h.date === rowDate);
+            const next = prev.map((row) => ({ ...row }));
+            const idx = next.findIndex((row) => row.date === rowDate);
             if (idx === -1) return prev;
 
-            const currentCell = newHist[idx][type] || {};
-            const newCell = {
-                ...currentCell,
-                [field]: numVal,
-                isChanged: true,
-                isUserInput: true,
-                error: field === 'raw' ? null : currentCell.error,
+            const currentCell = next[idx][type] || {};
+            next[idx] = {
+                ...next[idx],
+                [type]: {
+                    ...currentCell,
+                    [field]: numValue,
+                    isChanged: true,
+                    isUserInput: true,
+                    error: field === 'raw' ? null : currentCell.error,
+                },
             };
 
-            newHist[idx] = { ...newHist[idx], [type]: newCell };
-
             if (field === 'raw') {
-                pendingByDate = cascadeRecalculateType(
-                    newHist,
-                    idx,
-                    type,
-                    correctData,
-                    findPreviousSludgeCumulative,
-                    true
-                );
+                pendingByDate = recalculateFromIndex(next, idx, type, true);
             } else {
-                const c = newHist[idx][type] || {};
-                manualDiffSnap = { raw: c.raw, diff: c.diff };
+                const cell = next[idx][type] || {};
+                manualSnap = { raw: cell.raw, diff: cell.diff };
             }
 
-            return newHist;
+            return next;
         });
 
         if (field === 'raw' && pendingByDate) {
-            setPendingChanges((p) => {
-                const nextPending = { ...p };
+            setPendingChanges((prev) => {
+                const next = { ...prev };
                 for (const [date, snap] of pendingByDate.entries()) {
-                    const prevRow = p[date] || {};
-                    const prevType = prevRow[type] || {};
-                    nextPending[date] = {
-                        ...prevRow,
-                        [type]: {
-                            ...prevType,
-                            ...snap,
-                            isManual: date === rowDate,
-                        },
-                    };
+                    next[date] = { ...(next[date] || {}), [type]: { ...(next[date]?.[type] || {}), ...snap, isManual: date === rowDate } };
                 }
-                pendingChangesRef.current = nextPending;
-                return nextPending;
+                pendingChangesRef.current = next;
+                return next;
             });
-        } else if (field !== 'raw' && manualDiffSnap) {
-            setPendingChanges((p) => {
-                const rowChanges = p[rowDate] || {};
-                const typeChanges = rowChanges[type] || {
-                    raw: manualDiffSnap.raw,
-                    diff: manualDiffSnap.diff,
-                };
-                const nextPending = {
-                    ...p,
+        } else if (field !== 'raw' && manualSnap) {
+            setPendingChanges((prev) => {
+                const next = {
+                    ...prev,
                     [rowDate]: {
-                        ...rowChanges,
-                        [type]: { ...typeChanges, [field]: numVal, isManual: true },
+                        ...(prev[rowDate] || {}),
+                        [type]: { ...(prev[rowDate]?.[type] || manualSnap), [field]: numValue, isManual: true },
                     },
                 };
-                pendingChangesRef.current = nextPending;
-                return nextPending;
+                pendingChangesRef.current = next;
+                return next;
             });
         }
     };
 
-    // 일괄 저장
     const submitBatch = async (options = {}) => {
         const { targetDates = null, silent = false } = options;
         const sourcePendingChanges = pendingChangesRef.current;
         const changedDates = Array.isArray(targetDates)
-            ? targetDates.filter(date => sourcePendingChanges[date])
+            ? targetDates.filter((date) => sourcePendingChanges[date])
             : Object.keys(sourcePendingChanges);
+
         if (changedDates.length === 0) {
-            if (!silent) showAlert?.("변경 사항이 없습니다.");
-            return;
+            if (!silent) showAlert?.('변경 사항이 없습니다.');
+            return { success: false };
         }
 
         setLoading(true);
@@ -358,18 +308,65 @@ export const useFlowViewModel = (currentUser, { showAlert, flowTypes: flowTypesP
                         calculated_flow: data.diff,
                         sludge_export: type === '슬러지' ? data.raw : null,
                         is_manual: !!data.isManual,
-                        is_reset: false
+                        is_reset: false,
                     });
                 }
                 if (items.length > 0) {
                     const res = await FlowModel.bulkSave(dt, items);
-                    if (!res.success) throw new Error(res.error);
+                    if (!res.success) throw new Error(res.error || '저장 실패');
                 }
             }
-            if (!silent) showAlert?.("데이터가 성공적으로 저장되었습니다.");
+
+            if (!silent) showAlert?.('데이터가 성공적으로 저장되었습니다.');
             await loadReadings();
+            return { success: true };
         } catch (err) {
-            if (!silent) showAlert?.("저장 실패: " + err.message);
+            if (!silent) showAlert?.(`저장 실패: ${err.message}`);
+            return { success: false, error: err.message };
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const saveModalDraft = async ({ date, items = [] } = {}) => {
+        if (!date) {
+            showAlert?.('저장할 날짜가 없습니다.');
+            return { success: false };
+        }
+
+        const payloadItems = items
+            .map(({ item, values }) => {
+                const type = item?.key || item?.name || item?.label;
+                if (!type) return null;
+                const rawValue = toNumberOrNull(values?.reading);
+                const calculatedFlow = toNumberOrNull(values?.calculatedFlow);
+
+                return {
+                    type,
+                    raw_value: rawValue,
+                    calculated_flow: calculatedFlow,
+                    sludge_export: type === '슬러지' ? rawValue : null,
+                    is_manual: true,
+                    is_reset: false,
+                };
+            })
+            .filter(Boolean);
+
+        if (payloadItems.length === 0) {
+            showAlert?.('저장할 유량 데이터가 없습니다.');
+            return { success: false };
+        }
+
+        setLoading(true);
+        try {
+            const res = await FlowModel.bulkSave(date, payloadItems);
+            if (!res.success) throw new Error(res.error || '유량 데이터 저장에 실패했습니다.');
+            showAlert?.('유량 데이터가 저장되었습니다.');
+            await loadReadings();
+            return res;
+        } catch (err) {
+            showAlert?.(`저장 실패: ${err.message}`);
+            return { success: false, error: err.message };
         } finally {
             setLoading(false);
         }
@@ -383,7 +380,8 @@ export const useFlowViewModel = (currentUser, { showAlert, flowTypes: flowTypesP
         updateReading,
         updateManualReading,
         submitBatch,
-        refresh: loadReadings,
-        pendingChanges
+        saveModalDraft,
+        refresh: () => loadReadings({ force: true }),
+        pendingChanges,
     };
 };

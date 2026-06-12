@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useState, useEffect } from 'react';
 import { TAB_LABELS, DEFAULT_TAB } from './core/constants';
 import { useAuthViewModel, LoginView, SyncService } from './features/auth';
+import { clearRecordGridHistoryCache, preloadRecordGridData } from './features/records/recordPreloadService';
 import Sidebar from './components/Sidebar';
 import StatusBar from './components/StatusBar';
 import { WorkspaceErrorBoundary } from './components/common';
@@ -70,6 +71,12 @@ const PlaceholderView = ({ title }) => (
 function App() {
     const { user, loginHintName, isAuthenticated, isLoading, login, logout } = useAuthViewModel();
     const [activeTab, setActiveTab] = useState(DEFAULT_TAB);
+    const [preloadedUserId, setPreloadedUserId] = useState(null);
+    const [recordPreloadState, setRecordPreloadState] = useState({
+        active: false,
+        percent: 0,
+        label: '',
+    });
 
     useEffect(() => {
         // 로딩 완료 시 1회 시도
@@ -82,6 +89,36 @@ function App() {
         // 온라인 이벤트 리스너 등록 (1회만)
         SyncService.initAutoSync();
     }, []);
+
+    useEffect(() => {
+        if (!isAuthenticated || !user?.id) {
+            setPreloadedUserId(null);
+            setRecordPreloadState({ active: false, percent: 0, label: '' });
+            return undefined;
+        }
+
+        const preloadKey = `${user.id}::${user.site_id || 'default'}`;
+        if (preloadedUserId === preloadKey) return undefined;
+
+        let cancelled = false;
+        clearRecordGridHistoryCache();
+        setRecordPreloadState({ active: true, percent: 0, label: '업무 데이터 로드 준비 중...' });
+
+        preloadRecordGridData({
+            onProgress: ({ percent, label }) => {
+                if (cancelled) return;
+                setRecordPreloadState({ active: true, percent, label });
+            },
+        }).finally(() => {
+            if (cancelled) return;
+            setPreloadedUserId(preloadKey);
+            setRecordPreloadState({ active: false, percent: 100, label: '' });
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isAuthenticated, preloadedUserId, user?.id, user?.site_id]);
 
     if (isLoading) {
         return (
@@ -98,8 +135,39 @@ function App() {
         return <LoginView onLogin={login} loginHintName={loginHintName} />;
     }
 
+    if (recordPreloadState.active) {
+        return (
+            <div className="login-screen">
+                <div style={{ width: 'min(420px, calc(100vw - 48px))', color: 'var(--text-secondary)' }}>
+                    <div className="spinner" style={{ margin: '0 auto 1rem' }} />
+                    <p style={{ margin: '0 0 0.75rem', textAlign: 'center', fontSize: '0.95rem', fontWeight: 800 }}>
+                        {recordPreloadState.label || '업무 데이터 로드 중...'}
+                    </p>
+                    <div style={{ height: 8, borderRadius: 999, background: '#e2e8f0', overflow: 'hidden' }}>
+                        <div style={{
+                            width: `${recordPreloadState.percent}%`,
+                            height: '100%',
+                            borderRadius: 999,
+                            background: '#2563eb',
+                            transition: 'width 160ms ease',
+                        }} />
+                    </div>
+                    <p style={{ margin: '0.5rem 0 0', textAlign: 'center', fontSize: '0.75rem', fontWeight: 700 }}>
+                        {recordPreloadState.percent}%
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
     const handleUpdatePassword = () => {
         setActiveTab('myinfo');
+    };
+
+    const handleLogout = () => {
+        clearRecordGridHistoryCache();
+        setPreloadedUserId(null);
+        logout();
     };
 
     const renderContent = () => {
@@ -153,7 +221,7 @@ function App() {
                     user={user}
                     activeTab={activeTab}
                     onTabChange={setActiveTab}
-                    onLogout={logout}
+                    onLogout={handleLogout}
                     onUpdatePassword={handleUpdatePassword}
                 />
 
