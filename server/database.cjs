@@ -137,6 +137,19 @@ db.exec(`
     is_synced INTEGER DEFAULT 0,
     UNIQUE(date, measurement_group, location, item_code)
   );
+  CREATE TABLE IF NOT EXISTS operation_status_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date DATE NOT NULL,
+    site_id TEXT,
+    site_name TEXT,
+    ph REAL,
+    do_value REAL,
+    svi REAL,
+    author TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(date, site_id)
+  );
   CREATE TABLE IF NOT EXISTS sludge_photo_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     date TEXT NOT NULL UNIQUE,
@@ -377,14 +390,15 @@ function migrateLegacyWaterQualitySchema() {
   const waterColumnInfo = db.prepare("PRAGMA table_info(water_quality)").all();
   const waterColumnNames = waterColumnInfo.map((item) => item.name);
   const needsLegacyMigration = waterColumnNames.some((name) => [
-    'items', 'results', 'site_id', 'do', 'ph', 'source_page_index', 'ai_confidence', 'site_match_confidence',
+    'items', 'results', 'do', 'ph', 'source_page_index', 'ai_confidence', 'site_match_confidence',
     'manual_review_required', 'warnings_json', 'source_payload_json', 'certificate_category',
     'certificate_file_name', 'certificate_original_file_name', 'drive_file_id', 'drive_web_view_link'
   ].includes(name));
 
   if (!needsLegacyMigration) return;
 
-  db.exec('ALTER TABLE water_quality RENAME TO water_quality_legacy_backup');
+  const backupTableName = `water_quality_legacy_backup_${Date.now()}`;
+  db.exec(`ALTER TABLE water_quality RENAME TO ${backupTableName}`);
   createCertificateWaterQualityTable();
   db.exec(`
     INSERT INTO water_quality (
@@ -410,9 +424,9 @@ function migrateLegacyWaterQualitySchema() {
       created_at,
       last_modified,
       is_synced
-    FROM water_quality_legacy_backup
+    FROM ${backupTableName}
   `);
-  db.exec('DROP TABLE water_quality_legacy_backup');
+  db.exec(`DROP TABLE ${backupTableName}`);
 }
 
 migrateLegacyWaterQualitySchema();
@@ -741,7 +755,7 @@ if (obsoleteAttendanceLocationCols.some((column) => currentAttendanceCols.includ
       auto_logout, is_synced, last_modified
     )
     SELECT
-      id, member_id, member_name, site_id, site_name, date, login_time, logout_time,
+      id, COALESCE(member_id, ''), COALESCE(member_name, ''), site_id, site_name, date, login_time, logout_time,
       location_matched, remote_session_detected, remote_session_type, remote_session_evidence,
       auto_logout, is_synced, last_modified
     FROM attendance;
@@ -826,15 +840,16 @@ db.prepare('CREATE INDEX IF NOT EXISTS idx_water_quality_site_date ON water_qual
 db.prepare('CREATE INDEX IF NOT EXISTS idx_qntech_water_quality_site_date ON qntech_water_quality (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_kit_logs_site_date ON kit_logs (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_facility_logs_site_date ON facility_logs (site_id, date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_operation_status_logs_site_date ON operation_status_logs (site_id, date)').run();
 
 // site_id 백필: 기존 데이터가 있으면 app_settings.site_id로 채움
 if (currentSiteId) {
   db.prepare('UPDATE flow_readings SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE medicine_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
-  db.prepare('UPDATE water_quality SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE qntech_water_quality SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE kit_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE facility_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
+  db.prepare('UPDATE operation_status_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE sludge_photo_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE attendance SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
 }

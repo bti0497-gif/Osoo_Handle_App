@@ -11,6 +11,7 @@ const {
 } = require('../services/dailyWorkLogService.cjs');
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
 const { restoreOperationalData } = require('../services/bigQueryRestoreService.cjs');
+const { syncCertificateCacheForSiteMonth } = require('../services/certificateCacheSyncService.cjs');
 
 const TEMPLATE_NAME = '일일업무일지';
 
@@ -24,12 +25,39 @@ function buildMissingTemplateResponse() {
   };
 }
 
+function getMonthKeys(startDate, endDate) {
+  const months = [];
+  const cursor = new Date(`${startDate.slice(0, 7)}-01T00:00:00`);
+  const end = new Date(`${endDate.slice(0, 7)}-01T00:00:00`);
+  while (cursor <= end) {
+    months.push({
+      year: String(cursor.getFullYear()),
+      month: String(cursor.getMonth() + 1).padStart(2, '0'),
+    });
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return months;
+}
+
 module.exports = function (db, baseDir, appDataPath) {
   const getRequestContext = (req) => ({
     siteId: req.query.siteId || req.query.site_id || '',
     siteName: req.query.siteName || req.query.site_name || '',
     author: req.query.author || '',
   });
+
+  const syncCertificateCacheForRange = async (range, context) => {
+    const siteName = String(context.siteName || db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get()?.site_name || '').trim();
+    if (!siteName) return;
+
+    for (const item of getMonthKeys(range.startDate, range.endDate)) {
+      try {
+        await syncCertificateCacheForSiteMonth({ db, siteName, year: item.year, month: item.month });
+      } catch (err) {
+        console.warn('[Daily Work Log] certificate cache sync skipped:', err.message);
+      }
+    }
+  };
 
   router.get('/api/daily-work-log/active-dates', async (req, res) => {
     const { startDate, endDate, templateName } = req.query;
@@ -52,6 +80,7 @@ module.exports = function (db, baseDir, appDataPath) {
         tables: ['flow_readings', 'medicine_logs', 'kit_logs'],
         ...getRequestContext(req),
       });
+      await syncCertificateCacheForRange(range, getRequestContext(req));
       const activeDates = getActiveDates(db, range.startDate, range.endDate, getRequestContext(req));
 
       return res.json({ success: true, activeDates });
@@ -78,6 +107,7 @@ module.exports = function (db, baseDir, appDataPath) {
         tables: ['flow_readings', 'medicine_logs', 'kit_logs'],
         ...getRequestContext(req),
       });
+      await syncCertificateCacheForRange(range, getRequestContext(req));
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
 
       return res.json({ success: true, ...manifest });
@@ -104,6 +134,7 @@ module.exports = function (db, baseDir, appDataPath) {
         tables: ['flow_readings', 'medicine_logs', 'kit_logs'],
         ...getRequestContext(req),
       });
+      await syncCertificateCacheForRange(range, getRequestContext(req));
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
       const targetPage = findPageInManifest(manifest, pageKey);
 
@@ -144,6 +175,7 @@ module.exports = function (db, baseDir, appDataPath) {
         tables: ['flow_readings', 'medicine_logs', 'kit_logs'],
         ...getRequestContext(req),
       });
+      await syncCertificateCacheForRange(range, getRequestContext(req));
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
       
       if (!manifest.pages.length) {

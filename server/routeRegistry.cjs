@@ -32,6 +32,7 @@ const routeRegistry = [
   //    이미 baseDir에서 importQntechWaterPhotos(), buildManualPhotoDirectory()를 호출하므로 BASE_DIR 필요
   { tier: 1, path: '/',                   module: './routes/flowRoutes.cjs',           args: ['db'],           watch: true },
   { tier: 1, path: '/',                   module: './routes/waterQualityRoutes.cjs',   args: ['db', 'BASE_DIR'], watch: true },
+  { tier: 1, path: '/',                   module: './routes/operationStatusRoutes.cjs', args: ['db'] },
   { tier: 1, path: '/',                   module: './routes/medicineRoutes.cjs',       args: ['db'],           watch: true },
   { tier: 1, path: '/',                   module: './routes/kitRoutes.cjs',            args: ['db'],           watch: true },
   { tier: 1, path: '/',                   module: './routes/facilityRoutes.cjs',       args: ['db'],           watch: true },

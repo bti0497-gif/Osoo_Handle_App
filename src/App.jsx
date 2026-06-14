@@ -13,6 +13,7 @@ const MedicineManagementView = lazy(() => import('./features/medicine').then((mo
 const MedicineRegisterView = lazy(() => import('./features/medicine').then((module) => ({ default: module.MedicineRegisterView })));
 const MedicineInView = lazy(() => import('./features/medicine').then((module) => ({ default: module.MedicineInView })));
 const WaterQualityView = lazy(() => import('./features/water').then((module) => ({ default: module.WaterQualityView })));
+const OperationStatusView = lazy(() => import('./features/operation').then((module) => ({ default: module.OperationStatusView })));
 const FacilityManagementView = lazy(() => import('./features/facility').then((module) => ({ default: module.FacilityManagementView })));
 const DailyLogView = lazy(() => import('./features/dailylog').then((module) => ({ default: module.DailyLogView })));
 const BoardView = lazy(() => import('./features/board').then((module) => ({ default: module.BoardView })));
@@ -176,6 +177,7 @@ function App() {
             case 'medicine': return <MedicineManagementView currentUser={user} />;
             case 'water': return <WaterQualityView currentUser={user} />;
             case 'kit': return <KitManagementView currentUser={user} />;
+            case 'operation_status': return <OperationStatusView currentUser={user} />;
             case 'certificate': return <CertificateView currentUser={user} />;
             case 'facility': return <FacilityManagementView currentUser={user} />;
             // TODO: 장비이력카드 — 향후 EquipmentCardView 컴포넌트로 교체

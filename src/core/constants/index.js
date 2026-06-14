@@ -14,6 +14,7 @@ export const MENUS = [
     children: [
       { id: 'water', label: '수질분석' },
       { id: 'kit', label: '키트관리' },
+      { id: 'operation_status', label: '운전상태' },
       { id: 'certificate', label: '성적서' }
     ]
   },
@@ -54,6 +55,7 @@ export const TAB_LABELS = {
   medicine: '약품관리',
   water: '수질분석',
   kit: '분석키트관리',
+  operation_status: '운전상태',
   certificate: '성적서',
   facility: '고장·수리이력',
   // TODO: 장비이력카드 탭 레이블 — 장비이력카드 기능 구현 시 활성화

@@ -345,32 +345,6 @@ module.exports = (db) => {
     router.post('/local-login', async (req, res) => {
         const { name, password } = req.body;
         try {
-            if (isSheetsConfigured()) {
-                try {
-                    const members = await getMembers();
-                    const member = members.find((item) => item.name === name && item.password === password);
-                    if (member) {
-                        // Refresh the local member cache after a successful online login.
-                        upsertLocalMember(member);
-                        closeStaleOpenSessions(member);
-                        try {
-                            await syncRecentCertificateCacheForSite({
-                                db,
-                                siteName: member.site_name1,
-                                months: 2,
-                            });
-                        } catch (syncErr) {
-                            console.warn('[auth/local-login] certificate cache sync failed (sheets):', syncErr.message);
-                        }
-                        triggerBigQuerySync('login-success:sheets');
-                        return res.json({ success: true, member: enrichMemberWithSites(member), source: 'sheets' });
-                    }
-                } catch (sheetErr) {
-                    // Fall back to the local cache when Sheets lookup fails.
-                    console.warn('[auth/local-login] Sheets lookup failed, falling back to local cache:', sheetErr.message);
-                }
-            }
-
             const member = db.prepare('SELECT * FROM members WHERE name = ? AND password = ?').get(name, password);
             if (member) {
                 if (String(member.role || '').trim() === 'admin' || String(member.role || '').trim() === 'group_admin' || String(member.name || '').trim() === 'admin') {
@@ -388,7 +362,7 @@ module.exports = (db) => {
                     console.warn('[auth/local-login] certificate cache sync failed (local):', syncErr.message);
                 }
                 triggerBigQuerySync('login-success:local');
-                res.json({ success: true, member: enrichMemberWithSites(member) });
+                res.json({ success: true, member: enrichMemberWithSites(member), source: 'local' });
             } else {
                 res.status(401).json({ success: false, message: '이름 또는 비밀번호가 일치하지 않습니다.' });
             }

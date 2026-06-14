@@ -7,7 +7,7 @@ const { PDFDocument } = require('pdf-lib');
 
 const { convertExcelToPdf } = require('./excelPdfService.cjs');
 
-const PREVIEW_RENDER_VERSION = '2026-03-16-daily-work-log-flow-aggregate-v5';
+const PREVIEW_RENDER_VERSION = '2026-06-14-certificate-water-quality-v1';
 const EXPORT_TEMP_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 const pendingPreviewJobs = new Map();
@@ -137,6 +137,66 @@ function getMedicineLogs(db, date, scope = resolveSiteScope(db)) {
 function getKitLogs(db, date, scope = resolveSiteScope(db)) {
   const filter = siteWhere(scope);
   return db.prepare(`SELECT * FROM kit_logs WHERE date = ?${filter.clause}`).all(date, ...filter.params);
+}
+
+function getOperationStatusLog(db, date, scope = resolveSiteScope(db)) {
+  const filter = siteWhere(scope);
+  return db.prepare(`
+    SELECT *
+    FROM operation_status_logs
+    WHERE date = ?${filter.clause}
+    ORDER BY last_modified DESC, id DESC
+    LIMIT 1
+  `).get(date, ...filter.params) || null;
+}
+
+function getCertificateWaterQualityRows(db, date, scope = resolveSiteScope(db), limit = 2) {
+  const normalizedDate = normalizeDate(date);
+  if (!normalizedDate) return [];
+
+  const where = ['report_date <= ?'];
+  const params = [normalizedDate];
+  if (scope?.siteName) {
+    // 성적서 water_quality는 전국 현장 자료를 캐시할 수 있으므로 현장명 매칭을 우선한다.
+    // 과거 백필/레거시 데이터의 site_id가 현재 앱 site_id로 채워진 경우가 있어 OR 조건으로 묶으면 오매칭된다.
+    where.push('(REPLACE(COALESCE(site_name, \'\'), \' \', \'\') = REPLACE(?, \' \', \'\') OR REPLACE(COALESCE(site_name_raw, \'\'), \' \', \'\') = REPLACE(?, \' \', \'\'))');
+    params.push(scope.siteName, scope.siteName);
+  } else if (scope?.siteId) {
+    where.push('site_id = ?');
+    params.push(scope.siteId);
+  }
+
+  const requestedLimit = Math.max(1, Number(limit) || 1);
+  params.push(Math.max(requestedLimit * 5, 10));
+  const rows = db.prepare(`
+    SELECT report_date, bod, ss, tn, tp, total_coliform, mlss, drive_file_name, source_pdf_name, last_modified, id
+    FROM water_quality
+    WHERE ${where.join(' AND ')}
+    ORDER BY report_date DESC, COALESCE(last_modified, created_at, '') DESC, id DESC
+    LIMIT ?
+  `).all(...params);
+
+  const seen = new Set();
+  const deduped = [];
+  for (const row of rows) {
+    const key = [
+      row.report_date,
+      row.bod,
+      row.ss,
+      row.tn,
+      row.tp,
+      row.total_coliform,
+      row.mlss,
+      row.drive_file_name,
+      row.source_pdf_name,
+    ].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(row);
+    if (deduped.length >= requestedLimit) break;
+  }
+
+  return deduped;
 }
 
 function getSiteSettings(db) {
@@ -370,6 +430,42 @@ function findKitNameByKeyword(db, keyword) {
   return match?.item_name || keyword;
 }
 
+function setBindingAliases(bindings, names, value) {
+  for (const name of names) {
+    bindings[name] = value ?? '';
+  }
+}
+
+function bindCertificateWaterQuality(bindings, rows) {
+  const orderedRows = Array.isArray(rows) ? rows.slice(0, 2) : [];
+  for (let i = 0; i < 2; i += 1) {
+    const suffix = String(i + 1);
+    const row = orderedRows[i] || {};
+
+    setBindingAliases(bindings, [`수질날짜${suffix}`, `시료채취일${suffix}`], row.report_date || '');
+    setBindingAliases(bindings, [`수질ph${suffix}`, `PH${suffix}`, `ph${suffix}`], '');
+    setBindingAliases(bindings, [`수질bod${suffix}`, `BOD${suffix}`, `bod${suffix}`], row.bod ?? '');
+    setBindingAliases(bindings, [`수질cod${suffix}`, `COD${suffix}`, `cod${suffix}`, `수질toc${suffix}`, `TOC${suffix}`, `toc${suffix}`], '');
+    setBindingAliases(bindings, [`수질ss${suffix}`, `SS${suffix}`, `ss${suffix}`], row.ss ?? '');
+    setBindingAliases(bindings, [`수질tn${suffix}`, `TN${suffix}`, `T-N${suffix}`, `수질T-N${suffix}`, `tn${suffix}`], row.tn ?? '');
+    setBindingAliases(bindings, [`수질tp${suffix}`, `TP${suffix}`, `T-P${suffix}`, `수질T-P${suffix}`, `tp${suffix}`], row.tp ?? '');
+    setBindingAliases(bindings, [`수질대장균${suffix}`, `대장균${suffix}`, `총대장균군${suffix}`, `수질총대장균군${suffix}`], row.total_coliform ?? '');
+    setBindingAliases(bindings, [`수질mlss${suffix}`, `MLSS${suffix}`, `mlss${suffix}`], row.mlss ?? '');
+    setBindingAliases(bindings, [`수질비고${suffix}`, `비고${suffix}`], row.drive_file_name || row.source_pdf_name || '');
+  }
+}
+
+function bindOperationStatus(bindings, operationStatus, certificateWaterRows = []) {
+  const status = operationStatus || {};
+  const certificateWithMlss = (Array.isArray(certificateWaterRows) ? certificateWaterRows : [])
+    .find((row) => row.mlss !== null && row.mlss !== undefined && row.mlss !== '');
+
+  setBindingAliases(bindings, ['ph', 'PH', '운전ph', '운전PH'], status.ph ?? '');
+  setBindingAliases(bindings, ['산소', 'DO', 'do', '운전do', '운전DO'], status.do_value ?? '');
+  setBindingAliases(bindings, ['svi', 'SVI', '운전svi', '운전SVI'], status.svi ?? '');
+  setBindingAliases(bindings, ['ml', 'MLSS', 'mlss', '운전mlss', '운전MLSS'], certificateWithMlss?.mlss ?? '');
+}
+
 /**
  *
  *
@@ -388,6 +484,8 @@ function buildBindingsForDate(db, date, context = {}) {
   const prevFlows = getFlowReadingsForPrevDate(db, date, scope);
   const medicines = getMedicineLogs(db, date, scope);
   const kits = getKitLogs(db, date, scope);
+  const operationStatus = getOperationStatusLog(db, date, scope);
+  const certificateWaterRows = getCertificateWaterQualityRows(db, date, scope, 2);
 
   const monthStart = getMonthStartDate(date);
   const yearStart = getYearStartDate(date);
@@ -602,19 +700,13 @@ function buildBindingsForDate(db, date, context = {}) {
   // 전력계산(방류량 전력량 계산값 바인딩
   bindings['전력효율'] = kwPerM3;
 
-  // --- 수질 분석 (향후 구현, 현재는 빈 값) ---
-  ['ph', 'bod', 'toc', 'ss', 'tn', 'tp', '대장균'].forEach(item => {
-    bindings[`수질${item}1`] = '';
-    bindings[`수질${item}2`] = '';
-  });
-  bindings['수질날짜1'] = '';
-  bindings['수질날짜2'] = '';
+  // --- 성적서 수질 측정 ---
+  // 큐앤테크 수질분석(qntech_water_quality)이 아니라 성적서 파싱값(water_quality)을 사용한다.
+  bindCertificateWaterQuality(bindings, certificateWaterRows);
 
   // --- 기타 (수동 입력) ---
   bindings['수온'] = '';
-  bindings['산소'] = '';
-  bindings['ml'] = '';
-  bindings['svi'] = '';
+  bindOperationStatus(bindings, operationStatus, certificateWaterRows);
   // 엑셀 이름 관리자의 영문 대소문자 명명(PAC vs pac, NH3-N vs NH3_N 등) 차이를
       // 파일이 이미 삭제되었거나 접근 불가한 경우 무시
   const normalizedBindings = { ...bindings };
@@ -763,6 +855,8 @@ function buildContentSignature(db, date, context = {}) {
   const flows = getFlowReadings(db, date, scope);
   const medicines = getMedicineLogs(db, date, scope);
   const kits = getKitLogs(db, date, scope);
+  const operationStatus = getOperationStatusLog(db, date, scope);
+  const certificateWaterRows = getCertificateWaterQualityRows(db, date, scope, 2);
 
   return hashParts([
     PREVIEW_RENDER_VERSION,
@@ -770,6 +864,8 @@ function buildContentSignature(db, date, context = {}) {
     flows.map((r) => [r.type, r.raw_value, r.calculated_flow, r.sludge_export, r.last_modified].join(':')).join('|'),
     medicines.map((r) => [r.medicine_name, r.purchase_amount, r.usage_amount, r.current_inventory, r.last_modified].join(':')).join('|'),
     kits.map((r) => [r.kit_name, r.purchase_amount, r.usage_amount, r.current_inventory, r.last_modified].join(':')).join('|'),
+    operationStatus ? [operationStatus.ph, operationStatus.do_value, operationStatus.svi, operationStatus.last_modified].join(':') : '',
+    certificateWaterRows.map((r) => [r.report_date, r.bod, r.ss, r.tn, r.tp, r.total_coliform, r.mlss, r.last_modified].join(':')).join('|'),
   ]);
 }
 
@@ -1244,10 +1340,13 @@ function getActiveDates(db, startDate, endDate, context = {}) {
       SELECT date FROM medicine_logs WHERE date BETWEEN ? AND ?${filter.clause}
       UNION
       SELECT date FROM kit_logs WHERE date BETWEEN ? AND ?${filter.clause}
+      UNION
+      SELECT date FROM operation_status_logs WHERE date BETWEEN ? AND ?${filter.clause}
     )
     ORDER BY date ASC
   `;
   const rows = db.prepare(query).all(
+    startDate, endDate, ...filter.params,
     startDate, endDate, ...filter.params,
     startDate, endDate, ...filter.params,
     startDate, endDate, ...filter.params
