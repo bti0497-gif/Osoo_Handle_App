@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 const TAB_META = [
     { id: 'flow', label: '유량관리' },
-    { id: 'medicine', label: '약품관리' },
     { id: 'water', label: '수질분석' },
+    { id: 'medicine', label: '약품관리' },
     { id: 'kit', label: '키트관리' },
 ];
 
@@ -191,6 +191,27 @@ function buildInitialDraft(tabId, item, roundValue) {
     }, {});
 }
 
+const getFlowGroupMeta = (item) => {
+    const label = String(item?.label || item?.name || item?.key || '').trim();
+    if (label.includes('내부반송')) return { key: 'flow-group:internal-return', label: '내부반송' };
+    if (label.includes('외부반송')) return { key: 'flow-group:external-return', label: '외부반송' };
+    return { key: item?.key || label, label };
+};
+
+const isSludgeFlowItem = (item) => String(item?.label || item?.name || item?.key || '').includes('슬러지');
+
+const buildFlowGroups = (items = []) => {
+    const groupMap = new Map();
+    items.forEach((item) => {
+        const meta = getFlowGroupMeta(item);
+        if (!groupMap.has(meta.key)) {
+            groupMap.set(meta.key, { ...meta, items: [] });
+        }
+        groupMap.get(meta.key).items.push(item);
+    });
+    return Array.from(groupMap.values());
+};
+
 export default function UnifiedRecordModal({
     isOpen,
     mode = 'add',
@@ -218,9 +239,13 @@ export default function UnifiedRecordModal({
     const [rangeStartDate, setRangeStartDate] = useState(initialDate);
     const [rangeEndDate, setRangeEndDate] = useState(initialDate);
     const [waterInputMode, setWaterInputMode] = useState('manual');
+    const wasOpenRef = useRef(false);
 
     useEffect(() => {
+        const isOpening = isOpen && !wasOpenRef.current;
+        wasOpenRef.current = isOpen;
         if (!isOpen) return;
+
         const waterContext = contexts.water || {};
         const rounds = normalizeRoundOptions(waterContext.rounds, waterContext.measurementOrder || 1);
         setActiveTab(initialTab);
@@ -232,13 +257,21 @@ export default function UnifiedRecordModal({
         setDefaultPurchaseAppliedByTab({});
         setWaterRounds(rounds);
         setSelectedWaterRound(rounds[0]?.value || 1);
-        setWaterInputMode('manual');
+        if (isOpening) {
+            setWaterInputMode('manual');
+        }
     }, [isOpen, initialTab, initialDate, contexts]);
 
     const tabContext = contexts[activeTab] || {};
     const currentItems = useMemo(() => tabContext.items || [], [tabContext]);
-    const selectedKey = selectedByTab[activeTab] || currentItems[0]?.key || '';
-    const selectedItem = currentItems.find((item) => item.key === selectedKey) || currentItems[0] || null;
+    const flowGroups = useMemo(() => buildFlowGroups(currentItems), [currentItems]);
+    const selectedKey = selectedByTab[activeTab] || (activeTab === 'flow' ? flowGroups[0]?.key : currentItems[0]?.key) || '';
+    const selectedFlowGroup = activeTab === 'flow'
+        ? (flowGroups.find((group) => group.key === selectedKey) || flowGroups[0] || null)
+        : null;
+    const selectedItem = activeTab === 'flow'
+        ? (selectedFlowGroup?.items?.[0] || null)
+        : (currentItems.find((item) => item.key === selectedKey) || currentItems[0] || null);
     const draftKey = `${activeTab}:${selectedItem?.key || ''}:${activeTab === 'water' ? selectedWaterRound : 'base'}`;
     const currentDraft = draft[draftKey] || buildInitialDraft(activeTab, selectedItem, selectedWaterRound);
     const selectedRound = waterRounds.find((round) => round.value === selectedWaterRound) || waterRounds[0] || null;
@@ -257,9 +290,10 @@ export default function UnifiedRecordModal({
     };
 
     useEffect(() => {
-        if (!selectedItem) return;
-        setSelectedByTab((prev) => ({ ...prev, [activeTab]: selectedItem.key }));
-    }, [activeTab, selectedItem]);
+        const nextSelectedKey = activeTab === 'flow' ? selectedFlowGroup?.key : selectedItem?.key;
+        if (!nextSelectedKey) return;
+        setSelectedByTab((prev) => ({ ...prev, [activeTab]: nextSelectedKey }));
+    }, [activeTab, selectedFlowGroup, selectedItem]);
 
     if (!isOpen) return null;
 
@@ -353,6 +387,73 @@ export default function UnifiedRecordModal({
         });
     };
 
+    const setFlowDraftFieldForItem = (item, field, value) => {
+        setDraft((prev) => {
+            const isSludge = isSludgeFlowItem(item);
+            const key = getDraftKeyForItem('flow', item);
+            const nextDraft = {
+                ...(prev[key] || buildInitialDraft('flow', item)),
+                [field]: value,
+            };
+
+            if (isSludge && field === 'reading') {
+                const exportAmount = toNumberOrNull(value);
+                const previousMonthlyExport = toNumberOrNull(item?.previous?.monthlyExport)
+                    ?? toNumberOrNull(item?.previous?.monthly_export)
+                    ?? 0;
+                if (exportAmount !== null) {
+                    nextDraft.calculatedFlow = round1(previousMonthlyExport + exportAmount);
+                } else {
+                    nextDraft.calculatedFlow = previousMonthlyExport > 0 ? round1(previousMonthlyExport) : '';
+                }
+            }
+
+            if (!isSludge && mode !== 'edit' && field === 'reading') {
+                const reading = toNumberOrNull(value);
+                const previousReading = toNumberOrNull(item?.previous?.reading);
+                if (reading !== null && previousReading !== null) {
+                    nextDraft.calculatedFlow = round1(reading - previousReading);
+                }
+            }
+
+            if (!isSludge && mode !== 'edit' && field === 'calculatedFlow') {
+                const calculatedFlow = toNumberOrNull(value);
+                const previousReading = toNumberOrNull(item?.previous?.reading);
+                if (calculatedFlow !== null && previousReading !== null) {
+                    nextDraft.reading = round1(previousReading + calculatedFlow);
+                }
+            }
+
+            return { ...prev, [key]: nextDraft };
+        });
+    };
+
+    const setInventoryDraftFieldForItem = (tabId, item, field, value) => {
+        setDraft((prev) => {
+            const key = getDraftKeyForItem(tabId, item);
+            const current = prev[key] || buildInitialDraft(tabId, item);
+            const nextDraft = {
+                ...current,
+                [field]: value,
+            };
+
+            if (field === 'purchase' || field === 'usage') {
+                Object.assign(nextDraft, recalculateInventoryDraft(item, nextDraft));
+            }
+
+            if (field === 'inventory') {
+                const inventory = toNumberOrNull(value);
+                const previousInventory = toNumberOrNull(item?.previous?.inventory) || 0;
+                const purchase = toNumberOrNull(nextDraft.purchase) || 0;
+                if (inventory !== null) {
+                    nextDraft.usage = round1(previousInventory + purchase - inventory);
+                }
+            }
+
+            return { ...prev, [key]: nextDraft };
+        });
+    };
+
     const handleToggleDefaultPurchases = () => {
         if (activeTab !== 'medicine' && activeTab !== 'kit') return;
         const nextApplied = !defaultPurchaseAppliedByTab[activeTab];
@@ -407,8 +508,12 @@ export default function UnifiedRecordModal({
             const itemLabel = item.label || item.key;
 
             if (activeTab === 'flow') {
-                if (toNumberOrNull(values.reading) === null) return { item, message: `${itemLabel}의 검침값이 빠졌습니다.` };
-                if (toNumberOrNull(values.calculatedFlow) === null) return { item, message: `${itemLabel}의 유량 계산값이 빠졌습니다.` };
+                const readingLabel = isSludgeFlowItem(item) ? '반출량' : '검침값';
+                const calculatedLabel = isSludgeFlowItem(item) ? '월 반출량' : '유량 계산값';
+                if (toNumberOrNull(values.reading) === null) return { item, message: `${itemLabel}의 ${readingLabel}이 빠졌습니다.` };
+                if (!isSludgeFlowItem(item) && toNumberOrNull(values.calculatedFlow) === null) {
+                    return { item, message: `${itemLabel}의 ${calculatedLabel}이 빠졌습니다.` };
+                }
             }
 
             if (activeTab === 'medicine' || activeTab === 'kit') {
@@ -445,7 +550,10 @@ export default function UnifiedRecordModal({
     const notifyValidation = (message, item) => {
         if (onValidationError) onValidationError(message);
         else window.alert(message);
-        if (item?.key) setSelectedByTab((prev) => ({ ...prev, [activeTab]: item.key }));
+        if (item?.key) {
+            const nextKey = activeTab === 'flow' ? getFlowGroupMeta(item).key : item.key;
+            setSelectedByTab((prev) => ({ ...prev, [activeTab]: nextKey }));
+        }
     };
 
     const validateBeforeSave = () => {
@@ -589,7 +697,6 @@ export default function UnifiedRecordModal({
                             type="button"
                             onClick={async () => {
                                 await onImportQntechRange?.(rangeStartDate, rangeEndDate);
-                                setWaterInputMode('manual');
                             }}
                             disabled={isImportingQntech || !rangeStartDate || !rangeEndDate}
                             style={{
@@ -606,7 +713,6 @@ export default function UnifiedRecordModal({
                             type="button"
                             onClick={async () => {
                                 await onImportQntech?.(date);
-                                setWaterInputMode('manual');
                             }}
                             disabled={isImportingQntech || !date}
                             style={{
@@ -635,22 +741,86 @@ export default function UnifiedRecordModal({
         }
 
         if (activeTab === 'flow') {
+            const visibleFlowItems = selectedFlowGroup?.items || [];
+            const isSludgeGroup = visibleFlowItems.length > 0 && visibleFlowItems.every(isSludgeFlowItem);
+            const flowHeaderLabels = isSludgeGroup ? ['항목', '반출량', '월 반출량'] : ['유량계', '검침값', '유량 계산값'];
             return (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                    <label style={{ display: 'grid', gap: 6 }}>
-                        <span style={labelStyle}>검침값</span>
-                        <input style={inputStyle} value={currentDraft.reading} onChange={(e) => setDraftField('reading', e.target.value)} />
-                    </label>
-                    <label style={{ display: 'grid', gap: 6 }}>
-                        <span style={labelStyle}>유량 계산값</span>
-                        <input style={{ ...inputStyle, background: '#f8fafc' }} value={currentDraft.calculatedFlow} onChange={(e) => setDraftField('calculatedFlow', e.target.value)} />
-                    </label>
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(160px, 1fr) repeat(2, minmax(110px, 150px))',
+                    alignItems: 'center',
+                    overflow: 'hidden',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 10,
+                    background: '#fff',
+                }}>
+                    {flowHeaderLabels.map((label, index) => (
+                        <div
+                            key={label}
+                            style={{
+                                padding: '8px 10px',
+                                background: '#f8fafc',
+                                borderBottom: '1px solid #e2e8f0',
+                                fontSize: 12,
+                                fontWeight: 900,
+                                color: '#475569',
+                                textAlign: index === 0 ? 'left' : 'center',
+                            }}
+                        >
+                            {label}
+                        </div>
+                    ))}
+
+                    {visibleFlowItems.map((item) => {
+                        const values = getDraftForItem('flow', item);
+                        const isSludgeItem = isSludgeFlowItem(item);
+                        const fieldLabels = isSludgeFlowItem(item)
+                            ? [
+                                ['reading', '반출량'],
+                                ['calculatedFlow', '월 반출량'],
+                            ]
+                            : [
+                                ['reading', '검침값'],
+                                ['calculatedFlow', '유량 계산값'],
+                            ];
+                        return (
+                            <React.Fragment key={item.key}>
+                                <div style={{ padding: '9px 10px', borderBottom: '1px solid #f1f5f9', fontSize: 13, fontWeight: 900, color: '#0f172a' }}>
+                                    {item.label}
+                                </div>
+                                {fieldLabels.map(([field, label]) => (
+                                    <div key={`${item.key}-${field}`} style={{ padding: '7px 8px', borderBottom: '1px solid #f1f5f9' }}>
+                                        <input
+                                            aria-label={`${item.label} ${label}`}
+                                            readOnly={isSludgeItem && field === 'calculatedFlow'}
+                                            style={{
+                                                ...inputStyle,
+                                                width: '100%',
+                                                height: 30,
+                                                padding: '0 7px',
+                                                textAlign: 'right',
+                                                background: field === 'calculatedFlow' ? '#f8fafc' : '#fff',
+                                                color: isSludgeItem && field === 'calculatedFlow' ? '#64748b' : inputStyle.color,
+                                                cursor: isSludgeItem && field === 'calculatedFlow' ? 'default' : 'text',
+                                                boxSizing: 'border-box',
+                                            }}
+                                            value={values[field] ?? ''}
+                                            onChange={(e) => setFlowDraftFieldForItem(item, field, e.target.value)}
+                                        />
+                                    </div>
+                                ))}
+                            </React.Fragment>
+                        );
+                    })}
                 </div>
             );
         }
 
         if (activeTab === 'medicine' || activeTab === 'kit') {
-            const defaultButtonLabel = defaultPurchaseAppliedByTab[activeTab] ? '구매 적용 해제' : '구매 적용';
+            const isKitTab = activeTab === 'kit';
+            const itemLabel = isKitTab ? '키트' : '약품';
+            const purchaseLabel = isKitTab ? '구매' : '입고';
+            const defaultButtonLabel = defaultPurchaseAppliedByTab[activeTab] ? `${purchaseLabel} 적용 해제` : `${purchaseLabel} 적용`;
             return (
                 <div style={{ display: 'grid', gap: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -667,7 +837,7 @@ export default function UnifiedRecordModal({
                         >
                             {defaultButtonLabel}
                         </button>
-                        {activeTab === 'kit' && (
+                        {isKitTab && (
                             <button
                                 type="button"
                                 onClick={() => onSyncAnalysisKits?.(date)}
@@ -685,19 +855,65 @@ export default function UnifiedRecordModal({
                             </button>
                         )}
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
-                        <label style={{ display: 'grid', gap: 6 }}>
-                            <span style={labelStyle}>{activeTab === 'kit' ? '구매' : '입고'}</span>
-                            <input style={inputStyle} value={currentDraft.purchase} onChange={(e) => setDraftField('purchase', e.target.value)} />
-                        </label>
-                        <label style={{ display: 'grid', gap: 6 }}>
-                            <span style={labelStyle}>사용</span>
-                            <input style={inputStyle} value={currentDraft.usage} onChange={(e) => setDraftField('usage', e.target.value)} />
-                        </label>
-                        <label style={{ display: 'grid', gap: 6 }}>
-                            <span style={labelStyle}>재고</span>
-                            <input style={{ ...inputStyle, background: '#f8fafc' }} value={currentDraft.inventory} onChange={(e) => setDraftField('inventory', e.target.value)} />
-                        </label>
+
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'minmax(160px, 1fr) repeat(3, minmax(82px, 110px))',
+                        alignItems: 'center',
+                        overflow: 'hidden',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 10,
+                        background: '#fff',
+                    }}>
+                        {[itemLabel, purchaseLabel, '사용', '재고'].map((label) => (
+                            <div
+                                key={label}
+                                style={{
+                                    padding: '8px 10px',
+                                    background: '#f8fafc',
+                                    borderBottom: '1px solid #e2e8f0',
+                                    fontSize: 12,
+                                    fontWeight: 900,
+                                    color: '#475569',
+                                    textAlign: label === itemLabel ? 'left' : 'center',
+                                }}
+                            >
+                                {label}
+                            </div>
+                        ))}
+
+                        {currentItems.map((item) => {
+                            const values = getDraftForItem(activeTab, item);
+                            return (
+                                <React.Fragment key={item.key}>
+                                    <div style={{ padding: '9px 10px', borderBottom: '1px solid #f1f5f9', fontSize: 13, fontWeight: 900, color: '#0f172a' }}>
+                                        {item.label}
+                                    </div>
+                                    {[
+                                        ['purchase', purchaseLabel],
+                                        ['usage', '사용'],
+                                        ['inventory', '재고'],
+                                    ].map(([field, label]) => (
+                                        <div key={`${item.key}-${field}`} style={{ padding: '7px 8px', borderBottom: '1px solid #f1f5f9' }}>
+                                            <input
+                                                aria-label={`${item.label} ${label}`}
+                                                style={{
+                                                    ...inputStyle,
+                                                    width: '100%',
+                                                    height: 30,
+                                                    padding: '0 7px',
+                                                    textAlign: 'right',
+                                                    background: field === 'inventory' ? '#f8fafc' : '#fff',
+                                                    boxSizing: 'border-box',
+                                                }}
+                                                value={values[field] ?? ''}
+                                                onChange={(e) => setInventoryDraftFieldForItem(activeTab, item, field, e.target.value)}
+                                            />
+                                        </div>
+                                    ))}
+                                </React.Fragment>
+                            );
+                        })}
                     </div>
                 </div>
             );
@@ -877,12 +1093,13 @@ export default function UnifiedRecordModal({
                     </button>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '210px 1fr', gap: 0, minHeight: 0, flex: 1 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: (activeTab === 'medicine' || activeTab === 'kit') ? '1fr' : '210px 1fr', gap: 0, minHeight: 0, flex: 1 }}>
+                    {activeTab !== 'medicine' && activeTab !== 'kit' && (
                     <aside style={{ borderRight: '1px solid #e2e8f0', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                         {activeTab === 'water' ? renderWaterSidebar() : (
                             <div style={{ overflowY: 'auto', padding: 10, display: 'grid', alignContent: 'start', gap: 6 }}>
-                                {currentItems.map((item) => {
-                                    const isSelected = item.key === selectedItem?.key;
+                                {(activeTab === 'flow' ? flowGroups : currentItems).map((item) => {
+                                    const isSelected = item.key === selectedKey;
                                     return (
                                         <button
                                             key={item.key}
@@ -901,22 +1118,40 @@ export default function UnifiedRecordModal({
                                             }}
                                         >
                                             {item.label}
+                                            {activeTab === 'flow' && item.items?.length > 1 && (
+                                                <div style={{ marginTop: 4, fontSize: 11, color: '#64748b', fontWeight: 800 }}>
+                                                    {item.items.length}개 유량계
+                                                </div>
+                                            )}
                                         </button>
                                     );
                                 })}
                             </div>
                         )}
                     </aside>
+                    )}
 
                     <main style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                         <div style={{ padding: '14px 18px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
                             <div style={{ fontSize: 15, fontWeight: 900, color: '#0f172a' }}>
-                                {activeTab === 'water' ? `수질분석 ${selectedRound?.label || ''}` : (selectedItem?.label || '항목 선택')}
+                                {activeTab === 'water'
+                                    ? `수질분석 ${selectedRound?.label || ''}`
+                                    : activeTab === 'flow'
+                                        ? (selectedFlowGroup?.label || selectedItem?.label || '항목 선택')
+                                    : activeTab === 'medicine'
+                                        ? '약품 입고/사용/재고'
+                                        : activeTab === 'kit'
+                                            ? '분석키트 구매/사용/재고'
+                                            : (selectedItem?.label || '항목 선택')}
                             </div>
                             <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
                                 {(activeTab === 'water'
                                     ? [{ label: '날짜', value: date }, { label: '입력방식', value: selectedRound?.sourceType === 'qntech' ? 'QnTECH' : '수동입력' }]
-                                    : (selectedItem?.summary || [])
+                                    : activeTab === 'flow'
+                                        ? [{ label: '날짜', value: date }, { label: '항목', value: `${selectedFlowGroup?.items?.length || 0}개` }]
+                                    : activeTab === 'medicine' || activeTab === 'kit'
+                                        ? [{ label: '날짜', value: date }, { label: '항목', value: `${currentItems.length}개` }]
+                                        : (selectedItem?.summary || [])
                                 ).map((item) => (
                                     <div key={item.label} style={{ fontSize: 12, color: '#64748b', fontWeight: 800 }}>
                                         {item.label}: <span style={{ color: '#0f172a' }}>{formatValue(item.value)}</span>

@@ -3,6 +3,8 @@ import { MedicineModel } from '../medicine/MedicineModel';
 import { WaterQualityModel } from '../water/WaterQualityModel';
 import { KitModel } from '../kit/KitModel';
 import { SettingsModel } from '../settings/SettingsModel';
+import { OperationStatusModel } from '../operation/OperationStatusModel';
+import { CertificateModel } from '../certificate/CertificateModel';
 
 const PRELOAD_TASKS = [
     { key: 'settings', label: '설정 데이터', load: () => SettingsModel.getSettings() },
@@ -10,6 +12,7 @@ const PRELOAD_TASKS = [
     { key: 'medicine', label: '약품 데이터', load: () => MedicineModel.fetchHistory() },
     { key: 'water', label: '수질분석 데이터', load: () => WaterQualityModel.fetchHistory() },
     { key: 'kit', label: '키트 데이터', load: () => KitModel.fetchHistory() },
+    { key: 'operationStatus', label: '운전상태 데이터', load: () => OperationStatusModel.fetchHistory() },
 ];
 
 export async function preloadRecordGridData({ onProgress } = {}) {
@@ -43,4 +46,6 @@ export function clearRecordGridHistoryCache() {
     MedicineModel.clearHistoryCache?.();
     WaterQualityModel.clearHistoryCache?.();
     KitModel.clearHistoryCache?.();
+    OperationStatusModel.clearHistoryCache?.();
+    CertificateModel.clearListCache?.();
 }

@@ -926,6 +926,35 @@ function isAllowedManualMedia(fileName) {
   return /\.(jpg|jpeg|png|webp|pdf)$/i.test(String(fileName || '').trim());
 }
 
+function normalizeYearMonth(year, month) {
+  const y = String(year || '').trim();
+  const m = String(month || '').trim().padStart(2, '0');
+  if (/^\d{4}$/.test(y) && /^(0[1-9]|1[0-2])$/.test(m)) {
+    return `${y}${m}`;
+  }
+  return '';
+}
+
+function inferYearMonthFromCertificateItems(items = []) {
+  for (const item of items) {
+    const fileName = String(item.fileName || '').trim();
+    const compact = fileName.match(/(20\d{2})(0[1-9]|1[0-2])\d{2}/);
+    if (compact) return `${compact[1]}${compact[2]}`;
+
+    const dashed = fileName.match(/(20\d{2})[-_. ](0[1-9]|1[0-2])[-_. ]\d{2}/);
+    if (dashed) return `${dashed[1]}${dashed[2]}`;
+  }
+
+  const now = new Date();
+  return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function safePdfFileName(name) {
+  const raw = String(name || '').trim() || 'certificate.pdf';
+  const withoutExt = raw.replace(/\.[^.]+$/, '');
+  return `${withoutExt || 'certificate'}.pdf`.replace(/["\r\n\\/:*?<>|]+/g, '_').slice(0, 180);
+}
+
 function normalizeAiImportPayload(body = {}) {
   const extracted = body.extractedData && typeof body.extractedData === 'object'
     ? body.extractedData
@@ -1152,6 +1181,7 @@ module.exports = function () {
   router.post('/api/certificates/download-selected-pdf', async (req, res) => {
     try {
       const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+      const requestedYearMonth = normalizeYearMonth(req.body?.year, req.body?.month);
       const items = rawItems
         .map((item) => ({
           id: String(item?.id || '').trim(),
@@ -1179,16 +1209,9 @@ module.exports = function () {
       }
 
       const bytes = await mergedPdf.save();
-      const now = new Date();
-      const stamp = [
-        now.getFullYear(),
-        String(now.getMonth() + 1).padStart(2, '0'),
-        String(now.getDate()).padStart(2, '0'),
-        '-',
-        String(now.getHours()).padStart(2, '0'),
-        String(now.getMinutes()).padStart(2, '0'),
-      ].join('');
-      const outputName = `성적서_${items.length}건_${stamp}.pdf`;
+      const outputName = items.length === 1
+        ? safePdfFileName(items[0].fileName || '성적서.pdf')
+        : `병합성적서_${requestedYearMonth || inferYearMonthFromCertificateItems(items)}_${items.length}건.pdf`;
 
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(outputName)}`);

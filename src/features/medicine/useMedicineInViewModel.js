@@ -16,11 +16,6 @@ const todayStr = () => {
 
 const toMonthStart = (year, month) => `${year}-${String(month).padStart(2, '0')}-01`;
 
-const isDateInMonth = (value, year, month) => {
-  const mm = String(month).padStart(2, '0');
-  return String(value || '').startsWith(`${year}-${mm}-`);
-};
-
 const getFilePath = (file) => (file?.path && file.path !== '') ? file.path : null;
 
 export function useMedicineInViewModel(currentUser) {
@@ -55,12 +50,8 @@ export function useMedicineInViewModel(currentUser) {
       setSiteName(result.siteName || '');
 
       const fallbackDate = toMonthStart(year, month);
-      setMedicineDate((prev) => (
-        isDateInMonth(prev, year, month) ? prev : (result.latestMedicineDate || fallbackDate)
-      ));
-      setKitDate((prev) => (
-        isDateInMonth(prev, year, month) ? prev : (result.latestKitDate || fallbackDate)
-      ));
+      setMedicineDate(result.latestMedicineDate || fallbackDate);
+      setKitDate(result.latestKitDate || fallbackDate);
 
       const apiBase = getApiBase();
       const toAbsUrl = (url) => (url ? `${apiBase}${url}` : null);

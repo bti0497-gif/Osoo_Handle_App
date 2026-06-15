@@ -21,7 +21,6 @@ const {
 } = require('../services/driveService.cjs');
 const {
   sludgePhotoSegments,
-  sludgePhotoName,
 } = require('../services/drivePathService.cjs');
 
 const router = express.Router();
@@ -31,6 +30,11 @@ function sanitizeName(name) {
   return String(name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
 }
 
+// Canonical local storage:
+//   {appDataPath}/사진관리/슬러지/{YYYY}/{YYYYMMDD}-슬러지{N}.jpg
+//   {appDataPath}/사진관리/슬러지/{YYYY}/{YYYYMMDD}-청소필증.jpg
+// DB columns store only the app URL form, never absolute paths:
+//   /사진관리슬러지/{YYYY}/{fileName}
 function toDateStamp(date) {
   return String(date || '').replace(/-/g, '').slice(0, 8);
 }
@@ -92,12 +96,21 @@ function resolveLatestSludgePhotoInfo(appDataPath, date) {
     fileName: last.fileName,
     index: last.index,
     filePath: path.join(dir, last.fileName),
-    url: `/사진관리슬러지/${String(date).slice(0, 4)}/${last.fileName}`,
+    url: buildSludgePhotoUrl(date, last.fileName),
   };
 }
 
 function buildCertificateFileName(date) {
   return `${toDateStamp(date)}-청소필증.jpg`;
+}
+
+function buildSludgePhotoFileName(date, index = 1) {
+  const safeIndex = Number(index) > 0 ? Number(index) : 1;
+  return `${toDateStamp(date)}-슬러지${safeIndex}.jpg`;
+}
+
+function buildSludgePhotoUrl(date, fileName) {
+  return `/사진관리슬러지/${String(date || '').slice(0, 4)}/${fileName}`;
 }
 
 /**
@@ -190,11 +203,9 @@ async function savePhotoToLocal(appDataPath, date, label, srcPath) {
   if (!srcPath || !fs.existsSync(srcPath)) return { destPath: null, takenAt: null };
   const sharp    = require('sharp');
   const srcBuf   = fs.readFileSync(srcPath);
-  const year     = String(date).slice(0, 4);
-  const stamp    = toDateStamp(date);
   const isSludge = label === '반출';
   const fileName = isSludge
-    ? `${stamp}-슬러지${(resolveLatestSludgePhotoInfo(appDataPath, date)?.index || 0) + 1}.jpg`
+    ? buildSludgePhotoFileName(date, (resolveLatestSludgePhotoInfo(appDataPath, date)?.index || 0) + 1)
     : buildCertificateFileName(date);
   const destDir  = getSludgePhotoDir(appDataPath, date);
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
@@ -226,8 +237,8 @@ async function uploadSludgePhotoToDrive(db, date, type, localPath, index = 1) {
       sludgePhotoSegments(siteName, date)
     );
     const fileName = type === 'certificate'
-      ? `${date}-청소필증.jpg`
-      : sludgePhotoName(date, index, '.jpg');
+      ? buildCertificateFileName(date)
+      : buildSludgePhotoFileName(date, index);
     return await uploadBufferToFolder({
       folderId: folder.id,
       fileName,
@@ -249,9 +260,15 @@ async function findRemoteSludgePhoto(db, date, type) {
       getDriveRootFolderId(),
       sludgePhotoSegments(siteName, date)
     );
-    const fileName = type === 'certificate' ? `${date}-청소필증.jpg` : sludgePhotoName(date, 1, '.jpg');
-    const file = await findFileInFolder(folder.id, fileName);
-    return file ? { ...file, fileName, folderId: folder.id } : null;
+    const dateHyphen = String(date || '').slice(0, 10);
+    const candidates = type === 'certificate'
+      ? [buildCertificateFileName(date), `${dateHyphen}-청소필증.jpg`]
+      : [buildSludgePhotoFileName(date, 1), `${dateHyphen}-슬러지1.jpg`, `${dateHyphen}-슬러지-1.jpg`];
+    for (const fileName of candidates) {
+      const file = await findFileInFolder(folder.id, fileName);
+      if (file) return { ...file, fileName, folderId: folder.id };
+    }
+    return null;
   } catch (err) {
     console.warn(`[sludge-photos] Drive 사진 조회 실패 (${type}):`, err.message);
     return null;
@@ -266,40 +283,29 @@ async function restoreSludgePhotoFromDrive(db, appDataPath, date, type) {
     { responseType: 'arraybuffer' }
   );
   const buffer = Buffer.from(response.data);
-  const year = String(date).slice(0, 4);
-  const fileName = type === 'certificate' ? buildCertificateFileName(date) : `${toDateStamp(date)}-슬러지1.jpg`;
+  const fileName = type === 'certificate' ? buildCertificateFileName(date) : buildSludgePhotoFileName(date, 1);
   const destDir = getSludgePhotoDir(appDataPath, date);
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   const destPath = path.join(destDir, fileName);
   fs.writeFileSync(destPath, buffer);
   return {
     localPath: destPath,
-    url: `/사진관리슬러지/${year}/${fileName}`,
+    url: buildSludgePhotoUrl(date, fileName),
     remote,
   };
-}
-
-function photoUrl(date, label) {
-  const year = String(date).slice(0, 4);
-  if (label === '반출') {
-    const stamp = toDateStamp(date);
-    return `/사진관리슬러지/${year}/${stamp}-슬러지1.jpg`;
-  }
-  return `/사진관리슬러지/${year}/${buildCertificateFileName(date)}`;
 }
 
 function resolvePhotoUrl(appDataPath, date, label) {
   if (label === '반출') {
     return resolveLatestSludgePhotoInfo(appDataPath, date)?.url || null;
   }
-  const year = String(date).slice(0, 4);
   const hyphenName = `${String(date || '').slice(0, 10)}-청소필증.jpg`;
   const stampName = buildCertificateFileName(date);
   const candidates = [hyphenName, stampName];
   for (const fileName of candidates) {
     const filePath = path.join(getSludgePhotoDir(appDataPath, date), fileName);
     if (fs.existsSync(filePath)) {
-      return `/사진관리슬러지/${year}/${fileName}`;
+      return buildSludgePhotoUrl(date, fileName);
     }
   }
   return null;
@@ -307,10 +313,20 @@ function resolvePhotoUrl(appDataPath, date, label) {
 
 function resolveLocalPathFromUrl(appDataPath, url) {
   const raw = String(url || '').trim();
+  if (path.isAbsolute(raw) && fs.existsSync(raw)) return raw;
   if (!raw.startsWith('/사진관리슬러지/')) return null;
   const relative = raw.replace(/^\/사진관리슬러지\//, '');
   const candidate = path.join(appDataPath, '사진관리', '슬러지', relative);
   return fs.existsSync(candidate) ? candidate : null;
+}
+
+function resolveLocalSludgePhotoPath(appDataPath, row, label) {
+  const storedUrl = label === '반출' ? row?.sludge_photo_path : row?.certificate_photo_path;
+  const storedPath = resolveLocalPathFromUrl(appDataPath, storedUrl);
+  if (storedPath) return storedPath;
+
+  const resolvedUrl = resolvePhotoUrl(appDataPath, row?.date, label);
+  return resolveLocalPathFromUrl(appDataPath, resolvedUrl);
 }
 
 function getMergedSludgeRows(db, start, end) {
@@ -538,11 +554,9 @@ module.exports = function (db, baseDir, appDataPath) {
 
       const label    = type === 'certificate' ? '청소필증' : '반출';
       const sharp    = require('sharp');
-      const year     = String(date).slice(0, 4);
-      const stamp    = toDateStamp(date);
       const isSludge = label === '반출';
       const fileName = isSludge
-        ? `${stamp}-슬러지${(resolveLatestSludgePhotoInfo(appDataPath, date)?.index || 0) + 1}.jpg`
+        ? buildSludgePhotoFileName(date, (resolveLatestSludgePhotoInfo(appDataPath, date)?.index || 0) + 1)
         : buildCertificateFileName(date);
       const destDir  = getSludgePhotoDir(appDataPath, date);
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
@@ -560,8 +574,8 @@ module.exports = function (db, baseDir, appDataPath) {
       }
 
       const url     = label === '반출'
-        ? `/사진관리슬러지/${year}/${fileName}`
-        : `/사진관리슬러지/${year}/${buildCertificateFileName(date)}`;
+        ? buildSludgePhotoUrl(date, fileName)
+        : buildSludgePhotoUrl(date, buildCertificateFileName(date));
       const takenAt = type === 'sludge'
         ? (isBmp
             ? (clientTakenAt || nowDateTimeString())
@@ -657,19 +671,21 @@ module.exports = function (db, baseDir, appDataPath) {
   router.delete('/api/sludge-photos/:date', (req, res) => {
     try {
       const { date } = req.params;
-      const year = String(date).slice(0, 4);
       const sludgeDir = getSludgePhotoDir(appDataPath, date);
       const stamp = toDateStamp(date);
       if (fs.existsSync(sludgeDir)) {
-        const re = new RegExp(`^${stamp}-슬러지\\d+\\.jpg$`);
+        const dateHyphen = String(date || '').slice(0, 10);
+        const re = new RegExp(`^(?:${stamp}|${dateHyphen})-슬러지-?\\d+\\.jpg$`);
         for (const fileName of fs.readdirSync(sludgeDir)) {
           if (re.test(String(fileName))) {
             const fp = path.join(sludgeDir, fileName);
             if (fs.existsSync(fp)) fs.unlinkSync(fp);
           }
         }
-        const cert = path.join(sludgeDir, buildCertificateFileName(date));
-        if (fs.existsSync(cert)) fs.unlinkSync(cert);
+        for (const certName of [buildCertificateFileName(date), `${dateHyphen}-청소필증.jpg`]) {
+          const cert = path.join(sludgeDir, certName);
+          if (fs.existsSync(cert)) fs.unlinkSync(cert);
+        }
       }
       db.prepare('DELETE FROM sludge_photo_logs WHERE date = ?').run(date);
       res.json({ success: true });
@@ -706,8 +722,8 @@ module.exports = function (db, baseDir, appDataPath) {
       const settings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
 
       const items = rows.map(r => {
-        const sl = resolveLocalPathFromUrl(appDataPath, r.sludge_photo_path);
-        const cl = resolveLocalPathFromUrl(appDataPath, r.certificate_photo_path);
+        const sl = resolveLocalSludgePhotoPath(appDataPath, r, '반출');
+        const cl = resolveLocalSludgePhotoPath(appDataPath, r, '청소필증');
         return {
           ...r,
           sludge_photo_local      : sl && fs.existsSync(sl) ? sl : null,
@@ -883,6 +899,13 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
       ws.getCell(info.address).value = value;
     }
 
+    function findNamedRange(...names) {
+      for (const name of names) {
+        if (namedMap[name]) return namedMap[name];
+      }
+      return null;
+    }
+
     // 이전 값 잔존 방지: 슬롯 1~2를 먼저 초기화
     for (let n = 1; n <= ITEMS_PER_SHEET; n++) {
       setCellOnSheet(`날짜${n}`, '');
@@ -901,7 +924,7 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
 
       // 반출사진 삽입: 셀 가로의 90% 기준, 비율 유지 + 중앙 정렬
       if (item.sludge_photo_local) {
-        const info = namedMap[`사진${n}`];
+        const info = findNamedRange(`사진${n}`, `반출사진${n}`, `슬러지사진${n}`);
         if (info) {
           const extent = getMergedCellExtent(ws, info.col, info.row);
           try {
@@ -913,12 +936,14 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
           } catch (e) {
             console.error(`[sludge export] 사진${n} 삽입 실패:`, e.message);
           }
+        } else {
+          console.warn(`[sludge export] 반출사진 named range 없음: 사진${n}`);
         }
       }
 
       // 청소필증 삽입: 셀 세로의 80% 기준, 비율 유지 + 중앙 정렬
       if (item.certificate_photo_local) {
-        const info = namedMap[`?꾩쬆${n}`];
+        const info = findNamedRange(`청소필증${n}`, `필증${n}`, `증빙${n}`, `사진필증${n}`);
         if (info) {
           const extent = getMergedCellExtent(ws, info.col, info.row);
           try {
@@ -930,6 +955,8 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
           } catch (e) {
             console.error(`[sludge export] 사진${n} 삽입 실패:`, e.message);
           }
+        } else {
+          console.warn(`[sludge export] 청소필증 named range 없음: 청소필증${n}/필증${n}`);
         }
       }
     }

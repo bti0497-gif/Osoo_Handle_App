@@ -57,6 +57,11 @@ export function useSludgePhotoViewModel() {
   const [isLedgerExporting, setIsLedgerExporting] = useState(false);
 
   const activeDates = new Set(savedItems.map((item) => item.date));
+  const exportDates = new Set(
+    savedItems
+      .filter((item) => item?.sludge_amount != null && item.sludge_amount !== '')
+      .map((item) => item.date)
+  );
 
   useEffect(() => {
     const found = savedItems.find((item) => item.date === selectedDate);
@@ -237,6 +242,7 @@ export function useSludgePhotoViewModel() {
     editEntry,
     savedItems,
     activeDates,
+    exportDates,
     isLoading,
     isSaving,
     isExporting,

@@ -1,6 +1,7 @@
 const express = require('express');
 const { importQntechWaterValues, importQntechWaterPhotos, importQntechWaterAll, importQntechWaterRange } = require('../services/qntechWaterImportService.cjs');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
+const { syncAnalysisKitUsageForRange } = require('../services/kitUsageSyncService.cjs');
 
 const router = express.Router();
 
@@ -145,6 +146,16 @@ function runUpsert(stmt, row) {
   );
 }
 
+function collectDateRangeFromItems(items = []) {
+  const dates = (Array.isArray(items) ? items : [])
+    .map((item) => String(item?.date || '').trim().slice(0, 10))
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+    .sort((a, b) => a.localeCompare(b));
+
+  if (dates.length === 0) return null;
+  return { startDate: dates[0], endDate: dates[dates.length - 1] };
+}
+
 module.exports = function (db, baseDir) {
   let rangeImportProgress = {
     status: 'idle',
@@ -191,7 +202,11 @@ module.exports = function (db, baseDir) {
         }
       });
       insertMany(Array.isArray(items) ? items : []);
-      res.json({ success: true });
+      const range = collectDateRangeFromItems(items);
+      const kitUsageSync = range
+        ? syncAnalysisKitUsageForRange(db, range.startDate, range.endDate, metadata)
+        : null;
+      res.json({ success: true, kitUsageSync });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message, error: err.message });
     }
@@ -221,7 +236,11 @@ module.exports = function (db, baseDir) {
     const { date } = req.body || {};
     try {
       const result = await importQntechWaterAll(db, baseDir, date);
-      res.json(result);
+      const metadata = getCurrentRecordMetadata(db, req.body);
+      const kitUsageSync = result?.date
+        ? syncAnalysisKitUsageForRange(db, result.date, result.date, metadata)
+        : null;
+      res.json({ ...result, kitUsageSync });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message, error: err.message });
     }
@@ -243,6 +262,8 @@ module.exports = function (db, baseDir) {
           rangeImportProgress = { ...rangeImportProgress, ...progress };
         }
       });
+      const metadata = getCurrentRecordMetadata(db, req.body);
+      const kitUsageSync = syncAnalysisKitUsageForRange(db, result.startDate, result.endDate, metadata);
 
       rangeImportProgress = {
         ...rangeImportProgress,
@@ -252,7 +273,7 @@ module.exports = function (db, baseDir) {
         currentDate: result.endDate || rangeImportProgress.currentDate,
         message: '기간 데이터 불러오기가 완료되었습니다.'
       };
-      res.json(result);
+      res.json({ ...result, kitUsageSync });
     } catch (err) {
       rangeImportProgress = {
         ...rangeImportProgress,
@@ -272,7 +293,11 @@ module.exports = function (db, baseDir) {
         const info = runUpsert(stmt, row);
         lastId = info.lastInsertRowid;
       }
-      res.json({ success: true, id: lastId });
+      const date = String(req.body?.date || '').trim().slice(0, 10);
+      const kitUsageSync = /^\d{4}-\d{2}-\d{2}$/.test(date)
+        ? syncAnalysisKitUsageForRange(db, date, date, metadata)
+        : null;
+      res.json({ success: true, id: lastId, kitUsageSync });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message, error: err.message });
     }

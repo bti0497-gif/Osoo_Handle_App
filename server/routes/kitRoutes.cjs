@@ -19,13 +19,16 @@ function isCountableWaterValue(value) {
     return String(value).trim() !== '';
 }
 
-function aggregateExpectedUsageByDate(db, startDate, endDate) {
+function aggregateExpectedUsageByDate(db, startDate, endDate, metadata = {}) {
+    const siteId = String(metadata?.siteId || '').trim();
+    const siteClause = siteId ? ' AND site_id = ?' : '';
+    const params = siteId ? [startDate, endDate, siteId] : [startDate, endDate];
     const rows = db.prepare(`
         SELECT date, item_code, result_value
         FROM qntech_water_quality
-        WHERE date >= ? AND date <= ? AND source_type = 'qntech'
+        WHERE date >= ? AND date <= ?${siteClause}
         ORDER BY date ASC
-    `).all(startDate, endDate);
+    `).all(...params);
 
     const byDate = new Map();
     for (const row of rows) {
@@ -219,8 +222,8 @@ module.exports = function (db) {
                 return res.status(400).json({ success: false, error: '시작일은 종료일보다 클 수 없습니다.' });
             }
 
-            const expectedByDate = aggregateExpectedUsageByDate(db, startDate, endDate);
             const metadata = getCurrentRecordMetadata(db, req.body);
+            const expectedByDate = aggregateExpectedUsageByDate(db, startDate, endDate, metadata);
             const unsyncedDates = new Set();
             const changedKits = new Set();
             let updatedCellCount = 0;

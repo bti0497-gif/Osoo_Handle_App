@@ -102,6 +102,17 @@
   background: #0f172a !important;
 }
 
+.custom-calendar .react-calendar__tile--sludge-export {
+  background: #f5e6d3;
+  color: #7c2d12;
+  font-weight: 900;
+  box-shadow: inset 0 0 0 1px #d6a56f;
+}
+
+.custom-calendar .react-calendar__tile--sludge-export:hover {
+  background: #ecd0ad;
+}
+
 .custom-calendar .react-calendar__tile--hasActive {
   background: #e2e8f0;
 }

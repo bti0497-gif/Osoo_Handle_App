@@ -34,6 +34,12 @@ function safeDownloadFileName(name) {
     return raw.replace(/["\r\n\\/:*?<>|]+/g, '_').slice(0, 180);
 }
 
+function buildMergedCertificateFileName(year, month, count) {
+    const y = String(year || new Date().getFullYear()).padStart(4, '0');
+    const m = String(month || new Date().getMonth() + 1).padStart(2, '0');
+    return `병합성적서_${y}${m}_${count}건.pdf`;
+}
+
 function normalizeRecord(item) {
     const fileName = item.fileName || item.file_name || '-';
     const lowerFileName = String(fileName || '').toLowerCase();
@@ -94,7 +100,7 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
         } finally {
             setIsLoading(false);
         }
-    }, [currentUser, isPrivileged, selectedSite, selectedYear, selectedMonth, selectedId, showToast]);
+    }, [currentUser, selectedSite, selectedYear, selectedMonth, selectedId, showToast]);
 
     useEffect(() => {
         loadRecords();
@@ -207,7 +213,8 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
 
         try {
             const res = await CertificateModel.downloadSelectedPdf(
-                selectedRecords.map((item) => ({ id: item.id, fileName: item.fileName }))
+                selectedRecords.map((item) => ({ id: item.id, fileName: item.fileName })),
+                { year: selectedYear, month: selectedMonth }
             );
             if (!res.ok) {
                 const errorText = await res.text().catch(() => '');
@@ -219,7 +226,7 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
             const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
             const fallbackName = selectedRecords.length === 1
                 ? `${safeDownloadFileName(selectedRecords[0].fileName).replace(/\.[^.]+$/, '')}.pdf`
-                : `성적서_${selectedRecords.length}건.pdf`;
+                : buildMergedCertificateFileName(selectedYear, selectedMonth, selectedRecords.length);
             const a = document.createElement('a');
             a.href = objectUrl;
             a.download = encodedName ? decodeURIComponent(encodedName) : fallbackName;

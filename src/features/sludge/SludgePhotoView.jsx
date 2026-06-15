@@ -73,7 +73,7 @@ const td = {
 export default function SludgePhotoView() {
   const {
     year, month, selectedDate,
-    editEntry, savedItems, activeDates,
+    editEntry, savedItems, activeDates, exportDates,
     isLoading, isSaving, isExporting, isLedgerExporting, hasChanges,
     handleCalendarMonthChange,
     handleCalendarDayClick,
@@ -219,6 +219,7 @@ export default function SludgePhotoView() {
               tileClassName={({ date }) => {
                 const ds = toDateStr(date);
                 if (ds === selectedDate) return 'react-calendar__tile--active';
+                if (exportDates.has(ds)) return 'react-calendar__tile--sludge-export';
                 if (activeDates.has(ds)) return 'react-calendar__tile--saved';
                 return null;
               }}
@@ -231,7 +232,7 @@ export default function SludgePhotoView() {
             textAlign: 'center',
             lineHeight: 1.5,
           }}>
-            날짜를 클릭해 기록을 추가하세요
+            반출일은 갈색으로 표시됩니다.
           </p>
         </div>
 

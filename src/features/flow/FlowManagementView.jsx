@@ -23,6 +23,14 @@ const formatNumber = (value) => {
     return Number(value).toLocaleString();
 };
 
+const toNumberOrNull = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(String(value).replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const isSludgeItem = (name) => String(name || '').includes('슬러지');
+
 const getPreviousFlowCell = (history, selectedDate, flowName) => {
     const idx = history.findIndex((row) => row.date === selectedDate);
     for (let i = idx - 1; i >= 0; i -= 1) {
@@ -30,6 +38,17 @@ const getPreviousFlowCell = (history, selectedDate, flowName) => {
         if (cell?.raw !== null && cell?.raw !== undefined) return cell;
     }
     return null;
+};
+
+const getMonthlySludgeExportBefore = (history, selectedDate, flowName) => {
+    const monthKey = String(selectedDate || '').slice(0, 7);
+    if (!monthKey) return 0;
+
+    return history.reduce((sum, row) => {
+        if (!row?.date || row.date >= selectedDate || String(row.date).slice(0, 7) !== monthKey) return sum;
+        const value = toNumberOrNull(row?.[flowName]?.raw);
+        return value === null ? sum : sum + value;
+    }, 0);
 };
 
 const ManagementFooter = ({ count, loading, onOpen }) => (
@@ -123,18 +142,40 @@ const FlowManagementView = ({ currentUser }) => {
                     ? { reading: rawCell.raw, flow: rawCell.diff }
                     : correctData(rawCell);
                 const prev = getPreviousFlowCell(history, modalDate, item.name);
+                const isSludge = isSludgeItem(item.name);
+                const previousMonthlyExport = isSludge
+                    ? getMonthlySludgeExportBefore(history, modalDate, item.name)
+                    : null;
+                const currentExport = isSludge ? toNumberOrNull(cell?.reading) : null;
+                const currentMonthlyExport = isSludge && currentExport !== null
+                    ? previousMonthlyExport + currentExport
+                    : previousMonthlyExport > 0 ? previousMonthlyExport : '';
 
                 return {
                     key: item.name,
                     label: item.name,
-                    values: { reading: cell?.reading ?? '', flow: cell?.flow ?? '' },
-                    previous: { reading: prev?.raw ?? '', flow: prev?.diff ?? '' },
-                    summary: [
-                        { label: '직전 검침값', value: prev?.raw },
-                        { label: '직전 유량값', value: prev?.diff },
-                        { label: '현재 검침값', value: cell?.reading },
-                        { label: '현재 유량값', value: cell?.flow },
-                    ],
+                    values: {
+                        reading: cell?.reading ?? '',
+                        flow: isSludge ? currentMonthlyExport : (cell?.flow ?? ''),
+                    },
+                    previous: {
+                        reading: prev?.raw ?? '',
+                        flow: prev?.diff ?? '',
+                        monthlyExport: previousMonthlyExport,
+                    },
+                    summary: isSludge
+                        ? [
+                            { label: '직전 반출량', value: prev?.raw },
+                            { label: '직전 월 반출량', value: previousMonthlyExport },
+                            { label: '현재 반출량', value: cell?.reading },
+                            { label: '현재 월 반출량', value: currentMonthlyExport },
+                        ]
+                        : [
+                            { label: '직전 검침값', value: prev?.raw },
+                            { label: '직전 유량값', value: prev?.diff },
+                            { label: '현재 검침값', value: cell?.reading },
+                            { label: '현재 유량값', value: cell?.flow },
+                        ],
                 };
             }),
         },

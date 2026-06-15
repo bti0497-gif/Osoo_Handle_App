@@ -289,19 +289,26 @@ module.exports = function (db, baseDir, appDataPath) {
          LIMIT 3`
       ).all(...BASE_MEDICINES).map(r => r.item_name);
 
-      // 당월 날짜 범위
-      const getSum = (table, nameCol, name, start, end) =>
+      const getPurchaseSum = (table, nameCol, name, start, end) =>
         db.prepare(
           `SELECT COALESCE(SUM(purchase_amount), 0) AS v FROM ${table}
            WHERE ${nameCol} = ? AND date >= ? AND date <= ?${siteFilter.clause}`
         ).get(name, start, end, ...siteFilter.params)?.v ?? 0;
 
-      const getLatestDate = (table, start, end) =>
+      const getFirstPurchaseDate = (table, start, end) =>
         db.prepare(
-          `SELECT MAX(date) AS v FROM ${table}
+          `SELECT MIN(date) AS v FROM ${table}
            WHERE date >= ? AND date <= ?${siteFilter.clause}
              AND COALESCE(purchase_amount, 0) > 0`
         ).get(start, end, ...siteFilter.params)?.v || null;
+
+      const medicinePurchaseDate = getFirstPurchaseDate('medicine_logs', currStart, currEnd);
+      const kitPurchaseDate = getFirstPurchaseDate('kit_logs', currStart, currEnd);
+      const getCurrentPurchase = (table, nameCol, name, purchaseDate) => (
+        purchaseDate
+          ? getPurchaseSum(table, nameCol, name, purchaseDate, purchaseDate)
+          : 0
+      );
 
       // 약품별 기본 입고량 맵 (config_items.default_amount)
       const defaultAmountRows = db.prepare(
@@ -317,15 +324,15 @@ module.exports = function (db, baseDir, appDataPath) {
 
       const allMedicines = [...BASE_MEDICINES, ...extraMedicines].map(name => ({
         name,
-        currPurchase: getSum('medicine_logs', 'medicine_name', name, currStart, currEnd),
-        prevPurchase: getSum('medicine_logs', 'medicine_name', name, prevStart, prevEnd),
+        currPurchase: getCurrentPurchase('medicine_logs', 'medicine_name', name, medicinePurchaseDate),
+        prevPurchase: getPurchaseSum('medicine_logs', 'medicine_name', name, prevStart, prevEnd),
         defaultAmount: defaultAmountMap[name] ?? 0,
       }));
 
       const kits = BASE_KITS.map(name => ({
         name,
-        currPurchase: getSum('kit_logs', 'kit_name', name, currStart, currEnd),
-        prevPurchase: getSum('kit_logs', 'kit_name', name, prevStart, prevEnd),
+        currPurchase: getCurrentPurchase('kit_logs', 'kit_name', name, kitPurchaseDate),
+        prevPurchase: getPurchaseSum('kit_logs', 'kit_name', name, prevStart, prevEnd),
         defaultAmount: kitDefaultAmountMap[name] ?? 0,
       }));
 
@@ -351,8 +358,8 @@ module.exports = function (db, baseDir, appDataPath) {
         medicines: medicinesWithPhotos,
         kits: kitsWithPhotos,
         extraMedicines,
-        latestMedicineDate: getLatestDate('medicine_logs', currStart, currEnd),
-        latestKitDate: getLatestDate('kit_logs', currStart, currEnd),
+        latestMedicineDate: medicinePurchaseDate,
+        latestKitDate: kitPurchaseDate,
         tradePhotoUrl: tradePhoto?.url || null,
         tradePhotoDate: tradePhoto?.date || null,
       });
