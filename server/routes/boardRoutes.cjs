@@ -26,6 +26,8 @@ const {
   getComments, createComment, deleteComment
 } = require('../services/boardService.cjs');
 
+const ADMIN_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
+
 // ── 요청에서 현재 사용자 추출 ──────────────────────────────────────
 // 우선순위: 헤더 > body._user > query params
 function extractUser(req) {
@@ -43,7 +45,11 @@ function handleError(res, err, context) {
 }
 
 function isAdmin(user) {
-  return String(user?.role || '').trim() === 'admin';
+  return ADMIN_ROLES.has(String(user?.role || '').trim());
+}
+
+function isAdminRole(role) {
+  return ADMIN_ROLES.has(String(role || '').trim());
 }
 
 function canViewPost(user, post) {
@@ -51,15 +57,20 @@ function canViewPost(user, post) {
   if (isAdmin(user)) return true;
 
   const userSite = String(user?.site || '').trim();
+  const userName = String(user?.name || '').trim();
   const visibleSites = Array.isArray(post.visible_sites) ? post.visible_sites.map((v) => String(v).trim()) : null;
   if (visibleSites) {
-    return visibleSites.includes('ALL') || (userSite && visibleSites.includes(userSite));
+    const authorRole = String(post.author_role || '').trim();
+    return String(post.author || '').trim() === userName
+      || (isAdminRole(authorRole) && (
+        visibleSites.includes('ALL') || (userSite && visibleSites.includes(userSite))
+      ));
   }
 
-  const authorSite = String(post.author_site || '').trim();
   const targetSite = String(post.target_site || '').trim();
   const authorRole = String(post.author_role || '').trim();
-  return authorSite === userSite || (authorRole === 'admin' && (!targetSite || targetSite === userSite));
+  return String(post.author || '').trim() === userName
+    || (isAdminRole(authorRole) && (!targetSite || targetSite === userSite));
 }
 
 function normalizeAttachments(value) {
@@ -83,7 +94,7 @@ module.exports = function () {
   router.get('/api/board/posts', async (req, res) => {
     const user = extractUser(req);
     try {
-      const posts = await getPosts(user.role, user.site);
+      const posts = await getPosts(user.role, user.site, user.name);
       res.json({ success: true, data: posts });
     } catch (err) { handleError(res, err, 'getPosts'); }
   });
@@ -105,15 +116,16 @@ module.exports = function () {
   router.post('/api/board/posts', async (req, res) => {
     const user = extractUser(req);
     const body = req.body || {};
+    const adminUser = isAdmin(user);
     try {
       const post = await createPost({
         author:      user.name,
         author_role: user.role,
-        author_site: user.role === 'admin' ? 'CENTRAL' : user.site,
-        target_site: body.target_site  ?? '',   // '' = 전체, 특정 현장명 = 타겟
+        author_site: adminUser ? 'CENTRAL' : user.site,
+        target_site: adminUser ? (body.target_site ?? '') : '',
         title:       body.title        || '',
         content:     body.content      || '',
-        is_notice:   Boolean(body.is_notice),
+        is_notice:   adminUser ? Boolean(body.is_notice) : false,
         attachments: normalizeAttachments(body.attachments),
         parent_id:   body.parent_id    || null
       });
@@ -132,16 +144,16 @@ module.exports = function () {
       if (!canViewPost(user, existing)) {
         return res.status(403).json({ success: false, message: '게시글 조회 권한 없음' });
       }
-      if (user.role !== 'admin' && existing.author !== user.name) {
+      if (!isAdmin(user) && existing.author !== user.name) {
         return res.status(403).json({ success: false, message: '수정 권한 없음' });
       }
 
       await updatePost(req.params.id, {
         title:       body.title,
         content:     body.content,
-        is_notice:   body.is_notice,
+        is_notice:   isAdmin(user) ? body.is_notice : undefined,
         attachments: body.attachments != null ? normalizeAttachments(body.attachments) : undefined,
-        target_site: body.target_site
+        target_site: isAdmin(user) ? body.target_site : undefined
       });
       res.json({ success: true });
     } catch (err) { handleError(res, err, 'updatePost'); }
@@ -156,7 +168,7 @@ module.exports = function () {
       if (!canViewPost(user, existing)) {
         return res.status(403).json({ success: false, message: '게시글 조회 권한 없음' });
       }
-      if (user.role !== 'admin' && existing.author !== user.name) {
+      if (!isAdmin(user) && existing.author !== user.name) {
         return res.status(403).json({ success: false, message: '수정 권한 없음' });
       }
       await deletePost(req.params.id);

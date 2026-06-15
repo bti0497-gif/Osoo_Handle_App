@@ -21,6 +21,8 @@ const path = require('path');
 const crypto = require('crypto');
 const admin = require('firebase-admin');
 
+const ADMIN_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
+
 // ── 서비스 계정 키 파일 위치 ──────────────────────────────────────
 const serviceAccountPath = path.join(__dirname, '..', 'config', 'firebase-service-account.json');
 
@@ -67,7 +69,7 @@ function calculateVisibleSites(data) {
   }
   
   // target_site가 전체인 경우
-  if (data.author_role === 'admin') {
+  if (ADMIN_ROLES.has(String(data.author_role || '').trim())) {
     return ['ALL']; // 중앙관리자 전체공지
   } else {
     return [data.author_site || 'UNKNOWN']; // 현장관리자 본인 글 (해당 현장만 노출)
@@ -75,7 +77,7 @@ function calculateVisibleSites(data) {
 }
 
 function isAdmin(user) {
-  return String(user?.role || '').trim() === 'admin';
+  return ADMIN_ROLES.has(String(user?.role || '').trim());
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -85,12 +87,12 @@ function isAdmin(user) {
 /**
  * 게시글 목록 조회
  */
-async function getPosts(role, siteName) {
+async function getPosts(role, siteName, userName = '') {
   ensureInitialized();
 
   let query = db.collection('posts').where('is_deleted', '==', false);
 
-  if (role !== 'admin') {
+  if (!ADMIN_ROLES.has(String(role || '').trim())) {
     // 현장관리자: 전체공지('ALL')이거나 내 현장 타겟인 글만 조회
     query = query.where('visible_sites', 'array-contains-any', ['ALL', siteName || '']);
   }
@@ -101,8 +103,18 @@ async function getPosts(role, siteName) {
     posts.push({ id: doc.id, ...doc.data() });
   });
 
+  const visiblePosts = ADMIN_ROLES.has(String(role || '').trim())
+    ? posts
+    : posts.filter((post) => {
+      const authorName = String(post.author || '').trim();
+      const authorRole = String(post.author_role || '').trim();
+      const targetSite = String(post.target_site || '').trim();
+      return authorName === String(userName || '').trim()
+        || (ADMIN_ROLES.has(authorRole) && (!targetSite || targetSite === String(siteName || '').trim()));
+    });
+
   // JS 메모리상에서 정렬 (is_notice 내림차순, created_at 내림차순)
-  posts.sort((a, b) => {
+  visiblePosts.sort((a, b) => {
     // 1. 공지사항 우선 (is_notice가 true인 것이 위로)
     const aNotice = a.is_notice ? 1 : 0;
     const bNotice = b.is_notice ? 1 : 0;
@@ -115,7 +127,7 @@ async function getPosts(role, siteName) {
     return bTime.localeCompare(aTime);
   });
 
-  return posts;
+  return visiblePosts;
 }
 
 /**

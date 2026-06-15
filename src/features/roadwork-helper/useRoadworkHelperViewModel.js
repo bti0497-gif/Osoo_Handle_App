@@ -91,6 +91,34 @@ export function useRoadworkHelperViewModel() {
     },
   ], [data]);
 
+  const fillPayload = useMemo(() => ({
+    flow: data.flow || [],
+    electricity: data.electricity || [],
+    medicine: data.medicine || [],
+    kit: data.kit || [],
+  }), [data]);
+
+  const hasFillData = useMemo(() => {
+    const hasFlow = fillPayload.flow.some((row) => (
+      row.todayReading !== null
+      && row.todayReading !== undefined
+      && row.todayReading !== ''
+    ) || Number(row.todayFlow || 0) !== 0);
+
+    const hasElectricity = fillPayload.electricity.some((row) => (
+      row.todayReading !== null
+      && row.todayReading !== undefined
+      && row.todayReading !== ''
+    ) || Number(row.usage || 0) !== 0);
+
+    const hasInventory = [...fillPayload.medicine, ...fillPayload.kit].some((row) => (
+      Number(row.purchase || 0) !== 0
+      || Number(row.usage || 0) !== 0
+    ));
+
+    return hasFlow || hasElectricity || hasInventory;
+  }, [fillPayload]);
+
   const copySection = useCallback(async (section) => {
     try {
       await navigator.clipboard.writeText(toTsv(section.columns, section.rows));
@@ -121,6 +149,8 @@ export function useRoadworkHelperViewModel() {
     loading,
     error,
     copied,
+    fillPayload,
+    hasFillData,
     reload: () => load(date),
     copyAll,
     copySection,

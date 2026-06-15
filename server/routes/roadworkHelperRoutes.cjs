@@ -104,14 +104,17 @@ function getFlowRows(db, date, scope) {
   return types.filter((type) => !isPowerType(type)).map((type) => {
     const today = todayStmt.get(date, type, ...scope.params) || {};
     const prev = prevStmt.get(prevDate, type, ...scope.params) || {};
+    const hasTodayReading = today.raw_value !== null && today.raw_value !== undefined && today.raw_value !== '';
     const todayFlow = today.calculated_flow != null
       ? toNumber(today.calculated_flow)
-      : toNumber(today.raw_value) - toNumber(prev.raw_value);
+      : hasTodayReading
+        ? toNumber(today.raw_value) - toNumber(prev.raw_value)
+        : null;
     return {
       item: type,
       previousReading: prev.raw_value ?? null,
       todayReading: today.raw_value ?? null,
-      todayFlow: round1(todayFlow),
+      todayFlow: todayFlow === null ? null : round1(todayFlow),
       monthTotal: round1(sumStmt.get(type, startMonth, date, ...scope.params)?.total),
       yearTotal: round1(sumStmt.get(type, startYear, date, ...scope.params)?.total),
     };
@@ -137,14 +140,17 @@ function getElectricityRows(db, date, scope) {
   return targetTypes.map((type) => {
     const today = todayStmt.get(date, type, ...scope.params) || {};
     const prev = prevStmt.get(prevDate, type, ...scope.params) || {};
+    const hasTodayReading = today.raw_value !== null && today.raw_value !== undefined && today.raw_value !== '';
     const usage = today.calculated_flow != null
       ? toNumber(today.calculated_flow)
-      : toNumber(today.raw_value) - toNumber(prev.raw_value);
+      : hasTodayReading
+        ? toNumber(today.raw_value) - toNumber(prev.raw_value)
+        : null;
     return {
       item: type === '전력량' ? '전력량' : type,
       previousReading: prev.raw_value ?? null,
       todayReading: today.raw_value ?? null,
-      usage: round1(usage),
+      usage: usage === null ? null : round1(usage),
     };
   });
 }

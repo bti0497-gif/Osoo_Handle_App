@@ -21,6 +21,12 @@
 const crypto = require('crypto');
 const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
 
+const ADMIN_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
+
+function isAdminRole(role) {
+  return ADMIN_ROLES.has(String(role || '').trim());
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // UUID 생성
 // ─────────────────────────────────────────────────────────────────────
@@ -31,17 +37,18 @@ function newUUID() {
 // ─────────────────────────────────────────────────────────────────────
 // 조회 필터 SQL (파라미터화 불가 부분은 role 검사 후 보간)
 // ─────────────────────────────────────────────────────────────────────
-function buildVisibilityFilter(role, siteName) {
-  if (role === 'admin') {
+function buildVisibilityFilter(role, siteName, userName) {
+  if (isAdminRole(role)) {
     return { where: 'p.is_deleted = FALSE', params: {} };
   }
-  // 현장관리자: 내 글 or 전체공개 관리자글 or 나를 특정한 관리자글
+  // 현장관리자: 내가 쓴 글 or 전체공개 관리자글 or 내 현장을 특정한 관리자글
   return {
     where: `p.is_deleted = FALSE AND (
-      p.author_site = @siteName
-      OR (p.author_role = 'admin' AND (p.target_site IS NULL OR p.target_site = '' OR p.target_site = @siteName))
+      p.author = @userName
+      OR (p.author_role IN ('admin', 'group_admin', 'super_admin', 'central_admin')
+        AND (p.target_site IS NULL OR p.target_site = '' OR p.target_site = @siteName))
     )`,
-    params: { siteName }
+    params: { siteName, userName }
   };
 }
 
@@ -53,13 +60,14 @@ function buildVisibilityFilter(role, siteName) {
  * 게시글 목록 조회 (댓글 수 포함)
  * @param {string} role      'admin' | 'manager'
  * @param {string} siteName  현장관리자 현장명 (admin이면 무시)
+ * @param {string} userName  현장관리자 이름 (admin이면 무시)
  * @returns {Promise<Array>}
  */
-async function getPosts(role, siteName) {
+async function getPosts(role, siteName, userName = '') {
   const bq = getBigQueryClient();
   if (!bq) throw new Error('BigQuery 클라이언트 초기화 실패');
 
-  const { where, params } = buildVisibilityFilter(role, siteName);
+  const { where, params } = buildVisibilityFilter(role, siteName, userName);
 
   const query = `
     SELECT

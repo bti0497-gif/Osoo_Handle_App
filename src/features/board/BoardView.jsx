@@ -4,6 +4,8 @@ import 'react-quill-new/dist/quill.snow.css';
 import { useBoardViewModel } from './useBoardViewModel';
 import { useDialog } from '../../components/common/DialogContext';
 
+const PRIVILEGED_BOARD_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
+
 // ── 성능 최적화를 위한 댓글 입력 컴포넌트 분리 ──
 const CommentInput = ({ onSubmit, placeholder, initialValue = '', onCancel, buttonText = '등록' }) => {
     const [text, setText] = useState(initialValue);
@@ -64,7 +66,7 @@ const BoardView = ({ currentUser }) => {
     const [replyTo, setReplyTo] = useState(null);
     const fileInputRef = useRef(null);
 
-    const isAdmin = currentUser?.role === 'admin';
+    const isAdmin = PRIVILEGED_BOARD_ROLES.has(currentUser?.role);
     const isAuthor = (authorName) => currentUser?.name === authorName;
     const resolveAttachmentHref = (attachment) => {
         const rawUrl = String(attachment?.url || '').trim();
