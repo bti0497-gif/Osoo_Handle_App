@@ -5,22 +5,20 @@
  *
  * Drive + Sheets 스코프를 포함한 새 토큰 발급
  */
-require('dotenv').config({ path: require('path').join(__dirname, '../.env.local') });
 const { google } = require('googleapis');
 const http = require('http');
 const url = require('url');
 const fs = require('fs');
 const path = require('path');
+const {
+  findOAuthClientSecretPath,
+  loadRuntimeEnv,
+} = require('../server/config/runtimeConfig.cjs');
+
+loadRuntimeEnv();
 
 function findOAuthClientSecretFile() {
-  try {
-    const rootDir = path.join(__dirname, '..');
-    const files = fs.readdirSync(rootDir);
-    const match = files.find((name) => /^client_secret_.*\.json$/i.test(String(name || '').trim()));
-    return match ? path.join(rootDir, match) : '';
-  } catch (_) {
-    return '';
-  }
+  return findOAuthClientSecretPath();
 }
 
 function loadOAuthClientConfig() {
@@ -49,7 +47,7 @@ function loadOAuthClientConfig() {
 
 const oauthClientConfig = loadOAuthClientConfig();
 if (!oauthClientConfig) {
-  console.error('OAuth 클라이언트 정보를 찾지 못했습니다. .env.local 또는 client_secret_*.json 파일을 확인하세요.');
+  console.error('OAuth 클라이언트 정보를 찾지 못했습니다. AppData 런타임 설정 또는 개발용 설정 파일을 확인하세요.');
   process.exit(1);
 }
 
@@ -98,7 +96,7 @@ const server = http.createServer(async (req, res) => {
 
     console.log('=== 새 토큰 ===');
     console.log('GOOGLE_REFRESH_TOKEN=' + tokens.refresh_token);
-    console.log('\n.env.local 의 GOOGLE_REFRESH_TOKEN 을 위 값으로 교체하세요.\n');
+    console.log('\nAppData 런타임 설정의 GOOGLE_REFRESH_TOKEN 값을 위 값으로 교체하세요.\n');
 
     server.close();
   } catch (e) {

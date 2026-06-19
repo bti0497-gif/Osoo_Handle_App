@@ -10,11 +10,31 @@ function formatNumber(value) {
     return Intl.NumberFormat('ko-KR').format(Math.round(value * 10) / 10);
 }
 
+function toFiniteNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
 const WIDTH = 1000;
 const HEIGHT = 240;
 const PADDING = { top: 20, right: 36, bottom: 38, left: 42 };
 
-export default function LineChartPanel({ rows, lines, leftMax, rightMax }) {
+function normalizeDomain(domain, fallbackMax) {
+    const min = Number(domain?.min);
+    const max = Number(domain?.max);
+    if (Number.isFinite(min) && Number.isFinite(max) && max > min) {
+        return { min, max };
+    }
+    const numericFallbackMax = Number(fallbackMax);
+    const safeMax = Number.isFinite(numericFallbackMax) && numericFallbackMax > 0 ? numericFallbackMax : 1;
+    return { min: 0, max: safeMax };
+}
+
+export default function LineChartPanel({ rows, lines, leftMax, rightMax, leftDomain, rightDomain }) {
+    const leftScale = useMemo(() => normalizeDomain(leftDomain, leftMax), [leftDomain, leftMax]);
+    const rightScale = useMemo(() => normalizeDomain(rightDomain, rightMax), [rightDomain, rightMax]);
+
     const chart = useMemo(() => {
         const innerWidth = WIDTH - PADDING.left - PADDING.right;
         const innerHeight = HEIGHT - PADDING.top - PADDING.bottom;
@@ -23,9 +43,9 @@ export default function LineChartPanel({ rows, lines, leftMax, rightMax }) {
 
         const scaleX = (index) => PADDING.left + (innerWidth * index) / xDenom;
         const scaleY = (value, axis) => {
-            const max = axis === 'right' ? rightMax : leftMax;
-            if (!Number.isFinite(value) || max <= 0) return PADDING.top + innerHeight;
-            const ratio = Math.max(0, Math.min(1, value / max));
+            const domain = axis === 'right' ? rightScale : leftScale;
+            if (!Number.isFinite(value) || domain.max <= domain.min) return PADDING.top + innerHeight;
+            const ratio = Math.max(0, Math.min(1, (value - domain.min) / (domain.max - domain.min)));
             return PADDING.top + innerHeight * (1 - ratio);
         };
 
@@ -34,9 +54,12 @@ export default function LineChartPanel({ rows, lines, leftMax, rightMax }) {
             .map((line) => {
                 const points = safeRows
                     .map((row, idx) => {
-                        const value = row[line.key];
-                        if (!Number.isFinite(value)) return null;
-                        return { x: scaleX(idx), y: scaleY(value, line.axis), value };
+                        const value = toFiniteNumber(row[line.key]);
+                        if (value === null) return null;
+                        const x = scaleX(idx);
+                        const y = scaleY(value, line.axis);
+                        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+                        return { x, y, value };
                     })
                     .filter(Boolean);
                 return { ...line, path: makePath(points), latest: points[points.length - 1]?.value ?? null };
@@ -49,7 +72,7 @@ export default function LineChartPanel({ rows, lines, leftMax, rightMax }) {
         }));
 
         return { linePaths, xTicks, innerHeight, innerWidth };
-    }, [rows, lines, leftMax, rightMax]);
+    }, [rows, lines, leftScale, rightScale]);
 
     return (
         <div style={{ width: '100%', height: '100%', border: '1px solid #e2e8f0', borderRadius: '12px', backgroundColor: '#ffffff', padding: '0.5rem' }}>
@@ -68,8 +91,12 @@ export default function LineChartPanel({ rows, lines, leftMax, rightMax }) {
                     <path key={line.key} d={line.path} fill="none" stroke={line.color} strokeWidth="2.5" strokeLinecap="round" />
                 ))}
 
-                <text x={PADDING.left} y={14} fontSize="11" fill="#334155">좌축 최대 {formatNumber(leftMax)}</text>
-                <text x={WIDTH - PADDING.right} y={14} fontSize="11" fill="#334155" textAnchor="end">우축 최대 {formatNumber(rightMax)}</text>
+                <text x={PADDING.left} y={14} fontSize="11" fill="#334155">
+                    좌축 {formatNumber(leftScale.min)}~{formatNumber(leftScale.max)}
+                </text>
+                <text x={WIDTH - PADDING.right} y={14} fontSize="11" fill="#334155" textAnchor="end">
+                    우축 {formatNumber(rightScale.min)}~{formatNumber(rightScale.max)}
+                </text>
             </svg>
         </div>
     );

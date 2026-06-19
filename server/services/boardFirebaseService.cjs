@@ -17,14 +17,14 @@
  */
 
 const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 const admin = require('firebase-admin');
+const { getFirebaseServiceAccountPath } = require('../config/runtimeConfig.cjs');
 
 const ADMIN_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
 
 // ── 서비스 계정 키 파일 위치 ──────────────────────────────────────
-const serviceAccountPath = path.join(__dirname, '..', 'config', 'firebase-service-account.json');
+const serviceAccountPath = getFirebaseServiceAccountPath();
 
 let db = null;
 let initialized = false;
@@ -52,7 +52,7 @@ try {
 
 function ensureInitialized() {
   if (!initialized || !db) {
-    throw new Error('Firebase 서비스가 설정되지 않았습니다. server/config/firebase-service-account.json 키 파일을 확인해 주세요.');
+    throw new Error(`Firebase 서비스가 설정되지 않았습니다. 런타임 키 파일을 확인해 주세요: ${serviceAccountPath}`);
   }
 }
 
@@ -97,10 +97,28 @@ async function getPosts(role, siteName, userName = '') {
     query = query.where('visible_sites', 'array-contains-any', ['ALL', siteName || '']);
   }
 
-  const snapshot = await query.limit(500).get();
+  const [snapshot, commentSnapshot] = await Promise.all([
+    query.limit(500).get(),
+    db.collection('comments').where('is_deleted', '==', false).get()
+  ]);
+
+  const commentCounts = new Map();
+  commentSnapshot.forEach(doc => {
+    const postId = String(doc.data()?.post_id || '');
+    if (postId) {
+      commentCounts.set(postId, (commentCounts.get(postId) || 0) + 1);
+    }
+  });
+
   const posts = [];
   snapshot.forEach(doc => {
-    posts.push({ id: doc.id, ...doc.data() });
+    const data = doc.data();
+    posts.push({
+      id: doc.id,
+      ...data,
+      view_count: Number(data.view_count) || 0,
+      comment_count: commentCounts.get(doc.id) || 0
+    });
   });
 
   const visiblePosts = ADMIN_ROLES.has(String(role || '').trim())
@@ -133,16 +151,26 @@ async function getPosts(role, siteName, userName = '') {
 /**
  * 게시글 단건 조회
  */
-async function getPost(id) {
+async function getPost(id, { incrementView = false } = {}) {
   ensureInitialized();
 
-  const doc = await db.collection('posts').doc(id).get();
+  const ref = db.collection('posts').doc(id);
+  const doc = await ref.get();
   if (!doc.exists) return null;
   
   const data = doc.data();
   if (data.is_deleted) return null;
 
-  return { id: doc.id, ...data };
+  const currentCount = Number(data.view_count) || 0;
+  const viewCount = incrementView ? currentCount + 1 : currentCount;
+
+  if (incrementView) {
+    await ref.update({
+      view_count: admin.firestore.FieldValue.increment(1)
+    });
+  }
+
+  return { id: doc.id, ...data, view_count: viewCount };
 }
 
 /**
@@ -169,6 +197,7 @@ async function createPost(data) {
     attachments:  data.attachments || '[]',
     parent_id:    data.parent_id   || null,
     is_deleted:   false,
+    view_count:   0,
     created_at:   now,
     updated_at:   now
   };

@@ -174,6 +174,8 @@ const apiSpec = {
       { method: 'GET', path: '', description: '일일 작업 로그 조회' },
       { method: 'POST', path: '', description: '일일 작업 로그 저장' },
       { method: 'GET', path: '/export', description: '로그 내보내기' },
+      { method: 'GET', path: '/export-pdf', description: 'HWPX 기반 일일업무일지 다중 날짜 PDF 병합 내보내기' },
+      { method: 'GET', path: '/export-hwpx', description: '책갈피 기반 일일업무일지 HWPX 내보내기' },
     ],
   },
 

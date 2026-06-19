@@ -7,7 +7,7 @@ const { PDFDocument } = require('pdf-lib');
 
 const { convertExcelToPdf } = require('./excelPdfService.cjs');
 
-const PREVIEW_RENDER_VERSION = '2026-06-14-certificate-water-quality-v1';
+const PREVIEW_RENDER_VERSION = '2026-06-18-daily-log-cumulative-and-aliases-v2';
 const EXPORT_TEMP_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 const pendingPreviewJobs = new Map();
@@ -254,6 +254,10 @@ function sumFlowField(db, type, field, startDate, endDate, scope = resolveSiteSc
     `SELECT SUM(${field}) as total FROM flow_readings WHERE type = ? AND date BETWEEN ? AND ?${filter.clause}`
   ).get(type, startDate, endDate, ...filter.params);
   return row?.total ?? '';
+}
+
+function nonNegativeFlowField(field) {
+  return `CASE WHEN (${field}) >= 0 THEN (${field}) ELSE 0 END`;
 }
 
 function sumMedicineField(db, name, field, startDate, endDate, scope = resolveSiteScope(db)) {
@@ -505,8 +509,8 @@ function buildBindingsForDate(db, date, context = {}) {
   bindings['유입전일'] = prevFlowIn?.raw_value ?? '';
   bindings['유입금일'] = flowIn?.raw_value ?? '';
   bindings['유입누계'] = flowIn?.calculated_flow ?? '';
-  bindings['월간유입'] = sumFlowField(db, flowInType, 'calculated_flow', monthStart, date, scope);
-  bindings['연간유입'] = sumFlowField(db, flowInType, 'calculated_flow', yearStart, date, scope);
+  bindings['월간유입'] = sumFlowField(db, flowInType, nonNegativeFlowField('calculated_flow'), monthStart, date, scope);
+  bindings['연간유입'] = sumFlowField(db, flowInType, nonNegativeFlowField('calculated_flow'), yearStart, date, scope);
 
   // 유입유량계 (유입은 대부분 1개이므로 flowOption 적용 안 함)
   const flowOut = findFlowByKeyword(flows, '방류');
@@ -515,8 +519,8 @@ function buildBindingsForDate(db, date, context = {}) {
   bindings['방류전일'] = prevFlowOut?.raw_value ?? '';
   bindings['방류금일'] = flowOut?.raw_value ?? '';
   bindings['방류누계'] = flowOut?.calculated_flow ?? '';
-  bindings['월간방류'] = sumFlowField(db, flowOutType, 'calculated_flow', monthStart, date, scope);
-  bindings['연간방류'] = sumFlowField(db, flowOutType, 'calculated_flow', yearStart, date, scope);
+  bindings['월간방류'] = sumFlowField(db, flowOutType, nonNegativeFlowField('calculated_flow'), monthStart, date, scope);
+  bindings['연간방류'] = sumFlowField(db, flowOutType, nonNegativeFlowField('calculated_flow'), yearStart, date, scope);
 
   // 내부반송유량계 ── flowOption 적용
   const flowInternal = getFlowByOption(flows, '내부반송', flowOption) || getFlowByOption(flows, '내부', flowOption);
@@ -524,8 +528,8 @@ function buildBindingsForDate(db, date, context = {}) {
   bindings['내부반송전일'] = prevFlowInternal?.raw_value ?? '';
   bindings['내부반송금일'] = flowInternal?.raw_value ?? '';
   bindings['내부누계'] = flowInternal?.calculated_flow ?? '';
-  bindings['월간내부'] = sumFlowFieldByOption(db, '내부반송', 'calculated_flow', monthStart, date, flowOption, scope);
-  bindings['연간내부'] = sumFlowFieldByOption(db, '내부반송', 'calculated_flow', yearStart, date, flowOption, scope);
+  bindings['월간내부'] = sumFlowFieldByOption(db, '내부반송', nonNegativeFlowField('calculated_flow'), monthStart, date, flowOption, scope);
+  bindings['연간내부'] = sumFlowFieldByOption(db, '내부반송', nonNegativeFlowField('calculated_flow'), yearStart, date, flowOption, scope);
 
   // 내부반송유량계 ── flowOption 적용
   const flowExternal = getFlowByOption(flows, '외부반송', flowOption) || getFlowByOption(flows, '외부', flowOption);
@@ -533,8 +537,8 @@ function buildBindingsForDate(db, date, context = {}) {
   bindings['외부반송전일'] = prevFlowExternal?.raw_value ?? '';
   bindings['외부반송금일'] = flowExternal?.raw_value ?? '';
   bindings['외부누계'] = flowExternal?.calculated_flow ?? '';
-  bindings['월간외부'] = sumFlowFieldByOption(db, '외부반송', 'calculated_flow', monthStart, date, flowOption, scope);
-  bindings['연간외부'] = sumFlowFieldByOption(db, '외부반송', 'calculated_flow', yearStart, date, flowOption, scope);
+  bindings['월간외부'] = sumFlowFieldByOption(db, '외부반송', nonNegativeFlowField('calculated_flow'), monthStart, date, flowOption, scope);
+  bindings['연간외부'] = sumFlowFieldByOption(db, '외부반송', nonNegativeFlowField('calculated_flow'), yearStart, date, flowOption, scope);
 
   // 슬러지 처리량은 총 누계(calculated_flow)가 아니라 반출량(sludge_export) 기준이다.
   // 반출이 없는 날이 많으므로 값이 없으면 빈 칸으로 유지하고, 월간/연간도 반출량만 누적한다.
@@ -573,7 +577,7 @@ function buildBindingsForDate(db, date, context = {}) {
     // 기본 이름들
     const baseNames = [medNameNoSpace];
     if (medNameNoSpace.includes('포도')) baseNames.push('포도당');
-    if (medNameNoSpace.includes('중탄')) baseNames.push('중탄', '중탄산나트륨');
+    if (medNameNoSpace.includes('중탄')) baseNames.push('중탄', '중탄산', '중탄산나트륨');
     if (medNameNoSpace.includes('팩') || medNameNoSpace.toUpperCase().includes('PAC')) baseNames.push('팩', 'PAC', '팩(PAC)', 'PAC약품');
 
     // 확장 약품 별칭 매핑
@@ -651,10 +655,10 @@ function buildBindingsForDate(db, date, context = {}) {
       baseNames.push('질산', 'NO3', 'NO3-N', 'NO3_N');
     }
     if (kitNameNoSpace.includes('인산') || kitNameNoSpace.includes('오르토인산염') || kitNameNoSpace.toUpperCase().includes('PO4')) {
-      baseNames.push('인산', 'PO4', 'PO4-P', 'PO4_P');
+      baseNames.push('인', '인산', 'PO4', 'PO4-P', 'PO4_P');
     }
     if (kitNameNoSpace.includes('알칼리') || kitNameNoSpace.toUpperCase().includes('ALK')) {
-      baseNames.push('알칼리', 'ALK');
+      baseNames.push('알칼리', '알칼리도', 'ALK');
     }
 
     // 중복 제거
@@ -696,6 +700,7 @@ function buildBindingsForDate(db, date, context = {}) {
   bindings['kw당사용량'] = kwPerM3;
   bindings['전력효율'] = kwPerM3;
   bindings['1m3당사용량'] = kwPerM3;
+  bindings['전력계산'] = kwPerM3;
 
   // 전력계산(방류량 전력량 계산값 바인딩
   bindings['전력효율'] = kwPerM3;
@@ -928,6 +933,10 @@ async function buildBatchPreviewPdf({ db, appDataPath, templateInfo, manifest, c
     ...pageResults.map((result) => result.cacheKey),
   ]);
   const outputPath = path.join(directories.batchPdfDir, `${batchKey}.pdf`);
+
+  if (!fs.existsSync(outputPath)) {
+    await mergePdfFiles(pageResults.map((result) => result.pdfPath), outputPath);
+  }
 
   return outputPath;
 }

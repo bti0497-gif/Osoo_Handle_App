@@ -8,24 +8,24 @@
  */
 
 const { BigQuery } = require('@google-cloud/bigquery');
-const path = require('path');
 const fs = require('fs');
+const { getBigQueryServiceAccountPath } = require('../config/runtimeConfig.cjs');
 
-const KEY_FILE_PATH = path.join(__dirname, '../config/work-jindan-194620a46d59.json');
 const DATASET_ID = 'daily_log_system';
 
 let _client = null;
 
 function getBigQueryClient() {
   if (_client) return _client;
+  const keyFilePath = getBigQueryServiceAccountPath();
 
-  if (!fs.existsSync(KEY_FILE_PATH)) {
-    console.warn('[BigQuery] 키 파일 없음:', KEY_FILE_PATH);
+  if (!fs.existsSync(keyFilePath)) {
+    console.warn('[BigQuery] 키 파일 없음:', keyFilePath);
     return null;
   }
 
   try {
-    _client = new BigQuery({ keyFilename: KEY_FILE_PATH });
+    _client = new BigQuery({ keyFilename: keyFilePath });
     return _client;
   } catch (err) {
     console.error('[BigQuery] 클라이언트 초기화 실패:', err.message);

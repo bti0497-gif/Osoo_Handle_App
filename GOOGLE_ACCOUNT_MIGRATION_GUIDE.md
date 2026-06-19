@@ -1,68 +1,48 @@
-# Google 계정/프로젝트 교체 가이드
+# Google 및 Firebase 계정 교체 가이드
 
-현재 개발 중에는 개인 Google 계정과 개발용 Google Cloud/Firebase 리소스를 사용할 수 있지만, 최초 릴리즈 또는 운영 안정화 시점에는 회사 공식 계정으로 전환될 수 있다. 이 문서는 계정 교체 시 코드 수정을 최소화하고 설정 교체와 검증만으로 전환하기 위한 기준이다.
+## 런타임 설정 위치
 
-## 교체 대상
+배포 앱의 자격증명은 다음 경로에 둡니다.
 
-- Google Cloud 서비스 계정 JSON: `server/config/google-key.json`
-- BigQuery 프로젝트/데이터셋: `BIGQUERY_DATASET_ID` 및 서비스 계정 권한
-- Google Sheets 현장/회원 마스터: `GOOGLE_MEMBERS_SHEET_ID`
-- Google Drive 루트 폴더: `GOOGLE_DRIVE_FOLDER_ID`
-- Google Drive OAuth/서비스 계정 인증 값: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GOOGLE_REDIRECT_URI`
-- Firebase Firestore 서비스 계정: `server/config/firebase-service-account.json`
-- 소통게시판 백엔드 선택: `BOARD_BACKEND`
-- 자동 업데이트 배포 계정/저장소: GitHub Releases 설정
+```text
+%APPDATA%\Osoo_Handle_App\config
+```
 
-## 구조 원칙
+주요 파일:
 
-- 계정/프로젝트 교체 때문에 feature View, ViewModel, route 파일을 직접 수정하지 않는다.
-- Google/Firebase 연결 정보는 `.env.local`과 `server/config/*.json`으로 분리한다.
-- Google API 호출 로직은 `server/services/` 안의 서비스 파일에만 둔다.
-- 새 Google 연동 기능은 라우트에 직접 구현하지 않고 `server/services/{domain}Service.cjs`로 분리한다.
-- 공식 계정 전환 전후에 개발 계정 데이터와 운영 계정 데이터를 섞지 않는다.
+- `.env.local`
+- `google-key.json`
+- `bigquery-service-account.json`
+- `firebase-service-account.json`
+- 필요한 경우 `client_secret_*.json`
+
+이 파일들은 Git과 설치 패키지에 포함하지 않습니다.
 
 ## 교체 절차
 
-1. 회사 공식 Google Cloud 프로젝트를 생성한다.
-2. BigQuery 데이터셋과 필요한 테이블을 생성하거나 초기화 스크립트로 준비한다.
-3. 회사 공식 서비스 계정을 만들고 BigQuery, Sheets, Drive 권한을 부여한다.
-4. 새 서비스 계정 JSON을 `server/config/google-key.json`으로 교체한다.
-5. 회원/현장 관리용 Google Sheets 파일을 만들고 서비스 계정 이메일에 편집 권한을 부여한다.
-6. `.env.local`의 `GOOGLE_MEMBERS_SHEET_ID`를 회사 공식 Sheets ID로 교체한다.
-7. Drive 루트 폴더를 만들고 `.env.local`의 `GOOGLE_DRIVE_FOLDER_ID`를 교체한다.
-8. Drive 인증 방식이 OAuth이면 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GOOGLE_REDIRECT_URI`를 공식 계정 값으로 교체한다.
-9. Firebase 프로젝트를 회사 공식 계정으로 생성하고 Firestore를 활성화한다.
-10. Firebase Admin SDK 키를 `server/config/firebase-service-account.json`으로 교체한다.
-11. `.env.local`의 `BOARD_BACKEND=firebase` 설정을 확인한다.
-12. 필요하면 GitHub Releases 저장소/토큰/배포 권한을 회사 계정 기준으로 교체한다.
+1. 공식 Google Cloud/Firebase 프로젝트와 서비스 계정을 준비합니다.
+2. BigQuery, Sheets와 Drive에 필요한 권한을 부여합니다.
+3. 공식 Google Sheets와 Drive 폴더 ID를 `.env.local`에 반영합니다.
+4. Firebase Firestore와 서비스 계정을 준비합니다.
+5. 현장별 안전한 폴더에 자격증명 묶음을 준비합니다.
+6. 다음 명령으로 AppData에 복사합니다.
 
-## 전환 후 검증
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\provision-runtime-config.ps1 -SourceDir <자격증명 폴더>
+```
 
-아래 순서대로 확인한다.
+신규 설치는 `scripts/install-with-provisioning.cmd`를 사용합니다.
+
+## 검증 순서
 
 1. `npm run validate`
-2. admin 로그인
-3. 설정 메뉴에서 현장/현장관리자 저장
-4. 현장관리자 로그인/로그아웃 출결 기록
-5. 유량 입력 후 로컬 DB 저장 확인
-6. BigQuery 백그라운드 업로드 확인
-7. 약품/키트/슬러지 사진 로컬 저장 확인
-8. Drive 업로드 확인
-9. Drive 사진 복구 메시지 흐름 확인
-10. 소통게시판 작성/조회가 Firebase Firestore에 반영되는지 확인
-11. 일지/대장 Excel 출력 확인
-12. 성적서 PDF 다운로드 확인
+2. 로그인 및 현장 설정 조회
+3. Google Sheets 현장/사용자 조회
+4. BigQuery 읽기·쓰기
+5. Drive 업로드와 복구
+6. Firebase 게시글 조회·작성
+7. 출력물 생성
 
-## 롤백 기준
+## 롤백
 
-- BigQuery 업로드가 실패하면 `.env.local`과 `server/config/google-key.json`을 이전 개발 계정 값으로 되돌린 뒤 서버를 재시작한다.
-- 소통게시판 Firebase 문제가 발생하면 `BOARD_BACKEND=bigquery`로 임시 롤백할 수 있다.
-- Drive 업로드가 실패해도 로컬 저장은 유지되어야 하며, Drive 설정만 재점검한다.
-- 계정 교체 중 데이터가 섞이면 업로드 시각과 site_id/site_name 기준으로 BigQuery에서 정리한다.
-
-## 개발 시 주의
-
-- 개인 계정 전용 값은 코드에 직접 쓰지 않는다.
-- 서비스 계정 JSON은 Git에 커밋하지 않는다.
-- `.env.local` 값 변경만으로 전환 가능하게 유지한다.
-- 계정 전환과 기능 리팩토링은 같은 커밋에 섞지 않는다.
+문제가 발생하면 AppData의 자격증명 파일을 이전 정상본으로 되돌린 뒤 앱을 재시작합니다. 로컬 업무 입력은 유지하고 외부 동기화만 다시 검증합니다.

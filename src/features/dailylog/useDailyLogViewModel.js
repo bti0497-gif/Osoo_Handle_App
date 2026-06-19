@@ -55,6 +55,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
     const [pageRenderData, setPageRenderData] = useState(null);
     const [isPreviewAssetLoading, setIsPreviewAssetLoading] = useState(false);
     const [isOutputProcessing, setIsOutputProcessing] = useState(false);
+    const [outputFormat, setOutputFormat] = useState('pdf');
     const [activeDates, setActiveDates] = useState([]);
     const [siteName, setSiteName] = useState('');
     const [dashboardRows, setDashboardRows] = useState([]);
@@ -179,6 +180,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
 
             try {
                 const result = await DailyLogModel.fetchPreviewPageData({
+                    date: currentPage.date,
                     startDate: computedStartDate,
                     endDate: computedEndDate,
                     pageKey: currentPage.pageKey,
@@ -229,6 +231,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
                     } else {
                         try {
                             const result = await DailyLogModel.fetchPreviewPageData({
+                                date: page.date,
                                 startDate: computedStartDate,
                                 endDate: computedEndDate,
                                 pageKey: page.pageKey,
@@ -362,7 +365,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         });
     };
 
-    const handleExportExcel = async () => {
+    const handleExport = async () => {
         const dateRangeStr = sortedDates.length > 1
             ? `${computedStartDate},${computedEndDate}`
             : computedStartDate;
@@ -371,20 +374,27 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
 
         try {
             setIsOutputProcessing(true);
-            const result = await DailyLogModel.fetchExportExcel(dateRangeStr, templateName, siteName, requestContext);
+            const result = outputFormat === 'pdf'
+                ? await DailyLogModel.fetchExportPdf(dateRangeStr, templateName, siteName, requestContext)
+                : outputFormat === 'hwpx'
+                    ? await DailyLogModel.fetchExportHwpx(dateRangeStr, templateName, siteName, requestContext)
+                    : await DailyLogModel.fetchExportExcel(dateRangeStr, templateName, siteName, requestContext);
             if (result && result.success) {
                 const fileList = Array.isArray(result.files) && result.files.length
                     ? `\n${result.files.join('\n')}`
                     : '';
                 alertTitle = '일지 생성 완료';
-                alertMessage = `${templateName} 생성이 완료되었습니다.${fileList}`;
+                alertMessage = outputFormat === 'pdf'
+                    ? `${result.pageCount || sortedDates.length}페이지 PDF 생성이 완료되었습니다.${fileList}`
+                    : `${templateName} 생성이 완료되었습니다.${fileList}`;
             } else {
                 alertTitle = '일지 생성 실패';
                 alertMessage = result?.userMessage || result?.message || result?.error || '일지 생성 결과를 확인하지 못했습니다.';
             }
         } catch (error) {
             alertTitle = '내보내기 실패';
-            alertMessage = error?.data?.userMessage || error?.message || '엑셀 내보내기를 시작하지 못했습니다.';
+            const formatLabel = outputFormat === 'pdf' ? 'PDF' : outputFormat === 'hwpx' ? 'HWPX' : '엑셀';
+            alertMessage = error?.data?.userMessage || error?.message || `${formatLabel} 내보내기를 시작하지 못했습니다.`;
         } finally {
             setIsOutputProcessing(false);
         }
@@ -460,13 +470,15 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         isManifestLoading,
         isPreviewAssetLoading,
         isOutputProcessing,
+        outputFormat,
+        setOutputFormat,
         manifestError,
         manifestErrorCode,
         hasPreviousPage: currentPageIndex > 0,
         hasNextPage: currentPageIndex < pages.length - 1,
         handlePrevPage: () => handleMovePage(-1),
         handleNextPage: () => handleMovePage(1),
-        handleExportExcel,
+        handleExport,
         activeDates,
         setCalendarActiveStartDate,
         dashboardRows,

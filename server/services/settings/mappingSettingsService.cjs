@@ -32,8 +32,6 @@ function saveFlowMapping(db, config, mapping, progress) {
     if (name.endsWith('_raw') || name.endsWith('_flow')) upsertStmt.run(name, col);
   });
 
-  db.prepare('DELETE FROM flow_readings').run();
-
   const metadata = getCurrentRecordMetadata(db, config || {});
   const insertReading = db.prepare(`
     INSERT INTO flow_readings (
@@ -281,7 +279,7 @@ function saveWaterMapping(db, config, mapping, progress) {
       date, measurement_group, measurement_order, source_type, source_label,
       location, item_name, item_code, result_value, result_numeric, unit,
       site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET
       measurement_order = excluded.measurement_order,
       source_type = excluded.source_type,

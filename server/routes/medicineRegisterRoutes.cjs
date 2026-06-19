@@ -9,6 +9,38 @@ const router = express.Router();
 const BASE_MEDICINES = ['중탄산나트륨', '포도당', '팩(PAC)'];
 const BASE_KITS = ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '인산염인(PO4-P)', '알칼리도(ALK)'];
 
+const MEDICINE_NAMED_PREFIX = {
+  '포도당': '약1',
+  '중탄산나트륨': '약2',
+  '팩(PAC)': '약3',
+};
+
+const KIT_NAMED_PREFIX = {
+  '암모니아성질소(NH3-N)': '암모니아',
+  '질산성질소(NO3-N)': '질산',
+  '인산염인(PO4-P)': '인',
+  '알칼리도(ALK)': '알칼리',
+};
+
+function parseNamedCell(range) {
+  const match = String(range || '').match(/^'?([^'!]+)'?!\$?([A-Z]+)\$?(\d+)$/);
+  if (!match) return null;
+  return {
+    sheetName: match[1],
+    address: `${match[2]}${match[3]}`,
+  };
+}
+
+function buildNamedCellMap(workbook) {
+  const model = Array.isArray(workbook.definedNames?.model) ? workbook.definedNames.model : [];
+  const map = {};
+  for (const entry of model) {
+    const parsed = parseNamedCell(entry.ranges?.[0]);
+    if (parsed) map[entry.name] = parsed;
+  }
+  return map;
+}
+
 function resolveSiteScope(db, source = {}) {
   const settings = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get() || {};
   return {
@@ -64,47 +96,42 @@ async function exportMedicineRegisterXlsx({ templatePath, outputPath, year, mont
   const ws = wb.worksheets[0];
   if (!ws) throw new Error('약품관리대장 템플릿 시트를 찾을 수 없습니다.');
 
-  const mm = String(month).padStart(2, '0');
   const medicineNames = [...BASE_MEDICINES, ...(extraMedicines || [])].filter(Boolean);
+  const namedMap = buildNamedCellMap(wb);
 
-  ws.getCell('A1').value = `${year}년 ${Number(month)}월 약품관리대장`;
-  ws.getCell('A2').value = `현장: ${siteName || ''}`;
-  ws.getCell('A3').value = `사용약품: ${medicineNames.length ? `(${medicineNames.join(', ')})` : '()'}`;
-  ws.getCell('A4').value = `기준월: ${year}.${mm}`;
+  function setNamed(name, value) {
+    const info = namedMap[name];
+    if (!info || info.sheetName !== ws.name) return;
+    ws.getCell(info.address).value = value ?? '';
+  }
 
-  let row = 6;
-  ws.getCell(`A${row}`).value = '약품';
-  ws.getCell(`B${row}`).value = '구매';
-  ws.getCell(`C${row}`).value = '사용';
-  ws.getCell(`D${row}`).value = '누계';
-  ws.getCell(`E${row}`).value = '재고';
-  row += 1;
+  function bindAmounts(prefix, item) {
+    setNamed(`${prefix}구매`, formatNumber(item?.purchase));
+    setNamed(`${prefix}사용`, formatNumber(item?.usage));
+    setNamed(`${prefix}누계`, formatNumber(item?.yearTotal));
+    setNamed(`${prefix}잔량`, formatNumber(item?.balance));
+  }
 
-  [...(medicineData || []), ...(extraData || [])].forEach((item) => {
-    ws.getCell(`A${row}`).value = item?.name || '';
-    ws.getCell(`B${row}`).value = formatNumber(item?.purchase);
-    ws.getCell(`C${row}`).value = formatNumber(item?.usage);
-    ws.getCell(`D${row}`).value = formatNumber(item?.yearTotal);
-    ws.getCell(`E${row}`).value = formatNumber(item?.balance);
-    row += 1;
-  });
+  setNamed('대장명', `${year}년 ${Number(month)}월 약품관리대장`);
+  setNamed('현장명', siteName || '');
+  setNamed('사용약품', medicineNames.length ? `(${medicineNames.join(', ')})` : '()');
 
-  row += 1;
-  ws.getCell(`A${row}`).value = '킷';
-  ws.getCell(`B${row}`).value = '구매';
-  ws.getCell(`C${row}`).value = '사용';
-  ws.getCell(`D${row}`).value = '누계';
-  ws.getCell(`E${row}`).value = '재고';
-  row += 1;
+  for (const item of medicineData || []) {
+    const prefix = MEDICINE_NAMED_PREFIX[item?.name];
+    if (prefix) bindAmounts(prefix, item);
+  }
 
-  (kitData || []).forEach((item) => {
-    ws.getCell(`A${row}`).value = item?.name || '';
-    ws.getCell(`B${row}`).value = formatNumber(item?.purchase);
-    ws.getCell(`C${row}`).value = formatNumber(item?.usage);
-    ws.getCell(`D${row}`).value = formatNumber(item?.yearTotal);
-    ws.getCell(`E${row}`).value = formatNumber(item?.balance);
-    row += 1;
-  });
+  for (let index = 0; index < 3; index += 1) {
+    const item = extraData?.[index];
+    const prefix = `추${index + 1}`;
+    setNamed(`${prefix}약품명`, item?.name || '');
+    bindAmounts(prefix, item);
+  }
+
+  for (const item of kitData || []) {
+    const prefix = KIT_NAMED_PREFIX[item?.name];
+    if (prefix) bindAmounts(prefix, item);
+  }
 
   await wb.xlsx.writeFile(outputPath);
 }
@@ -134,6 +161,9 @@ module.exports = function (db, baseDir, appDataPath) {
         `SELECT item_name FROM config_items
          WHERE category = 'medicine' AND is_active = 1
            AND item_name NOT IN ('중탄산나트륨', '포도당', '팩(PAC)')
+           AND item_name NOT GLOB '*_purchase'
+           AND item_name NOT GLOB '*_usage'
+           AND item_name NOT GLOB '*_inventory'
          ORDER BY display_order ASC
          LIMIT 3`
       ).all().map((r) => r.item_name);
@@ -221,6 +251,9 @@ module.exports = function (db, baseDir, appDataPath) {
         `SELECT item_name FROM config_items
          WHERE category = 'medicine' AND is_active = 1
            AND item_name NOT IN ('중탄산나트륨', '포도당', '팩(PAC)')
+           AND item_name NOT GLOB '*_purchase'
+           AND item_name NOT GLOB '*_usage'
+           AND item_name NOT GLOB '*_inventory'
          ORDER BY display_order ASC
          LIMIT 3`
       ).all().map((r) => r.item_name);

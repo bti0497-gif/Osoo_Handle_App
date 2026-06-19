@@ -23,11 +23,12 @@ function formatDate(date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function cellToString(cellValue) {
+function cellToString(cellValue, formulaResult) {
   if (cellValue === null || cellValue === undefined) return null;
   if (cellValue instanceof Date) return formatDate(cellValue);
   if (typeof cellValue === 'object') {
     if (cellValue.result !== undefined) return cellToString(cellValue.result);
+    if (formulaResult !== undefined) return cellToString(formulaResult);
     if (cellValue.text !== undefined) return String(cellValue.text);
     if (cellValue.richText) return cellValue.richText.map(r => r.text).join('');
     return String(cellValue);
@@ -89,7 +90,8 @@ async function parseAndStoreExcel(db, filePath) {
     for (let r = 1; r < START_ROW; r++) {
       const row = ws.getRow(r);
       for (const col of COLUMNS) {
-        const val = cellToString(row.getCell(col).value);
+        const cell = row.getCell(col);
+        const val = cellToString(cell.value, cell.result);
         if (val !== null) headerBatch.push({ rowNum: r, col, value: val });
       }
     }
@@ -99,7 +101,8 @@ async function parseAndStoreExcel(db, filePath) {
     for (let r = START_ROW; r <= maxDataRow; r++) {
       const row = ws.getRow(r);
       for (const col of COLUMNS) {
-        const val = cellToString(row.getCell(col).value);
+        const cell = row.getCell(col);
+        const val = cellToString(cell.value, cell.result);
         if (val !== null) {
           batch.push({ rowNum: r, col, value: val });
         }

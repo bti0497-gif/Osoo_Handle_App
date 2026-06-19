@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useState, useEffect } from 'react';
 import { TAB_LABELS, DEFAULT_TAB } from './core/constants';
 import { useAuthViewModel, LoginView, SyncService } from './features/auth';
+import SplashLoadingView from './components/SplashLoadingView';
 import { clearRecordGridHistoryCache, preloadRecordGridData } from './features/records/recordPreloadService';
 import Sidebar from './components/Sidebar';
 import StatusBar from './components/StatusBar';
@@ -72,6 +73,7 @@ const PlaceholderView = ({ title }) => (
 function App() {
     const { user, loginHintName, isAuthenticated, isLoading, login, logout } = useAuthViewModel();
     const [activeTab, setActiveTab] = useState(DEFAULT_TAB);
+    const [isRoadworkMounted, setIsRoadworkMounted] = useState(false);
     const [preloadedUserId, setPreloadedUserId] = useState(null);
     const [recordPreloadState, setRecordPreloadState] = useState({
         active: false,
@@ -138,26 +140,10 @@ function App() {
 
     if (recordPreloadState.active) {
         return (
-            <div className="login-screen">
-                <div style={{ width: 'min(420px, calc(100vw - 48px))', color: 'var(--text-secondary)' }}>
-                    <div className="spinner" style={{ margin: '0 auto 1rem' }} />
-                    <p style={{ margin: '0 0 0.75rem', textAlign: 'center', fontSize: '0.95rem', fontWeight: 800 }}>
-                        {recordPreloadState.label || '업무 데이터 로드 중...'}
-                    </p>
-                    <div style={{ height: 8, borderRadius: 999, background: '#e2e8f0', overflow: 'hidden' }}>
-                        <div style={{
-                            width: `${recordPreloadState.percent}%`,
-                            height: '100%',
-                            borderRadius: 999,
-                            background: '#2563eb',
-                            transition: 'width 160ms ease',
-                        }} />
-                    </div>
-                    <p style={{ margin: '0.5rem 0 0', textAlign: 'center', fontSize: '0.75rem', fontWeight: 700 }}>
-                        {recordPreloadState.percent}%
-                    </p>
-                </div>
-            </div>
+            <SplashLoadingView
+                percent={recordPreloadState.percent}
+                label={recordPreloadState.label}
+            />
         );
     }
 
@@ -168,7 +154,15 @@ function App() {
     const handleLogout = () => {
         clearRecordGridHistoryCache();
         setPreloadedUserId(null);
+        setIsRoadworkMounted(false);
         logout();
+    };
+
+    const handleTabChange = (nextTab) => {
+        if (nextTab === 'log_roadwork_helper') {
+            setIsRoadworkMounted(true);
+        }
+        setActiveTab(nextTab);
     };
 
     const renderContent = () => {
@@ -192,7 +186,7 @@ function App() {
             case 'log_med_in': return <MedicineInView currentUser={user} />;
             case 'log_sludge_out': return <SludgeLedgerView currentUser={user} />;
             case 'log_sludge_photo': return <SludgePhotoView currentUser={user} />;
-            case 'log_roadwork_helper': return <RoadworkHelperView currentUser={user} />;
+            case 'log_roadwork_helper': return null;
             case 'attendance':
                 return <AttendanceView currentUser={user} />;
             case 'myinfo':
@@ -222,18 +216,42 @@ function App() {
                 <Sidebar
                     user={user}
                     activeTab={activeTab}
-                    onTabChange={setActiveTab}
+                    onTabChange={handleTabChange}
                     onLogout={handleLogout}
                     onUpdatePassword={handleUpdatePassword}
                 />
 
                 <main className="main-content">
-                    <div className="main-content-workspace">
-                        <WorkspaceErrorBoundary resetKey={activeTab}>
-                            <Suspense fallback={contentLoadingFallback}>
-                                {renderContent()}
-                            </Suspense>
-                        </WorkspaceErrorBoundary>
+                    <div className="main-content-workspace" style={{ position: 'relative' }}>
+                        <div style={{
+                            display: activeTab === 'log_roadwork_helper' ? 'none' : 'block',
+                            width: '100%',
+                            height: '100%',
+                        }}>
+                            <WorkspaceErrorBoundary resetKey={activeTab}>
+                                <Suspense fallback={contentLoadingFallback}>
+                                    {renderContent()}
+                                </Suspense>
+                            </WorkspaceErrorBoundary>
+                        </div>
+
+                        {isRoadworkMounted && (
+                            <div style={{
+                                position: activeTab === 'log_roadwork_helper' ? 'relative' : 'absolute',
+                                inset: 0,
+                                width: '100%',
+                                height: '100%',
+                                visibility: activeTab === 'log_roadwork_helper' ? 'visible' : 'hidden',
+                                pointerEvents: activeTab === 'log_roadwork_helper' ? 'auto' : 'none',
+                                zIndex: activeTab === 'log_roadwork_helper' ? 1 : 0,
+                            }}>
+                                <WorkspaceErrorBoundary resetKey="log_roadwork_helper">
+                                    <Suspense fallback={contentLoadingFallback}>
+                                        <RoadworkHelperView currentUser={user} />
+                                    </Suspense>
+                                </WorkspaceErrorBoundary>
+                            </div>
+                        )}
                     </div>
                 </main>
             </div>

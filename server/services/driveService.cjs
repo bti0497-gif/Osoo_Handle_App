@@ -1,24 +1,21 @@
 ﻿const { google } = require('googleapis');
-const path = require('path');
 const fs = require('fs');
-require('dotenv').config({ path: path.join(__dirname, '../../.env.local') });
 const { boardUploadsSegments } = require('./drivePathService.cjs');
+const {
+  findOAuthClientSecretPath,
+  getGoogleServiceAccountPath,
+  loadRuntimeEnv,
+} = require('../config/runtimeConfig.cjs');
 
-const KEY_FILE = path.join(__dirname, '../config/google-key.json');
-const WORKSPACE_ROOT = path.join(__dirname, '../..');
+loadRuntimeEnv();
+const KEY_FILE = getGoogleServiceAccountPath();
 const OAUTH_SCOPES = [
   'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/spreadsheets',
 ];
 
 function findOAuthClientSecretFile() {
-  try {
-    const files = fs.readdirSync(WORKSPACE_ROOT);
-    const match = files.find((name) => /^client_secret_.*\.json$/i.test(String(name || '').trim()));
-    return match ? path.join(WORKSPACE_ROOT, match) : '';
-  } catch (_) {
-    return '';
-  }
+  return findOAuthClientSecretPath();
 }
 
 function loadOAuthClientConfig() {

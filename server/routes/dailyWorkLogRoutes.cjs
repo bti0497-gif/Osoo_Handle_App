@@ -7,9 +7,14 @@ const {
   buildPageRenderData,
   findPageInManifest,
   normalizeDateRange,
+  parsePageKey,
   getActiveDates,
 } = require('../services/dailyWorkLogService.cjs');
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
+const {
+  buildBatchDailyWorkLogHwpx,
+  buildBatchDailyWorkLogPdf,
+} = require('../services/dailyWorkLogHwpxService.cjs');
 const { restoreOperationalData } = require('../services/bigQueryRestoreService.cjs');
 const { syncCertificateCacheForSiteMonth } = require('../services/certificateCacheSyncService.cjs');
 
@@ -22,6 +27,14 @@ function buildMissingTemplateResponse() {
     code: 'REPORT_TEMPLATE_MISSING',
     error: `${TEMPLATE_NAME} 양식을 찾을 수 없습니다.`,
     userMessage: `${TEMPLATE_NAME} 양식을 찾을 수 없습니다.\n설정에서 ${TEMPLATE_NAME} 양식 파일을 업로드해 주세요.`
+  };
+}
+
+function buildMissingHwpxTemplateResponse() {
+  return {
+    code: 'REPORT_HWPX_TEMPLATE_MISSING',
+    error: `${TEMPLATE_NAME} HWPX 양식을 찾을 수 없습니다.`,
+    userMessage: `설정에서 ${TEMPLATE_NAME}.hwpx 양식을 업로드해 주세요.`,
   };
 }
 
@@ -127,7 +140,11 @@ module.exports = function (db, baseDir, appDataPath) {
     }
 
     try {
-      const range = normalizeDateRange(startDate || date, endDate || date || startDate);
+      const parsedPageKey = parsePageKey(pageKey);
+      const requestedDate = date || parsedPageKey?.date || startDate || endDate;
+      const range = requestedDate
+        ? normalizeDateRange(requestedDate, requestedDate)
+        : normalizeDateRange(startDate, endDate);
       await restoreOperationalData(db, {
         startDate: range.startDate,
         endDate: range.endDate,
@@ -136,7 +153,8 @@ module.exports = function (db, baseDir, appDataPath) {
       });
       await syncCertificateCacheForRange(range, getRequestContext(req));
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
-      const targetPage = findPageInManifest(manifest, pageKey);
+      const targetPage = findPageInManifest(manifest, pageKey)
+        || (parsedPageKey?.date === range.startDate ? manifest.pages[0] : null);
 
       if (!targetPage) {
         return res.status(404).json({ error: 'Preview page not found' });
@@ -205,6 +223,96 @@ module.exports = function (db, baseDir, appDataPath) {
     } catch (err) {
       console.error('[Daily Work Log Export Error]', err.message);
       return res.status(500).json({ error: `내보내기에 실패했습니다: ${err.message}` });
+    }
+  });
+
+  router.get('/api/daily-work-log/export-pdf', async (req, res) => {
+    const { startDate, endDate, date, templateName } = req.query;
+    const resolvedTemplateName = templateName || TEMPLATE_NAME;
+    const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, resolvedTemplateName, { hwpxOnly: true });
+    if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
+      return res.status(404).json(buildMissingHwpxTemplateResponse());
+    }
+
+    try {
+      const range = normalizeDateRange(startDate || date, endDate || date || startDate);
+      const context = getRequestContext(req);
+      await restoreOperationalData(db, {
+        startDate: range.startDate,
+        endDate: range.endDate,
+        tables: ['flow_readings', 'medicine_logs', 'kit_logs', 'qntech_water_quality'],
+        ...context,
+      });
+      await syncCertificateCacheForRange(range, context);
+      const manifest = buildPreviewManifest(range.startDate, range.endDate);
+      const result = await buildBatchDailyWorkLogPdf({
+        db,
+        appDataPath,
+        templateInfo,
+        manifest,
+        context,
+      });
+      const { openExcelFile } = require('../services/excelOpenService.cjs');
+      await openExcelFile(result.outputPath);
+      return res.json({
+        success: true,
+        message: `${result.pageCount}페이지 PDF를 열었습니다.`,
+        file: path.basename(result.outputPath),
+        files: [path.basename(result.outputPath)],
+        pageCount: result.pageCount,
+        dateCount: manifest.pages.length,
+      });
+    } catch (err) {
+      console.error('[Daily Work Log PDF Export Error]', err.message);
+      return res.status(500).json({ success: false, error: `PDF 생성에 실패했습니다: ${err.message}` });
+    }
+  });
+
+  router.get('/api/daily-work-log/export-hwpx', async (req, res) => {
+    const { startDate, endDate, date, templateName } = req.query;
+    const resolvedTemplateName = templateName || TEMPLATE_NAME;
+    const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, resolvedTemplateName, { hwpxOnly: true });
+    if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
+      return res.status(404).json(buildMissingHwpxTemplateResponse());
+    }
+
+    try {
+      const range = normalizeDateRange(startDate || date, endDate || date || startDate);
+      const context = getRequestContext(req);
+      await restoreOperationalData(db, {
+        startDate: range.startDate,
+        endDate: range.endDate,
+        tables: ['flow_readings', 'medicine_logs', 'kit_logs', 'qntech_water_quality'],
+        ...context,
+      });
+      await syncCertificateCacheForRange(range, context);
+
+      const manifest = buildPreviewManifest(range.startDate, range.endDate);
+      const results = await buildBatchDailyWorkLogHwpx({
+        db,
+        appDataPath,
+        templateInfo,
+        manifest,
+        context,
+      });
+
+      const { openExcelFile } = require('../services/excelOpenService.cjs');
+      for (const result of results) {
+        await openExcelFile(result.outputPath);
+      }
+
+      return res.json({
+        success: true,
+        message: `${results.length}개의 HWPX 일지를 열었습니다.`,
+        files: results.map((result) => path.basename(result.outputPath)),
+        bookmarkCount: results.reduce((sum, result) => sum + result.replacedCount, 0),
+      });
+    } catch (err) {
+      console.error('[Daily Work Log HWPX Export Error]', err);
+      return res.status(500).json({
+        success: false,
+        error: `HWPX 생성에 실패했습니다: ${err.message}`,
+      });
     }
   });
 

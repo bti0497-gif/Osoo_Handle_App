@@ -40,12 +40,12 @@ const getPreviousFlowCell = (history, selectedDate, flowName) => {
     return null;
 };
 
-const getMonthlySludgeExportBefore = (history, selectedDate, flowName) => {
-    const monthKey = String(selectedDate || '').slice(0, 7);
-    if (!monthKey) return 0;
+const getYearlySludgeExportBefore = (history, selectedDate, flowName) => {
+    const yearKey = String(selectedDate || '').slice(0, 4);
+    if (!yearKey) return 0;
 
     return history.reduce((sum, row) => {
-        if (!row?.date || row.date >= selectedDate || String(row.date).slice(0, 7) !== monthKey) return sum;
+        if (!row?.date || row.date >= selectedDate || String(row.date).slice(0, 4) !== yearKey) return sum;
         const value = toNumberOrNull(row?.[flowName]?.raw);
         return value === null ? sum : sum + value;
     }, 0);
@@ -125,7 +125,7 @@ const FlowManagementView = ({ currentUser }) => {
                 },
                 {
                     id: `${item.name}_diff`,
-                    label: '유량',
+                    label: item.name === '슬러지' ? '누계' : '유량',
                     width: 58,
                     headerBgColor: '#fff',
                     headerTextColor: '#1e40af',
@@ -143,32 +143,32 @@ const FlowManagementView = ({ currentUser }) => {
                     : correctData(rawCell);
                 const prev = getPreviousFlowCell(history, modalDate, item.name);
                 const isSludge = isSludgeItem(item.name);
-                const previousMonthlyExport = isSludge
-                    ? getMonthlySludgeExportBefore(history, modalDate, item.name)
+                const previousYearlyExport = isSludge
+                    ? getYearlySludgeExportBefore(history, modalDate, item.name)
                     : null;
                 const currentExport = isSludge ? toNumberOrNull(cell?.reading) : null;
-                const currentMonthlyExport = isSludge && currentExport !== null
-                    ? previousMonthlyExport + currentExport
-                    : previousMonthlyExport > 0 ? previousMonthlyExport : '';
+                const currentYearlyExport = isSludge && currentExport !== null
+                    ? previousYearlyExport + currentExport
+                    : previousYearlyExport > 0 ? previousYearlyExport : '';
 
                 return {
                     key: item.name,
                     label: item.name,
                     values: {
                         reading: cell?.reading ?? '',
-                        flow: isSludge ? currentMonthlyExport : (cell?.flow ?? ''),
+                        flow: isSludge ? currentYearlyExport : (cell?.flow ?? ''),
                     },
                     previous: {
                         reading: prev?.raw ?? '',
                         flow: prev?.diff ?? '',
-                        monthlyExport: previousMonthlyExport,
+                        yearlyExport: previousYearlyExport,
                     },
                     summary: isSludge
                         ? [
                             { label: '직전 반출량', value: prev?.raw },
-                            { label: '직전 월 반출량', value: previousMonthlyExport },
+                            { label: '직전 연 누계', value: previousYearlyExport },
                             { label: '현재 반출량', value: cell?.reading },
-                            { label: '현재 월 반출량', value: currentMonthlyExport },
+                            { label: '현재 연 누계', value: currentYearlyExport },
                         ]
                         : [
                             { label: '직전 검침값', value: prev?.raw },

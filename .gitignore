@@ -1,38 +1,38 @@
 # Logs
-logs
+logs/
 *.log
-npm-debug.log*
-yarn-debug.log*
+*-debug.log*
+*.pid
 
-# Google 서비스 계정 키 파일 (절대 커밋 금지)
+# Dependencies and build output
+node_modules/
+dist/
+dist-ssr/
+build/
+release/
+release-*/
+artifacts/
+test-build/
+
+# Local databases and generated reports
+*.db
+*.sqlite
+encoding-check-report.json
+garbled_results.json
+
+# Runtime configuration and credentials
+.env.local
+*.local
 server/config/google-key.json
 server/config/work-jindan-*.json
 server/config/firebase-service-account.json
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+client_secret_*.json
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Database
-*.db
-
-# Build output
-build/
-dist/
-release/
-
-# Testing & temporary files
-garbled_results.json
-
-# Editor directories and files
+# Editors and operating systems
 .vscode/*
 !.vscode/extensions.json
 .cursor/
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*

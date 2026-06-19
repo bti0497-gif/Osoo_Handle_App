@@ -3,11 +3,12 @@ const path = require('path');
 const fs = require('fs');
 const net = require('net');
 const cors = require('cors');
-const dotenvResult = require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
+const { loadRuntimeEnv } = require('./config/runtimeConfig.cjs');
+const dotenvResult = loadRuntimeEnv();
 if (dotenvResult.error) {
-  console.warn('[dotenv] .env.local 로드 실패:', dotenvResult.error.message);
+  console.warn('[dotenv] 런타임 환경설정 로드 실패:', dotenvResult.envPath, dotenvResult.error.message);
 } else {
-  console.log('[dotenv] .env.local 로드 성공:', Object.keys(dotenvResult.parsed || {}).join(', '));
+  console.log('[dotenv] 런타임 환경설정 로드 성공:', dotenvResult.envPath);
 }
 const routeRegistry = require('./routeRegistry.cjs');
 

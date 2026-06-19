@@ -177,6 +177,11 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
         try {
             const detail = await BoardModel.fetchPost(post.id, currentUser);
             setSelectedPost(detail);
+            setPosts(prev => prev.map(item => (
+                item.id === detail.id
+                    ? { ...item, view_count: Number(detail.view_count) || 0 }
+                    : item
+            )));
             setViewMode('detail');
             loadComments(post.id);
         } catch {

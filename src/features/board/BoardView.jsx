@@ -308,7 +308,7 @@ const BoardView = ({ currentUser }) => {
                                                     {formatDate(p.created_at)}
                                                 </span>
                                                 <span style={{ width: '40px', textAlign: 'center', color: '#94a3b8', fontSize: '0.6875rem' }}>
-                                                    {p.view_count}
+                                                    {Number(p.view_count) || 0}
                                                 </span>
                                             </div>
                                         );
@@ -369,7 +369,7 @@ const BoardView = ({ currentUser }) => {
                             <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600, borderBottom: '1px solid #f1f5f9', paddingBottom: '0.75rem' }}>
                                 <span style={{ fontWeight: 700, color: '#475569' }}>{selectedPost.author}</span>
                                 <span>{formatFullDate(selectedPost.created_at)}</span>
-                                <span>조회 {selectedPost.view_count}</span>
+                                <span>조회 {Number(selectedPost.view_count) || 0}</span>
                             </div>
 
                             {/* 본문 (HTML) */}

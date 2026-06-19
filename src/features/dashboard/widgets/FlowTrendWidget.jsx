@@ -9,17 +9,25 @@ const SERIES_META = [
     { key: 'power', label: '전력량', color: '#7c3aed', axis: 'left' },
 ];
 
-function maxOf(rows, keys) {
-    let max = 0;
+function domainOf(rows, keys) {
+    let max = -Infinity;
     rows.forEach((row) => {
         keys.forEach((key) => {
+            if (row[key] === null || row[key] === undefined || row[key] === '') return;
             const value = Number(row[key]);
             if (Number.isFinite(value)) {
                 max = Math.max(max, value);
             }
         });
     });
-    return max;
+    if (!Number.isFinite(max)) {
+        return { min: 0, max: 1 };
+    }
+
+    return {
+        min: 0,
+        max: Math.max(1, max * 1.7),
+    };
 }
 
 export default function FlowTrendWidget({
@@ -37,8 +45,16 @@ export default function FlowTrendWidget({
         visible: !!visibleSeries[meta.key],
     })), [visibleSeries]);
 
-    const leftMax = useMemo(() => Math.max(1, maxOf(rows, ['inflow', 'outflow'])), [rows]);
-    const rightMax = useMemo(() => Math.max(1, maxOf(rows, ['internalReturn', 'externalReturn'])), [rows]);
+    const leftKeys = useMemo(
+        () => lines.filter((line) => line.visible && line.axis === 'left').map((line) => line.key),
+        [lines]
+    );
+    const rightKeys = useMemo(
+        () => lines.filter((line) => line.visible && line.axis === 'right').map((line) => line.key),
+        [lines]
+    );
+    const leftDomain = useMemo(() => domainOf(rows, leftKeys), [rows, leftKeys]);
+    const rightDomain = useMemo(() => domainOf(rows, rightKeys), [rows, rightKeys]);
 
     return (
         <section style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', minHeight: 280 }}>
@@ -107,7 +123,7 @@ export default function FlowTrendWidget({
                 </div>
             </div>
             <div style={{ flex: 1 }}>
-                <LineChartPanel rows={rows} lines={lines} leftMax={leftMax} rightMax={rightMax} />
+                <LineChartPanel rows={rows} lines={lines} leftDomain={leftDomain} rightDomain={rightDomain} />
             </div>
         </section>
     );

@@ -42,7 +42,7 @@ export default function TemplateFilePanel({
                     placeholder="선택한 양식은 앱 로컬 템플릿 폴더로 복사됩니다."
                     buttonLabel="양식 선택"
                     icon="library_add"
-                    accept=".xlsx, .xls, .xlsm"
+                    accept=".xlsx, .xls, .xlsm, .hwpx"
                     multiple
                     onFileChange={handleTemplateFileChange}
                     onOpenFolder={() => handleOpenLocalFolder?.('reports')}

@@ -157,6 +157,18 @@ const TABLE_MAPPINGS = {
   })
 };
 
+const TABLE_NATURAL_KEYS = {
+  flow_readings: ['site_id', 'date', 'type'],
+  medicine_logs: ['site_id', 'date', 'medicine_name'],
+  qntech_water_quality: ['site_id', 'date', 'measurement_group', 'location', 'item_code'],
+  kit_logs: ['site_id', 'date', 'kit_name'],
+  facility_logs: ['site_id', 'date', 'location', 'facility_name'],
+};
+
+function quoteIdentifier(value) {
+  return `\`${String(value).replace(/`/g, '')}\``;
+}
+
 // 5. 단일 테이블 동기화 함수
 async function syncTable(tableName) {
   const bq = getBigQueryClient();
@@ -199,11 +211,19 @@ async function syncTable(tableName) {
     return { success: false, error: writeErr.message };
   }
 
+  const dataset = bq.dataset(DATASET_ID);
+  const targetTable = dataset.table(tableName);
+  const stagingTableName = `_sync_stage_${tableName}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+  const stagingTable = dataset.table(stagingTableName);
+
   try {
     // 5-4. BigQuery 전송 (Load Job - 로컬 파일 업로드)
-    const [job] = await bq.dataset(DATASET_ID).table(tableName).load(
+    const [targetMetadata] = await targetTable.getMetadata();
+    await stagingTable.create({ schema: targetMetadata.schema });
+
+    const [job] = await stagingTable.load(
       tmpFile,
-      { sourceFormat: 'NEWLINE_DELIMITED_JSON', writeDisposition: 'WRITE_APPEND' }
+      { sourceFormat: 'NEWLINE_DELIMITED_JSON', writeDisposition: 'WRITE_TRUNCATE' }
     );
 
     // 임시 파일 삭제
@@ -215,18 +235,43 @@ async function syncTable(tableName) {
       throw new Error(jobError.message || JSON.stringify(jobError));
     }
 
+    const columns = Object.keys(bqRows[0]);
+    const columnList = columns.map(quoteIdentifier).join(', ');
+    const naturalKeys = TABLE_NATURAL_KEYS[tableName] || ['local_id'];
+    const matchSql = naturalKeys
+      .map((key) => `T.${quoteIdentifier(key)} = S.${quoteIdentifier(key)}`)
+      .join(' AND ');
+
+    await bq.query({
+      query: `
+        BEGIN TRANSACTION;
+        DELETE FROM \`${DATASET_ID}.${tableName}\` T
+        WHERE EXISTS (
+          SELECT 1
+          FROM \`${DATASET_ID}.${stagingTableName}\` S
+          WHERE ${matchSql}
+        );
+        INSERT INTO \`${DATASET_ID}.${tableName}\` (${columnList})
+        SELECT ${columnList}
+        FROM \`${DATASET_ID}.${stagingTableName}\`;
+        COMMIT TRANSACTION;
+      `,
+    });
+
     // 5-5. 로컬 상태 '완료' (is_synced = 1)로 업데이트
     const updateStmt = db.prepare(`UPDATE ${tableName} SET is_synced = 1 WHERE id = ?`);
     db.transaction(() => {
       for (const id of rowIds) updateStmt.run(id);
     })();
 
+    try { await stagingTable.delete({ ignoreNotFound: true }); } catch (_) {}
     console.log(`[BigQuery] ${tableName}: ${rows.length} rows synced.`);
     return { success: true, count: rows.length };
 
   } catch (err) {
     // 임시 파일 삭제
     try { fs.unlinkSync(tmpFile); } catch (_) {}
+    try { await stagingTable.delete({ ignoreNotFound: true }); } catch (_) {}
 
     // 5-6. 실패 시 로컬 상태 '대기' (is_synced = 0)로 롤백
     const rollbackStmt = db.prepare(`UPDATE ${tableName} SET is_synced = 0 WHERE id = ?`);

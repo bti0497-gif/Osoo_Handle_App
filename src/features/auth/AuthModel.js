@@ -34,7 +34,17 @@ export const AuthModel = {
     },
 
     async discoveryLogin(name, password) {
-        return this.localLogin(name, password);
+        try {
+            const data = await apiClient.post('/api/auth/discovery-login', { name, password });
+            if (!data.success) {
+                console.error("Discovery login failed:", data.message);
+                return null;
+            }
+            return data.member;
+        } catch (e) {
+            console.error("Error during discoveryLogin:", e);
+            return null;
+        }
     },
 
     async findActiveSession(memberId) {

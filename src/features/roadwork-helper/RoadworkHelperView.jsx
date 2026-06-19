@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useRoadworkHelperViewModel } from './useRoadworkHelperViewModel';
+import { RoadworkHelperModel } from './RoadworkHelperModel';
 import './components/RoadworkHelperModal.css';
 
 const DEFAULT_ROADWORK_URL = 'https://nwpo.ex.co.kr:5002/security/login.do';
@@ -31,14 +32,34 @@ const ROADWORK_STATUS_SCRIPT = `
   };
 
   const getDailyWindow = () => {
-    const windows = [window];
-    const outer = document.querySelector('#mdi_subWindow1_iframe')?.contentWindow;
-    if (outer) windows.push(outer);
-    const center = outer?.document.querySelector('#centerFrame')?.contentWindow;
-    if (center) windows.push(center);
+    const windows = [];
+    const visit = (target) => {
+      if (!target || windows.includes(target)) return;
+      windows.push(target);
+      let frames = [];
+      try {
+        frames = Array.from(target.document?.querySelectorAll('iframe, webview') || []);
+      } catch {
+        return;
+      }
+      for (const frame of frames) {
+        try {
+          if (frame.contentWindow) visit(frame.contentWindow);
+        } catch {
+          // Ignore cross-origin frames.
+        }
+      }
+    };
+    visit(window);
     return windows.find((target) => {
       try {
-        return Boolean(target.document?.getElementById('DalyOpDllgPros') || target.DalyOpDllgPros);
+        return Boolean(
+          target.document?.getElementById('DalyOpDllgPros')
+          || target.document?.getElementById('regDate_input')
+          || target.document?.getElementById('regDate')
+          || target.DalyOpDllgPros
+          || target.regDate
+        );
       } catch {
         return false;
       }
@@ -47,25 +68,293 @@ const ROADWORK_STATUS_SCRIPT = `
 
   const daily = getDailyWindow();
   if (!daily) {
-    return { isDailyLog: false, canAutoFill: false, date: '' };
+    return { isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false };
   }
 
   const saveButton = daily.document.getElementById('btn_Save');
+  const dateInput = daily.document.getElementById('regDate_input') || daily.document.getElementById('regDate');
   const date = normalizeDate(
     daily.regDate?.getValue?.()
-    || daily.document.getElementById('regDate_input')?.value
-    || daily.document.getElementById('regDate')?.innerText
+    || dateInput?.value
+    || dateInput?.innerText
   );
+  const componentDisabled = Boolean(
+    daily.regDate?.getDisabled?.()
+    || daily.regDate?.getReadOnly?.()
+    || daily.regDate?.disabled
+  );
+  const inputDisabled = Boolean(
+    dateInput?.disabled
+    || dateInput?.getAttribute?.('disabled') !== null
+    || dateInput?.getAttribute?.('aria-disabled') === 'true'
+    || dateInput?.closest?.('.w2input_disabled,.w2calendar_disabled,.disabled')
+  );
+  const isEditableDate = Boolean(date && !componentDisabled && !inputDisabled);
 
   return {
     isDailyLog: true,
-    canAutoFill: isVisible(saveButton),
+    canAutoFill: isVisible(saveButton) && isEditableDate,
     date,
+    isEditableDate,
   };
 })()
 `;
 
+function buildRoadworkAutoFillScriptV2(payload) {
+  return `
+(() => {
+  const payload = ${JSON.stringify(payload)};
+  const toText = (value) => {
+    if (value === null || value === undefined || value === '') return '';
+    const n = Number(value);
+    if (Number.isFinite(n)) return String(Math.round(n * 10) / 10);
+    return String(value);
+  };
+  const normalize = (value) => String(value || '')
+    .replace(/[₀⁰]/g, '0')
+    .replace(/[₁¹]/g, '1')
+    .replace(/[₂²]/g, '2')
+    .replace(/[₃³]/g, '3')
+    .replace(/[₄⁴]/g, '4')
+    .replace(/[₅⁵]/g, '5')
+    .replace(/[₆⁶]/g, '6')
+    .replace(/[₇⁷]/g, '7')
+    .replace(/[₈⁸]/g, '8')
+    .replace(/[₉⁹]/g, '9')
+    .replace(/[⁻₋－–—]/g, '-')
+    .replace(new RegExp(String.fromCharCode(13221), 'g'), '')
+    .replace(/[\\s()]/g, '')
+    .toLowerCase();
+  const ALIASES = {
+    '\\uBC29\\uB958\\uC720\\uB7C9\\uACC4': ['\\uBC29\\uB958\\uC720\\uB7C9\\uACC4', '\\uBC29\\uB958\\uC218\\uC720\\uB7C9\\uACC4', '\\uBC29\\uB958\\uC218', '\\uBC29\\uB958\\uB7C9', '\\uBC29\\uB958'],
+    '\\uC720\\uC785\\uC720\\uB7C9\\uACC4': ['\\uC720\\uC785\\uC720\\uB7C9\\uACC4', '\\uC720\\uC785\\uC218\\uC720\\uB7C9\\uACC4', '\\uC720\\uC785\\uC218', '\\uC720\\uC785\\uB7C9', '\\uC720\\uC785'],
+    '\\uB0B4\\uBD80\\uBC18\\uC1A1\\uC720\\uB7C9\\uACC4': ['\\uB0B4\\uBD80\\uBC18\\uC1A1\\uC720\\uB7C9\\uACC4', '\\uB0B4\\uBD80\\uBC18\\uC1A1', '\\uB0B4\\uBD80\\uBC18\\uC1A1\\uC2AC\\uB7EC\\uC9C0'],
+    '\\uC678\\uBD80\\uBC18\\uC1A1\\uC720\\uB7C9\\uACC4': ['\\uC678\\uBD80\\uBC18\\uC1A1\\uC720\\uB7C9\\uACC4', '\\uC678\\uBD80\\uBC18\\uC1A1'],
+    '\\uC2AC\\uB7EC\\uC9C0': ['\\uC778\\uBC1C\\uC2AC\\uB7EC\\uC9C0', '\\uC2AC\\uB7EC\\uC9C0\\uBC18\\uCD9C', '\\uC2AC\\uB7EC\\uC9C0\\uBC18\\uCD9C\\uB7C9'],
+    '\\uD329(PAC)': ['\\uD329(PAC)', 'PAC', '\\uC751\\uC9D1\\uC81C'],
+    '\\uC554\\uBAA8\\uB2C8\\uC544\\uC131\\uC9C8\\uC18C(NH3-N)': ['\\uC554\\uBAA8\\uB2C8\\uC544\\uC131\\uC9C8\\uC18C(NH3-N)', '\\uC554\\uBAA8\\uB2C8\\uC544\\uC131\\uC9C8\\uC18C', 'NH3-N', 'NH\\u2083-N'],
+    '\\uC9C8\\uC0B0\\uC131\\uC9C8\\uC18C(NO3-N)': ['\\uC9C8\\uC0B0\\uC131\\uC9C8\\uC18C(NO3-N)', '\\uC9C8\\uC0B0\\uC131\\uC9C8\\uC18C', 'NO3-N', 'NO\\u2083-N', 'NO\\u2083\\u207B-N'],
+    '\\uC778\\uC0B0\\uC5FC\\uC778(PO4-P)': ['\\uC778\\uC0B0\\uC5FC\\uC778(PO4-P)', '\\uC778\\uC0B0\\uC5FC\\uC778', 'PO4-P', 'PO\\u2084-P', 'PO\\u2084\\u00B3\\u207B-P'],
+    '\\uC54C\\uCE7C\\uB9AC\\uB3C4(ALK)': ['\\uC54C\\uCE7C\\uB9AC\\uB3C4(ALK)', '\\uC54C\\uCE7C\\uB9AC\\uB3C4', 'ALK']
+  };
+  const getDailyWindow = () => {
+    const windows = [];
+    const visit = (target) => {
+      if (!target || windows.includes(target)) return;
+      windows.push(target);
+      let frames = [];
+      try { frames = Array.from(target.document?.querySelectorAll('iframe, webview') || []); } catch { return; }
+      for (const frame of frames) {
+        try { if (frame.contentWindow) visit(frame.contentWindow); } catch {}
+      }
+    };
+    visit(window);
+    return windows.find((target) => {
+      try {
+        return Boolean(
+          target.document?.getElementById('DalyOpDllgPros')
+          || target.document?.getElementById('regDate_input')
+          || target.document?.getElementById('regDate')
+          || target.DalyOpDllgPros
+          || target.regDate
+        );
+      }
+      catch { return false; }
+    });
+  };
+  const daily = getDailyWindow();
+  if (!daily) return { success: false, filled: 0, message: 'daily log window not found' };
+  const getDataList = (grid) => {
+    try {
+      const candidate = grid?.getDataList?.();
+      if (!candidate) return null;
+      if (typeof candidate === 'string') {
+        return daily[candidate]
+          || daily.WebSquare?.util?.getComponentById?.(candidate)
+          || daily.document?.getElementById?.(candidate)
+          || null;
+      }
+      return candidate;
+    } catch {
+      return null;
+    }
+  };
+  const describeGrid = (gridId) => {
+    const grid = daily[gridId];
+    const dl = getDataList(grid);
+    const gridMethods = grid ? Object.keys(grid).filter((key) => /cell|column|data|row|value/i.test(key)).slice(0, 20) : [];
+    const dlMethods = dl ? Object.keys(dl).filter((key) => /cell|column|data|row|value/i.test(key)).slice(0, 20) : [];
+    return { gridId, hasGrid: Boolean(grid), hasDataList: Boolean(dl), gridMethods, dlMethods };
+  };
+  const getDataCell = (dl, row, col) => {
+    try { const v = dl?.getCellData?.(row, col); if (v !== undefined && v !== null && String(v).trim() !== '') return v; } catch {}
+    try { const v = dl?.getColumnValue?.(row, col); if (v !== undefined && v !== null && String(v).trim() !== '') return v; } catch {}
+    try { const r = dl?.getRowJSON?.(row) || dl?.getRowData?.(row); return r?.[col] ?? ''; } catch {}
+    return '';
+  };
+  const rowCount = (gridId) => {
+    const grid = daily[gridId];
+    const dl = getDataList(grid);
+    const dlCount = Number(dl?.getRowCount?.()) || Number(dl?.getTotalRow?.()) || 0;
+    if (dlCount) return { data: dlCount, view: Number(grid?.getRowCount?.()) || 0 };
+    return { data: 0, view: Number(grid?.getRowCount?.()) || daily.document.querySelectorAll('#' + gridId + '_body_tbody tr').length };
+  };
+  const aliasesFor = (name) => (ALIASES[name] || [name]).map(normalize).filter(Boolean);
+  const COLUMN_INDEX = {
+    DalyOpDllgPros: {
+      prvdDrwtMsrmVal: 1,
+      tdayDrwtMsrmVal: 2,
+      drwtProsAmnt: 3,
+      drwtProsMnthlCmtlAmnt: 4,
+      drwtProsAnulCmtlAmnt: 5
+    },
+    DalyOpDllgChmc: {
+      chmcPuchAmnt: 1,
+      chmcUseAmnt: 2,
+      chmcUseMnthlCmtlAmnt: 3,
+      chmcUseAnulCmtlAmnt: 4,
+      chmcRsqnVal: 5
+    }
+  };
+  const findRow = (gridId, itemName, labelCols) => {
+    const grid = daily[gridId];
+    const dl = getDataList(grid);
+    const counts = rowCount(gridId);
+    const aliases = aliasesFor(itemName);
+    for (let i = 0; i < counts.data; i += 1) {
+      const text = normalize(labelCols.map((col) => getDataCell(dl, i, col)).join(' '));
+      if (text && aliases.some((a) => text.includes(a) || a.includes(text))) return { viewIndex: i, dataIndex: i };
+    }
+    const rows = daily.document.querySelectorAll('#' + gridId + '_body_tbody tr');
+    for (let i = 0; i < Math.max(counts.view, rows.length); i += 1) {
+      const row = rows[i];
+      const selector = labelCols.map((col) => '[col_id="' + col + '"]').join(',');
+      const text = normalize(row?.querySelector(selector)?.innerText || row?.innerText || '');
+      if (!text || !aliases.some((a) => text.includes(a) || a.includes(text))) continue;
+      let dataIndex = i;
+      try { dataIndex = grid?.getRealRowIndex?.(i) ?? grid?.getDataRowIndex?.(i) ?? i; } catch {}
+      return { viewIndex: i, dataIndex };
+    }
+    return { viewIndex: -1, dataIndex: -1 };
+  };
+  const setGridCell = (gridId, rowRef, colId, value) => {
+    if (value === null || value === undefined || value === '') return false;
+    const grid = daily[gridId];
+    const dl = getDataList(grid);
+    const text = toText(value);
+    const viewIndex = Number(rowRef?.viewIndex ?? -1);
+    const dataIndex = Number(rowRef?.dataIndex ?? viewIndex);
+    if (viewIndex < 0 && dataIndex < 0) return false;
+    let wrote = false;
+    let verified = false;
+    const verifyValue = () => {
+      try {
+        const v = grid?.getCellData?.(viewIndex, colId);
+        if (String(v ?? '').trim() === text) return true;
+      } catch {}
+      try {
+        const v = dl?.getCellData?.(dataIndex, colId);
+        if (String(v ?? '').trim() === text) return true;
+      } catch {}
+      try {
+        const v = dl?.getColumnValue?.(dataIndex, colId);
+        if (String(v ?? '').trim() === text) return true;
+      } catch {}
+      return false;
+    };
+    const calls = [
+      () => dl?.setCellData?.(dataIndex, colId, text),
+      () => dl?.setColumnValue?.(dataIndex, colId, text)
+    ];
+    for (const call of calls) {
+      try {
+        call();
+        if (verifyValue()) {
+          wrote = true;
+          verified = true;
+        }
+      } catch {}
+    }
+    if (verified) {
+      try { dl?.setRowStatus?.(dataIndex, 'U'); } catch {}
+      try { dl?.modifyRowStatus?.(dataIndex, 'U'); } catch {}
+      try { grid?.setRowStatus?.(viewIndex, 'U'); } catch {}
+    }
+    try { grid?.refresh?.(); } catch {}
+    try { grid?.reDraw?.(); } catch {}
+    return wrote && verified;
+  };
+  const setInput = (id, value) => {
+    if (value === null || value === undefined || value === '') return false;
+    const text = toText(value);
+    const component = daily[id];
+    try { if (component?.setValue) { component.setValue(text); return true; } } catch {}
+    const element = daily.document.getElementById(id);
+    if (!element) return false;
+    element.value = text;
+    ['input', 'change', 'blur'].forEach((eventName) => element.dispatchEvent(new Event(eventName, { bubbles: true })));
+    return true;
+  };
+  let filled = 0;
+  const missing = [];
+  const required = [];
+  const workerOk = [
+    setInput('totWorkrCnt', 1),
+    setInput('workTnop', 1)
+  ].every(Boolean);
+  required.push('근무자 현황');
+  if (workerOk) filled += 1; else missing.push('근무자 현황');
+  for (const row of payload.flow || []) {
+    const ref = findRow('DalyOpDllgPros', row.item, ['insrIdntIdText', 'column17']);
+    const ok = [
+      setGridCell('DalyOpDllgPros', ref, 'prvdDrwtMsrmVal', row.previousReading),
+      setGridCell('DalyOpDllgPros', ref, 'tdayDrwtMsrmVal', row.todayReading),
+      setGridCell('DalyOpDllgPros', ref, 'drwtProsAmnt', row.todayFlow),
+      setGridCell('DalyOpDllgPros', ref, 'drwtProsMnthlCmtlAmnt', row.monthTotal),
+      setGridCell('DalyOpDllgPros', ref, 'drwtProsAnulCmtlAmnt', row.yearTotal)
+    ];
+    required.push(row.item);
+    if (ok.some(Boolean)) filled += 1; else missing.push(row.item);
+  }
+  const electricity = (payload.electricity || [])[0];
+  let electricityOk = true;
+  if (electricity) {
+    electricityOk = [
+      setInput('prvdElpwMsrmVal', electricity.previousReading),
+      setInput('tdayElpwMsrmVal', electricity.todayReading),
+      setInput('elpwUsmn', electricity.usage)
+    ].every(Boolean);
+    required.push(electricity.item || 'electricity');
+    if (electricityOk) filled += 1; else missing.push(electricity.item || 'electricity');
+  }
+  for (const row of [...(payload.medicine || []), ...(payload.kit || [])]) {
+    const ref = findRow('DalyOpDllgChmc', row.item, ['chmcClssNmText', 'column29']);
+    const ok = [
+      setGridCell('DalyOpDllgChmc', ref, 'chmcPuchAmnt', row.purchase),
+      setGridCell('DalyOpDllgChmc', ref, 'chmcUseAmnt', row.usage),
+      setGridCell('DalyOpDllgChmc', ref, 'chmcUseMnthlCmtlAmnt', row.monthUsage),
+      setGridCell('DalyOpDllgChmc', ref, 'chmcUseAnulCmtlAmnt', row.yearUsage),
+      setGridCell('DalyOpDllgChmc', ref, 'chmcRsqnVal', row.inventory)
+    ];
+    required.push(row.item);
+    if (ok.some(Boolean)) filled += 1; else missing.push(row.item);
+  }
+  const success = required.length > 0 && missing.length === 0;
+  return {
+    success,
+    filled,
+    missing,
+    required: required.length,
+    diagnostics: success ? undefined : [describeGrid('DalyOpDllgPros'), describeGrid('DalyOpDllgChmc')],
+    message: success ? 'auto fill done' : 'auto fill failed: ' + missing.join(', ')
+  };
+})()
+`;
+}
+
 function buildRoadworkAutoFillScript(payload) {
+  return buildRoadworkAutoFillScriptV2(payload);
+  // eslint-disable-next-line no-unreachable
   return `
 (() => {
   const payload = ${JSON.stringify(payload)};
@@ -77,10 +366,25 @@ function buildRoadworkAutoFillScript(payload) {
     return String(value);
   };
 
+  const FLOW_ALIAS_MAP = {
+    '방류유량계': ['방류유량계', '방류수유량계', '방류수', '방류'],
+    '유입유량계': ['유입유량계', '유입수유량계', '유입수', '유입'],
+    '내부반송유량계': ['내부반송유량계', '내부반송', '내부반송유량'],
+    '외부반송유량계': ['외부반송유량계', '외부반송', '외부반송유량'],
+    '슬러지': ['인발슬러지', '슬러지반출', '슬러지반출량', '인발슬러지유량계']
+  };
+
+  const INVENTORY_ALIAS_MAP = {
+    '팩(PAC)': ['팩(PAC)', 'PAC', '응집제'],
+    '암모니아성질소(NH3-N)': ['암모니아성질소(NH3-N)', '암모니아성질소', 'NH3-N'],
+    '질산성질소(NO3-N)': ['질산성질소(NO3-N)', '질산성질소', 'NO3-N'],
+    '인산염인(PO4-P)': ['인산염인(PO4-P)', '인산염인', 'PO4-P'],
+    '알칼리도(ALK)': ['알칼리도(ALK)', '알칼리도', 'ALK']
+  };
+
   const normalize = (value) => String(value || '')
     .replace(new RegExp(String.fromCharCode(13221), 'g'), '')
     .replace(/[\\s()]/g, '')
-    .replace(/슬러지/g, '')
     .toLowerCase();
 
   const getDailyWindow = () => {
@@ -144,25 +448,95 @@ function buildRoadworkAutoFillScript(payload) {
   };
 
   const findRow = (gridId, itemName, colIds) => {
-    const needle = normalize(itemName);
     const count = gridRowCount(gridId);
-    for (let index = 0; index < count; index += 1) {
-      const text = normalize(getCellText(gridId, index, colIds));
-      if (text && (text.includes(needle) || needle.includes(text))) {
-        return index;
+    const aliasSource = FLOW_ALIAS_MAP[itemName] || INVENTORY_ALIAS_MAP[itemName] || [itemName];
+    const aliases = aliasSource.map(normalize).filter(Boolean);
+    const grid = daily[gridId];
+    const dl = grid?.getDataList?.();
+    const dataCount = Number(dl?.getRowCount?.()) || 0;
+
+    for (let index = 0; index < dataCount; index += 1) {
+      const values = colIds.map((colId) => {
+        try {
+          return dl?.getCellData?.(index, colId) ?? dl?.getColumnValue?.(index, colId) ?? '';
+        } catch {
+          return '';
+        }
+      }).join(' ');
+      const text = normalize(values);
+      if (!text) continue;
+      const isMatched = aliases.some(alias => text.includes(alias) || alias.includes(text));
+      if (isMatched) {
+        return { viewIndex: index, dataIndex: index };
       }
     }
-    return -1;
+
+    for (let index = 0; index < count; index += 1) {
+      const text = normalize(getCellText(gridId, index, colIds));
+      if (!text) continue;
+      const isMatched = aliases.some(alias => text.includes(alias) || alias.includes(text));
+      if (isMatched) {
+        let dataIndex = index;
+        try {
+          dataIndex = grid?.getRealRowIndex?.(index) ?? grid?.getDataRowIndex?.(index) ?? index;
+        } catch {
+          dataIndex = index;
+        }
+        return { viewIndex: index, dataIndex };
+      }
+    }
+    return { viewIndex: -1, dataIndex: -1 };
   };
 
-  const setGridCell = (gridId, rowIndex, colId, value) => {
-    if (rowIndex < 0 || value === null || value === undefined || value === '') return false;
+  const setGridCell = (gridId, rowRef, colId, value) => {
+    const rowIndex = typeof rowRef === 'object' ? rowRef.viewIndex : rowRef;
+    const dataIndex = typeof rowRef === 'object' ? rowRef.dataIndex : rowRef;
+    if ((rowIndex < 0 && dataIndex < 0) || value === null || value === undefined || value === '') return false;
     const text = toText(value);
     const grid = daily[gridId];
+    let wrote = false;
+    const dataRowIndex = (() => {
+      if (Number.isFinite(Number(dataIndex)) && Number(dataIndex) >= 0) return Number(dataIndex);
+      try {
+        return grid?.getRealRowIndex?.(rowIndex) ?? grid?.getDataRowIndex?.(rowIndex) ?? rowIndex;
+      } catch {
+        return rowIndex;
+      }
+    })();
+
+    try {
+      if (grid?.setColumnValue) {
+        grid.setColumnValue(rowIndex, colId, text);
+        wrote = true;
+      }
+    } catch {
+      // Continue with other WebSquare APIs.
+    }
+
     try {
       if (grid?.setCellData) {
         grid.setCellData(rowIndex, colId, text);
-        return true;
+        wrote = true;
+      }
+    } catch {
+      // Continue with other WebSquare APIs.
+    }
+
+    try {
+      const dl = grid?.getDataList?.();
+      if (dl?.setCellData) {
+        dl.setCellData(dataRowIndex, colId, text);
+        wrote = true;
+      }
+      if (dl?.setColumnValue) {
+        dl.setColumnValue(dataRowIndex, colId, text);
+        wrote = true;
+      }
+      if (grid?.refresh) {
+        grid.refresh();
+      }
+      if (grid?.reDraw) {
+        grid.reDraw();
       }
     } catch {
       // Continue with DOM fallback.
@@ -170,12 +544,20 @@ function buildRoadworkAutoFillScript(payload) {
 
     const row = daily.document.querySelectorAll('#' + gridId + '_body_tbody tr')[rowIndex];
     const cell = row?.querySelector('[col_id="' + colId + '"]');
-    if (!cell) return false;
-    const target = cell.querySelector('.w2grid_input') || cell;
-    target.textContent = text;
-    cell.dispatchEvent(new Event('input', { bubbles: true }));
-    cell.dispatchEvent(new Event('change', { bubbles: true }));
-    return true;
+    if (cell) {
+      const target = cell.querySelector('input,textarea') || cell.querySelector('.w2grid_input') || cell;
+      if ('value' in target) {
+        target.value = text;
+      }
+      target.textContent = text;
+      for (const eventName of ['input', 'change', 'blur']) {
+        target.dispatchEvent(new Event(eventName, { bubbles: true }));
+        cell.dispatchEvent(new Event(eventName, { bubbles: true }));
+      }
+      wrote = true;
+    }
+
+    return wrote;
   };
 
   const fillFlow = (row) => {
@@ -233,8 +615,7 @@ export default function RoadworkHelperView() {
   const [loadError, setLoadError] = useState(null);
   const [preloadPath, setPreloadPath] = useState('');
   const [webviewUrl, setWebviewUrl] = useState('');
-  const [roadworkStatus, setRoadworkStatus] = useState({ isDailyLog: false, canAutoFill: false, date: '' });
-  const [filledKey, setFilledKey] = useState('');
+  const [roadworkStatus, setRoadworkStatus] = useState({ isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false });
   const [statusMessage, setStatusMessage] = useState('');
   const [isFilling, setIsFilling] = useState(false);
 
@@ -281,9 +662,9 @@ export default function RoadworkHelperView() {
 
       try {
         const nextStatus = await webview.executeJavaScript(ROADWORK_STATUS_SCRIPT);
-        setRoadworkStatus(nextStatus || { isDailyLog: false, canAutoFill: false, date: '' });
+        setRoadworkStatus(nextStatus || { isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false });
       } catch {
-        setRoadworkStatus({ isDailyLog: false, canAutoFill: false, date: '' });
+        setRoadworkStatus({ isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false });
       }
     }, 1200);
 
@@ -299,7 +680,6 @@ export default function RoadworkHelperView() {
 
   useEffect(() => {
     if (!roadworkStatus.canAutoFill) {
-      setFilledKey('');
       setStatusMessage('');
     }
   }, [roadworkStatus.canAutoFill]);
@@ -323,14 +703,19 @@ export default function RoadworkHelperView() {
 
   const handleAutoFill = React.useCallback(async () => {
     const webview = webviewRef.current;
-    if (!webview || isFilling || !vm.hasFillData) return;
+    if (!webview || isFilling || !roadworkStatus.canAutoFill || roadworkStatus.date !== vm.date || !vm.hasFillData) return;
 
     try {
       setIsFilling(true);
       setStatusMessage('');
-      const result = await webview.executeJavaScript(buildRoadworkAutoFillScript(vm.fillPayload));
+      const latestPayload = await RoadworkHelperModel.fetchAll(roadworkStatus.date);
+      const result = await webview.executeJavaScript(buildRoadworkAutoFillScript({
+        flow: latestPayload.flow || [],
+        electricity: latestPayload.electricity || [],
+        medicine: latestPayload.medicine || [],
+        kit: latestPayload.kit || [],
+      }));
       if (result?.success) {
-        setFilledKey(`${roadworkStatus.date || vm.date}:filled`);
         setStatusMessage(result.message || '자동 채우기가 완료되었습니다. 화면을 확인한 뒤 직접 저장하세요.');
       } else {
         setStatusMessage(result?.message || '자동 채우기에 실패했습니다.');
@@ -341,11 +726,10 @@ export default function RoadworkHelperView() {
       setIsFilling(false);
       window.setTimeout(() => setStatusMessage(''), 3500);
     }
-  }, [isFilling, roadworkStatus.date, vm]);
+  }, [isFilling, roadworkStatus.canAutoFill, roadworkStatus.date, vm]);
 
-  const statusKey = `${roadworkStatus.date || vm.date}:filled`;
-  const showAutoFill = roadworkStatus.canAutoFill && filledKey !== statusKey;
-  const disableAutoFill = vm.loading || isFilling || !vm.hasFillData;
+  const showAutoFill = Boolean(webviewUrl);
+  const disableAutoFill = !roadworkStatus.canAutoFill || roadworkStatus.date !== vm.date || vm.loading || isFilling || !vm.hasFillData;
   const autoFillLabel = vm.loading
     ? '데이터 확인 중'
     : isFilling

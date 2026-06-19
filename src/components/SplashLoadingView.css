@@ -1,0 +1,233 @@
+.splash-loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100vw;
+    height: 100vh;
+    background: radial-gradient(circle at center, #0f172a 0%, #020617 100%);
+    color: #f8fafc;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+}
+
+/* 씬 배치 래퍼 */
+.splash-scene-wrapper {
+    position: relative;
+    width: 180px;
+    height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 2.5rem;
+}
+
+/* 원형 진행 링 */
+.splash-progress-ring {
+    position: absolute;
+    transform: rotate(-90deg); /* 12시 방향부터 시작 */
+    z-index: 10;
+    pointer-events: none;
+}
+
+.splash-progress-ring-bar {
+    transition: stroke-dashoffset 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 어항 모양 물결 뷰포트 */
+.splash-boat-viewport {
+    position: relative;
+    width: 112px;
+    height: 112px;
+    border-radius: 50%;
+    background: radial-gradient(circle at top, #1e293b 0%, #0f172a 100%);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 2px 12px rgba(255, 255, 255, 0.05);
+    z-index: 1;
+}
+
+/* 백그라운드 아우라 */
+.splash-aura-glow {
+    position: absolute;
+    width: 100px;
+    height: 100px;
+    background: radial-gradient(circle, rgba(37, 99, 235, 0.3) 0%, rgba(59, 130, 246, 0) 70%);
+    filter: blur(12px);
+    animation: splashPulse 3s infinite ease-in-out;
+    pointer-events: none;
+    z-index: 2;
+}
+
+/* 배처럼 흔들리는 로고 */
+.splash-logo-boat {
+    position: absolute;
+    width: 60px;
+    height: 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 50%;
+    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.2), inset 0 0 6px rgba(0, 0, 0, 0.05);
+    z-index: 5;
+    animation: splashBoat 4s infinite ease-in-out;
+    bottom: 24px; /* 파도 경계선에 걸치도록 */
+}
+
+.splash-boat-img {
+    width: 38px;
+    height: auto;
+    object-fit: contain;
+}
+
+/* 물결 반사 그림자 */
+.splash-boat-shadow {
+    position: absolute;
+    bottom: -10px;
+    width: 40px;
+    height: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    filter: blur(2px);
+    border-radius: 50%;
+    z-index: 4;
+}
+
+/* 파도 영역 */
+.splash-wave-area {
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    height: 40px;
+    z-index: 6; /* 로고와 그림자보다 위로 덮어서 파도 속에 있는 연출 */
+    pointer-events: none;
+}
+
+.splash-waves {
+    position: absolute;
+    bottom: -1px;
+    width: 100%;
+    height: 100%;
+}
+
+/* 파도 움직임 패러랙스 */
+.splash-wave-parallax > use {
+    animation: waveMove 12s cubic-bezier(0.55, 0.5, 0.45, 0.5) infinite;
+}
+
+.wave-layer1 {
+    animation-delay: -2s;
+    animation-duration: 9s;
+    fill: rgba(37, 99, 235, 0.2);
+}
+
+.wave-layer2 {
+    animation-delay: -3s;
+    animation-duration: 7s;
+    fill: rgba(59, 130, 246, 0.35);
+}
+
+.wave-layer3 {
+    animation-delay: -4s;
+    animation-duration: 5s;
+    fill: rgba(96, 165, 250, 0.55);
+}
+
+.wave-layer4 {
+    animation-delay: -5s;
+    animation-duration: 3s;
+    fill: #0f172a; /* 뷰포트 하단 배경색과 동일화하여 매끄러운 단색 결합 */
+}
+
+/* 로딩 정보 텍스트 */
+.splash-text-section {
+    text-align: center;
+    z-index: 15;
+    max-width: 320px;
+}
+
+.splash-title {
+    font-size: 1.25rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    margin: 0 0 0.5rem 0;
+    background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.splash-label {
+    font-size: 0.875rem;
+    color: #94a3b8;
+    font-weight: 600;
+    margin: 0 0 1.25rem 0;
+    animation: textFade 1.5s infinite ease-in-out alternate;
+}
+
+.splash-progress-info {
+    display: inline-flex;
+    align-items: baseline;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0.35rem 1rem;
+    border-radius: 999px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.splash-percent-num {
+    font-size: 1.15rem;
+    font-weight: 900;
+    color: #60a5fa;
+}
+
+.splash-percent-sign {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #94a3b8;
+    margin-left: 1px;
+}
+
+/* 애니메이션 모음 */
+@keyframes splashBoat {
+    0% {
+        transform: translateY(2px) rotate(-3deg) translateX(-1px);
+    }
+    50% {
+        transform: translateY(-4px) rotate(1deg) translateX(1px);
+    }
+    100% {
+        transform: translateY(3px) rotate(3deg) translateX(-1px);
+    }
+}
+
+@keyframes waveMove {
+    0% {
+        transform: translate3d(-90px, 0, 0);
+    }
+    100% {
+        transform: translate3d(85px, 0, 0);
+    }
+}
+
+@keyframes splashPulse {
+    0%, 100% {
+        transform: scale(0.95);
+        opacity: 0.6;
+    }
+    50% {
+        transform: scale(1.15);
+        opacity: 0.95;
+    }
+}
+
+@keyframes textFade {
+    0% {
+        opacity: 0.5;
+    }
+    100% {
+        opacity: 1;
+    }
+}

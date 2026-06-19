@@ -1,5 +1,6 @@
 ﻿const express = require('express');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
+const { recalculateInventoryCascade } = require('../services/inventoryCascadeService.cjs');
 const router = express.Router();
 
 const KIT_FIELD_MAP = [
@@ -54,37 +55,14 @@ function aggregateExpectedUsageByDate(db, startDate, endDate, metadata = {}) {
     return byDate;
 }
 
-function recalculateKitInventory(db, kitName, metadata) {
-    const rows = db.prepare(`
-        SELECT id, COALESCE(purchase_amount, 0) AS purchase_amount, COALESCE(usage_amount, 0) AS usage_amount
-        FROM kit_logs
-        WHERE kit_name = ?
-        ORDER BY date ASC, id ASC
-    `).all(kitName);
-
-    const updateStmt = db.prepare(`
-        UPDATE kit_logs
-        SET current_inventory = ?,
-            site_id = ?,
-            site_name = ?,
-            author = ?,
-            last_modified = ?,
-            is_synced = ?
-        WHERE id = ?
-    `);
-
-    let runningInventory = 0;
-    rows.forEach((row) => {
-        runningInventory = Math.round((runningInventory + Number(row.purchase_amount || 0) - Number(row.usage_amount || 0)) * 10) / 10;
-        updateStmt.run(
-            runningInventory,
-            metadata.siteId,
-            metadata.siteName,
-            metadata.author,
-            metadata.lastModified,
-            metadata.isSynced,
-            row.id
-        );
+function recalculateKitInventory(db, kitName, metadata, startDate, explicitDates = new Set()) {
+    recalculateInventoryCascade(db, {
+        tableName: 'kit_logs',
+        nameColumn: 'kit_name',
+        itemName: kitName,
+        metadata,
+        startDate,
+        explicitDates,
     });
 }
 
@@ -141,10 +119,27 @@ module.exports = function (db) {
 
             insertMany(items);
 
-            const touchedKits = new Set(items.map((it) => it.kit_name).filter(Boolean));
+            const touchedByKit = new Map();
+            items.forEach((item) => {
+                if (!item.kit_name || !item.date) return;
+                if (!touchedByKit.has(item.kit_name)) {
+                    touchedByKit.set(item.kit_name, { dates: new Set(), explicitDates: new Set() });
+                }
+                const touched = touchedByKit.get(item.kit_name);
+                touched.dates.add(item.date);
+                if (item.current_inventory !== null && item.current_inventory !== undefined) {
+                    touched.explicitDates.add(item.date);
+                }
+            });
             db.transaction(() => {
-                for (const kitName of touchedKits) {
-                    recalculateKitInventory(db, kitName, metadata);
+                for (const [kitName, touched] of touchedByKit.entries()) {
+                    recalculateKitInventory(
+                        db,
+                        kitName,
+                        metadata,
+                        [...touched.dates].sort()[0],
+                        touched.explicitDates
+                    );
                 }
             })();
 
@@ -198,7 +193,7 @@ module.exports = function (db) {
 
             db.transaction(() => {
                 for (const kitName of affectedKits) {
-                    recalculateKitInventory(db, kitName, metadata);
+                    recalculateKitInventory(db, kitName, metadata, date);
                 }
             })();
 
@@ -272,7 +267,7 @@ module.exports = function (db) {
                 }
 
                 changedKits.forEach((kitName) => {
-                    recalculateKitInventory(db, kitName, metadata);
+                    recalculateKitInventory(db, kitName, metadata, startDate);
                 });
             })();
 

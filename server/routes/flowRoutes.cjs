@@ -1,26 +1,38 @@
-﻿const express = require('express');
+const express = require('express');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const router = express.Router();
 
 module.exports = function (db) {
-  function calculateSludgeYearlyCumulative(targetDate, previousCalculatedFlow, sludgeExport) {
-    const currentYear = String(targetDate || '').slice(0, 4);
-    const previousCumulative = previousCalculatedFlow ?? 0;
-
-    if (String(targetDate || '').slice(5, 10) === '01-01') {
-      return sludgeExport ?? 0;
-    }
-
-    return currentYear ? previousCumulative + (sludgeExport ?? 0) : (sludgeExport ?? 0);
-  }
-
-  function recalculateFlowTypeCascade(dbConn, type, metadata) {
+  function recalculateFlowTypeCascade(dbConn, type, metadata, startDate, explicitDates = new Set()) {
+    const previousRaw = startDate
+      ? dbConn.prepare(`
+          SELECT date, raw_value
+          FROM flow_readings
+          WHERE type = ? AND date < ? AND raw_value IS NOT NULL
+          ORDER BY date DESC, id DESC
+          LIMIT 1
+        `).get(type, startDate)
+      : null;
+    const startYear = String(startDate || '').slice(0, 4);
+    const previousSludge = startDate && type === '슬러지'
+      ? dbConn.prepare(`
+          SELECT date, calculated_flow
+          FROM flow_readings
+          WHERE type = ?
+            AND date < ?
+            AND date >= ?
+            AND calculated_flow IS NOT NULL
+          ORDER BY date DESC, id DESC
+          LIMIT 1
+        `).get(type, startDate, `${startYear}-01-01`)
+      : null;
     const rows = dbConn.prepare(`
-      SELECT id, date, raw_value, sludge_export
+      SELECT id, date, raw_value, sludge_export, calculated_flow,
+             is_reset, is_manual, is_synced, last_modified
       FROM flow_readings
-      WHERE type = ?
+      WHERE type = ? AND (? IS NULL OR date >= ?)
       ORDER BY date ASC, id ASC
-    `).all(type);
+    `).all(type, startDate || null, startDate || null);
 
     const updateStmt = dbConn.prepare(`
       UPDATE flow_readings
@@ -33,42 +45,59 @@ module.exports = function (db) {
       WHERE id = ?
     `);
 
-    let prevRaw = null;
-    let prevSludgeYear = null;
-    let prevSludgeCumulative = 0;
+    let prevRaw = previousRaw?.raw_value == null ? null : Number(previousRaw.raw_value);
+    let prevSludgeYear = previousSludge
+      ? String(previousSludge.date || '').slice(0, 4)
+      : startYear || null;
+    let prevSludgeCumulative = previousSludge?.calculated_flow == null
+      ? 0
+      : Number(previousSludge.calculated_flow);
 
     for (const row of rows) {
       const rawNum = row.raw_value == null ? null : Number(row.raw_value);
       const hasRaw = rawNum != null && Number.isFinite(rawNum);
       let flow = null;
+      const isExplicit = explicitDates.has(row.date);
 
       if (type === '슬러지') {
         const sludgeRaw = row.sludge_export ?? row.raw_value;
         const sludgeNum = sludgeRaw == null ? null : Number(sludgeRaw);
         const hasSludge = sludgeNum != null && Number.isFinite(sludgeNum);
-        if (hasSludge) {
-          const y = String(row.date || '').slice(0, 4);
-          if (y !== prevSludgeYear) {
-            prevSludgeYear = y;
-            prevSludgeCumulative = 0;
-          }
+        const storedFlow = row.calculated_flow == null ? null : Number(row.calculated_flow);
+        const hasStoredFlow = storedFlow != null && Number.isFinite(storedFlow);
+        const year = String(row.date || '').slice(0, 4);
+        if (year !== prevSludgeYear) {
+          prevSludgeYear = year;
+          prevSludgeCumulative = 0;
+        }
+        if (isExplicit && hasStoredFlow) {
+          flow = storedFlow;
+          prevSludgeCumulative = flow;
+        } else if (hasSludge) {
           flow = Math.round((prevSludgeCumulative + sludgeNum) * 10) / 10;
           prevSludgeCumulative = flow;
         }
       } else if (hasRaw) {
-        if (prevRaw != null && Number.isFinite(prevRaw)) {
+        const storedFlow = row.calculated_flow == null ? null : Number(row.calculated_flow);
+        if ((isExplicit || row.is_manual || row.is_reset) && storedFlow != null) {
+          flow = storedFlow;
+        } else if (prevRaw != null && Number.isFinite(prevRaw)) {
           flow = Math.round((rawNum - prevRaw) * 10) / 10;
         }
         prevRaw = rawNum;
       }
+
+      const prevFlow = row.calculated_flow == null ? null : Number(row.calculated_flow);
+      const isFlowChanged = flow !== prevFlow;
+      const nextSynced = isFlowChanged ? metadata.isSynced : (row.is_synced ?? 0);
 
       updateStmt.run(
         flow,
         metadata.siteId,
         metadata.siteName,
         metadata.author,
-        metadata.lastModified,
-        metadata.isSynced,
+        isFlowChanged ? metadata.lastModified : (row.last_modified || metadata.lastModified),
+        nextSynced,
         row.id
       );
     }
@@ -161,10 +190,15 @@ module.exports = function (db) {
       });
 
       insertMany(items);
-      const touchedTypes = new Set(items.map((it) => it.type).filter(Boolean));
+      const touchedByType = new Map();
+      items.forEach((item) => {
+        if (!item.type || !date) return;
+        if (!touchedByType.has(item.type)) touchedByType.set(item.type, new Set());
+        touchedByType.get(item.type).add(date);
+      });
       db.transaction(() => {
-        for (const type of touchedTypes) {
-          recalculateFlowTypeCascade(db, type, metadata);
+        for (const [type, dates] of touchedByType.entries()) {
+          recalculateFlowTypeCascade(db, type, metadata, [...dates].sort()[0], dates);
         }
       })();
 
@@ -197,7 +231,7 @@ module.exports = function (db) {
         const prevSameYearCalculated = prevReading && String(prevReading.date || '').slice(0, 4) === String(date || '').slice(0, 4)
           ? Number(prevReading.calculated_flow || 0)
           : 0;
-        calculated_flow = calculateSludgeYearlyCumulative(date, prevSameYearCalculated, sludgeAmount);
+        calculated_flow = Math.round((prevSameYearCalculated + Number(sludgeAmount || 0)) * 10) / 10;
       } else if (is_manual) { calculated_flow = manual_flow; }
       else if (!is_reset && effectivePrevRaw !== undefined) { calculated_flow = raw_value - effectivePrevRaw; }
 
@@ -233,7 +267,7 @@ module.exports = function (db) {
         metadata.isSynced
       );
       db.transaction(() => {
-        recalculateFlowTypeCascade(db, type, metadata);
+        recalculateFlowTypeCascade(db, type, metadata, date, new Set([date]));
       })();
       res.json({ success: true, id: info.lastInsertRowid });
     } catch (err) {

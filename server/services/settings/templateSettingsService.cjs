@@ -74,6 +74,7 @@ async function handleSettingsUpload(db, files, {
   for (const templateFile of reportTemplates) {
     const uploadedName = String(templateFile.filename || '').normalize('NFC');
     const uploadedIdentity = path.parse(uploadedName).name.normalize('NFC').trim().toLowerCase();
+    const uploadedExtension = path.extname(uploadedName).toLowerCase();
 
     const currentFiles = fs.readdirSync(reportsDir, { withFileTypes: true })
       .filter((entry) => entry.isFile())
@@ -85,7 +86,8 @@ async function handleSettingsUpload(db, files, {
       }
 
       const existingIdentity = path.parse(existingName).name.normalize('NFC').trim().toLowerCase();
-      if (existingIdentity === uploadedIdentity) {
+      const existingExtension = path.extname(existingName).toLowerCase();
+      if (existingIdentity === uploadedIdentity && existingExtension === uploadedExtension) {
         const existingPath = path.join(reportsDir, existingName);
         if (fs.existsSync(existingPath)) {
           fs.unlinkSync(existingPath);

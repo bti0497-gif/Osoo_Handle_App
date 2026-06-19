@@ -8,6 +8,35 @@ function toDateKey(date = new Date()) {
     return date.toISOString().slice(0, 10);
 }
 
+function parseDateKey(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function formatDateKey(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+function addDays(date, days) {
+    const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    next.setDate(next.getDate() + days);
+    return next;
+}
+
+function addMonths(date, months) {
+    const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const originalDate = next.getDate();
+    next.setMonth(next.getMonth() + months);
+    if (next.getDate() !== originalDate) {
+        next.setDate(0);
+    }
+    return next;
+}
+
 function toNumberOrNull(value) {
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
@@ -114,8 +143,12 @@ export function useDashboardViewModel(currentUser) {
 
     const maxOffsetWeeks = useMemo(() => {
         if (historyRows.length <= 1) return 0;
-        return Math.floor((historyRows.length - 1) / 7);
-    }, [historyRows.length]);
+        const firstDate = parseDateKey(historyRows[0]?.date);
+        const lastDate = parseDateKey(historyRows[historyRows.length - 1]?.date);
+        if (!firstDate || !lastDate || firstDate >= lastDate) return 0;
+        const diffDays = Math.floor((lastDate.getTime() - firstDate.getTime()) / 86400000);
+        return Math.max(0, Math.ceil(diffDays / 7));
+    }, [historyRows]);
 
     const chartWindow = useMemo(() => {
         if (historyRows.length === 0) {
@@ -127,19 +160,45 @@ export function useDashboardViewModel(currentUser) {
             };
         }
 
+        const latestDate = parseDateKey(historyRows[historyRows.length - 1]?.date);
+        const earliestDate = parseDateKey(historyRows[0]?.date);
+        if (!latestDate || !earliestDate) {
+            return {
+                rows: [],
+                rangeText: '',
+                canGoPast: false,
+                canGoFuture: false,
+            };
+        }
+
         const safeOffset = Math.max(0, Math.min(weekOffset, maxOffsetWeeks));
-        const shiftDays = safeOffset * 7;
-        const endIndex = Math.max(0, historyRows.length - 1 - shiftDays);
-        const startIndex = Math.max(0, endIndex - 29);
-        const rows = historyRows.slice(startIndex, endIndex + 1);
-        const firstDate = rows[0]?.date || '';
-        const lastDate = rows[rows.length - 1]?.date || '';
+        const endDate = addDays(latestDate, -(safeOffset * 7));
+        const startDate = addMonths(endDate, -1);
+        const startKey = formatDateKey(startDate);
+        const endKey = formatDateKey(endDate);
+        const rowByDate = new Map(
+            historyRows
+                .filter((row) => row.date >= startKey && row.date <= endKey)
+                .map((row) => [row.date, row])
+        );
+        const rows = [];
+        for (let cursor = startDate; cursor <= endDate; cursor = addDays(cursor, 1)) {
+            const date = formatDateKey(cursor);
+            rows.push(rowByDate.get(date) || {
+                date,
+                inflow: null,
+                outflow: null,
+                internalReturn: null,
+                externalReturn: null,
+                power: null,
+            });
+        }
 
         return {
             rows,
-            rangeText: firstDate && lastDate ? `${firstDate} ~ ${lastDate}` : '',
-            canGoPast: startIndex > 0,
+            rangeText: `${startKey} ~ ${endKey}`,
             canGoFuture: safeOffset > 0,
+            canGoPast: startDate > earliestDate,
         };
     }, [historyRows, maxOffsetWeeks, weekOffset]);
 

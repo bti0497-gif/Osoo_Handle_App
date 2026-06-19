@@ -1,38 +1,16 @@
 ﻿const express = require('express');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
+const { recalculateInventoryCascade } = require('../services/inventoryCascadeService.cjs');
 const router = express.Router();
 
-function recalculateMedicineInventory(db, medicineName, metadata) {
-  const rows = db.prepare(`
-    SELECT id, COALESCE(purchase_amount, 0) AS purchase_amount, COALESCE(usage_amount, 0) AS usage_amount
-    FROM medicine_logs
-    WHERE medicine_name = ?
-    ORDER BY date ASC, id ASC
-  `).all(medicineName);
-
-  const updateStmt = db.prepare(`
-    UPDATE medicine_logs
-    SET current_inventory = ?,
-        site_id = ?,
-        site_name = ?,
-        author = ?,
-        last_modified = ?,
-        is_synced = ?
-    WHERE id = ?
-  `);
-
-  let runningInventory = 0;
-  rows.forEach((row) => {
-    runningInventory = Math.round((runningInventory + Number(row.purchase_amount || 0) - Number(row.usage_amount || 0)) * 10) / 10;
-    updateStmt.run(
-      runningInventory,
-      metadata.siteId,
-      metadata.siteName,
-      metadata.author,
-      metadata.lastModified,
-      metadata.isSynced,
-      row.id
-    );
+function recalculateMedicineInventory(db, medicineName, metadata, startDate, explicitDates = new Set()) {
+  recalculateInventoryCascade(db, {
+    tableName: 'medicine_logs',
+    nameColumn: 'medicine_name',
+    itemName: medicineName,
+    metadata,
+    startDate,
+    explicitDates,
   });
 }
 
@@ -97,10 +75,27 @@ module.exports = function (db) {
 
       insertMany(items);
 
-      const touchedNames = new Set(items.map((it) => it.medicine_name).filter(Boolean));
+      const touchedByName = new Map();
+      items.forEach((item) => {
+        if (!item.medicine_name || !item.date) return;
+        if (!touchedByName.has(item.medicine_name)) {
+          touchedByName.set(item.medicine_name, { dates: new Set(), explicitDates: new Set() });
+        }
+        const touched = touchedByName.get(item.medicine_name);
+        touched.dates.add(item.date);
+        if (item.current_inventory !== null && item.current_inventory !== undefined) {
+          touched.explicitDates.add(item.date);
+        }
+      });
       db.transaction(() => {
-        for (const medicineName of touchedNames) {
-          recalculateMedicineInventory(db, medicineName, metadata);
+        for (const [medicineName, touched] of touchedByName.entries()) {
+          recalculateMedicineInventory(
+            db,
+            medicineName,
+            metadata,
+            [...touched.dates].sort()[0],
+            touched.explicitDates
+          );
         }
       })();
 
@@ -162,7 +157,7 @@ module.exports = function (db) {
 
       db.transaction(() => {
         for (const medicineName of affected) {
-          recalculateMedicineInventory(db, medicineName, metadata);
+          recalculateMedicineInventory(db, medicineName, metadata, date);
         }
       })();
 
@@ -177,8 +172,10 @@ module.exports = function (db) {
     try {
       const metadata = getCurrentRecordMetadata(db, req.body);
       const prevLog = db.prepare('SELECT current_inventory FROM medicine_logs WHERE medicine_name = ? AND date < ? ORDER BY date DESC LIMIT 1').get(medicine_name, date);
-      const startInventory = prevLog ? prevLog.current_inventory : 0;
-      const current_inventory = startInventory + (purchase_amount || 0) - (usage_amount || 0);
+      const startInventory = Number(prevLog?.current_inventory || 0);
+      const current_inventory = startInventory
+        + Number(purchase_amount || 0)
+        - Number(usage_amount || 0);
 
       const info = db.prepare(`
         INSERT INTO medicine_logs (
@@ -207,6 +204,9 @@ module.exports = function (db) {
         metadata.lastModified,
         metadata.isSynced
       );
+      db.transaction(() => {
+        recalculateMedicineInventory(db, medicine_name, metadata, date);
+      })();
       res.json({ success: true, id: info.lastInsertRowid, current_inventory });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });

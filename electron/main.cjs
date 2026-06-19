@@ -99,7 +99,12 @@ function startServer() {
   serverProcess = fork(serverScriptPath, [], {
     cwd: serverWorkingDirectory,
     stdio: 'pipe',
-    env: { ...process.env, ELECTRON: '1' }
+    env: {
+      ...process.env,
+      ELECTRON: '1',
+      OSOO_PACKAGED: app.isPackaged ? '1' : '0',
+      OSOO_APP_DATA_PATH: app.getPath('userData'),
+    }
   });
 
   serverProcess.stdout?.on('data', (data) => {

@@ -7,6 +7,7 @@ const { openExcelFile } = require('../services/excelOpenService.cjs');
 
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
+const { recalculateInventoryCascade } = require('../services/inventoryCascadeService.cjs');
 const {
   isDriveConfigured,
   drive,
@@ -26,40 +27,6 @@ const BASE_MEDICINES = ['중탄산나트륨', '포도당', '팩(PAC)'];
 const BASE_KITS = ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '인산염인(PO4-P)', '알칼리도(ALK)'];
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']);
-
-function recalculateInventory(db, { tableName, nameColumn, itemName, metadata }) {
-  const rows = db.prepare(`
-    SELECT id, COALESCE(purchase_amount, 0) AS purchase_amount, COALESCE(usage_amount, 0) AS usage_amount
-    FROM ${tableName}
-    WHERE ${nameColumn} = ?
-    ORDER BY date ASC, id ASC
-  `).all(itemName);
-
-  const updateStmt = db.prepare(`
-    UPDATE ${tableName}
-    SET current_inventory = ?,
-        site_id = ?,
-        site_name = ?,
-        author = ?,
-        last_modified = ?,
-        is_synced = ?
-    WHERE id = ?
-  `);
-
-  let runningInventory = 0;
-  for (const row of rows) {
-    runningInventory = Math.round((runningInventory + Number(row.purchase_amount || 0) - Number(row.usage_amount || 0)) * 10) / 10;
-    updateStmt.run(
-      runningInventory,
-      metadata.siteId,
-      metadata.siteName,
-      metadata.author,
-      metadata.lastModified,
-      metadata.isSynced,
-      row.id
-    );
-  }
-}
 
 /** 파일명에 사용 불가한 문자 제거 */
 function sanitizeName(name) {
@@ -435,10 +402,11 @@ module.exports = function (db, baseDir, appDataPath) {
 
       db.transaction(() => {
         for (const itemName of affectedNames) {
-          recalculateInventory(db, {
+          recalculateInventoryCascade(db, {
             ...recalculateConfig,
             itemName,
             metadata,
+            startDate: date,
           });
         }
       })();
@@ -660,7 +628,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const outputDir = path.join(os.tmpdir(), 'osoo-medicine-in');
       if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
-      const outputPath = path.join(outputDir, `약품입고일지_${y}_${mm}.xlsx`);
+      const outputPath = path.join(outputDir, `약품입고일지_${y}_${mm}_${Date.now()}.xlsx`);
       await exportMedicineInXlsx({
         templatePath: templateInfo.absolutePath,
         outputPath,
@@ -742,22 +710,22 @@ function getMergedCellExtent(worksheet, colLetter, rowNum) {
 
 // 사진 placeholder -> Excel named cell 매핑
 const PHOTO_PLACEHOLDER_TO_NAMED = {
-  '{{기본1사진}}': '기본1사진',
-  '{{기본2사진}}': '기본2사진',
-  '{{기본3사진}}': '기본3사진',
-  '{{추가1사진}}': '추가1사진',
-  '{{추가2사진}}': '추가2사진',
-  '{{거래사진}}': '거래사진',
-  '{{키트1사진}}': '사진1',
-  '{{키트2사진}}': '사진2',
+  '{{기본1사진}}': ['약1사진', '기본1사진'],
+  '{{기본2사진}}': ['약2사진', '기본2사진'],
+  '{{기본3사진}}': ['약3사진', '기본3사진'],
+  '{{추가1사진}}': ['추1사진', '추가1사진'],
+  '{{추가2사진}}': ['추2사진', '추가2사진'],
+  '{{거래사진}}': ['거래사진'],
+  '{{키트1사진}}': ['사진1', '키트1사진'],
+  '{{키트2사진}}': ['사진2', '키트2사진'],
 };
 
 // 킷 항목명 -> Excel named cell 매핑
 const KIT_NAME_TO_NAMED = {
   '암모니아성질소(NH3-N)': '암모니아량',
   '질산성질소(NO3-N)': '질산량',
-  '인산염인(PO4-P)': '인산량',
-  '알칼리도(ALK)': '알칼리도량',
+  '인산염인(PO4-P)': '인량',
+  '알칼리도(ALK)': '알칼리량',
 };
 
 /**
@@ -798,7 +766,7 @@ async function exportMedicineInXlsx({ templatePath, outputPath, year, month, med
 
   // 헤더 (named cells)
   setNamed('약품시트명', `(${month})월 약품입고일지`);
-  setNamed('킷시트명', `(${month})월 킷입고일지`);
+  setNamed('키트시트명', `(${month})월 키트입고일지`);
 
   // 날짜: 약품 시트는 직접, 킷 시트는 named cell
   if (medSheet) {
@@ -809,15 +777,15 @@ async function exportMedicineInXlsx({ templatePath, outputPath, year, month, med
   // 기본 약품
   BASE_MEDICINES.forEach((name, idx) => {
     const item = baseMeds.find(i => i.name === name);
-    setNamed(`${idx + 1}명`, name);
-    setNamed(`${idx + 1}량`, item?.purchase ?? '');
+    setNamed(`약${idx + 1}명`, name);
+    setNamed(`약${idx + 1}량`, item?.purchase ?? '');
   });
 
   // 추가 약품
   [0, 1].forEach(idx => {
     const item = extraMeds[idx];
-    setNamed(`추가${idx + 1}명`, item?.name || '');
-    setNamed(`추가${idx + 1}량`, item ? (item.purchase ?? '') : '');
+    setNamed(`추${idx + 1}명`, item?.name || '');
+    setNamed(`추${idx + 1}량`, item ? (item.purchase ?? '') : '');
   });
 
   // 기본 약품
@@ -827,12 +795,16 @@ async function exportMedicineInXlsx({ templatePath, outputPath, year, month, med
   }
 
   // 기본 약품
-  for (const [placeholder, namedKey] of Object.entries(PHOTO_PLACEHOLDER_TO_NAMED)) {
+  for (const [placeholder, namedCandidates] of Object.entries(PHOTO_PLACEHOLDER_TO_NAMED)) {
     const imgBuf = imageMap[placeholder];
     if (!imgBuf) continue;
 
+    const namedKey = namedCandidates.find((candidate) => namedMap[candidate]);
+    if (!namedKey) {
+      console.warn(`[medicine-in xlsx] 사진 named range 없음: ${namedCandidates.join('/')}`);
+      continue;
+    }
     const info = namedMap[namedKey];
-    if (!info) continue;
     const ws = wb.getWorksheet(info.sheetName);
     if (!ws) continue;
 

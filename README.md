@@ -1,22 +1,45 @@
-# React + Vite
+# Osoo Handle App
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+휴게소 오수처리시설의 현장 업무를 로컬 우선으로 관리하는 Windows 데스크톱 앱입니다.
 
-Currently, two official plugins are available:
+## 기술 구성
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- React 19 + Vite
+- Express + better-sqlite3
+- Electron + electron-builder
+- BigQuery, Google Drive/Sheets, Firebase 연동
+- GitHub Releases 기반 자동 업데이트
 
-## React Compiler
+## 개발 실행
 
-The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
-
-
-# 백엔드, 프런트앤드 동시 실행 명령어..
+```powershell
 npm run dev:all
-http://localhost:18735/
+```
 
+기본 로컬 서버 포트는 `18731~18734` 범위에서 자동 탐색합니다.
+
+## 필수 검증
+
+```powershell
+npm run validate
+npm run build
+```
+
+Electron 패키지 검증:
+
+```powershell
+npm run electron:build
+npm run validate:asar
+```
+
+## 문서
+
+- [개발 히스토리](docs/DEVELOPMENT_HISTORY.md)
+- [향후 작업](docs/ROADMAP.md)
+- [릴리스 가이드](docs/RELEASE_GUIDE.md)
+- [릴리스 이후 유지보수](POST_RELEASE_MAINTENANCE_GUIDE.md)
+- [레이아웃 계약](LAYOUT_CONTRACT.md)
+- [백엔드 라우트 생성 지침](ROUTE_CREATION_GUIDE.md)
+- [Google 계정 교체 가이드](GOOGLE_ACCOUNT_MIGRATION_GUIDE.md)
+
+프로젝트 구조와 변경 제한은 반드시 [AGENTS.md](AGENTS.md)를 먼저 확인합니다.

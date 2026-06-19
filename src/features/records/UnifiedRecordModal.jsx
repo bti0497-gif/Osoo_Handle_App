@@ -475,6 +475,32 @@ export default function UnifiedRecordModal({
         setDefaultPurchaseAppliedByTab((prev) => ({ ...prev, [activeTab]: nextApplied }));
     };
 
+    const handleAdjustKitUsage = (delta) => {
+        if (activeTab !== 'kit') return;
+
+        setDraft((prev) => {
+            const next = { ...prev };
+            currentItems.forEach((item) => {
+                const key = getDraftKeyForItem('kit', item);
+                const current = next[key] || buildInitialDraft('kit', item);
+                const currentUsage = toNumberOrNull(current.usage) || 0;
+                const previousInventory = toNumberOrNull(item?.previous?.inventory) || 0;
+                const purchase = toNumberOrNull(current.purchase) || 0;
+                const nextUsage = round1(Math.max(0, currentUsage + delta));
+                const nextInventory = round1(previousInventory + purchase - nextUsage);
+                if (delta > 0 && nextInventory < 0) {
+                    return;
+                }
+                const updated = {
+                    ...current,
+                    usage: nextUsage,
+                };
+                next[key] = recalculateInventoryDraft(item, updated);
+            });
+            return next;
+        });
+    };
+
     const handleSelectItem = (key) => {
         setSelectedByTab((prev) => ({ ...prev, [activeTab]: key }));
     };
@@ -838,21 +864,49 @@ export default function UnifiedRecordModal({
                             {defaultButtonLabel}
                         </button>
                         {isKitTab && (
-                            <button
-                                type="button"
-                                onClick={() => onSyncAnalysisKits?.(date)}
-                                disabled={isSyncingAnalysisKits || !date}
-                                style={{
-                                    ...buttonBaseStyle,
-                                    padding: '0 14px',
-                                    borderColor: '#16a34a',
-                                    background: '#f0fdf4',
-                                    color: '#166534',
-                                    cursor: isSyncingAnalysisKits || !date ? 'not-allowed' : 'pointer',
-                                }}
-                            >
-                                {isSyncingAnalysisKits ? '동기화 중...' : '분석키트 동기화'}
-                            </button>
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={() => onSyncAnalysisKits?.(date)}
+                                    disabled={isSyncingAnalysisKits || !date}
+                                    style={{
+                                        ...buttonBaseStyle,
+                                        padding: '0 14px',
+                                        borderColor: '#16a34a',
+                                        background: '#f0fdf4',
+                                        color: '#166534',
+                                        cursor: isSyncingAnalysisKits || !date ? 'not-allowed' : 'pointer',
+                                    }}
+                                >
+                                    {isSyncingAnalysisKits ? '동기화 중...' : '분석키트 동기화'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleAdjustKitUsage(1)}
+                                    style={{
+                                        ...buttonBaseStyle,
+                                        padding: '0 12px',
+                                        borderColor: '#7c3aed',
+                                        background: '#f5f3ff',
+                                        color: '#5b21b6',
+                                    }}
+                                >
+                                    실험+
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleAdjustKitUsage(-1)}
+                                    style={{
+                                        ...buttonBaseStyle,
+                                        padding: '0 12px',
+                                        borderColor: '#7c3aed',
+                                        background: '#ffffff',
+                                        color: '#5b21b6',
+                                    }}
+                                >
+                                    실험-
+                                </button>
+                            </>
                         )}
                     </div>
 

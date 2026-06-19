@@ -1,3 +1,5 @@
+const { recalculateInventoryCascade } = require('./inventoryCascadeService.cjs');
+
 const KIT_FIELD_MAP = [
   { kitName: '암모니아성질소(NH3-N)', field: 'nh3_n' },
   { kitName: '질산성질소(NO3-N)', field: 'no3_n' },
@@ -52,38 +54,13 @@ function aggregateExpectedUsageByDate(db, startDate, endDate, metadata = {}) {
   return byDate;
 }
 
-function recalculateKitInventory(db, kitName, metadata = {}) {
-  const siteFilter = buildSiteClause(metadata);
-  const rows = db.prepare(`
-    SELECT id, COALESCE(purchase_amount, 0) AS purchase_amount, COALESCE(usage_amount, 0) AS usage_amount
-    FROM kit_logs
-    WHERE kit_name = ?${siteFilter.clause}
-    ORDER BY date ASC, id ASC
-  `).all(kitName, ...siteFilter.params);
-
-  const updateStmt = db.prepare(`
-    UPDATE kit_logs
-    SET current_inventory = ?,
-        site_id = ?,
-        site_name = ?,
-        author = ?,
-        last_modified = ?,
-        is_synced = ?
-    WHERE id = ?
-  `);
-
-  let runningInventory = 0;
-  rows.forEach((row) => {
-    runningInventory = Math.round((runningInventory + Number(row.purchase_amount || 0) - Number(row.usage_amount || 0)) * 10) / 10;
-    updateStmt.run(
-      runningInventory,
-      metadata.siteId,
-      metadata.siteName,
-      metadata.author,
-      metadata.lastModified,
-      metadata.isSynced,
-      row.id
-    );
+function recalculateKitInventory(db, kitName, metadata = {}, startDate) {
+  recalculateInventoryCascade(db, {
+    tableName: 'kit_logs',
+    nameColumn: 'kit_name',
+    itemName: kitName,
+    metadata,
+    startDate,
   });
 }
 
@@ -151,7 +128,7 @@ function syncAnalysisKitUsageForRange(db, startDate, endDate, metadata = {}) {
     }
 
     changedKits.forEach((kitName) => {
-      recalculateKitInventory(db, kitName, metadata);
+      recalculateKitInventory(db, kitName, metadata, normalizedStart);
     });
   })();
 

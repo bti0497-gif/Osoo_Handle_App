@@ -33,9 +33,9 @@ const ADMIN_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_adm
 function extractUser(req) {
   const u = req.body?._user || {};
   return {
-    name: req.headers['x-user-name'] || u.name  || req.query._name || 'unknown',
-    role: req.headers['x-user-role'] || u.role  || req.query._role || 'manager',
-    site: req.headers['x-user-site'] || u.site  || req.query._site || ''
+    name: req.headers['x-user-name'] || u.name  || req.query._name || req.query.name || 'unknown',
+    role: req.headers['x-user-role'] || u.role  || req.query._role || req.query.role || 'manager',
+    site: req.headers['x-user-site'] || u.site  || req.query._site || req.query.site || ''
   };
 }
 
@@ -103,7 +103,7 @@ module.exports = function () {
   router.get('/api/board/posts/:id', async (req, res) => {
     const user = extractUser(req);
     try {
-      const post = await getPost(req.params.id);
+      const post = await getPost(req.params.id, { incrementView: true });
       if (!post) return res.status(404).json({ success: false, message: '게시글 없음' });
       if (!canViewPost(user, post)) {
         return res.status(403).json({ success: false, message: '게시글 조회 권한 없음' });

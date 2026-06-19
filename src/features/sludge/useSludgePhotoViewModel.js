@@ -187,7 +187,11 @@ export function useSludgePhotoViewModel() {
     const ok = await showConfirm(`${editEntry.date} 반출 기록을 삭제하시겠습니까?`);
     if (!ok) return;
     try {
-      await SludgePhotoModel.deleteByDate(editEntry.date);
+      const deletedDate = editEntry.date;
+      const result = await SludgePhotoModel.deleteByDate(deletedDate);
+      if (!result?.success) throw new Error(result?.error || '삭제 실패');
+      setSavedItems((items) => items.filter((item) => item.date !== deletedDate));
+      setEditEntry(makeEmptyEntry(deletedDate));
       showToast('삭제되었습니다.', 'success');
       await loadMonth();
     } catch (err) {
@@ -204,7 +208,7 @@ export function useSludgePhotoViewModel() {
     try {
       const result = await SludgePhotoModel.export(year, month);
       if (!result?.success) throw new Error(result?.error || '사진대지 출력 실패');
-      showToast('사진대지를 열었습니다.', 'success');
+      showToast(`사진대지 ${result.itemCount || 0}건을 열었습니다.`, 'success');
     } catch (err) {
       showToast(err.message || '사진대지 출력 실패', 'error');
     } finally {

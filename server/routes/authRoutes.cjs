@@ -371,6 +371,53 @@ module.exports = (db) => {
         }
     });
 
+    // Authenticate against the Google Sheets member master.
+    // Admin accounts remain remote-only so they can always use the latest credentials.
+    router.post('/discovery-login', async (req, res) => {
+        const name = String(req.body?.name || '').trim();
+        const password = String(req.body?.password || '');
+
+        if (!name || !password) {
+            return res.status(400).json({ success: false, message: '이름과 비밀번호를 입력해 주세요.' });
+        }
+
+        try {
+            if (!isSheetsConfigured()) {
+                return res.status(503).json({ success: false, message: 'Google Sheets 회원 조회가 설정되지 않았습니다.' });
+            }
+
+            const members = await getMembers();
+            const member = members.find((row) => (
+                String(row?.name || '').trim() === name
+                && String(row?.password || '') === password
+            ));
+
+            if (!member) {
+                return res.status(401).json({ success: false, message: '이름 또는 비밀번호가 일치하지 않습니다.' });
+            }
+
+            const role = String(member.role || 'user').trim();
+            const isAdmin = role === 'admin' || role === 'group_admin' || name === 'admin';
+            if (isAdmin) {
+                return res.json({ success: true, member, source: 'sheets' });
+            }
+
+            syncLocalMembers([member]);
+            syncMemberSiteLinks(member);
+            const localMember = db.prepare('SELECT * FROM members WHERE id = ? OR name = ? LIMIT 1').get(member.id, member.name);
+            closeStaleOpenSessions(localMember || member);
+            triggerBigQuerySync('login-success:sheets');
+
+            return res.json({
+                success: true,
+                member: enrichMemberWithSites(localMember || member),
+                source: 'sheets'
+            });
+        } catch (err) {
+            return res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
     // Provide the default login name for the site manager.
     router.get('/login-hint', (req, res) => {
         try {

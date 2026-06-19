@@ -2,6 +2,7 @@
 const path = require('path');
 
 const EXCEL_TEMPLATE_EXTENSIONS = new Set(['.xlsx', '.xls', '.xlsm']);
+const HWPX_TEMPLATE_EXTENSIONS = new Set(['.hwpx']);
 const ALLOWED_REPORT_TEMPLATE_NAMES = [
   '일일업무일지',
   '수질분석일지',
@@ -83,6 +84,10 @@ function isExcelReportTemplate(fileName) {
   return EXCEL_TEMPLATE_EXTENSIONS.has(path.extname(String(fileName || '')).toLowerCase());
 }
 
+function isHwpxReportTemplate(fileName) {
+  return HWPX_TEMPLATE_EXTENSIONS.has(path.extname(String(fileName || '')).toLowerCase());
+}
+
 function isTemplateMatched(fileName, templateName) {
   const normalizedTarget = normalizeTemplateKey(templateName);
   if (!normalizedTarget) {
@@ -104,7 +109,7 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
   const bundledDirs = getBundledReportTemplateDirs(baseDir);
 
   const existingFiles = listFiles(customDir);
-  const existingIdentities = new Set(existingFiles.map(f => getTemplateIdentity(f)));
+  const existingNames = new Set(existingFiles.map((fileName) => normalizeTemplateKey(fileName)));
 
   bundledDirs.forEach((bundledDir) => {
     listFiles(bundledDir).forEach((fileName) => {
@@ -112,18 +117,17 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
         return;
       }
 
-      const identity = getTemplateIdentity(fileName);
       const sourcePath = path.join(bundledDir, fileName);
       const targetPath = path.join(customDir, fileName);
 
-      // 해당 식별자의 파일이 이미 존재하면 (확장자 상관없이) 복사하지 않음
-      if (existingIdentities.has(identity)) {
+      // 같은 일지의 Excel/HWPX 양식을 함께 유지한다.
+      if (existingNames.has(normalizeTemplateKey(fileName))) {
         return;
       }
 
       if (!fs.existsSync(targetPath)) {
         fs.copyFileSync(sourcePath, targetPath);
-        existingIdentities.add(identity); // 새로 추가된 식별자 기록
+        existingNames.add(normalizeTemplateKey(fileName));
       }
     });
   });
@@ -138,16 +142,18 @@ function listReportTemplates(baseDir, appDataPath) {
     .map((fileName) => ({
     fileName,
     relativePath: path.posix.join('templates', 'reports', fileName),
-    isExcelTemplate: isExcelReportTemplate(fileName)
+    isExcelTemplate: isExcelReportTemplate(fileName),
+    isHwpxTemplate: isHwpxReportTemplate(fileName),
     }));
 }
 
 function resolveReportTemplatePath(baseDir, appDataPath, templateName, options = {}) {
   const customDir = syncBundledTemplatesToAppData(baseDir, appDataPath);
-  const { excelOnly = false } = options;
+  const { excelOnly = false, hwpxOnly = false } = options;
   const availableTemplates = listFiles(customDir)
     .filter((fileName) => isAllowedReportTemplateName(fileName))
-    .filter((fileName) => !excelOnly || isExcelReportTemplate(fileName));
+    .filter((fileName) => !excelOnly || isExcelReportTemplate(fileName))
+    .filter((fileName) => !hwpxOnly || isHwpxReportTemplate(fileName));
 
   let targetName = String(templateName || '').trim();
   if (!targetName) {
@@ -182,6 +188,7 @@ module.exports = {
   getCustomReportTemplatesDir,
   isAllowedReportTemplateName,
   isExcelReportTemplate,
+  isHwpxReportTemplate,
   listReportTemplates,
   resolveReportTemplatePath,
   syncBundledTemplatesToAppData,

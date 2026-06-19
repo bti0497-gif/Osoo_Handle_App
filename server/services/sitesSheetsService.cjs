@@ -23,11 +23,11 @@
  *   3. 스프레드시트가 이미 서비스 계정과 공유된 상태
  */
 
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '../../.env.local') });
 const { google } = require('googleapis');
+const { getGoogleServiceAccountPath, loadRuntimeEnv } = require('../config/runtimeConfig.cjs');
 
-const KEY_FILE   = path.join(__dirname, '../config/google-key.json');
+loadRuntimeEnv();
+const KEY_FILE   = getGoogleServiceAccountPath();
 const SHEET_NAME = 'Wastewater_Sites';
 const APP_SETTINGS_SHEET_NAME = 'Wastewater_App_Settings';
 const HEADER_ROW = [

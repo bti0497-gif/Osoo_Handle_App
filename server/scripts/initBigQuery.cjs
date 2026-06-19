@@ -1,9 +1,9 @@
 ﻿const { BigQuery } = require('@google-cloud/bigquery');
-const path = require('path');
 const fs = require('fs');
+const { getBigQueryServiceAccountPath } = require('../config/runtimeConfig.cjs');
 
 // 설정
-const KEY_FILE_PATH = path.join(__dirname, '../config/work-jindan-194620a46d59.json');
+const KEY_FILE_PATH = getBigQueryServiceAccountPath();
 const DATASET_ID = 'daily_log_system'; // 사용자가 생성한 데이터셋 이름
 
 if (!fs.existsSync(KEY_FILE_PATH)) {

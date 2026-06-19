@@ -20,11 +20,11 @@
  *      (osoo-handler-service@gen-lang-client-0937938814.iam.gserviceaccount.com)
  */
 
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '../../.env.local') });
 const { google } = require('googleapis');
+const { getGoogleServiceAccountPath, loadRuntimeEnv } = require('../config/runtimeConfig.cjs');
 
-const KEY_FILE   = path.join(__dirname, '../config/google-key.json');
+loadRuntimeEnv();
+const KEY_FILE   = getGoogleServiceAccountPath();
 const SHEET_NAME = 'Wastewater_Member';
 const HEADER_ROW = ['id', 'name', 'password', 'role', 'site_name1', 'phone', 'target_lat', 'target_lng', 'radius_m', 'notes'];
 const HEADER_IDX = Object.fromEntries(HEADER_ROW.map((h, i) => [h, i]));

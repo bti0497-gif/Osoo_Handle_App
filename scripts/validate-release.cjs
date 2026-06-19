@@ -3,7 +3,7 @@
  * scripts/validate-release.cjs
  * 
  * 배포 전 검증:
- * 1. 필수 파일 포함 여부 (.env.local, google-key.json)
+ * 1. 필수 코드 파일 및 자격증명 패키징 제외 여부
  * 2. 라우트 레지스트리 유효성
  * 3. API 스펙 vs 실제 라우트 매칭
  * 4. 모듈 로드 가능 여부
@@ -53,10 +53,26 @@ function checkFileExists(filePath, description) {
 function validateRequiredFiles() {
   console.log(`\n${colors.blue}▶ 필수 파일 검증${colors.reset}`);
   
-  checkFileExists(path.join(BASE_DIR, '.env.local'), '.env.local');
-  checkFileExists(path.join(BASE_DIR, 'server', 'config', 'google-key.json'), 'google-key.json');
   checkFileExists(path.join(BASE_DIR, 'package.json'), 'package.json');
   checkFileExists(path.join(BASE_DIR, 'electron-builder.config.js'), 'electron-builder.config.js');
+  checkFileExists(path.join(BASE_DIR, 'server', 'config', 'runtimeConfig.cjs'), '런타임 설정 로더');
+  checkFileExists(path.join(BASE_DIR, 'scripts', 'provision-runtime-config.cjs'), '런타임 설정 프로비저닝 도구');
+
+  const configText = fs.readFileSync(path.join(BASE_DIR, 'electron-builder.config.js'), 'utf8');
+  if (configText.includes("'.env.local'")) {
+    error('electron-builder에 .env.local 포함 규칙이 남아 있습니다');
+  } else {
+    success('electron-builder에서 .env.local 제외됨');
+  }
+  const requiredExclusions = [
+    '!server/config/google-key.json',
+    '!server/config/work-jindan-*.json',
+    '!server/config/firebase-service-account.json',
+  ];
+  for (const exclusion of requiredExclusions) {
+    if (configText.includes(exclusion)) success(`자격증명 제외 규칙 확인: ${exclusion}`);
+    else error(`자격증명 제외 규칙 누락: ${exclusion}`);
+  }
 }
 
 function validateRouteRegistry() {
@@ -181,13 +197,31 @@ function validateAsarPackage(asarPath) {
       'server/api-spec.cjs',
       'server/routes/authRoutes.cjs',
       'server/routes/settingsRoutes.cjs',
-      '.env.local',
+      'server/config/runtimeConfig.cjs',
     ];
     
     requiredFiles.forEach(file => {
       const fullPath = path.join(unpackPath, file);
       checkFileExists(fullPath, `unpacked: ${file}`);
     });
+
+    const forbiddenFiles = [
+      '.env.local',
+      'server/config/google-key.json',
+      'server/config/firebase-service-account.json',
+    ];
+    forbiddenFiles.forEach((file) => {
+      const fullPath = path.join(unpackPath, file);
+      if (fs.existsSync(fullPath)) error(`패키지에 자격증명 포함됨: ${file}`);
+      else success(`패키지 자격증명 미포함: ${file}`);
+    });
+
+    const unpackedConfigDir = path.join(unpackPath, 'server', 'config');
+    const leakedBigQueryKeys = fs.existsSync(unpackedConfigDir)
+      ? fs.readdirSync(unpackedConfigDir).filter((name) => /^work-jindan-.*\.json$/i.test(name))
+      : [];
+    if (leakedBigQueryKeys.length) error(`패키지에 BigQuery 키 포함됨: ${leakedBigQueryKeys.join(', ')}`);
+    else success('패키지 BigQuery 키 미포함');
   } else {
     warn(`asar.unpacked 디렉토리 없음: ${unpackPath}`);
   }
@@ -240,11 +274,10 @@ function validateEnvVariables() {
   console.log(`\n${colors.blue}▶ 환경 변수 검증${colors.reset}`);
   
   try {
-    require('dotenv').config({ path: path.join(BASE_DIR, '.env.local') });
+    require(path.join(BASE_DIR, 'server', 'config', 'runtimeConfig.cjs')).loadRuntimeEnv();
     
     const requiredVars = [
       'GOOGLE_MEMBERS_SHEET_ID',
-      'OSOO_SERVER_TOKEN',
     ];
     
     requiredVars.forEach(varName => {
@@ -254,6 +287,12 @@ function validateEnvVariables() {
         warn(`환경 변수 누락: ${varName} (필수 기능 비활성화됨)`);
       }
     });
+
+    if (process.env.OSOO_SERVER_TOKEN) {
+      success('선택 환경 변수 설정됨: OSOO_SERVER_TOKEN');
+    } else {
+      info('OSOO_SERVER_TOKEN 미설정: 현재 서버는 localhost 바인딩으로 동작합니다');
+    }
     
   } catch (e) {
     error(`환경 변수 로드 실패: ${e.message}`);
@@ -306,6 +345,7 @@ function validateEncodingAndKorean() {
           .replace(/[가-힣]\?/g, '')
           .replace(/[\u4e00-\u9fa5]/g, '') // 한자(Hanja) 허용
           .replace(/[\u0370-\u03FF]/g, '') // 그리스 문자(φ, Δ, λ 등) 허용
+          .replace(/[₀₁₂₃₄₅₆₇₈₉⁰¹²³⁴⁵⁶⁷⁸⁹⁻₋－]/g, '') // 화학식/숫자 정규화용 위·아래첨자 허용
           .replace(/[\uD83C\uDFED\u23F8]/g, '') // 🏭, ⏸ 이모지 허용
           .replace(/[─—→←↔–—⚠️✅❌⚠✓✗ℹ🔍▶║═⭐●│┌┐└┘├┤┬┴┼※≈·³✚▲▼📷➕📸🛠⚙⚙️🔧⚡💡📊📈📉📝📂📁📎🔗🗑📅⏰🕰⏱🧭📍🗺💾📥📤📡🔊🔔🏷📌🔎“”「」…↳💬×✕✖‹›]/g, ''); // 특수 문자 및 이모지 허용
         if (garbledPattern.test(cleanLine)) {

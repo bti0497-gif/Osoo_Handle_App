@@ -14,10 +14,12 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         isManifestLoading,
         isPreviewAssetLoading,
         isOutputProcessing,
+        outputFormat,
+        setOutputFormat,
         manifestError,
         manifestErrorCode,
         setCalendarActiveStartDate,
-        handleExportExcel,
+        handleExport,
         dashboardRows,
         dashboardDateRows,
         dashboardSummary,
@@ -45,10 +47,14 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         return `${date.getFullYear()}-${mm}-${dd}`;
     };
 
-    const exportButtonLabel = templateName === '일일업무일지' ? '업무일지 출력' : '분석일지 출력';
+    const isDailyWorkLog = templateName === '일일업무일지';
+    const outputFormatLabel = outputFormat === 'pdf' ? 'PDF' : outputFormat === 'hwpx' ? 'HWPX' : '엑셀';
+    const exportButtonLabel = isDailyWorkLog
+        ? `${outputFormatLabel} 업무일지 출력`
+        : '분석일지 출력';
 
     return (
-        <div style={{ display: 'flex', width: '100%', height: '100%', backgroundColor: '#ffffff', padding: '1.25rem', gap: '1.25rem' }}>
+        <div style={{ display: 'flex', width: '100%', height: '100%', minWidth: 0, minHeight: 0, backgroundColor: '#ffffff', padding: '1.25rem', gap: '1.25rem' }}>
             {/* 좌측 패널 (조회 조건 및 내보내기 설정) */}
             <div style={{ width: '220px', flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <h1 style={{ fontSize: '1.25rem', fontWeight: 900, color: '#1e293b', letterSpacing: '-0.025em', margin: 0 }}>
@@ -87,69 +93,53 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                         </div>
                     </div>
 
-                    {/* 출력 대상 옵션 및 데이터 표시 */}
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                        <div style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#475569', marginBottom: '0.75rem' }}>출력 대상 페이지</div>
+                    {isDailyWorkLog && (
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#475569', marginBottom: '0.75rem' }}>출력 형식</div>
                         <div style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '12px',
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(3, 1fr)',
+                            gap: '6px',
                             backgroundColor: '#f8fafc',
                             border: '1px solid #e2e8f0',
                             borderRadius: '12px',
-                            padding: '16px'
+                            padding: '6px'
                         }}>
-                            {/* 라디오 1: 전체 페이지 */}
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                                <input
-                                    type="radio"
-                                    name="pageOption"
-                                    value="all"
-                                    defaultChecked
-                                    style={{ margin: 0, width: '16px', height: '16px', accentColor: '#1e293b' }}
-                                    onChange={() => {}} 
-                                />
-                                <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#334155' }}>전체 페이지 지정</span>
-                            </label>
-
-                            {/* 라디오 2: 부분 페이지 */}
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'not-allowed', opacity: 0.45 }}>
-                                <input
-                                    type="radio"
-                                    name="pageOption"
-                                    value="partial"
-                                    disabled={true}
-                                    style={{ margin: 0, width: '16px', height: '16px', accentColor: '#1e293b' }}
-                                    onChange={() => {}} 
-                                />
-                                <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#334155' }}>부분 페이지 지정</span>
-                            </label>
-                            
-                            {/* 부분 입력 창 */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: '24px', opacity: 0.45 }}>
-                                <input
-                                    type="text"
-                                    placeholder="예: 1-3, 5"
-                                    disabled={true} 
-                                    style={{
-                                        flex: 1,
-                                        height: '36px',
-                                        padding: '0 12px',
-                                        border: '1px solid #e2e8f0',
-                                        borderRadius: '8px',
-                                        fontSize: '0.875rem',
-                                        outline: 'none',
-                                        backgroundColor: '#ffffff'
-                                    }}
-                                />
-                            </div>
+                            {[
+                                { id: 'hwpx', label: 'HWPX' },
+                                { id: 'excel', label: '엑셀' },
+                                { id: 'pdf', label: 'PDF' },
+                            ].map((format) => {
+                                const selected = outputFormat === format.id;
+                                return (
+                                    <button
+                                        key={format.id}
+                                        type="button"
+                                        onClick={() => setOutputFormat(format.id)}
+                                        aria-pressed={selected}
+                                        style={{
+                                            height: '38px',
+                                            border: selected ? '1px solid #1e293b' : '1px solid transparent',
+                                            borderRadius: '8px',
+                                            backgroundColor: selected ? '#1e293b' : 'transparent',
+                                            color: selected ? '#ffffff' : '#475569',
+                                            fontSize: '0.8125rem',
+                                            fontWeight: 800,
+                                            cursor: 'pointer',
+                                        }}
+                                    >
+                                        {format.label}
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
+                    )}
 
                     {/* 내보내기 버튼 영역 */}
                     <div>
                         <button 
-                            onClick={() => handleExportExcel()}
+                            onClick={() => handleExport()}
                             disabled={isOutputProcessing}
                             style={{
                             width: '100%', height: '48px', 
@@ -216,7 +206,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                             borderRadius: '50%',
                             animation: 'spin 0.8s linear infinite'
                         }} />
-                        엑셀 일지를 출력 중입니다. 잠시만 기다려 주세요...
+                        {outputFormatLabel} 일지를 출력 중입니다. 잠시만 기다려 주세요...
                     </div>
                 </div>
             )}

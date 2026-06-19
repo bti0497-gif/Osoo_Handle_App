@@ -22,14 +22,15 @@ module.exports = {
     'templates/**/*',
     'node_modules/**/*',
     'package.json',
-    '.env.local',
+    '!server/config/google-key.json',
+    '!server/config/work-jindan-*.json',
+    '!server/config/firebase-service-account.json',
   ],
   asarUnpack: [
     'server.cjs',
     'public/**/*',
     'server/**/*',
     'node_modules/**/*',
-    '.env.local',
   ],
   extraResources: [
     { from: 'templates', to: 'templates' },

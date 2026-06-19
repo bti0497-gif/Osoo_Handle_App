@@ -335,7 +335,11 @@ function getMergedSludgeRows(db, start, end) {
   ).all(start, end);
 
   const flowRows = db.prepare(
-    "SELECT date, sludge_export, raw_value, calculated_flow FROM flow_readings WHERE type = '슬러지' AND date >= ? AND date <= ? ORDER BY date ASC"
+    `SELECT date, sludge_export, raw_value, calculated_flow,
+            site_name, author, created_at, last_modified
+     FROM flow_readings
+     WHERE type = '슬러지' AND date >= ? AND date <= ?
+     ORDER BY date ASC`
   ).all(start, end);
 
   const map = new Map();
@@ -360,10 +364,10 @@ function getMergedSludgeRows(db, start, end) {
         sludge_photo_taken_at: null,
         certificate_photo_path: null,
         note: null,
-        site_name: null,
-        author: null,
-        created_at: null,
-        last_modified: null,
+        site_name: fr.site_name || null,
+        author: fr.author || null,
+        created_at: fr.created_at || null,
+        last_modified: fr.last_modified || fr.created_at || null,
       });
       continue;
     }
@@ -687,8 +691,15 @@ module.exports = function (db, baseDir, appDataPath) {
           if (fs.existsSync(cert)) fs.unlinkSync(cert);
         }
       }
-      db.prepare('DELETE FROM sludge_photo_logs WHERE date = ?').run(date);
-      res.json({ success: true });
+      const deletePhotoLog = db.prepare('DELETE FROM sludge_photo_logs WHERE date = ?');
+      const deleteFlowReading = db.prepare(
+        "DELETE FROM flow_readings WHERE date = ? AND type = '슬러지'"
+      );
+      const deleted = db.transaction(() => ({
+        photoLogs: deletePhotoLog.run(date).changes,
+        flowReadings: deleteFlowReading.run(date).changes,
+      }))();
+      res.json({ success: true, deleted });
     } catch (err) {
       console.error('[sludge-photos DELETE]', err);
       res.status(500).json({ success: false, error: err.message });
@@ -729,6 +740,9 @@ module.exports = function (db, baseDir, appDataPath) {
           sludge_photo_local      : sl && fs.existsSync(sl) ? sl : null,
           certificate_photo_local : cl && fs.existsSync(cl) ? cl : null,
         };
+      }).filter((item) => {
+        const amount = Number(item.sludge_amount);
+        return Number.isFinite(amount) && amount > 0;
       }).sort((a, b) => {
         const toKey = (d) => {
           const s = String(d || '');
@@ -745,7 +759,7 @@ module.exports = function (db, baseDir, appDataPath) {
         templatePath, outputPath, year, month, items, siteName: settings?.site_name || ''
       });
       await openExcelFile(outputPath);
-      res.json({ success: true });
+      res.json({ success: true, itemCount: items.length });
     } catch (err) {
       console.error('[sludge-photos export]', err);
       if (!res.headersSent) res.status(500).json({ success: false, error: err.message });

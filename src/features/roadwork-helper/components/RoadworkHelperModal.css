@@ -66,8 +66,8 @@
 
 .roadwork-autofill-button {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  top: 24px;
+  left: 42px;
   z-index: 18;
   height: 42px;
   border: 1px solid #1d4ed8;
@@ -98,8 +98,8 @@
 
 .roadwork-autofill-status {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  top: 24px;
+  left: 162px;
   z-index: 18;
   max-width: min(460px, calc(100vw - 32px));
   padding: 12px 14px;

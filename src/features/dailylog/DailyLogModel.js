@@ -47,9 +47,9 @@ export const DailyLogModel = {
         return apiClient.get(`${prefix}/preview-manifest`, { startDate, endDate, templateName, siteName, ...context });
     },
 
-    async fetchPreviewPageData({ startDate, endDate, pageKey, templateName, siteName, ...context }) {
+    async fetchPreviewPageData({ date, startDate, endDate, pageKey, templateName, siteName, ...context }) {
         const prefix = getApiPrefix(templateName);
-        return apiClient.get(`${prefix}/preview-page-data`, { startDate, endDate, pageKey, templateName, siteName, ...context });
+        return apiClient.get(`${prefix}/preview-page-data`, { date, startDate, endDate, pageKey, templateName, siteName, ...context });
     },
     fetchExportExcel: async (dateString, templateName, siteName, context = {}) => {
         let url;
@@ -82,5 +82,35 @@ export const DailyLogModel = {
 
         // 서버에 요청 → 서버가 파일을 생성하고 시스템 Excel로 열어줌
         return apiClient.get(url);
-    }
+    },
+    fetchExportPdf: async (dateString, templateName, siteName, context = {}) => {
+        const ranges = dateString.split(',');
+        const params = {
+            templateName,
+            siteName,
+            ...context,
+        };
+        if (ranges.length === 1) {
+            params.date = ranges[0].trim();
+        } else {
+            params.startDate = ranges[0].trim();
+            params.endDate = ranges[1].trim();
+        }
+        return apiClient.get('/api/daily-work-log/export-pdf', params, { timeout: 300000 });
+    },
+    fetchExportHwpx: async (dateString, templateName, siteName, context = {}) => {
+        const ranges = dateString.split(',');
+        const params = {
+            templateName,
+            siteName,
+            ...context,
+        };
+        if (ranges.length === 1) {
+            params.date = ranges[0].trim();
+        } else {
+            params.startDate = ranges[0].trim();
+            params.endDate = ranges[1].trim();
+        }
+        return apiClient.get('/api/daily-work-log/export-hwpx', params, { timeout: 300000 });
+    },
 };
