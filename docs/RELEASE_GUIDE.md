@@ -19,6 +19,22 @@ npm run validate:asar
 
 ## 신규 현장 설치 패키지
 
+공통 자격증명을 포함한 단일 통합 설치파일:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-integrated-installer.ps1
+```
+
+생성 위치:
+
+```text
+release\integrated-deployment\Osoo Handle App Integrated Setup 1.0.2.exe
+```
+
+이 파일은 자격증명을 포함하므로 GitHub Release에 업로드하지 않고 직접 현장 배포에만 사용합니다.
+
+비상용 다중 파일 패키지:
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\prepare-deployment-package.ps1
 ```
