@@ -79,6 +79,7 @@
 const DRIVE_CATEGORY = {
   BOARD_UPLOADS:    'Board_Uploads',  // 게시판 첨부파일
   CERTIFICATE:      '성적서',         // 성적서 (중앙 업로드)
+  MANAGEMENT_PHOTO: '관리사진',       // 현장 업무사진 통합 보관
   WATER_ANALYSIS:   '수질분석',       // 수질분석 사진 (현장 업로드)
   MEDICINE_RECEIPT: '약품입고',       // 약품입고 사진 (향후 구현)
   SLUDGE:           '슬러지',         // 슬러지 사진 (향후 구현)
@@ -122,6 +123,14 @@ function boardUploadsSegments() {
  */
 function certificateFolderSegments(date) {
   return [DRIVE_CATEGORY.CERTIFICATE, yearOf(date), monthOf(date)];
+}
+
+/**
+ * 현장 업무사진 통합 폴더
+ * → ROOT/관리사진/{year}/{month}/
+ */
+function managementPhotoSegments(date) {
+  return [DRIVE_CATEGORY.MANAGEMENT_PHOTO, yearOf(date), monthOf(date)];
 }
 
 /**
@@ -241,6 +250,17 @@ function sludgePhotoName(date, index = 1, ext = '.jpg') {
   return [date, '슬러지', String(index)].join('-') + ext;
 }
 
+/**
+ * 현장 업무사진 통합 파일명
+ * 형식: {date}_{현장명}_{업무항목}[순번].jpg
+ */
+function managementPhotoName(date, siteName, itemLabel, index = 0, ext = '.jpg') {
+  const normalizedExt = String(ext || '.jpg').startsWith('.') ? String(ext || '.jpg') : `.${ext}`;
+  const sequence = Number(index) > 0 ? String(Number(index)) : '';
+  const parts = [date, sanitize(siteName), `${sanitize(itemLabel)}${sequence}`].filter(Boolean);
+  return `${parts.join('_')}${normalizedExt.toLowerCase()}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // 5. exports
 // ─────────────────────────────────────────────────────────────────────
@@ -254,12 +274,14 @@ module.exports = {
 // ─────────────────────────────────────────────────────────────────────
   boardUploadsSegments,
   certificateFolderSegments,
+  managementPhotoSegments,
   waterAnalysisPhotoSegments,
   medicinePhotoSegments,     // 향후 구현
   sludgePhotoSegments,       // 향후 구현
 
 // ─────────────────────────────────────────────────────────────────────
   certificateFileName,
+  managementPhotoName,
   waterAnalysisPhotoName,
   medicinePhotoName,         // 향후 구현
   sludgePhotoName,           // 향후 구현

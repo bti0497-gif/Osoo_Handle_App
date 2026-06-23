@@ -131,6 +131,29 @@ async function getOrCreateFolder(parentFolderId, folderName) {
   return folder.data;
 }
 
+async function findFolderInFolder(parentFolderId, folderName) {
+  if (!drive) return null;
+  const normalizedParentId = String(parentFolderId || '').trim();
+  const normalizedName = String(folderName || '').trim();
+  if (!normalizedParentId || !normalizedName) return null;
+
+  const response = await drive.files.list({
+    q: [
+      "mimeType='application/vnd.google-apps.folder'",
+      `name='${escapeDriveQueryValue(normalizedName)}'`,
+      `'${normalizedParentId}' in parents`,
+      'trashed=false'
+    ].join(' and '),
+    fields: 'files(id, name, webViewLink)',
+    spaces: 'drive',
+    includeItemsFromAllDrives: true,
+    supportsAllDrives: true,
+    pageSize: 10
+  });
+
+  return (response.data.files || [])[0] || null;
+}
+
 async function findFileInFolder(parentFolderId, fileName) {
   if (!drive) return null;
   const normalizedParentId = String(parentFolderId || '').trim();
@@ -160,6 +183,15 @@ async function getOrCreateFolderPath(rootFolderId, segments = []) {
     currentFolder = await getOrCreateFolder(currentFolder.id, segment);
   }
 
+  return currentFolder;
+}
+
+async function findFolderPath(rootFolderId, segments = []) {
+  let currentFolder = { id: rootFolderId, name: '', webViewLink: '' };
+  for (const segment of segments) {
+    currentFolder = await findFolderInFolder(currentFolder.id, segment);
+    if (!currentFolder) return null;
+  }
   return currentFolder;
 }
 
@@ -206,8 +238,10 @@ module.exports = {
   isDriveConfigured,
   getDriveRootFolderId,
   getOrCreateFolder,
+  findFolderInFolder,
   findFileInFolder,
   getOrCreateFolderPath,
+  findFolderPath,
   uploadBufferToFolder,
   getOrCreateBoardUploadsFolder
 };

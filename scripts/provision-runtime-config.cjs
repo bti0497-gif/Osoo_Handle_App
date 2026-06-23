@@ -2,9 +2,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { RUNTIME_CONFIG_DIR } = require('../server/config/runtimeConfig.cjs');
-
 const sourceDir = path.resolve(process.argv[2] || path.join(__dirname, '..'));
+const appDataRoot = process.env.APPDATA || process.env.LOCALAPPDATA || path.join(__dirname, '..');
+const runtimeConfigDir = path.join(appDataRoot, 'wastewater-treatment-plant', 'config');
 const mappings = [
   { target: '.env.local', candidates: ['.env.local'] },
   { target: 'google-key.json', candidates: ['google-key.json', 'server/config/google-key.json'] },
@@ -24,7 +24,7 @@ function findSource(candidates) {
     .find((candidate) => fs.existsSync(candidate));
 }
 
-fs.mkdirSync(RUNTIME_CONFIG_DIR, { recursive: true });
+fs.mkdirSync(runtimeConfigDir, { recursive: true });
 const copied = [];
 const missing = [];
 
@@ -34,17 +34,17 @@ for (const mapping of mappings) {
     missing.push(mapping.target);
     continue;
   }
-  fs.copyFileSync(source, path.join(RUNTIME_CONFIG_DIR, mapping.target));
+  fs.copyFileSync(source, path.join(runtimeConfigDir, mapping.target));
   copied.push(mapping.target);
 }
 
 const oauthSecret = fs.readdirSync(sourceDir)
   .find((name) => /^client_secret_.*\.json$/i.test(name));
 if (oauthSecret) {
-  fs.copyFileSync(path.join(sourceDir, oauthSecret), path.join(RUNTIME_CONFIG_DIR, oauthSecret));
+  fs.copyFileSync(path.join(sourceDir, oauthSecret), path.join(runtimeConfigDir, oauthSecret));
   copied.push(oauthSecret);
 }
 
-console.log(`런타임 설정 위치: ${RUNTIME_CONFIG_DIR}`);
+console.log(`런타임 설정 위치: ${runtimeConfigDir}`);
 console.log(`복사 완료: ${copied.length ? copied.join(', ') : '없음'}`);
 if (missing.length) console.warn(`선택 파일 누락: ${missing.join(', ')}`);

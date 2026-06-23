@@ -97,28 +97,6 @@ const normalizeWaterValue = (value) => {
     return normalized;
 };
 
-const buildBulkSaveItems = (rows = []) => {
-    if (!Array.isArray(rows) || rows.length === 0) return [];
-
-    return rows.map((item) => ({
-        date: item.date,
-        measurement_group: resolveMeasurementGroup(item),
-        measurement_order: normalizeMeasurementOrder(item.measurement_order),
-        source_type: String(item.source_type || '').trim() || (item.qntech_project_id ? 'qntech' : 'manual'),
-        source_label: item.source_label ?? null,
-        qntech_project_id: item.qntech_project_id ?? null,
-        location: item.location,
-        nh3_n: item.nh3_n ?? null,
-        no3_n: item.no3_n ?? null,
-        po4_p: item.po4_p ?? null,
-        alkalinity: item.alkalinity ?? null,
-        tn: item.tn ?? null,
-        tp: item.tp ?? null,
-        cod: item.cod ?? null,
-        ss: item.ss ?? null,
-    }));
-};
-
 const normalizeModalSaveValue = (value) => {
     if (value === undefined || value === null) return null;
     const text = String(value).trim();
@@ -283,16 +261,6 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
         });
     };
 
-    const persistImportedRows = async (rows = []) => {
-        const items = buildBulkSaveItems(rows);
-        if (items.length === 0) return;
-
-        const res = await WaterQualityModel.bulkSave(items);
-        if (!res?.success) {
-            throw new Error(res?.error || 'QnTECH 데이터 저장에 실패했습니다.');
-        }
-    };
-
     const handleImportFromQntech = async (date, silent = false) => {
         setIsImportingFromQntech(true);
         try {
@@ -301,28 +269,40 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
                 throw new Error(result?.error || 'QnTECH 데이터 불러오기에 실패했습니다.');
             }
 
-            await persistImportedRows(result.importedRows || []);
             setLastImportSummary({
                 date: result.date,
                 siteName: result.site?.name || '',
                 importedRowCount: result.summary?.importedRowCount || 0,
                 savedPhotoCount: result.summary?.savedPhotoCount || 0,
                 driveUploadedPhotoCount: result.summary?.driveUploadedPhotoCount || 0,
+                driveUploadErrorCount: result.summary?.driveUploadErrorCount || 0,
+                driveUploadErrors: result.driveUploadErrors || [],
                 photoDirectory: result.photoDirectory,
                 driveFolderUrl: result.driveFolderUrl || '',
                 unmatchedSamples: result.unmatchedSamples || [],
+                matchedExistingData: Boolean(result.summary?.matchedExistingData),
+                matchedRowCount: result.summary?.matchedRowCount || 0,
             });
             setLastRangeImportSummary(null);
 
             await loadReadings();
             const importedRowCount = result.summary?.importedRowCount || 0;
             const savedPhotoCount = result.summary?.savedPhotoCount || 0;
+            const driveUploadErrorCount = result.summary?.driveUploadErrorCount || 0;
 
             if (!silent) {
                 if (importedRowCount === 0 && savedPhotoCount === 0) {
                     showToast?.('데이터가 없습니다.', 'error');
+                } else if (result.summary?.matchedExistingData) {
+                    const driveWarning = driveUploadErrorCount > 0
+                        ? `, Drive 업로드 실패 ${driveUploadErrorCount}건`
+                        : '';
+                    showToast?.(`기존 수질값과 일치하여 사진만 보강했습니다. 사진 ${savedPhotoCount}건${driveWarning}`);
                 } else {
-                    showToast?.(`QnTECH 데이터를 저장했습니다. 값 ${importedRowCount}건, 사진 ${savedPhotoCount}건`);
+                    const driveWarning = driveUploadErrorCount > 0
+                        ? `, Drive 업로드 실패 ${driveUploadErrorCount}건`
+                        : '';
+                    showToast?.(`QnTECH 데이터를 저장했습니다. 값 ${importedRowCount}건, 사진 ${savedPhotoCount}건${driveWarning}`);
                 }
             }
             return result;
@@ -347,6 +327,7 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
             insertedRowCount: result.summary?.insertedRowCount || 0,
             savedPhotoCount: result.summary?.savedPhotoCount || 0,
             driveUploadedPhotoCount: result.summary?.driveUploadedPhotoCount || 0,
+            driveUploadErrorCount: result.summary?.driveUploadErrorCount || 0,
             existingValueDateCount: result.summary?.existingValueDateCount || 0,
             existingValueDates: result.existingValueDates || [],
             insertedDates: result.insertedDates || [],

@@ -57,7 +57,7 @@ if ($missingSources.Count -gt 0) {
 Write-Host '[1/3] Provisioning user configuration and service credentials.'
 & $provisionScript -SourceDir $credentialRoot
 
-$runtimeConfigRoot = Join-Path $env:APPDATA 'Osoo_Handle_App\config'
+$runtimeConfigRoot = Join-Path $env:APPDATA 'wastewater-treatment-plant\config'
 $requiredFiles = @(
     '.env.local',
     'google-key.json',

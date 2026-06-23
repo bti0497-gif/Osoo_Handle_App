@@ -153,12 +153,16 @@ export function useMedicineInViewModel(currentUser) {
   }, []);
 
   const uploadBrowserOnlyPhotos = async (date, entries = []) => {
+    let driveUploadFailureCount = 0;
     for (const { name, file } of entries) {
       const res = await MedicineInModel.uploadPhoto(date, name, file);
       if (!res?.success) {
         console.warn(`[medicine-in] 사진 업로드 실패 ${name}:`, res?.error);
+      } else if (res.driveUploaded === false) {
+        driveUploadFailureCount += 1;
       }
     }
+    return driveUploadFailureCount;
   };
 
   const collectPhotoPathsByName = (targetTab) => {
@@ -201,7 +205,7 @@ export function useMedicineInViewModel(currentUser) {
       const date = tab === 'medicine' ? medicineDate : kitDate;
       const { photoPathsByName, uploadTargets } = collectPhotoPathsByName(tab);
 
-      await uploadBrowserOnlyPhotos(date, uploadTargets);
+      const browserDriveFailures = await uploadBrowserOnlyPhotos(date, uploadTargets);
 
       const items = targetItems.map((item) => ({ name: item.name, purchase: Number(item.purchase) || 0 }));
       const result = await MedicineInModel.saveItems({
@@ -213,7 +217,16 @@ export function useMedicineInViewModel(currentUser) {
       });
 
       if (!result?.success) throw new Error(result?.error || '저장 실패');
-      showToast(tab === 'medicine' ? '약품 입고량이 저장되었습니다.' : '키트 입고량이 저장되었습니다.');
+      const driveFailureCount = browserDriveFailures + Number(result.driveUploadFailureCount || 0);
+      const successMessage = tab === 'medicine'
+        ? '약품 입고량이 저장되었습니다.'
+        : '키트 입고량이 저장되었습니다.';
+      showToast(
+        driveFailureCount > 0
+          ? `${successMessage} 로컬 사진은 저장됐지만 Drive 업로드 ${driveFailureCount}건은 실패했습니다.`
+          : successMessage,
+        driveFailureCount > 0 ? 'warning' : 'success'
+      );
     } catch (err) {
       showToast(err.message || '저장에 실패했습니다.', 'error');
     } finally {
@@ -230,23 +243,32 @@ export function useMedicineInViewModel(currentUser) {
       const medPhotos = collectPhotoPathsByName('medicine');
       const kitPhotos = collectPhotoPathsByName('kit');
 
-      await uploadBrowserOnlyPhotos(medicineDate, medPhotos.uploadTargets);
-      await uploadBrowserOnlyPhotos(kitDate, kitPhotos.uploadTargets);
+      let driveUploadFailureCount = 0;
+      driveUploadFailureCount += await uploadBrowserOnlyPhotos(medicineDate, medPhotos.uploadTargets);
+      driveUploadFailureCount += await uploadBrowserOnlyPhotos(kitDate, kitPhotos.uploadTargets);
 
-      await MedicineInModel.saveItems({
+      const medicineSaveResult = await MedicineInModel.saveItems({
         tab: 'medicine',
         date: medicineDate,
         items: medItems,
         ...requestContext,
         ...(Object.keys(medPhotos.photoPathsByName).length > 0 && { photoPaths: medPhotos.photoPathsByName }),
       });
-      await MedicineInModel.saveItems({
+      const kitSaveResult = await MedicineInModel.saveItems({
         tab: 'kit',
         date: kitDate,
         items: kitSaveItems,
         ...requestContext,
         ...(Object.keys(kitPhotos.photoPathsByName).length > 0 && { photoPaths: kitPhotos.photoPathsByName }),
       });
+      if (!medicineSaveResult?.success) {
+        throw new Error(medicineSaveResult?.error || '약품 입고 데이터 저장 실패');
+      }
+      if (!kitSaveResult?.success) {
+        throw new Error(kitSaveResult?.error || '키트 입고 데이터 저장 실패');
+      }
+      driveUploadFailureCount += Number(medicineSaveResult?.driveUploadFailureCount || 0);
+      driveUploadFailureCount += Number(kitSaveResult?.driveUploadFailureCount || 0);
 
       const photoPaths = {};
       medicineItems.forEach((item) => {
@@ -286,7 +308,12 @@ export function useMedicineInViewModel(currentUser) {
       });
 
       if (!result?.success) throw new Error(result?.userMessage || result?.error || '생성 실패');
-      showToast('약품입고일지가 생성되었습니다.');
+      showToast(
+        driveUploadFailureCount > 0
+          ? `약품입고일지가 생성됐습니다. 로컬 사진은 저장됐지만 Drive 업로드 ${driveUploadFailureCount}건은 실패했습니다.`
+          : '약품입고일지가 생성되었습니다.',
+        driveUploadFailureCount > 0 ? 'warning' : 'success'
+      );
     } catch (err) {
       showToast(err.message || '약품입고일지 생성에 실패했습니다.', 'error');
     } finally {

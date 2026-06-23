@@ -13,10 +13,13 @@ const {
   drive,
   getDriveRootFolderId,
   getOrCreateFolderPath,
+  findFolderPath,
   findFileInFolder,
   uploadBufferToFolder,
 } = require('../services/driveService.cjs');
 const {
+  managementPhotoName,
+  managementPhotoSegments,
   medicinePhotoSegments,
   medicinePhotoName,
 } = require('../services/drivePathService.cjs');
@@ -141,11 +144,11 @@ async function uploadMedicinePhotoToDrive(db, date, medicineName, localPath) {
     const siteName = settings.site_name || 'Unknown Site';
     const folder = await getOrCreateFolderPath(
       getDriveRootFolderId(),
-      medicinePhotoSegments(siteName, date)
+      managementPhotoSegments(date)
     );
     return await uploadBufferToFolder({
       folderId: folder.id,
-      fileName: medicinePhotoName(date, medicineName, 0, '.jpg'),
+      fileName: managementPhotoName(date, siteName, medicineName, 0, '.jpg'),
       buffer: fs.readFileSync(localPath),
       mimeType: 'image/jpeg',
     });
@@ -160,13 +163,24 @@ async function findRemoteMedicinePhoto(db, date, medicineName) {
   try {
     const settings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get() || {};
     const siteName = settings.site_name || 'Unknown Site';
-    const folder = await getOrCreateFolderPath(
+    const managementFolder = await getOrCreateFolderPath(
+      getDriveRootFolderId(),
+      managementPhotoSegments(date)
+    );
+    const managementFileName = managementPhotoName(date, siteName, medicineName, 0, '.jpg');
+    const managementFile = await findFileInFolder(managementFolder.id, managementFileName);
+    if (managementFile) {
+      return { ...managementFile, fileName: managementFileName, folderId: managementFolder.id };
+    }
+
+    const legacyFolder = await findFolderPath(
       getDriveRootFolderId(),
       medicinePhotoSegments(siteName, date)
     );
-    const fileName = medicinePhotoName(date, medicineName, 0, '.jpg');
-    const file = await findFileInFolder(folder.id, fileName);
-    return file ? { ...file, fileName, folderId: folder.id } : null;
+    if (!legacyFolder) return null;
+    const legacyFileName = medicinePhotoName(date, medicineName, 0, '.jpg');
+    const legacyFile = await findFileInFolder(legacyFolder.id, legacyFileName);
+    return legacyFile ? { ...legacyFile, fileName: legacyFileName, folderId: legacyFolder.id } : null;
   } catch (err) {
     console.warn(`[medicine-in] Drive 사진 조회 실패 (${medicineName}):`, err.message);
     return null;
@@ -344,6 +358,7 @@ module.exports = function (db, baseDir, appDataPath) {
   router.post('/api/medicine-in/save', async (req, res) => {
     try {
       const { tab, date, items, photoPaths } = req.body;
+      const drivePhotoResults = [];
 
       if (!date || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ success: false, error: '유효하지 않은 요청입니다.' });
@@ -423,7 +438,8 @@ module.exports = function (db, baseDir, appDataPath) {
               const fileName = path.basename(localPath);
               const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(`${yearStr}/${fileName}`)}`;
               updateMedicinePhotoUrl(db, tab, date, medicineName, localUrl);
-              await uploadMedicinePhotoToDrive(db, date, medicineName, localPath);
+              const driveFile = await uploadMedicinePhotoToDrive(db, date, medicineName, localPath);
+              drivePhotoResults.push({ medicineName, uploaded: Boolean(driveFile?.id) });
             }
           } catch (e) {
             console.warn(`[medicine-in save] 사진 저장 실패 (${medicineName}):`, e.message);
@@ -431,7 +447,11 @@ module.exports = function (db, baseDir, appDataPath) {
         }
       }
 
-      res.json({ success: true });
+      res.json({
+        success: true,
+        drivePhotoResults,
+        driveUploadFailureCount: drivePhotoResults.filter((item) => !item.uploaded).length,
+      });
     } catch (err) {
       console.error('[medicine-in save]', err);
       res.status(500).json({ success: false, error: err.message });
@@ -469,8 +489,13 @@ module.exports = function (db, baseDir, appDataPath) {
       const url = `/api/medicine-in/photo?p=${encodeURIComponent(`${yearStr}/${fileName}`)}`;
       updateMedicinePhotoUrl(db, 'medicine', date, medicineName, url);
       updateMedicinePhotoUrl(db, 'kit', date, medicineName, url);
-      await uploadMedicinePhotoToDrive(db, date, medicineName, destPath);
-      res.json({ success: true, url });
+      const driveFile = await uploadMedicinePhotoToDrive(db, date, medicineName, destPath);
+      res.json({
+        success: true,
+        url,
+        driveUploaded: Boolean(driveFile?.id),
+        driveFileId: driveFile?.id || '',
+      });
     } catch (err) {
       console.error('[medicine-in upload-photo]', err);
       res.status(500).json({ success: false, error: err.message });

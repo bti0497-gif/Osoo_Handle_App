@@ -335,6 +335,7 @@ const WaterQualityView = ({ currentUser }) => {
 
         let totalImportedRowCount = 0;
         let totalSavedPhotoCount = 0;
+        let totalDriveUploadErrorCount = 0;
         const success = await batchProcess.executeBatch(
             datesToImport,
             (dateStr) => ({ id: dateStr, title: `${formatImportProgressDate(dateStr)} 데이터` }),
@@ -345,6 +346,7 @@ const WaterQualityView = ({ currentUser }) => {
                 const photoCnt = result?.summary?.savedPhotoCount || 0;
                 totalImportedRowCount += rowCnt;
                 totalSavedPhotoCount += photoCnt;
+                totalDriveUploadErrorCount += result?.summary?.driveUploadErrorCount || 0;
                 updateMessage(`값 ${rowCnt}건, 사진 ${photoCnt}건 저장됨`);
             },
             { stopOnError: false }
@@ -355,7 +357,12 @@ const WaterQualityView = ({ currentUser }) => {
             if (startDate <= modalDate && modalDate <= endDate) {
                 setModalState((prev) => ({ ...prev, mode: 'edit' }));
             }
-            showToast?.(`기간 데이터 불러오기 완료 - 값 ${totalImportedRowCount}건, 사진 ${totalSavedPhotoCount}건`);
+            showToast?.(
+                totalDriveUploadErrorCount > 0
+                    ? `기간 데이터 불러오기 완료 - 값 ${totalImportedRowCount}건, 사진 ${totalSavedPhotoCount}건, Drive 실패 ${totalDriveUploadErrorCount}건`
+                    : `기간 데이터 불러오기 완료 - 값 ${totalImportedRowCount}건, 사진 ${totalSavedPhotoCount}건`,
+                totalDriveUploadErrorCount > 0 ? 'warning' : 'success'
+            );
         } else {
             showToast?.(`일부 불러오기 실패 - 성공: 값 ${totalImportedRowCount}건, 사진 ${totalSavedPhotoCount}건`, 'error');
         }

@@ -16,10 +16,13 @@ const {
   drive,
   getDriveRootFolderId,
   getOrCreateFolderPath,
+  findFolderPath,
   findFileInFolder,
   uploadBufferToFolder,
 } = require('../services/driveService.cjs');
 const {
+  managementPhotoName,
+  managementPhotoSegments,
   sludgePhotoSegments,
 } = require('../services/drivePathService.cjs');
 
@@ -234,11 +237,11 @@ async function uploadSludgePhotoToDrive(db, date, type, localPath, index = 1) {
     const siteName = settings.site_name || 'Unknown Site';
     const folder = await getOrCreateFolderPath(
       getDriveRootFolderId(),
-      sludgePhotoSegments(siteName, date)
+      managementPhotoSegments(date)
     );
     const fileName = type === 'certificate'
-      ? buildCertificateFileName(date)
-      : buildSludgePhotoFileName(date, index);
+      ? managementPhotoName(date, siteName, '청소필증', 0, '.jpg')
+      : managementPhotoName(date, siteName, '슬러지반출', index, '.jpg');
     return await uploadBufferToFolder({
       folderId: folder.id,
       fileName,
@@ -256,17 +259,30 @@ async function findRemoteSludgePhoto(db, date, type) {
   try {
     const settings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get() || {};
     const siteName = settings.site_name || 'Unknown Site';
-    const folder = await getOrCreateFolderPath(
+    const managementFolder = await getOrCreateFolderPath(
+      getDriveRootFolderId(),
+      managementPhotoSegments(date)
+    );
+    const managementCandidates = type === 'certificate'
+      ? [managementPhotoName(date, siteName, '청소필증', 0, '.jpg')]
+      : [managementPhotoName(date, siteName, '슬러지반출', 1, '.jpg')];
+    for (const fileName of managementCandidates) {
+      const file = await findFileInFolder(managementFolder.id, fileName);
+      if (file) return { ...file, fileName, folderId: managementFolder.id };
+    }
+
+    const legacyFolder = await findFolderPath(
       getDriveRootFolderId(),
       sludgePhotoSegments(siteName, date)
     );
+    if (!legacyFolder) return null;
     const dateHyphen = String(date || '').slice(0, 10);
     const candidates = type === 'certificate'
       ? [buildCertificateFileName(date), `${dateHyphen}-청소필증.jpg`]
       : [buildSludgePhotoFileName(date, 1), `${dateHyphen}-슬러지1.jpg`, `${dateHyphen}-슬러지-1.jpg`];
     for (const fileName of candidates) {
-      const file = await findFileInFolder(folder.id, fileName);
-      if (file) return { ...file, fileName, folderId: folder.id };
+      const file = await findFileInFolder(legacyFolder.id, fileName);
+      if (file) return { ...file, fileName, folderId: legacyFolder.id };
     }
     return null;
   } catch (err) {
@@ -484,8 +500,8 @@ module.exports = function (db, baseDir, appDataPath) {
       const sludgeIndex = sludgeLocalPath
         ? (parseSludgePhotoFileName(path.basename(sludgeLocalPath), date)?.index || 1)
         : 1;
-      await uploadSludgePhotoToDrive(db, date, 'sludge', sludgeLocalPath, sludgeIndex);
-      await uploadSludgePhotoToDrive(db, date, 'certificate', certificateLocalPath, 1);
+      const sludgeDriveFile = await uploadSludgePhotoToDrive(db, date, 'sludge', sludgeLocalPath, sludgeIndex);
+      const certificateDriveFile = await uploadSludgePhotoToDrive(db, date, 'certificate', certificateLocalPath, 1);
 
       const sludgeUrl = resolvePhotoUrl(appDataPath, date, '반출');
       const certUrl   = resolvePhotoUrl(appDataPath, date, '청소필증');
@@ -542,6 +558,10 @@ module.exports = function (db, baseDir, appDataPath) {
         sludge_photo_url      : sludgeUrl,
         certificate_photo_url : certUrl,
         sludge_photo_taken_at : finalTakenAt,
+        driveUploads: {
+          sludge: sludgeLocalPath ? Boolean(sludgeDriveFile?.id) : null,
+          certificate: certificateLocalPath ? Boolean(certificateDriveFile?.id) : null,
+        },
       });
     } catch (err) {
       console.error('[sludge-photos save]', err);
@@ -589,7 +609,13 @@ module.exports = function (db, baseDir, appDataPath) {
       const sludgeIndex = isSludge
         ? (parseSludgePhotoFileName(fileName, date)?.index || 1)
         : 1;
-      await uploadSludgePhotoToDrive(db, date, type === 'certificate' ? 'certificate' : 'sludge', destPath, sludgeIndex);
+      const driveFile = await uploadSludgePhotoToDrive(
+        db,
+        date,
+        type === 'certificate' ? 'certificate' : 'sludge',
+        destPath,
+        sludgeIndex
+      );
 
       const existingRow = db.prepare('SELECT id FROM sludge_photo_logs WHERE date = ?').get(date);
       if (existingRow) {
@@ -618,7 +644,13 @@ module.exports = function (db, baseDir, appDataPath) {
         );
       }
 
-      res.json({ success: true, url, sludge_photo_taken_at: takenAt });
+      res.json({
+        success: true,
+        url,
+        sludge_photo_taken_at: takenAt,
+        driveUploaded: Boolean(driveFile?.id),
+        driveFileId: driveFile?.id || '',
+      });
     } catch (err) {
       console.error('[sludge-photos upload-photo]', err);
       res.status(500).json({ success: false, error: err.message });

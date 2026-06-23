@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $sourceRoot = [System.IO.Path]::GetFullPath($SourceDir)
-$targetRoot = Join-Path $env:APPDATA 'Osoo_Handle_App\config'
+$targetRoot = Join-Path $env:APPDATA 'wastewater-treatment-plant\config'
 New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
 
 $mappings = @(

@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { getStoredSheets, getStoredRow, hasStoredData } = require('../excelService.cjs');
 const { isDriveConfigured, getDriveRootFolderId, getOrCreateFolder } = require('../driveService.cjs');
+const { DRIVE_CATEGORY } = require('../drivePathService.cjs');
 const { listReportTemplates } = require('../reportTemplateService.cjs');
 
 const DEFAULT_SITE_SUBFOLDERS = [
@@ -118,15 +119,10 @@ async function ensureSiteStorageFolders(db, settings, siteStorageRoot) {
   if (isDriveConfigured()) {
     try {
       if (folderNameBySite) {
-        driveSiteFolder = await getOrCreateFolder(getDriveRootFolderId(), folderNameBySite);
-        for (const folderName of DEFAULT_SITE_SUBFOLDERS) {
-          const child = await getOrCreateFolder(driveSiteFolder.id, folderName);
-          driveSubFolders.push({
-            id: child.id,
-            name: child.name,
-            url: child.webViewLink,
-          });
-        }
+        driveSiteFolder = await getOrCreateFolder(
+          getDriveRootFolderId(),
+          DRIVE_CATEGORY.MANAGEMENT_PHOTO
+        );
       }
     } catch (driveErr) {
       console.error('[Settings] Drive 사이트/기본폴더 생성 실패:', driveErr.message);

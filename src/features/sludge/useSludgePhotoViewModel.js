@@ -156,6 +156,7 @@ export function useSludgePhotoViewModel() {
     }
     setIsSaving(true);
     try {
+      let driveUploadFailureCount = 0;
       const payload = {
         date: editEntry.date,
         sludge_amount: editEntry.sludge_amount !== '' ? editEntry.sludge_amount : null,
@@ -166,14 +167,23 @@ export function useSludgePhotoViewModel() {
       if (!payload.sludge_photo_path && editEntry.sludgePhotoFile) {
         const r = await SludgePhotoModel.uploadPhoto(editEntry.date, 'sludge', editEntry.sludgePhotoFile);
         if (!r?.success) throw new Error(r?.error || '반출사진 업로드 실패');
+        if (r.driveUploaded === false) driveUploadFailureCount += 1;
       }
       if (!payload.certificate_photo_path && editEntry.certPhotoFile) {
         const r = await SludgePhotoModel.uploadPhoto(editEntry.date, 'certificate', editEntry.certPhotoFile);
         if (!r?.success) throw new Error(r?.error || '청소필증 업로드 실패');
+        if (r.driveUploaded === false) driveUploadFailureCount += 1;
       }
       const result = await SludgePhotoModel.save(payload);
       if (!result?.success) throw new Error(result?.error || '저장 실패');
-      showToast('저장되었습니다.', 'success');
+      driveUploadFailureCount += Object.values(result.driveUploads || {})
+        .filter((uploaded) => uploaded === false).length;
+      showToast(
+        driveUploadFailureCount > 0
+          ? `로컬 저장은 완료됐지만 Drive 업로드 ${driveUploadFailureCount}건은 실패했습니다.`
+          : '저장되었습니다.',
+        driveUploadFailureCount > 0 ? 'warning' : 'success'
+      );
       await loadMonth();
     } catch (err) {
       showToast(err.message || '저장 실패', 'error');

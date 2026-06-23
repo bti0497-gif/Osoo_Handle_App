@@ -9,8 +9,9 @@ const {
   uploadBufferToFolder
 } = require('./driveService.cjs');
 const {
+  managementPhotoName,
+  managementPhotoSegments,
   sanitize,
-  waterAnalysisPhotoSegments,
 } = require('./drivePathService.cjs');
 
 const TARGET_PHOTO_ITEMS = ['암모니아성 질소', '질산성 질소', '오르토인산염', '알칼리도'];
@@ -48,13 +49,13 @@ function buildProjectSourceLabel(project, projectIndex, totalProjects) {
 }
 
 
-async function ensureDrivePhotoFolder(siteName, date) {
+async function ensureDrivePhotoFolder(date) {
   if (!isDriveConfigured()) {
-    return null;
+    throw new Error('Google Drive 인증 또는 루트 폴더가 설정되지 않았습니다.');
   }
 
   const rootFolderId = getDriveRootFolderId();
-  const segments = waterAnalysisPhotoSegments(siteName || 'Unknown Site', date);
+  const segments = managementPhotoSegments(date);
   return getOrCreateFolderPath(rootFolderId, segments);
 }
 
@@ -126,7 +127,17 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
   const photoRoot = resolvePhotoRoot(baseDir, configuredPhotoRoot);
   const photoDir = buildPhotoDirectory(photoRoot, date);
   ensureDirectory(photoDir);
-  const driveFolder = await ensureDrivePhotoFolder(siteName, date);
+  let driveFolder = null;
+  const driveUploadErrors = [];
+  try {
+    driveFolder = await ensureDrivePhotoFolder(date);
+  } catch (error) {
+    driveUploadErrors.push({
+      stage: 'folder',
+      fileName: '',
+      message: error.message,
+    });
+  }
   const sourceProjects = Array.isArray(projects) ? projects : [];
 
   const selectedFiles = [];
@@ -195,18 +206,37 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
     savedPhotos.push(savedPhoto);
 
     if (driveFolder?.id) {
-      const driveFile = await uploadBufferToFolder({
-        folderId: driveFolder.id,
-        fileName: readableName,
-        buffer: downloaded.body,
-        mimeType: downloaded.contentType || 'image/jpeg'
-      });
+      try {
+        const driveItemLabel = ['수질분석', file.sourceLabel, file.itemName]
+          .filter(Boolean)
+          .join('_');
+        const driveFileName = managementPhotoName(
+          date,
+          siteName || 'Unknown Site',
+          driveItemLabel,
+          duplicateIndex > 0 ? duplicateIndex + 1 : 0,
+          ext
+        );
+        const driveFile = await uploadBufferToFolder({
+          folderId: driveFolder.id,
+          fileName: driveFileName,
+          buffer: downloaded.body,
+          mimeType: downloaded.contentType || 'image/jpeg'
+        });
 
-      driveUploadedPhotos.push({
-        ...savedPhoto,
-        driveFileId: driveFile.id,
-        driveUrl: driveFile.webViewLink || driveFile.webContentLink || ''
-      });
+        driveUploadedPhotos.push({
+          ...savedPhoto,
+          driveFileName,
+          driveFileId: driveFile.id,
+          driveUrl: driveFile.webViewLink || driveFile.webContentLink || ''
+        });
+      } catch (error) {
+        driveUploadErrors.push({
+          stage: 'upload',
+          fileName: readableName,
+          message: error.message,
+        });
+      }
     }
   }
 
@@ -217,6 +247,7 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
     driveFolderUrl: driveFolder?.webViewLink || '',
     savedPhotos,
     driveUploadedPhotos,
+    driveUploadErrors,
     identifiedPhotos: selectedFiles.length
   };
 }

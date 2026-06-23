@@ -47,12 +47,82 @@ function enumerateDates(startDate, endDate) {
   return dates;
 }
 
+function normalizeComparableValue(value) {
+  if (value === null || value === undefined) return '';
+  const text = String(value).trim();
+  if (!text) return '';
+  const numeric = Number(text);
+  return Number.isFinite(numeric) ? `n:${numeric}` : `s:${text}`;
+}
+
+function buildComparableRowKey(row = {}) {
+  return [
+    String(row.location || '유입수').trim(),
+    String(row.item_code || '').trim(),
+  ].join('|');
+}
+
+function waterRowsMatchExisting(db, importedRows, metadata = {}) {
+  if (!Array.isArray(importedRows) || importedRows.length === 0) return false;
+
+  const dates = [...new Set(importedRows.map((row) => normalizeDateInput(row.date)))];
+  if (dates.length !== 1) return false;
+
+  const siteId = String(metadata.siteId || '').trim();
+  const existingRows = siteId
+    ? db.prepare(`
+        SELECT measurement_order, location, item_code, result_value
+        FROM qntech_water_quality
+        WHERE date = ? AND site_id = ?
+      `).all(dates[0], siteId)
+    : db.prepare(`
+        SELECT measurement_order, location, item_code, result_value
+        FROM qntech_water_quality
+        WHERE date = ?
+      `).all(dates[0]);
+
+  if (existingRows.length === 0) return false;
+
+  const existingValues = new Map();
+  for (const row of existingRows) {
+    const key = buildComparableRowKey(row);
+    const values = existingValues.get(key) || [];
+    values.push(normalizeComparableValue(row.result_value));
+    existingValues.set(key, values);
+  }
+
+  for (const row of importedRows) {
+    const key = buildComparableRowKey(row);
+    const expectedValue = normalizeComparableValue(row.result_value ?? row.result_numeric);
+    const candidates = existingValues.get(key) || [];
+    const matchedIndex = candidates.indexOf(expectedValue);
+    if (matchedIndex < 0) return false;
+    candidates.splice(matchedIndex, 1);
+  }
+
+  return true;
+}
+
 function persistWaterRows(db, importedRows) {
   if (!Array.isArray(importedRows) || importedRows.length === 0) {
-    return { insertedRowCount: 0, upsertedRowCount: 0 };
+    return {
+      insertedRowCount: 0,
+      upsertedRowCount: 0,
+      matchedExistingData: false,
+      matchedRowCount: 0,
+    };
   }
 
   const metadata = getCurrentRecordMetadata(db);
+  if (waterRowsMatchExisting(db, importedRows, metadata)) {
+    return {
+      insertedRowCount: 0,
+      upsertedRowCount: 0,
+      matchedExistingData: true,
+      matchedRowCount: importedRows.length,
+    };
+  }
+
   const existingRowStmt = db.prepare(`
     SELECT 1
     FROM qntech_water_quality
@@ -116,7 +186,9 @@ function persistWaterRows(db, importedRows) {
   runInsert(importedRows);
   return {
     insertedRowCount,
-    upsertedRowCount: importedRows.length
+    upsertedRowCount: importedRows.length,
+    matchedExistingData: false,
+    matchedRowCount: 0,
   };
 }
 
@@ -208,6 +280,7 @@ async function importQntechWaterAll(db, baseDir, date) {
     identifiedPhotos: photoResult.identifiedPhotos,
     savedPhotos: photoResult.savedPhotos,
     driveUploadedPhotos: photoResult.driveUploadedPhotos,
+    driveUploadErrors: photoResult.driveUploadErrors,
     photoRoot: photoResult.photoRoot,
     photoDirectory: photoResult.photoDirectory,
     driveFolderId: photoResult.driveFolderId,
@@ -215,8 +288,11 @@ async function importQntechWaterAll(db, baseDir, date) {
     summary: {
       importedRowCount: persistResult.upsertedRowCount,
       insertedRowCount: persistResult.insertedRowCount,
+      matchedExistingData: persistResult.matchedExistingData,
+      matchedRowCount: persistResult.matchedRowCount,
       savedPhotoCount: photoResult.savedPhotos.length,
-      driveUploadedPhotoCount: photoResult.driveUploadedPhotos.length
+      driveUploadedPhotoCount: photoResult.driveUploadedPhotos.length,
+      driveUploadErrorCount: photoResult.driveUploadErrors.length
     }
   };
 }
@@ -232,6 +308,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
   const summaryRows = [];
   let totalSavedPhotos = 0;
   let totalDriveUploadedPhotos = 0;
+  let totalDriveUploadErrors = 0;
   let totalInsertedRows = 0;
   let photoRoot = null;
 
@@ -262,7 +339,8 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
     });
     const persistResult = persistWaterRows(db, mapped.importedRows);
     const insertedRowCount = persistResult.insertedRowCount;
-    const hadExistingValues = persistResult.upsertedRowCount > insertedRowCount;
+    const hadExistingValues = persistResult.matchedExistingData
+      || persistResult.upsertedRowCount > insertedRowCount;
 
     const photoResult = await saveProjectPhotos({
       db,
@@ -278,16 +356,21 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
     photoRoot = photoResult.photoRoot;
     totalSavedPhotos += photoResult.savedPhotos.length;
     totalDriveUploadedPhotos += photoResult.driveUploadedPhotos.length;
+    totalDriveUploadErrors += photoResult.driveUploadErrors.length;
     totalInsertedRows += insertedRowCount;
 
     summaryRows.push({
       date,
       siteName: context.site?.name || '',
       existingValues: hadExistingValues,
+      matchedExistingData: persistResult.matchedExistingData,
+      matchedRowCount: persistResult.matchedRowCount,
       projectCount: context.projects.length,
       insertedRowCount,
       savedPhotoCount: photoResult.savedPhotos.length,
       driveUploadedPhotoCount: photoResult.driveUploadedPhotos.length,
+      driveUploadErrorCount: photoResult.driveUploadErrors.length,
+      driveUploadErrors: photoResult.driveUploadErrors,
       photoDirectory: photoResult.photoDirectory,
       driveFolderUrl: photoResult.driveFolderUrl,
       unmatchedSamples: mapped.unmatchedSamples
@@ -309,6 +392,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
     processedDates: dates.length,
     insertedDates: summaryRows.filter((item) => item.insertedRowCount > 0).map((item) => item.date),
     existingValueDates: summaryRows.filter((item) => item.existingValues).map((item) => item.date),
+    kitSyncDates: summaryRows.filter((item) => !item.matchedExistingData).map((item) => item.date),
     summaryRows,
     photoRoot,
     driveFolderUrl: summaryRows.find((item) => item.driveFolderUrl)?.driveFolderUrl || '',
@@ -316,6 +400,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
       insertedRowCount: totalInsertedRows,
       savedPhotoCount: totalSavedPhotos,
       driveUploadedPhotoCount: totalDriveUploadedPhotos,
+      driveUploadErrorCount: totalDriveUploadErrors,
       existingValueDateCount: summaryRows.filter((item) => item.existingValues).length
     }
   };
@@ -326,5 +411,6 @@ module.exports = {
   importQntechWaterPhotos,
   importQntechWaterAll,
   importQntechWaterRange,
-  fetchProjectsForDate
+  fetchProjectsForDate,
+  waterRowsMatchExisting,
 };

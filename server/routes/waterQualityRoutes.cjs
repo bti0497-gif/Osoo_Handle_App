@@ -237,10 +237,14 @@ module.exports = function (db, baseDir) {
     try {
       const result = await importQntechWaterAll(db, baseDir, date);
       const metadata = getCurrentRecordMetadata(db, req.body);
-      const kitUsageSync = result?.date
+      const kitUsageSync = result?.date && !result?.summary?.matchedExistingData
         ? syncAnalysisKitUsageForRange(db, result.date, result.date, metadata)
         : null;
-      res.json({ ...result, kitUsageSync });
+      res.json({
+        ...result,
+        kitUsageSync,
+        kitUsageSkipped: Boolean(result?.summary?.matchedExistingData),
+      });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message, error: err.message });
     }
@@ -263,7 +267,9 @@ module.exports = function (db, baseDir) {
         }
       });
       const metadata = getCurrentRecordMetadata(db, req.body);
-      const kitUsageSync = syncAnalysisKitUsageForRange(db, result.startDate, result.endDate, metadata);
+      const kitUsageSync = (result.kitSyncDates || []).map((syncDate) => (
+        syncAnalysisKitUsageForRange(db, syncDate, syncDate, metadata)
+      ));
 
       rangeImportProgress = {
         ...rangeImportProgress,

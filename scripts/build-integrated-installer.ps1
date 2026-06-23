@@ -15,23 +15,11 @@ if (-not $OutputDir) {
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDir)
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 
-$appInstallerCandidates = @(
-    (Join-Path $projectRoot "release\deployment-package\Osoo Handle App Setup $AppVersion.exe"),
-    (Join-Path $projectRoot "release\Osoo Handle App Setup $AppVersion.exe")
-)
-$appInstaller = $appInstallerCandidates |
-    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
-    Select-Object -First 1
-if (-not $appInstaller) {
-    throw "앱 설치파일을 찾을 수 없습니다: Osoo Handle App Setup $AppVersion.exe"
-}
-
 $requiredFiles = @{
-    ENV_FILE = Join-Path $projectRoot '.env.local'
-    GOOGLE_KEY_FILE = Join-Path $projectRoot 'server\config\google-key.json'
-    BIGQUERY_KEY_FILE = Join-Path $projectRoot 'server\config\work-jindan-194620a46d59.json'
-    FIREBASE_KEY_FILE = Join-Path $projectRoot 'server\config\firebase-service-account.json'
-    INSTALLER_ICON = Join-Path $projectRoot 'public\icon.ico'
+    '.env.local' = Join-Path $projectRoot '.env.local'
+    'google-key.json' = Join-Path $projectRoot 'server\config\google-key.json'
+    'bigquery-service-account.json' = Join-Path $projectRoot 'server\config\work-jindan-194620a46d59.json'
+    'firebase-service-account.json' = Join-Path $projectRoot 'server\config\firebase-service-account.json'
 }
 
 foreach ($entry in $requiredFiles.GetEnumerator()) {
@@ -45,44 +33,132 @@ $oauthFile = Get-ChildItem -LiteralPath $projectRoot -File -Filter 'client_secre
 if (-not $oauthFile) {
     throw 'Google OAuth client_secret_*.json 파일을 찾을 수 없습니다.'
 }
+$requiredFiles[$oauthFile.Name] = $oauthFile.FullName
 
-$makensisCandidates = @(
-    (Join-Path $env:LOCALAPPDATA 'electron-builder\Cache\nsis\nsis-3.0.4.1-nsis-3.0.4.1\Bin\makensis.exe'),
-    'C:\Program Files (x86)\NSIS\makensis.exe',
-    'C:\Program Files\NSIS\makensis.exe'
-)
-$makensis = $makensisCandidates |
-    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
-    Select-Object -First 1
-if (-not $makensis) {
-    throw 'NSIS makensis.exe를 찾을 수 없습니다. electron-builder를 먼저 실행하세요.'
+$packageJson = Get-Content -Raw -LiteralPath (Join-Path $projectRoot 'package.json') |
+    ConvertFrom-Json
+if ($packageJson.version -ne $AppVersion) {
+    throw "package.json 버전($($packageJson.version))과 요청 버전($AppVersion)이 다릅니다."
 }
 
+$buildRoot = Join-Path $outputRoot '.integrated-build'
+$includeFile = Join-Path $buildRoot 'installer-credentials.nsh'
+$configFile = Join-Path $buildRoot 'electron-builder.integrated.cjs'
 $outputFile = Join-Path $outputRoot "Osoo Handle App Integrated Setup $AppVersion.exe"
-$nsiScript = Join-Path $PSScriptRoot 'integrated-installer.nsi'
 
-$defines = @(
-    "/DAPP_VERSION=$AppVersion",
-    "/DOUTPUT_FILE=$outputFile",
-    "/DAPP_INSTALLER=$appInstaller",
-    "/DOAUTH_FILE=$($oauthFile.FullName)",
-    "/DOAUTH_TARGET_NAME=$($oauthFile.Name)"
+function ConvertTo-JsSingleQuotedString([string]$Value) {
+    return $Value.Replace('\', '\\').Replace("'", "\'")
+}
+
+function ConvertTo-NsisSourcePath([string]$Value) {
+    return $Value.Replace('$', '$$').Replace('"', '$\"')
+}
+
+if (Test-Path -LiteralPath $buildRoot) {
+    Remove-Item -LiteralPath $buildRoot -Recurse -Force
+}
+New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
+
+$includeLines = @(
+    '!macro customInstall'
+    '  SetShellVarContext current'
+    '  DetailPrint "Installing shared service configuration."'
+    '  CreateDirectory "$APPDATA\wastewater-treatment-plant\config"'
+    '  SetOutPath "$APPDATA\wastewater-treatment-plant\config"'
 )
-foreach ($entry in $requiredFiles.GetEnumerator()) {
-    $defines += "/D$($entry.Key)=$($entry.Value)"
+foreach ($entry in $requiredFiles.GetEnumerator() | Sort-Object Key) {
+    $sourcePath = ConvertTo-NsisSourcePath $entry.Value
+    $includeLines += "  File /oname=$($entry.Key) `"$sourcePath`""
 }
-
-Write-Host "Building integrated installer: $outputFile"
-& $makensis @defines $nsiScript
-if ($LASTEXITCODE -ne 0) {
-    throw "NSIS 통합 설치파일 생성에 실패했습니다. 종료 코드: $LASTEXITCODE"
+$includeLines += '  DetailPrint "Verifying shared service configuration."'
+foreach ($entry in $requiredFiles.GetEnumerator() | Sort-Object Key) {
+    $includeLines += "  IfFileExists `"`$APPDATA\wastewater-treatment-plant\config\$($entry.Key)`" +2 0"
+    $includeLines += "    Abort `"Failed to install required configuration: $($entry.Key)`""
 }
+$includeLines += @(
+    '  DetailPrint "Shared service configuration installed."'
+    '!macroend'
+)
+Set-Content -LiteralPath $includeFile -Value $includeLines -Encoding utf8
 
-if (-not (Test-Path -LiteralPath $outputFile -PathType Leaf)) {
-    throw "통합 설치파일이 생성되지 않았습니다: $outputFile"
+$baseConfigPath = ConvertTo-JsSingleQuotedString (Join-Path $projectRoot 'electron-builder.config.cjs')
+$includeConfigPath = ConvertTo-JsSingleQuotedString $includeFile
+$outputConfigPath = ConvertTo-JsSingleQuotedString $outputRoot
+$configText = @"
+const base = require('$baseConfigPath');
+
+module.exports = {
+  ...base,
+  directories: {
+    ...base.directories,
+    output: '$outputConfigPath',
+  },
+  artifactName: 'Osoo Handle App Integrated Setup `${version}.`${ext}',
+  nsis: {
+    ...base.nsis,
+    include: '$includeConfigPath',
+    perMachine: false,
+    allowElevation: false,
+    allowToChangeInstallationDirectory: false,
+  },
+  publish: null,
+};
+"@
+Set-Content -LiteralPath $configFile -Value $configText -Encoding utf8
+
+try {
+    if (Test-Path -LiteralPath $outputFile) {
+        Remove-Item -LiteralPath $outputFile -Force
+    }
+
+    Write-Host 'Rebuilding native modules for Electron...'
+    & npx.cmd '@electron/rebuild' --force --arch=x64 --electron-version=40.6.0
+    if ($LASTEXITCODE -ne 0) {
+        throw "Electron 네이티브 모듈 재빌드에 실패했습니다. 종료 코드: $LASTEXITCODE"
+    }
+
+    Write-Host 'Building renderer...'
+    & npm.cmd run build
+    if ($LASTEXITCODE -ne 0) {
+        throw "렌더러 빌드에 실패했습니다. 종료 코드: $LASTEXITCODE"
+    }
+
+    Write-Host "Building single-stage integrated installer: $outputFile"
+    & npx.cmd electron-builder --config $configFile --win nsis
+    if ($LASTEXITCODE -ne 0) {
+        throw "통합 설치파일 생성에 실패했습니다. 종료 코드: $LASTEXITCODE"
+    }
+
+    if (-not (Test-Path -LiteralPath $outputFile -PathType Leaf)) {
+        throw "통합 설치파일이 생성되지 않았습니다: $outputFile"
+    }
+
+    $unpackedAsar = Join-Path $outputRoot 'win-unpacked\resources\app.asar'
+    Write-Host 'Validating packaged application...'
+    & node.exe scripts\validate-release.cjs --asar-path $unpackedAsar
+    if ($LASTEXITCODE -ne 0) {
+        throw "패키지 검증에 실패했습니다. 종료 코드: $LASTEXITCODE"
+    }
+
+    $unpackedRoot = Join-Path $outputRoot 'win-unpacked'
+    if (Test-Path -LiteralPath $unpackedRoot) {
+        Remove-Item -LiteralPath $unpackedRoot -Recurse -Force
+    }
+    $blockMap = "$outputFile.blockmap"
+    if (Test-Path -LiteralPath $blockMap) {
+        Remove-Item -LiteralPath $blockMap -Force
+    }
+
+    $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $outputFile
+    Write-Host "Integrated installer created: $outputFile"
+    Write-Host "Size: $((Get-Item -LiteralPath $outputFile).Length) bytes"
+    Write-Host "SHA256: $($hash.Hash)"
 }
+finally {
+    if (Test-Path -LiteralPath $buildRoot) {
+        Remove-Item -LiteralPath $buildRoot -Recurse -Force
+    }
 
-$hash = Get-FileHash -Algorithm SHA256 -LiteralPath $outputFile
-Write-Host "Integrated installer created: $outputFile"
-Write-Host "Size: $((Get-Item -LiteralPath $outputFile).Length) bytes"
-Write-Host "SHA256: $($hash.Hash)"
+    Write-Host 'Restoring native modules for the local Node.js runtime...'
+    & npm.cmd rebuild better-sqlite3
+}
