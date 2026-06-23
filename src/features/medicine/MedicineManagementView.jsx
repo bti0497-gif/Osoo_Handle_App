@@ -44,7 +44,7 @@ const MedicineManagementView = ({ currentUser }) => {
     const { showAlert } = useDialog();
     const { itemState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
-    const { history = [], loading, medicineTypes = [], refresh, saveModalDraft } = useMedicineViewModel(currentUser, { showAlert });
+    const { history = [], loading, medicineTypes = [], refresh } = useMedicineViewModel(currentUser, { showAlert });
 
     const [selectedDate, setSelectedDate] = useState(null);
     const [modalState, setModalState] = useState({ open: false, tab: 'medicine', mode: 'add' });
@@ -143,17 +143,9 @@ const MedicineManagementView = ({ currentUser }) => {
         openModal(hasSelectedRowData() ? 'edit' : 'add');
     };
 
-    const handleSaveDraft = async (payload) => {
-        if (payload.tab !== 'medicine') {
-            showAlert?.('현재 화면에서는 약품관리 데이터만 저장합니다.');
-            return;
-        }
-
-        const result = await saveModalDraft({ date: payload.date, items: payload.items });
-        if (result?.success) {
-            setSelectedDate(payload.date);
-            setModalState((prev) => ({ ...prev, open: false }));
-        }
+    const handleSaveComplete = async ({ date }) => {
+        setSelectedDate(date);
+        await refresh();
     };
 
     const renderCell = (row, col) => {
@@ -248,7 +240,7 @@ const MedicineManagementView = ({ currentUser }) => {
                 initialDate={modalState.mode === 'add' ? todayStr : (selectedDate || todayStr)}
                 contexts={buildModalContexts()}
                 onClose={() => setModalState((prev) => ({ ...prev, open: false }))}
-                onSaveDraft={handleSaveDraft}
+                onSaveComplete={handleSaveComplete}
             />
         </div>
     );

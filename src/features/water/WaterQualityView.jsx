@@ -119,7 +119,6 @@ const WaterQualityView = ({ currentUser }) => {
         refresh,
         isImportingFromQntech,
         handleImportFromQntech,
-        saveModalDraft,
     } = useWaterQualityViewModel(currentUser, { showToast });
 
     const batchProcess = useBatchProcess();
@@ -362,24 +361,9 @@ const WaterQualityView = ({ currentUser }) => {
         }
     };
 
-    const handleSaveDraft = async (payload) => {
-        if (payload.tab !== 'water') {
-            showAlert?.('현재 화면에서는 수질분석 데이터만 저장합니다.');
-            return;
-        }
-
-        const result = await saveModalDraft({
-            date: payload.date,
-            items: payload.items,
-            measurementOrder: payload.measurementOrder,
-            measurementGroup: payload.measurementGroup,
-            sourceType: payload.sourceType,
-            sourceLabel: payload.sourceLabel,
-            qntechProjectId: payload.qntechProjectId,
-        });
-        if (result?.success) {
-            setModalState((prev) => ({ ...prev, open: false }));
-        }
+    const handleSaveComplete = async ({ date }) => {
+        await refresh();
+        setModalState((prev) => ({ ...prev, date }));
     };
 
     const getRowStyle = (row, _selected, isHovered) => {
@@ -488,9 +472,8 @@ const WaterQualityView = ({ currentUser }) => {
                         po4pLocations
                     ) ? 'edit' : 'add',
                 }))}
-                onSaveDraft={handleSaveDraft}
+                onSaveComplete={handleSaveComplete}
                 onValidationError={(message) => showAlert?.(message)}
-                onConfirmPartialSave={(message) => showConfirm?.(message)}
             />
 
             <BatchProgressDialog

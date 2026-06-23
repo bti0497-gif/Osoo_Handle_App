@@ -1,7 +1,6 @@
-﻿const bigQuerySyncService = require('../services/bigQuerySyncService.cjs');
+const { runSyncIfIdle } = require('../services/bigQueryTriggerService.cjs');
 
-// 설정: 동기화 주기 (밀리초 단위)
-// 기본값: 10분 (10 * 60 * 1000)
+// 유휴 상태 점검 주기. 실제 전송은 마지막 저장 후 설정된 유휴시간이 지난 경우에만 실행한다.
 const SYNC_INTERVAL_MS = 10 * 60 * 1000;
 
 let intervalId = null;
@@ -15,11 +14,11 @@ async function runSync() {
 
   isSyncing = true;
   try {
-    // console.log('[Scheduler] BigQuery 동기화 시작...');
-    const results = await bigQuerySyncService.syncAll();
-    
-    // 전송된 데이터가 있을 때만 로그 출력
-    const totalCount = Object.values(results).reduce((sum, res) => sum + (res.count || 0), 0);
+    const result = await runSyncIfIdle('scheduler');
+    if (result?.skipped) return;
+
+    const results = result?.results || {};
+    const totalCount = Object.values(results).reduce((sum, row) => sum + (row.count || 0), 0);
     if (totalCount > 0) {
       console.log(`[Scheduler] 총 ${totalCount}건의 데이터가 BigQuery로 전송되었습니다.`);
     }
@@ -32,11 +31,9 @@ async function runSync() {
 
 function start() {
   if (intervalId) return;
-  
-  console.log(`[Scheduler] 백그라운드 동기화 스케줄러 시작 (주기: ${SYNC_INTERVAL_MS / 1000 / 60}분)`);
-  // 서버 시작 직후 10초 뒤에 한 번 실행 (초기 데이터 적재)
+
+  console.log(`[Scheduler] BigQuery 유휴 동기화 점검 시작 (점검 주기: ${SYNC_INTERVAL_MS / 1000 / 60}분)`);
   setTimeout(runSync, 10000);
-    // 전송된 데이터가 있을 때만 로그 출력
   intervalId = setInterval(runSync, SYNC_INTERVAL_MS);
 }
 

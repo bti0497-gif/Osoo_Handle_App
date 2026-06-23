@@ -82,7 +82,6 @@ const FlowManagementView = ({ currentUser }) => {
         loading,
         correctData,
         refresh,
-        saveModalDraft,
     } = useFlowViewModel(currentUser, { showAlert, flowTypes: flowMeterTypes });
 
     const [selectedDate, setSelectedDate] = useState(null);
@@ -230,17 +229,9 @@ const FlowManagementView = ({ currentUser }) => {
         openModal(hasSelectedRowData() ? 'edit' : 'add');
     };
 
-    const handleSaveDraft = async (payload) => {
-        if (payload.tab !== 'flow') {
-            showAlert?.('현재는 유량관리 저장부터 연결되어 있습니다.');
-            return;
-        }
-
-        const result = await saveModalDraft({ date: payload.date, items: payload.items });
-        if (result?.success) {
-            setSelectedDate(payload.date);
-            setModalState((prev) => ({ ...prev, open: false }));
-        }
+    const handleSaveComplete = async ({ date }) => {
+        setSelectedDate(date);
+        await refresh();
     };
 
     const renderCell = (row, col) => {
@@ -344,7 +335,7 @@ const FlowManagementView = ({ currentUser }) => {
                 initialDate={modalDate}
                 contexts={buildModalContexts()}
                 onClose={() => setModalState((prev) => ({ ...prev, open: false }))}
-                onSaveDraft={handleSaveDraft}
+                onSaveComplete={handleSaveComplete}
                 onValidationError={(message) => showAlert?.(message)}
             />
         </div>

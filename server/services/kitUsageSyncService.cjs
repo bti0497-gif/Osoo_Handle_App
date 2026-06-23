@@ -103,8 +103,9 @@ function syncAnalysisKitUsageForRange(db, startDate, endDate, metadata = {}) {
   db.transaction(() => {
     for (const [date, expected] of expectedByDate.entries()) {
       for (const { kitName } of KIT_FIELD_MAP) {
-        const targetUsage = Number(expected[kitName] || 0);
+        const analysisUsage = Number(expected[kitName] || 0);
         const currentUsage = Number(selectUsageStmt.get(kitName, date, ...siteFilter.params)?.usage_amount || 0);
+        const targetUsage = Math.max(currentUsage, analysisUsage);
         if (currentUsage === targetUsage) {
           alreadyMatchedCellCount += 1;
           continue;

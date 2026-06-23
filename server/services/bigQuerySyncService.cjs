@@ -259,7 +259,14 @@ async function syncTable(tableName) {
     });
 
     // 5-5. 로컬 상태 '완료' (is_synced = 1)로 업데이트
-    const updateStmt = db.prepare(`UPDATE ${tableName} SET is_synced = 1 WHERE id = ?`);
+    // 전송 도중 같은 행이 다시 저장되면 라우트가 is_synced를 0으로 되돌린다.
+    // 이때 이전 전송 작업이 최신 변경까지 완료 처리하지 않도록,
+    // 여전히 '전송 중(2)'인 행만 완료 상태로 변경한다.
+    const updateStmt = db.prepare(`
+      UPDATE ${tableName}
+      SET is_synced = 1
+      WHERE id = ? AND is_synced = 2
+    `);
     db.transaction(() => {
       for (const id of rowIds) updateStmt.run(id);
     })();

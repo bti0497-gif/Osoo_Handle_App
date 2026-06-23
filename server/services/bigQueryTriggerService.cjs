@@ -1,8 +1,30 @@
-﻿const { syncAll } = require('./bigQuerySyncService.cjs');
+const { syncAll } = require('./bigQuerySyncService.cjs');
+
+const DEFAULT_IDLE_DELAY_MS = 30 * 60 * 1000;
+const configuredIdleMinutes = Number(process.env.BIGQUERY_SYNC_IDLE_MINUTES || 30);
+const IDLE_DELAY_MS = Number.isFinite(configuredIdleMinutes) && configuredIdleMinutes > 0
+  ? configuredIdleMinutes * 60 * 1000
+  : DEFAULT_IDLE_DELAY_MS;
 
 let isSyncing = false;
 let hasPending = false;
 let lastReason = '';
+let lastWriteAt = Date.now();
+let idleTimer = null;
+
+function scheduleIdleSync(reason = 'after-save') {
+  lastReason = reason;
+  if (idleTimer) clearTimeout(idleTimer);
+
+  const elapsed = Date.now() - lastWriteAt;
+  const remaining = Math.max(0, IDLE_DELAY_MS - elapsed);
+  idleTimer = setTimeout(() => {
+    idleTimer = null;
+    runSyncIfIdle(`idle:${lastReason || reason}`).catch((err) => {
+      console.error('[BigQuery Trigger] idle sync failed:', err.message);
+    });
+  }, remaining);
+}
 
 async function runSync(reason = 'manual') {
   const isEnabled = String(process.env.BIGQUERY_SYNC_ENABLED || 'true') === 'true';
@@ -31,26 +53,33 @@ async function runSync(reason = 'manual') {
     isSyncing = false;
     if (hasPending) {
       hasPending = false;
-      const pendingReason = lastReason || 'pending';
-      lastReason = '';
-      setTimeout(() => {
-        runSync(`queued:${pendingReason}`).catch((err) => {
-          console.error('[BigQuery Trigger] queued sync failed:', err.message);
-        });
-      }, 0);
+      scheduleIdleSync(`queued:${lastReason || 'pending'}`);
     }
   }
 }
 
-function triggerSync(reason = 'manual') {
-  setTimeout(() => {
-    runSync(reason).catch((err) => {
-      console.error('[BigQuery Trigger] async trigger failed:', err.message);
-    });
-  }, 0);
+function triggerSync(reason = 'after-save') {
+  lastWriteAt = Date.now();
+  scheduleIdleSync(reason);
+}
+
+async function runSyncIfIdle(reason = 'scheduler') {
+  const elapsed = Date.now() - lastWriteAt;
+  if (elapsed < IDLE_DELAY_MS) {
+    scheduleIdleSync(reason);
+    return {
+      queued: true,
+      skipped: true,
+      reason: 'waiting-for-idle',
+      remainingMs: IDLE_DELAY_MS - elapsed,
+    };
+  }
+  return runSync(reason);
 }
 
 module.exports = {
   triggerSync,
   runSync,
+  runSyncIfIdle,
+  IDLE_DELAY_MS,
 };

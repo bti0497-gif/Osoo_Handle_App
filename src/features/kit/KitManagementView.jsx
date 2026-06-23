@@ -51,7 +51,6 @@ const KitManagementView = ({ currentUser }) => {
         isSyncingAnalysisKits,
         syncAnalysisKits,
         refresh,
-        saveModalDraft,
     } = useKitViewModel(currentUser, { showAlert });
 
     const [selectedDate, setSelectedDate] = useState(null);
@@ -150,17 +149,9 @@ const KitManagementView = ({ currentUser }) => {
         openModal(hasSelectedRowData() ? 'edit' : 'add');
     };
 
-    const handleSaveDraft = async (payload) => {
-        if (payload.tab !== 'kit') {
-            showAlert?.('현재 화면에서는 키트관리 데이터만 저장합니다.');
-            return;
-        }
-
-        const result = await saveModalDraft({ date: payload.date, items: payload.items });
-        if (result?.success) {
-            setSelectedDate(payload.date);
-            setModalState((prev) => ({ ...prev, open: false }));
-        }
+    const handleSaveComplete = async ({ date }) => {
+        setSelectedDate(date);
+        await refresh();
     };
 
     const renderCell = (row, col) => {
@@ -256,7 +247,7 @@ const KitManagementView = ({ currentUser }) => {
                 contexts={buildModalContexts()}
                 isSyncingAnalysisKits={isSyncingAnalysisKits}
                 onClose={() => setModalState((prev) => ({ ...prev, open: false }))}
-                onSaveDraft={handleSaveDraft}
+                onSaveComplete={handleSaveComplete}
                 onSyncAnalysisKits={syncAnalysisKits}
             />
         </div>
