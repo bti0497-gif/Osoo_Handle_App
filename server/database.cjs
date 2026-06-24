@@ -1,4 +1,4 @@
-﻿const sqlite3 = require('better-sqlite3');
+const sqlite3 = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -576,11 +576,12 @@ db.prepare(`
 `).run();
 
 // --- Seeds ---
-db.prepare("INSERT OR IGNORE INTO app_settings (id, site_name) VALUES (1, '새 현장')").run();
+// 신규 설치 시 현장 미확정 상태를 유지하기 위해 site_name을 빈 문자열로 시드한다.
+db.prepare("INSERT OR IGNORE INTO app_settings (id, site_name) VALUES (1, '')").run();
 
 const settingsExists = db.prepare('SELECT id FROM app_settings WHERE id = 1').get();
 if (!settingsExists) {
-  db.prepare(`INSERT INTO app_settings (id, site_name, manager_name, method, series) VALUES (1, '오수처리장', '관리자', 'A2O', '1계열')`).run();
+  db.prepare(`INSERT INTO app_settings (id, site_name, manager_name, method, series) VALUES (1, '', '', 'A2O', '1계열')`).run();
 }
 
 db.prepare(`
@@ -664,14 +665,24 @@ if (legacyWaterItems.length > 0) {
   console.log(`Migrated ${legacyWaterItems.length} water mapping items to water_mapping category.`);
 }
 
-if (db.prepare('SELECT count(*) as count FROM config_items').get().count === 0) {
-  const stmt = db.prepare('INSERT INTO config_items (category, item_name, is_active, display_order) VALUES (?, ?, ?, ?)');
-  ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '전력량계', '슬러지'].forEach((name, i) => stmt.run('flow', name, 1, i));
-  ['중탄산나트륨', '포도당', '팩(PAC)'].forEach((name, i) => {
-    stmt.run('medicine', name, 1, i);
+// 각 설정 위젯의 기본항목은 신규 DB 생성 시 로컬 DB에 시드한다.
+// 기존 DB에서는 누락된 기본항목만 보충하며 사용자 추가항목과 활성 상태는 보존한다.
+const defaultConfigItems = {
+  flow: ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '전력량계', '슬러지'],
+  medicine: ['중탄산나트륨', '포도당', '팩(PAC)'],
+  water: ['암모니아성질소', '질산성질소', '인산염인', '알칼리도'],
+  kit: ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '인산염인(PO4-P)', '알칼리도(ALK)'],
+  location: ['유량조정조', '무산소조', '포기조', '침전조', '방류조'],
+};
+const seedConfigItem = db.prepare(`
+  INSERT OR IGNORE INTO config_items (category, item_name, is_active, display_order)
+  VALUES (?, ?, 1, ?)
+`);
+db.transaction(() => {
+  Object.entries(defaultConfigItems).forEach(([category, names]) => {
+    names.forEach((name, index) => seedConfigItem.run(category, name, index));
   });
-  ['암모니아성질소', '질산성질소', '인산염인', '알칼리도'].forEach((name, i) => stmt.run('water', name, 1, i));
-}
+})();
 
 // --- Sync Columns Migration (BigQuery Synchronization) ---
 // 동기화 대상 테이블 목록
@@ -795,16 +806,27 @@ photoTables.forEach(tableName => {
 });
 
 // --- site_id 마이그레이션 (휴게소별 고유 식별자) ---
-// app_settings 에 site_id 컬럼 추가 및 UUID 시드
+// app_settings 에 site_id 컬럼 추가
 const appSettingsCols = db.prepare("PRAGMA table_info(app_settings)").all().map(c => c.name);
 if (!appSettingsCols.includes('site_id')) {
   db.prepare('ALTER TABLE app_settings ADD COLUMN site_id TEXT').run();
 }
-db.prepare("UPDATE app_settings SET site_id = ? WHERE id = 1 AND (site_id IS NULL OR TRIM(site_id) = '')").run(crypto.randomUUID());
+// 신규 설치 시 site_id는 빈 상태(NULL)로 유지한다.
+// 실제 현장이 설정된 기존 DB에서만 빈 site_id에 UUID를 부여한다.
+const siteNameForIdCheck = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
+const hasRealSiteName = Boolean(
+  siteNameForIdCheck?.site_name
+  && String(siteNameForIdCheck.site_name).trim() !== ''
+  && String(siteNameForIdCheck.site_name).trim() !== '새 현장'
+);
+if (hasRealSiteName) {
+  db.prepare("UPDATE app_settings SET site_id = ? WHERE id = 1 AND (site_id IS NULL OR TRIM(site_id) = '')").run(crypto.randomUUID());
+}
 
-// app_settings의 기본 현장 정보 → sites 테이블 마이그레이션 (site_id 설정 후)
+// app_settings의 기본 현장 정보 → sites 테이블 마이그레이션 (실제 현장 설정이 있는 경우만)
 const settingsSeed = db.prepare('SELECT site_id, site_name, manager_name, method, series FROM app_settings WHERE id = 1').get();
-if (settingsSeed?.site_id) {
+const hasSeedSiteId = Boolean(settingsSeed?.site_id && String(settingsSeed.site_id).trim());
+if (hasSeedSiteId && hasRealSiteName) {
   db.prepare(`
     INSERT INTO sites (id, site_name, manager_name, method, series, is_active, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, 1, datetime('now', 'localtime'), datetime('now', 'localtime'))
@@ -814,10 +836,10 @@ if (settingsSeed?.site_id) {
       method = excluded.method,
       series = excluded.series,
       updated_at = datetime('now', 'localtime')
-  `).run(settingsSeed.site_id, settingsSeed.site_name || '새 현장', settingsSeed.manager_name || '관리자', settingsSeed.method || 'A2O', settingsSeed.series || '1계열');
+  `).run(settingsSeed.site_id, settingsSeed.site_name || '', settingsSeed.manager_name || '', settingsSeed.method || 'A2O', settingsSeed.series || '1계열');
 
   db.prepare('UPDATE attendance SET site_id = COALESCE(site_id, ?)').run(settingsSeed.site_id);
-  db.prepare('UPDATE attendance SET site_name = COALESCE(NULLIF(site_name, \'\'), ?)').run(settingsSeed.site_name || '새 현장');
+  db.prepare('UPDATE attendance SET site_name = COALESCE(NULLIF(site_name, \'\'), ?)').run(settingsSeed.site_name || '');
   db.prepare('UPDATE sludge_photo_logs SET site_id = COALESCE(site_id, ?)').run(settingsSeed.site_id);
 }
 

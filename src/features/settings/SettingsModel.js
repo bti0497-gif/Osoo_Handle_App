@@ -55,6 +55,10 @@ export const SettingsModel = {
         return mutateSettings(() => apiClient.post('/api/settings/site-location', { targetLat, targetLng }));
     },
 
+    async getCurrentLocation() {
+        return apiClient.get('/api/location/current');
+    },
+
     async saveWebAppCredentials(payload) {
         return mutateSettings(() => apiClient.post('/api/settings/web-app-credentials', payload));
     },

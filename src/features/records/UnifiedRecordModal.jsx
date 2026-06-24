@@ -15,8 +15,6 @@ const WATER_FIELD_META = [
     { id: 'alkalinity', label: '알칼리도', code: 'ALK' },
 ];
 
-const WATER_LOCATION_COLUMNS = ['유량조정조', '무산소조', '포기조', '침전조', '방류조'];
-
 const emptyWaterDraft = () => WATER_FIELD_META.reduce((acc, field) => {
     acc[field.id] = '';
     return acc;
@@ -1039,10 +1037,13 @@ export default function UnifiedRecordModal({
             );
         }
 
+        const activeLocations = currentItems.map((item) => String(item.label || item.key).trim());
+        const gridTemplateColumns = `128px repeat(${activeLocations.length}, minmax(76px, 1fr))`;
+        const minWidth = 128 + activeLocations.length * 84;
+
         const itemByLocation = new Map(
             currentItems.map((item) => [String(item.label || item.key).trim(), item])
         );
-        const gridTemplateColumns = '128px repeat(5, minmax(76px, 1fr))';
 
         return (
             <div style={{
@@ -1055,14 +1056,14 @@ export default function UnifiedRecordModal({
                     display: 'grid',
                     gridTemplateColumns,
                     alignItems: 'center',
-                    minWidth: 620,
+                    minWidth,
                     padding: '8px 10px',
                     background: '#f8fafc',
                     borderBottom: '1px solid #e2e8f0',
                     columnGap: 8,
                 }}>
                     <div style={{ fontSize: 11, fontWeight: 950, color: '#64748b' }}>항목</div>
-                    {WATER_LOCATION_COLUMNS.map((location) => (
+                    {activeLocations.map((location) => (
                         <div
                             key={location}
                             style={{
@@ -1085,7 +1086,7 @@ export default function UnifiedRecordModal({
                             display: 'grid',
                             gridTemplateColumns,
                             alignItems: 'center',
-                            minWidth: 620,
+                            minWidth,
                             padding: '10px',
                             columnGap: 8,
                             borderBottom: index === WATER_FIELD_META.length - 1 ? 0 : '1px solid #eef2f7',
@@ -1100,7 +1101,7 @@ export default function UnifiedRecordModal({
                             </div>
                         </div>
 
-                        {WATER_LOCATION_COLUMNS.map((location) => {
+                        {activeLocations.map((location) => {
                             const item = itemByLocation.get(location);
                             const enabled = Boolean(item) && (field.id !== 'po4_p' || isPo4pInputEnabled(item));
                             const values = item ? getDraftForItem('water', item) : {};

@@ -1,5 +1,17 @@
 export default function SettingsDataModal({ isOpen, data, onClose }) {
-  if (!isOpen || !data) return null;
+  if (!isOpen || !data || !Array.isArray(data)) return null;
+
+  // 전체 데이터의 키를 중복 없이 모으기 (날짜 제외)
+  const allKeys = Array.from(
+    data.reduce((acc, row) => {
+      Object.keys(row).forEach(key => {
+        if (key !== 'date') {
+          acc.add(key);
+        }
+      });
+      return acc;
+    }, new Set())
+  );
 
   return (
     <div style={{
@@ -7,7 +19,8 @@ export default function SettingsDataModal({ isOpen, data, onClose }) {
       backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
     }}>
       <div style={{
-        backgroundColor: 'white', padding: '1.5rem', borderRadius: '16px', width: '600px', maxHeight: '80vh',
+        backgroundColor: 'white', padding: '1.5rem', borderRadius: '16px',
+        width: '90%', maxWidth: '800px', maxHeight: '80vh',
         display: 'flex', flexDirection: 'column', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)'
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -16,13 +29,19 @@ export default function SettingsDataModal({ isOpen, data, onClose }) {
             <span className="material-icons">close</span>
           </button>
         </div>
-        <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+        <div style={{
+          flex: 1,
+          overflowY: 'auto',
+          overflowX: 'auto',
+          border: '1px solid #e2e8f0',
+          borderRadius: '8px'
+        }}>
+          <table style={{ width: '100%', minWidth: '600px', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
             <thead style={{ backgroundColor: '#f8fafc', position: 'sticky', top: 0 }}>
               <tr>
-                <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>날짜</th>
-                {Object.keys(data[0] || {}).filter(k => k !== 'date').map(key => (
-                  <th key={key} style={{ padding: '10px', borderBottom: '1px solid #e2e8f0', textAlign: 'right' }}>{key}</th>
+                <th style={{ padding: '10px', borderBottom: '1px solid #e2e8f0', textAlign: 'left', minWidth: '100px' }}>날짜</th>
+                {allKeys.map(key => (
+                  <th key={key} style={{ padding: '10px', borderBottom: '1px solid #e2e8f0', textAlign: 'right', minWidth: '80px' }}>{key}</th>
                 ))}
               </tr>
             </thead>
@@ -30,8 +49,10 @@ export default function SettingsDataModal({ isOpen, data, onClose }) {
               {data.map((row, idx) => (
                 <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
                   <td style={{ padding: '10px', fontWeight: 700 }}>{row.date}</td>
-                  {Object.entries(row).filter(([k]) => k !== 'date').map(([k, v]) => (
-                    <td key={k} style={{ padding: '10px', textAlign: 'right' }}>{v}</td>
+                  {allKeys.map(key => (
+                    <td key={key} style={{ padding: '10px', textAlign: 'right' }}>
+                      {row[key] !== undefined ? row[key] : '-'}
+                    </td>
                   ))}
                 </tr>
               ))}

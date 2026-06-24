@@ -168,7 +168,9 @@ function saveInventoryMapping(db, config, mapping, progress, options) {
           rowResults[`${itemName}_재고`] = inventory;
         }
       });
-      importedData.push(rowResults);
+      if (Object.keys(rowResults).length > 1) {
+        importedData.push(rowResults);
+      }
       progress.current += 1;
     }
   })();

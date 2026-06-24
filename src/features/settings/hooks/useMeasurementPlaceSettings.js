@@ -3,11 +3,11 @@ import { SettingsModel } from '../SettingsModel';
 import { createDefaultLocationItems } from '../settingsDefaults';
 
 export const useMeasurementPlaceSettings = ({ showAlert } = {}) => {
-    const [locationItems, setLocationItems] = useState(createDefaultLocationItems('A2O').filter((item) => item.checked));
+    const [locationItems, setLocationItems] = useState(createDefaultLocationItems('A2O'));
     const [newLocationItem, setNewLocationItem] = useState('');
 
     const resetLocationItemsToDefaults = (method = 'A2O') => {
-        setLocationItems(createDefaultLocationItems(method).filter((item) => item.checked));
+        setLocationItems(createDefaultLocationItems(method));
     };
 
     const addLocationItem = async () => {

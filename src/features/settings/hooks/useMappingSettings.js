@@ -1,5 +1,9 @@
 import { useState } from 'react';
 import { SettingsModel } from '../SettingsModel';
+import { FlowModel } from '../../flow/FlowModel';
+import { MedicineModel } from '../../medicine/MedicineModel';
+import { KitModel } from '../../kit/KitModel';
+import { WaterQualityModel } from '../../water/WaterQualityModel';
 
 export const useMappingSettings = ({
     flowConfig,
@@ -16,7 +20,7 @@ export const useMappingSettings = ({
     const [importedData, setImportedData] = useState(null);
     const [showDataModal, setShowDataModal] = useState(false);
 
-    const saveMappingWithProgress = async ({ config, mapping, save }) => {
+    const saveMappingWithProgress = async ({ config, mapping, save, clearCache }) => {
         try {
             setImportProgress({
                 current: 0,
@@ -34,6 +38,7 @@ export const useMappingSettings = ({
                     status: 'completed',
                     isVisible: true
                 });
+                clearCache?.();
                 reloadSettings?.();
             } else {
                 throw new Error(res.message);
@@ -53,24 +58,28 @@ export const useMappingSettings = ({
         config: flowConfig,
         mapping: flowMapping,
         save: SettingsModel.saveFlowMapping,
+        clearCache: () => FlowModel.clearHistoryCache(),
     });
 
     const handleSaveMedicineMapping = () => saveMappingWithProgress({
         config: medicineConfig,
         mapping: medicineMapping,
         save: SettingsModel.saveMedicineMapping,
+        clearCache: () => MedicineModel.clearHistoryCache(),
     });
 
     const handleSaveWaterMapping = () => saveMappingWithProgress({
         config: waterConfig,
         mapping: waterMapping,
         save: SettingsModel.saveWaterMapping,
+        clearCache: () => WaterQualityModel.clearHistoryCache(),
     });
 
     const handleSaveKitMapping = () => saveMappingWithProgress({
         config: kitConfig,
         mapping: kitMapping,
         save: SettingsModel.saveKitMapping,
+        clearCache: () => KitModel.clearHistoryCache(),
     });
 
     return {

@@ -422,6 +422,12 @@ function findFlowTypeNameByKeyword(db, keyword) {
   return partialMatch?.normalizedName || keyword;
 }
 
+function getActiveBaseFlowNames(db) {
+  return getActiveConfigItems(db, 'flow')
+    .map((item) => String(item.item_name || '').replace(/_(flow|raw)$/i, '').trim())
+    .filter((name, index, names) => name && names.indexOf(name) === index);
+}
+
 function findMedicineNameByKeyword(db, keyword) {
   const items = getActiveConfigItems(db, 'medicine');
   const match = items.find(item => item.item_name.includes(keyword));
@@ -502,17 +508,31 @@ function buildBindingsForDate(db, date, context = {}) {
   bindings['이름'] = scope.author || settings.manager_name || '';
 
   // --- 유량 데이터 ---
-  // 유입유량계 (유입은 대부분 1개이므로 flowOption 적용 안 함)
-  const flowIn = findFlowByKeyword(flows, '유입');
-  const prevFlowIn = findFlowByKeyword(prevFlows, '유입');
-  const flowInType = findFlowTypeNameByKeyword(db, '유입');
+  // 파샬플롬 유량계가 있는 현장:
+  //   파샬플롬 = 전체 유입량, 유입유량계 = 공정 유입량
+  // 파샬플롬이 없는 현장:
+  //   유입유량계 = 전체 유입량, 공정 유입량은 비움
+  const activeFlowNames = getActiveBaseFlowNames(db);
+  const parshallType = activeFlowNames.find((name) => name.includes('파샬')) || '';
+  const processInType = activeFlowNames.find((name) => name === '유입유량계')
+    || activeFlowNames.find((name) => name.includes('유입')) || '';
+  const hasParshall = Boolean(parshallType);
+  const flowInType = hasParshall ? parshallType : (processInType || findFlowTypeNameByKeyword(db, '유입'));
+  const flowIn = findFlowByType(flows, flowInType);
+  const prevFlowIn = findFlowByType(prevFlows, flowInType);
   bindings['유입전일'] = prevFlowIn?.raw_value ?? '';
   bindings['유입금일'] = flowIn?.raw_value ?? '';
   bindings['유입누계'] = flowIn?.calculated_flow ?? '';
   bindings['월간유입'] = sumFlowField(db, flowInType, nonNegativeFlowField('calculated_flow'), monthStart, date, scope);
   bindings['연간유입'] = sumFlowField(db, flowInType, nonNegativeFlowField('calculated_flow'), yearStart, date, scope);
 
-  // 유입유량계 (유입은 대부분 1개이므로 flowOption 적용 안 함)
+  const processIn = hasParshall ? findFlowByType(flows, processInType) : null;
+  const prevProcessIn = hasParshall ? findFlowByType(prevFlows, processInType) : null;
+  bindings['공정전일'] = prevProcessIn?.raw_value ?? '';
+  bindings['공정금일'] = processIn?.raw_value ?? '';
+  bindings['공정누계'] = processIn?.calculated_flow ?? '';
+
+  // 방류유량계
   const flowOut = findFlowByKeyword(flows, '방류');
   const prevFlowOut = findFlowByKeyword(prevFlows, '방류');
   const flowOutType = findFlowTypeNameByKeyword(db, '방류');

@@ -38,13 +38,10 @@ const iconButtonStyle = {
 const CertificateView = ({ currentUser }) => {
     const { showToast, showAlert } = useDialog();
     const {
-        isPrivileged,
         isLoading,
         visibleRecords,
         selectedId,
         setSelectedId,
-        selectedSite,
-        setSelectedSite,
         selectedYear,
         setSelectedYear,
         selectedMonth,
@@ -52,13 +49,13 @@ const CertificateView = ({ currentUser }) => {
         yearOptions,
         monthOptions,
         moveMonth,
-        siteOptions,
         handleDownload,
         selectedRecords,
         selectedCertificateIds,
         toggleCertificateSelection,
         toggleAllVisibleSelection,
         allVisibleSelected,
+        errorMessage,
     } = useCertificateViewModel(currentUser, { showToast, showAlert });
 
     return (
@@ -78,19 +75,7 @@ const CertificateView = ({ currentUser }) => {
                     <span className="material-icons" style={{ fontSize: '18px', color: '#475569' }}>description</span>
                     <strong style={{ color: '#1e293b', fontSize: '14px' }}>성적서 목록</strong>
                 </div>
-                {isPrivileged && (
-                    <select
-                        value={selectedSite}
-                        onChange={(e) => setSelectedSite(e.target.value)}
-                        style={{ ...selectStyle, minWidth: '180px' }}
-                    >
-                        {siteOptions.map((name) => (
-                            <option key={name} value={name}>
-                                {name === 'ALL' ? '전체 현장' : name}
-                            </option>
-                        ))}
-                    </select>
-                )}
+
             </div>
 
             <div style={{
@@ -136,7 +121,7 @@ const CertificateView = ({ currentUser }) => {
                             fontWeight: 700,
                             fontSize: '13px',
                         }}>
-                            {isLoading ? '성적서 목록을 불러오는 중...' : '표시할 성적서가 없습니다.'}
+                            {isLoading ? '성적서 목록을 불러오는 중...' : (errorMessage || '표시할 성적서가 없습니다.')}
                         </div>
                     ) : (
                         visibleRecords.map((item) => {

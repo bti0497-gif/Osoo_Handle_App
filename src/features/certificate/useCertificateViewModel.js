@@ -68,6 +68,7 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
     const [selectedSite, setSelectedSite] = useState('ALL');
     const [selectedYear, setSelectedYear] = useState(currentYear);
     const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+    const [errorMessage, setErrorMessage] = useState('');
 
     const role = String(currentUser?.role || '').trim().toLowerCase();
     const isPrivileged = PRIVILEGED_ROLES.has(role);
@@ -75,12 +76,12 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
 
     const loadRecords = useCallback(async () => {
         setIsLoading(true);
+        setErrorMessage('');
         try {
             const authHeaders = buildCertificateAuthHeaders(currentUser);
-            const siteName = selectedSite === 'ALL' ? undefined : selectedSite;
             const month = String(selectedMonth).padStart(2, '0');
 
-            const res = await CertificateModel.fetchList({ siteName, year: selectedYear, month }, authHeaders);
+            const res = await CertificateModel.fetchList({ year: selectedYear, month }, authHeaders);
             const list = Array.isArray(res?.items) ? res.items.map(normalizeRecord) : [];
             setRecords(list);
             setSelectedCertificateIds((prev) => {
@@ -94,13 +95,17 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
             }
         } catch (err) {
             console.error(err);
-            showToast?.('성적서 목록을 불러오지 못했습니다.', 'error');
+            if (err.code === 'SITE_NOT_CONFIGURED' || err.message?.includes('설정에서 현장을 먼저 확정') || err.data?.code === 'SITE_NOT_CONFIGURED' || err.data?.message?.includes('설정에서 현장을 먼저 확정')) {
+                setErrorMessage('설정에서 현장을 먼저 확정해 주세요.');
+            } else {
+                showToast?.('성적서 목록을 불러오지 못했습니다.', 'error');
+            }
             setRecords([]);
             setSelectedId(null);
         } finally {
             setIsLoading(false);
         }
-    }, [currentUser, selectedSite, selectedYear, selectedMonth, selectedId, showToast]);
+    }, [currentUser, selectedYear, selectedMonth, selectedId, showToast]);
 
     useEffect(() => {
         loadRecords();
@@ -271,5 +276,6 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
         moveMonth,
         siteOptions,
         handleDownload,
+        errorMessage,
     };
 };

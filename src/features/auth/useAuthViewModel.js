@@ -262,9 +262,13 @@ export const useAuthViewModel = () => {
         try {
             const currentCoords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null;
 
-            let userData = await AuthModel.localLogin(name, password);
-            if (!userData) {
-                userData = await AuthModel.discoveryLogin(name, password);
+            const normalizedName = String(name || '').trim();
+            const isPrimaryAdminLogin = normalizedName.toLowerCase() === 'admin';
+            let userData = isPrimaryAdminLogin
+                ? await AuthModel.discoveryLogin(normalizedName, password)
+                : await AuthModel.localLogin(normalizedName, password);
+            if (!userData && !isPrimaryAdminLogin) {
+                userData = await AuthModel.discoveryLogin(normalizedName, password);
             }
 
             if (userData) {

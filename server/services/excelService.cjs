@@ -1,4 +1,4 @@
-﻿const ExcelJS = require('exceljs');
+const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 
@@ -47,7 +47,7 @@ async function parseAndStoreExcel(db, filePath) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(filePath);
 
-  const sheetsToProcess = workbook.worksheets.slice(0, 3);
+  const sheetsToProcess = workbook.worksheets;
   console.log(`[Excel] 처리할 시트 ${sheetsToProcess.length}개: ${sheetsToProcess.map(s => s.name).join(', ')}`);
 
   db.prepare('DELETE FROM excel_raw_data').run();
@@ -57,26 +57,21 @@ async function parseAndStoreExcel(db, filePath) {
   const insertSheet = db.prepare('INSERT INTO excel_sheets (sheet_name, max_row, imported_at) VALUES (?, ?, ?)');
   const now = new Date().toISOString();
 
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = formatDate(yesterday);
-  console.log(`[Excel] 기준 날짜 (어제): ${yesterdayStr}`);
+  const todayStr = formatDate(new Date());
+  console.log(`[Excel] 기준 날짜 (오늘): ${todayStr}`);
 
   const START_ROW = 3;
 
   for (const ws of sheetsToProcess) {
     let maxDataRow = START_ROW - 1;
-
-    for (let r = START_ROW; r <= ws.rowCount; r++) {
-      const cellVal = ws.getRow(r).getCell('A').value;
-      const dateStr = formatDate(cellVal);
+    for (let r = START_ROW; r <= ws.rowCount; r += 1) {
+      const dateStr = formatDate(ws.getRow(r).getCell('A').value);
       if (!dateStr) continue;
-      if (dateStr > yesterdayStr) break;
+      if (dateStr > todayStr) break;
       maxDataRow = r;
     }
 
     if (maxDataRow < START_ROW) {
-      console.log('[Excel] sheet "' + ws.name + '": no valid date in column A, keeping header rows only (1~2)');
       maxDataRow = Math.min(ws.rowCount, 2);
     }
 
@@ -117,7 +112,7 @@ async function parseAndStoreExcel(db, filePath) {
     }
 
     insertSheet.run(ws.name, maxDataRow, now);
-    console.log('[Excel] sheet "' + ws.name + '": rows ' + START_ROW + '~' + maxDataRow + ' cleaned (through ' + yesterdayStr + ')');
+    console.log('[Excel] sheet "' + ws.name + '": rows ' + START_ROW + '~' + maxDataRow + ' processed (through ' + todayStr + ')');
   }
 
   console.log('[Excel] all sheets processed in ' + (Date.now() - startMs) + 'ms');

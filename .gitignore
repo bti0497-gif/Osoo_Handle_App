@@ -13,6 +13,7 @@ release/
 release-*/
 artifacts/
 test-build/
+.tmp-validation/
 
 # Local databases and generated reports
 *.db

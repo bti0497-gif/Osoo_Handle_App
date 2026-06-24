@@ -107,26 +107,37 @@ async function listSites(db) {
   }
 
   const current = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get();
-  const fallbackSite = sites.find((site) => String(site.id) === String(current?.site_id)) || sites[0] || null;
+  const currentSiteId = String(current?.site_id || '').trim();
 
-  if (fallbackSite && String(current?.site_id || '') !== String(fallbackSite.id)) {
-    const series = String(fallbackSite.series || '').trim() || '1계열';
-    const flowOption = getFlowOptionForSite(db, series);
-    db.prepare(`
-      UPDATE app_settings
-      SET site_id = ?, site_name = ?, manager_name = ?, method = ?, series = ?, flow_option = ?
-      WHERE id = 1
-    `).run(
-      fallbackSite.id,
-      fallbackSite.site_name || '',
-      fallbackSite.manager_name || '',
-      fallbackSite.method || 'A2O',
-      series,
-      flowOption
-    );
+  // 신규 설치(site_id가 비어있는 상태)에서는 자동으로 첫 번째 현장을 할당하지 않는다.
+  // 기존 현장이 확정된 DB에서만 현장 매칭과 fallback을 수행한다.
+  if (currentSiteId) {
+    const matchedSite = sites.find((site) => String(site.id) === currentSiteId);
+    if (matchedSite) {
+      return { sites, currentSiteId: matchedSite.id, source };
+    }
+    // 확정 현장이 사이트 목록에서 사라진 경우에만 fallback
+    const fallbackSite = sites[0] || null;
+    if (fallbackSite) {
+      const series = String(fallbackSite.series || '').trim() || '1계열';
+      const flowOption = getFlowOptionForSite(db, series);
+      db.prepare(`
+        UPDATE app_settings
+        SET site_id = ?, site_name = ?, manager_name = ?, method = ?, series = ?, flow_option = ?
+        WHERE id = 1
+      `).run(
+        fallbackSite.id,
+        fallbackSite.site_name || '',
+        fallbackSite.manager_name || '',
+        fallbackSite.method || 'A2O',
+        series,
+        flowOption
+      );
+      return { sites, currentSiteId: fallbackSite.id, source };
+    }
   }
 
-  return { sites, currentSiteId: fallbackSite?.id || null, source };
+  return { sites, currentSiteId: currentSiteId || null, source };
 }
 
 async function saveSite(payload = {}) {

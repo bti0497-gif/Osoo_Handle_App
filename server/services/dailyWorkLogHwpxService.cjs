@@ -243,15 +243,35 @@ function getPreviousDate(date) {
 
 function getProcessFlowBindings(db, date, context = {}) {
   const filter = getSiteFilter(db, context);
+  const activeFlowNames = db.prepare(`
+    SELECT item_name
+    FROM config_items
+    WHERE category = 'flow'
+      AND is_active = 1
+      AND item_name NOT LIKE '%\_raw' ESCAPE '\'
+      AND item_name NOT LIKE '%\_flow' ESCAPE '\'
+    ORDER BY display_order, id
+  `).all().map((row) => String(row.item_name || '').trim());
+  const hasParshall = activeFlowNames.some((name) => name.includes('파샬'));
+  if (!hasParshall) {
+    return { 전날공정: '', 오늘공정: '', 공정량: '' };
+  }
+
+  const processType = activeFlowNames.find((name) => name === '유입유량계')
+    || activeFlowNames.find((name) => name.includes('유입'));
+  if (!processType) {
+    return { 전날공정: '', 오늘공정: '', 공정량: '' };
+  }
+
   const findReading = (targetDate) => db.prepare(`
     SELECT raw_value, calculated_flow
     FROM flow_readings
     WHERE date = ?
-      AND (REPLACE(type, ' ', '') LIKE '%공정%' OR REPLACE(type, ' ', '') LIKE '%처리수%')
+      AND type = ?
       ${filter.clause}
-    ORDER BY CASE WHEN REPLACE(type, ' ', '') LIKE '%공정%' THEN 0 ELSE 1 END, id
+    ORDER BY id
     LIMIT 1
-  `).get(targetDate, ...filter.params) || {};
+  `).get(targetDate, processType, ...filter.params) || {};
 
   const current = findReading(date);
   const previous = findReading(getPreviousDate(date));

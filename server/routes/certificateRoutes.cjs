@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const sharp = require('sharp');
 const { PDFDocument } = require('pdf-lib');
 const { drive } = require('../services/driveService.cjs');
@@ -1013,10 +1013,15 @@ module.exports = function () {
   router.get('/api/certificates', async (req, res) => {
     try {
       const role = resolveUserRole(req);
-      const requestedSiteName = String(req.query.siteName || '').trim();
+      const appSettings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
+      const currentSiteName = String(appSettings?.site_name || '').trim();
+      if (!currentSiteName) {
+        return res.status(400).json({ success: false, code: 'SITE_NOT_CONFIGURED', message: '설정에서 현장을 먼저 확정해 주세요.' });
+      }
+      const requestedSiteName = currentSiteName;
       const userSiteName = resolveUserSiteName(req);
       const userName = resolveUserName(req);
-      let siteNameFilters = requestedSiteName ? [requestedSiteName] : [];
+      let siteNameFilters = [requestedSiteName];
       if (role === 'user') {
         const allowedFromHeader = getDirectionalPairSiteNames(userSiteName);
         const allowedFromManager = getManagedSiteNamesByManagerName(userName);
@@ -1024,10 +1029,10 @@ module.exports = function () {
         if (allowedSites.length === 0) {
           return res.status(403).json({ success: false, message: '현장 정보가 없어 성적서를 조회할 수 없습니다.' });
         }
-        if (requestedSiteName && !allowedSites.includes(requestedSiteName)) {
+        if (!allowedSites.includes(requestedSiteName)) {
           return res.status(403).json({ success: false, message: '현장 정보가 없어 성적서를 조회할 수 없습니다.' });
         }
-        siteNameFilters = requestedSiteName ? [requestedSiteName] : allowedSites;
+        siteNameFilters = [requestedSiteName];
       }
       const year = normalizeYear(req.query.year);
       const month = normalizeMonth(req.query.month);

@@ -23,13 +23,15 @@ export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
         setIsMetadataLoading(true);
         try {
             const result = await SettingsModel.getExcelStatus();
+            const rawSheets = result.sheets || [];
+            const normalizedSheets = rawSheets.map(s => typeof s === 'object' ? (s.sheet_name || s.name || '') : s);
             const nextStatus = {
                 status: result.status,
                 fileName: result.fileName || null,
-                sheets: result.sheets || []
+                sheets: normalizedSheets
             };
             setExcelStatus(nextStatus);
-            if (result.sheets) setExcelSheets(result.sheets);
+            setExcelSheets(normalizedSheets);
         } catch {
             setExcelStatus({ status: 'error', fileName: null, sheets: [] });
         } finally {
@@ -60,8 +62,10 @@ export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
             formData.append('excel_original', file);
             const result = await SettingsModel.uploadFiles(formData);
             if (result.success && result.sheets) {
-                setExcelStatus({ status: 'ready', fileName: file.name, sheets: result.sheets });
-                setExcelSheets(result.sheets);
+                const rawSheets = result.sheets || [];
+                const normalizedSheets = rawSheets.map(s => typeof s === 'object' ? (s.sheet_name || s.name || '') : s);
+                setExcelStatus({ status: 'ready', fileName: file.name, sheets: normalizedSheets });
+                setExcelSheets(normalizedSheets);
             } else {
                 throw new Error(result.message || '업로드 실패');
             }

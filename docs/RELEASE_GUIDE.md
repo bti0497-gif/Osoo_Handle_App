@@ -28,7 +28,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-integrated-installer.ps1
 생성 위치:
 
 ```text
-release\integrated-deployment\Osoo Handle App Integrated Setup 1.0.2.exe
+release\integrated-deployment\Osoo Handle App Integrated Setup 1.0.3.exe
 ```
 
 이 파일은 자격증명을 포함하므로 GitHub Release에 업로드하지 않고 직접 현장 배포에만 사용합니다.

@@ -9,6 +9,7 @@ export const useBasicSiteSettings = ({
     setSelectedSiteId,
     setFlowOption,
     hasLoadedSettings,
+    isAppSiteConfigured,
     resetItemListsToDefaults,
     reloadSettings,
     showAlert,
@@ -73,7 +74,11 @@ export const useBasicSiteSettings = ({
         const nextSiteId = String(siteId || '');
         const currentSiteId = String(selectedSiteId || '');
 
-        if (nextSiteId && currentSiteId && nextSiteId !== currentSiteId && hasLoadedSettings) {
+        // 현장이 아직 확정되지 않은 최초 설치 상태에서는 변경 경고를 표시하지 않는다.
+        // hasLoadedSettings는 기본설정이 있는지를 의미하고,
+        // isAppSiteConfigured는 실제 현장(site_id 또는 site_name)이 확정됐는지를 의미한다.
+        const isActuallyConfigured = hasLoadedSettings && isAppSiteConfigured;
+        if (nextSiteId && currentSiteId && nextSiteId !== currentSiteId && isActuallyConfigured) {
             const confirmed = await showConfirm?.(
                 '이미 현장이 저장된 상태입니다.\n현장을 변경하면 이후 저장 데이터 기준 현장이 바뀝니다.\n선택한 현장으로 변경하시겠습니까?'
             );

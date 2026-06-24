@@ -15,7 +15,6 @@ import {
     createDefaultFlowItems,
     createDefaultLocationItems,
     getDefaultFlowOptionBySeries,
-    needsResyncFlowItemsForSite,
 } from './settingsDefaults';
 
 export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {}) => {
@@ -199,7 +198,8 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         setSelectedSiteId,
         setFlowOption,
         hasLoadedSettings,
-        resetAllItemListsToDefaults,
+        isAppSiteConfigured,
+        resetItemListsToDefaults: resetAllItemListsToDefaults,
         reloadSettings: () => loadSettings(),
         showAlert,
         showConfirm,
@@ -242,22 +242,54 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
             checked: !!item.is_active
         }));
         const isMbr = String(method || '').trim().toUpperCase() === 'MBR';
-        const defaultLocations = createDefaultLocationItems(method).filter((item) => item.checked);
+        const defaultLocations = createDefaultLocationItems(method);
         const defaultNames = new Set(defaultLocations.map((item) => item.name));
         const restoredByName = new Map(restored.map((item) => [item.name, item]));
 
         const normalizedDefaults = defaultLocations.map((item) => {
             const saved = restoredByName.get(item.name);
+            if (isMbr && item.name === '침전조') return { ...item, checked: false };
             return saved ? { ...item, checked: saved.checked } : item;
         });
 
         const customLocations = restored.filter((item) => {
             if (defaultNames.has(item.name)) return false;
-            if (isMbr && item.name === '침전조') return false;
             return true;
         });
 
         return [...normalizedDefaults, ...customLocations];
+    };
+
+    const normalizeFlowItemsForSite = (storedFlows = [], series = '1계열', method = 'A2O') => {
+        const restored = storedFlows.map((item) => ({
+            name: item.item_name,
+            checked: !!item.is_active
+        }));
+        const defaults = createDefaultFlowItems(series, method);
+        const expectedNames = new Set(defaults.map((item) => item.name));
+        const restoredByName = new Map(restored.map((item) => [item.name, item]));
+        const knownBuiltInNames = new Set(
+            [
+                ...createDefaultFlowItems('1계열', 'A2O'),
+                ...createDefaultFlowItems('1계열', 'MBR'),
+                ...createDefaultFlowItems('2계열', 'A2O'),
+                ...createDefaultFlowItems('2계열', 'MBR'),
+            ].map((item) => item.name)
+        );
+
+        const normalizedDefaults = defaults.map((item) => {
+            const saved = restoredByName.get(item.name);
+            return saved ? { ...item, checked: saved.checked } : item;
+        });
+        const extraItems = restored
+            .filter((item) => !expectedNames.has(item.name))
+            .map((item) => (
+                knownBuiltInNames.has(item.name)
+                    ? { ...item, checked: false }
+                    : item
+            ));
+
+        return [...normalizedDefaults, ...extraItems];
     };
 
     const loadSettings = async () => {
@@ -340,27 +372,14 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                     const flows = data.configItems.filter(i => i.category === 'flow');
                     if (flows.length > 0) {
                         const baseFlows = flows.filter(i => !i.item_name.includes('_raw') && !i.item_name.includes('_flow'));
-                        const restoredList = baseFlows.map(i => ({ name: i.item_name, checked: !!i.is_active }));
-                        if (needsResyncFlowItemsForSite(restoredList, resolvedSeries, resolvedMethod)) {
-                            const fresh = createDefaultFlowItems(resolvedSeries, resolvedMethod);
-                            const checkedByName = Object.fromEntries(restoredList.map((i) => [i.name, i.checked]));
-                            setFlowItems(fresh.map((i) => ({
-                                ...i,
-                                checked: Object.prototype.hasOwnProperty.call(checkedByName, i.name)
-                                    ? checkedByName[i.name]
-                                    : i.checked
-                            })));
-                            setFlowMapping({});
-                        } else {
-                            setFlowItems(restoredList);
-                            const restored = {};
-                            flows.forEach(i => {
-                                if (i.excel_cell && (i.item_name.endsWith('_raw') || i.item_name.endsWith('_flow'))) {
-                                    restored[i.item_name] = i.excel_cell;
-                                }
-                            });
-                            if (Object.keys(restored).length > 0) setFlowMapping(restored);
-                        }
+                        const restored = {};
+                        flows.forEach(i => {
+                            if (i.excel_cell && (i.item_name.endsWith('_raw') || i.item_name.endsWith('_flow'))) {
+                                restored[i.item_name] = i.excel_cell;
+                            }
+                        });
+                        setFlowItems(normalizeFlowItemsForSite(baseFlows, resolvedSeries, resolvedMethod));
+                        setFlowMapping(restored);
                     } else {
                         setFlowItems(createDefaultFlowItems(resolvedSeries, resolvedMethod));
                         setFlowMapping({});
@@ -420,7 +439,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                     if (locations.length > 0) {
                         setLocationItems(normalizeLocationItemsForSite(locations, resolvedMethod));
                     } else {
-                        setLocationItems(createDefaultLocationItems(resolvedMethod).filter((item) => item.checked));
+                        setLocationItems(createDefaultLocationItems(resolvedMethod));
                     }
                 } else {
                     // 저장 설정은 있으나 config_items가 비어있는 극초기 상태 대비
@@ -448,6 +467,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
             const configItems = [
                 ...flowItems.map(i => ({ ...i, category: 'flow' })),
                 ...medicineItems.map(i => ({ ...i, category: 'medicine' })),
+                ...kitItems.map(i => ({ ...i, category: 'kit' })),
                 ...locationItems.map(i => ({ ...i, category: 'location' }))
             ];
             const response = await SettingsModel.saveSettings({ settings: siteInfo, configItems });
