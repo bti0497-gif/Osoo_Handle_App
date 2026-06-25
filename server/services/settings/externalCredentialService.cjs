@@ -83,6 +83,12 @@ function syncSiteCredentialsToLocal(db, site = {}) {
       updateLocalCredential(db, serviceKey, { userId, password });
     }
   }
+
+  db.prepare(`
+    UPDATE app_settings
+    SET qntech_site_id = ?
+    WHERE id = 1
+  `).run(String(site.qntech_site_id || '').trim() || null);
 }
 
 async function syncCredentialToSheets(db, { serviceKey, serviceUrl, userId, password } = {}) {

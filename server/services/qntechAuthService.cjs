@@ -190,6 +190,11 @@ function getStoredCredential(db) {
   };
 }
 
+function getConfiguredQntechSiteId(db) {
+  const row = db.prepare('SELECT qntech_site_id FROM app_settings WHERE id = 1').get();
+  return String(row?.qntech_site_id || '').trim();
+}
+
 async function authenticateWithCredential(credential, fingerprint) {
   const cookieJar = createCookieJar();
   await seedSession(credential.baseUrl, cookieJar);
@@ -286,6 +291,7 @@ async function createAuthenticatedClient(db) {
     baseUrl: credential.baseUrl,
     cookieJar: session.cookieJar,
     me: session.me,
+    qntechSiteId: getConfiguredQntechSiteId(db),
     graphqlRequest: async (query, variables, referer) => {
       const active = await ensureAuthenticatedSession(db);
       try {

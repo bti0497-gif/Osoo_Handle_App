@@ -29,6 +29,7 @@ const { getGoogleServiceAccountPath, loadRuntimeEnv } = require('../config/runti
 loadRuntimeEnv();
 const KEY_FILE   = getGoogleServiceAccountPath();
 const SHEET_NAME = 'Wastewater_Sites';
+const KMSC_SHEET_NAME = 'KMSC';
 const APP_SETTINGS_SHEET_NAME = 'Wastewater_App_Settings';
 const HEADER_ROW = [
   'id',
@@ -42,6 +43,7 @@ const HEADER_ROW = [
   'road_web_password',
   'water_analysis_user_id',
   'water_analysis_password',
+  'qntech_site_id',
 ];
 const APP_SETTINGS_HEADER_ROW = ['setting_key', 'setting_value', 'notes'];
 
@@ -153,7 +155,39 @@ function rowToSite(row, header = HEADER_ROW) {
     road_web_password: get('road_web_password'),
     water_analysis_user_id: get('water_analysis_user_id'),
     water_analysis_password: get('water_analysis_password'),
+    qntech_site_id: get('qntech_site_id'),
   };
+}
+
+async function getKmscSiteSettings(sheetId) {
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${KMSC_SHEET_NAME}!A1:Z`
+    });
+    const rows = res.data.values || [];
+    const header = rows[0] || [];
+    const index = headerIndex(header);
+
+    return new Map(
+      rows.slice(1)
+        .map((row) => {
+          const siteName = String(row[index['place name']] || '').trim();
+          if (!siteName) return null;
+          return [siteName, {
+            water_analysis_user_id: String(row[index['id name']] || '').trim(),
+            water_analysis_password: String(row[index.password] || '').trim(),
+            qntech_site_id: String(row[index.qntech_site_id] || '').trim(),
+          }];
+        })
+        .filter(Boolean)
+    );
+  } catch (error) {
+    if (error?.code === 400 || error?.code === 404) {
+      return new Map();
+    }
+    throw error;
+  }
 }
 
 /** 행 배열 → 현장 객체 변환 */
@@ -318,6 +352,7 @@ async function getSites() {
   const sheetId = getSheetId();
   const header = await ensureHeader(sheetId);
   const endCol = columnLetter(header.length - 1);
+  const kmscSettings = await getKmscSiteSettings(sheetId);
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
@@ -326,7 +361,17 @@ async function getSites() {
 
   return (res.data.values || [])
     .filter(row => row[0])        // id 비어있는 행 제외
-    .map(row => rowToSite(row, header));
+    .map((row) => {
+      const site = rowToSite(row, header);
+      const kmsc = kmscSettings.get(String(site.site_name || '').trim());
+      if (!kmsc) return site;
+      return {
+        ...site,
+        water_analysis_user_id: kmsc.water_analysis_user_id || site.water_analysis_user_id,
+        water_analysis_password: kmsc.water_analysis_password || site.water_analysis_password,
+        qntech_site_id: kmsc.qntech_site_id || site.qntech_site_id,
+      };
+    });
 }
 
 /**

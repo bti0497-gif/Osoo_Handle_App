@@ -198,7 +198,15 @@ async function fetchProjectsForDateWithClient(client, normalizedDate) {
     throw new Error('QnTECH에서 접근 가능한 현장을 찾지 못했습니다.');
   }
 
-  const site = sites[0];
+  const configuredSiteId = String(client.qntechSiteId || '').trim();
+  if (!configuredSiteId) {
+    throw new Error('현재 현장의 QnTECH siteId가 설정되어 있지 않습니다. Google Sheets의 qntech_site_id를 확인해 주세요.');
+  }
+
+  const site = sites.find((item) => String(item.id) === configuredSiteId);
+  if (!site) {
+    throw new Error(`저장된 QnTECH siteId(${configuredSiteId})가 로그인 계정의 접근 현장 목록에 없습니다.`);
+  }
   const projectResult = await client.graphqlRequest(PROJECTS_QUERY, {
     data: { siteId: Number(site.id), regDt: normalizedDate }
   }, '/');

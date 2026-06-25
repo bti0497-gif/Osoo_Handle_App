@@ -21,8 +21,8 @@ function upsertLocalSite(db, site) {
   const radiusM = site.radius_m != null && site.radius_m !== '' ? Number(site.radius_m) : null;
 
   db.prepare(`
-    INSERT INTO sites (id, site_name, manager_name, method, series, target_lat, target_lng, radius_m, is_active, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+    INSERT INTO sites (id, site_name, manager_name, method, series, target_lat, target_lng, radius_m, qntech_site_id, is_active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
     ON CONFLICT(id) DO UPDATE SET
       site_name = excluded.site_name,
       manager_name = excluded.manager_name,
@@ -31,6 +31,7 @@ function upsertLocalSite(db, site) {
       target_lat = COALESCE(excluded.target_lat, sites.target_lat),
       target_lng = COALESCE(excluded.target_lng, sites.target_lng),
       radius_m = COALESCE(excluded.radius_m, sites.radius_m, 500),
+      qntech_site_id = COALESCE(NULLIF(excluded.qntech_site_id, ''), sites.qntech_site_id),
       is_active = excluded.is_active,
       updated_at = datetime('now', 'localtime')
   `).run(
@@ -42,6 +43,7 @@ function upsertLocalSite(db, site) {
     Number.isFinite(targetLat) ? targetLat : null,
     Number.isFinite(targetLng) ? targetLng : null,
     Number.isFinite(radiusM) ? radiusM : null,
+    String(site.qntech_site_id || '').trim() || null,
     site.is_active === 0 ? 0 : 1
   );
   db.prepare('UPDATE sites SET radius_m = COALESCE(radius_m, 500) WHERE id = ?').run(localId);
@@ -57,7 +59,7 @@ function syncLocalSites(db, sites) {
 
 function getLocalActiveSites(db) {
   return db.prepare(`
-    SELECT id, site_name, manager_name, method, series, target_lat, target_lng, radius_m, is_active
+    SELECT id, site_name, manager_name, method, series, target_lat, target_lng, radius_m, qntech_site_id, is_active
     FROM sites
     WHERE is_active = 1
     ORDER BY COALESCE(created_at, updated_at, '') ASC, id ASC
@@ -88,6 +90,7 @@ async function listSites(db) {
           manager_name: site.manager_name,
           method: site.method,
           series: site.series,
+          qntech_site_id: site.qntech_site_id,
           is_active: site.is_active
         }));
 
@@ -246,7 +249,8 @@ async function selectSite(db, siteId) {
           site_name: matched.site_name,
           manager_name: matched.manager_name,
           method: matched.method,
-          series: matched.series
+          series: matched.series,
+          qntech_site_id: matched.qntech_site_id
         };
         upsertLocalSite(db, site);
       }
@@ -257,7 +261,7 @@ async function selectSite(db, siteId) {
 
   if (!site) {
     const localSite = db.prepare(`
-      SELECT id, site_name, manager_name, method, series, target_lat, target_lng, radius_m
+      SELECT id, site_name, manager_name, method, series, target_lat, target_lng, radius_m, qntech_site_id
       FROM sites
       WHERE id = ? AND is_active = 1
       LIMIT 1
@@ -272,7 +276,8 @@ async function selectSite(db, siteId) {
         series: localSite.series,
         target_lat: localSite.target_lat,
         target_lng: localSite.target_lng,
-        radius_m: localSite.radius_m
+        radius_m: localSite.radius_m,
+        qntech_site_id: localSite.qntech_site_id
       };
     }
   }
@@ -288,12 +293,20 @@ async function selectSite(db, siteId) {
 
   db.prepare(`
     UPDATE app_settings
-    SET site_id = ?, site_name = ?, manager_name = ?, method = ?, series = ?, flow_option = ?
+    SET site_id = ?, site_name = ?, manager_name = ?, method = ?, series = ?, flow_option = ?, qntech_site_id = ?
     WHERE id = 1
-  `).run(site.id, site.site_name || '', site.manager_name || '', site.method || 'A2O', series, flowOption);
+  `).run(
+    site.id,
+    site.site_name || '',
+    site.manager_name || '',
+    site.method || 'A2O',
+    series,
+    flowOption,
+    String(site.qntech_site_id || '').trim() || null
+  );
 
   const localSite = db.prepare(`
-    SELECT id, site_name, manager_name, method, series, target_lat, target_lng, radius_m
+    SELECT id, site_name, manager_name, method, series, target_lat, target_lng, radius_m, qntech_site_id
     FROM sites
     WHERE id = ?
     LIMIT 1

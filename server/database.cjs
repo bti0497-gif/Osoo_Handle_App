@@ -209,7 +209,8 @@ db.exec(`
     water_sheet TEXT, water_start_row INTEGER, water_end_row INTEGER, water_date_col TEXT,
     kit_sheet TEXT, kit_start_row INTEGER, kit_end_row INTEGER, kit_date_col TEXT,
     qntech_photo_root TEXT,
-    qntech_sample_mappings TEXT
+    qntech_sample_mappings TEXT,
+    qntech_site_id TEXT
   );
   CREATE TABLE IF NOT EXISTS web_app_credentials (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -265,6 +266,7 @@ db.exec(`
     target_lat REAL,
     target_lng REAL,
     radius_m REAL DEFAULT 500,
+    qntech_site_id TEXT,
     is_active INTEGER DEFAULT 1,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -344,6 +346,7 @@ const sitesCols = db.prepare("PRAGMA table_info(sites)").all().map(c => c.name);
 if (!sitesCols.includes('target_lat')) db.prepare('ALTER TABLE sites ADD COLUMN target_lat REAL').run();
 if (!sitesCols.includes('target_lng')) db.prepare('ALTER TABLE sites ADD COLUMN target_lng REAL').run();
 if (!sitesCols.includes('radius_m')) db.prepare('ALTER TABLE sites ADD COLUMN radius_m REAL DEFAULT 500').run();
+if (!sitesCols.includes('qntech_site_id')) db.prepare('ALTER TABLE sites ADD COLUMN qntech_site_id TEXT').run();
 db.prepare("UPDATE sites SET radius_m = COALESCE(radius_m, 500)").run();
 
 const sludgePhotoCols = db.prepare("PRAGMA table_info(sludge_photo_logs)").all().map(c => c.name);
@@ -551,6 +554,7 @@ const settingsCols = db.prepare("PRAGMA table_info(app_settings)").all().map(c =
   'water_sheet', 'water_start_row', 'water_end_row', 'water_date_col',
   'kit_sheet', 'kit_start_row', 'kit_end_row', 'kit_date_col',
   'qntech_photo_root', 'qntech_sample_mappings',
+  'qntech_site_id',
   'flow_option' // new column for flow mapping option
 ].forEach(col => {
   if (!settingsCols.includes(col)) {
