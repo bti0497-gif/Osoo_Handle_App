@@ -3,7 +3,7 @@
 ## 버전 원칙
 
 - 최초 현장 배포 기준: `1.0.2`
-- 다음 자동 업데이트: `1.0.4`
+- 다음 자동 업데이트: `1.0.5`
 - 버전은 `package.json`과 `package-lock.json`에 동일하게 반영
 
 ## 사전 검증
@@ -28,7 +28,7 @@ powershell -ExecutionPolicy Bypass -File scripts\build-integrated-installer.ps1
 생성 위치:
 
 ```text
-release\integrated-deployment\Osoo Handle App Integrated Setup 1.0.4.exe
+release\integrated-deployment\Osoo Handle App Integrated Setup 1.0.5.exe
 ```
 
 이 파일은 자격증명을 포함하므로 GitHub Release에 업로드하지 않고 직접 현장 배포에만 사용합니다.
@@ -55,13 +55,13 @@ powershell -ExecutionPolicy Bypass -File scripts\prepare-deployment-package.ps1
 
 ```powershell
 gh auth status
-gh release create 1.0.4 `
-  "release/auto-update-v1.0.4/Osoo-Handle-App-Setup-1.0.4.exe" `
-  "release/auto-update-v1.0.4/Osoo-Handle-App-Setup-1.0.4.exe.blockmap" `
-  "release/auto-update-v1.0.4/latest.yml" `
+gh release create 1.0.5 `
+  "release/auto-update-v1.0.5/Osoo-Handle-App-Setup-1.0.5.exe" `
+  "release/auto-update-v1.0.5/Osoo-Handle-App-Setup-1.0.5.exe.blockmap" `
+  "release/auto-update-v1.0.5/latest.yml" `
   --repo bti0497-gif/Osoo_Handle_App `
-  --title "Osoo Handle App 1.0.4" `
-  --notes-file "release/auto-update-v1.0.4/release-notes.md"
+  --title "Osoo Handle App 1.0.5" `
+  --notes-file "release/auto-update-v1.0.5/release-notes.md"
 ```
 
 현재 저장소의 기존 태그 규칙에 맞춰 버전 태그에 `v`를 붙이지 않습니다.
@@ -69,7 +69,7 @@ gh release create 1.0.4 `
 ## 배포 후 확인
 
 ```powershell
-gh release view 1.0.4 --repo bti0497-gif/Osoo_Handle_App
+gh release view 1.0.5 --repo bti0497-gif/Osoo_Handle_App
 ```
 
 - 정식 공개 릴리스인지 확인

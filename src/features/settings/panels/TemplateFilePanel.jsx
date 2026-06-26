@@ -20,43 +20,41 @@ export default function TemplateFilePanel({
             alignItems: 'flex-end',
             gap: '1.25rem'
         }}>
-            {/* 왼쪽: 파일 선택 그룹 */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                 <TemplateUploadCard
-                    label="엑셀 원본 파일 불러오기"
+                    label="기존 운영 엑셀 원본 불러오기"
                     value={excelFileName}
-                    placeholder="엑셀 원본 파일을 선택해주세요..."
+                    placeholder="기존 관리 엑셀 원본 파일을 선택해주세요..."
                     buttonLabel="파일 선택"
                     icon="file_open"
                     accept=".xlsx, .xls, .xlsm"
                     status={excelStatus}
                     onFileChange={handleExcelFileUpload}
                     onOpenFolder={() => handleOpenLocalFolder?.('excel-originals')}
-                    openFolderTitle="엑셀 원본 저장 폴더 열기"
+                    openFolderTitle="기존 운영 엑셀 원본 저장 폴더 열기"
                 />
 
                 <TemplateUploadCard
-                    label="일지양식 불러오기 (한꺼번에 선택 가능)"
+                    label="일지 양식 불러오기"
                     value={templateFileNames}
                     title={templateFileNames}
-                    placeholder="선택한 양식은 앱 로컬 템플릿 폴더로 복사됩니다."
+                    placeholder="선택한 일지 양식을 로컬 템플릿 폴더로 복사합니다."
                     buttonLabel="양식 선택"
                     icon="library_add"
                     accept=".xlsx, .xls, .xlsm, .hwpx"
                     multiple
                     onFileChange={handleTemplateFileChange}
                     onOpenFolder={() => handleOpenLocalFolder?.('reports')}
-                    openFolderTitle="일지양식 저장 폴더 열기"
+                    openFolderTitle="일지 양식 저장 폴더 열기"
                 />
             </div>
 
-            {/* 오른쪽: 설정 저장 버튼 */}
             <button
                 onClick={handleApply}
                 disabled={!isSiteSelected}
                 style={{
                     width: '180px',
-                    height: '112px', // 두 개의 입력창 높이 + 갭에 맞춰 조정
+                    height: '112px',
                     backgroundColor: isSiteSelected ? '#1e293b' : '#94a3b8',
                     color: 'white',
                     border: 'none',
@@ -73,11 +71,11 @@ export default function TemplateFilePanel({
                     gap: '8px',
                     flexShrink: 0
                 }}
-                onMouseEnter={e => {
+                onMouseEnter={(e) => {
                     if (!isSiteSelected) return;
                     e.currentTarget.style.backgroundColor = '#0f172a';
                 }}
-                onMouseLeave={e => {
+                onMouseLeave={(e) => {
                     e.currentTarget.style.backgroundColor = isSiteSelected ? '#1e293b' : '#94a3b8';
                 }}
             >

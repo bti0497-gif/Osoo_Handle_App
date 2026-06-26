@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 
@@ -51,5 +52,4 @@ $latitude = [double]$point.Latitude
 $longitude = [double]$point.Longitude
 $accuracy = [double]$coordinate.Accuracy
 
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Write-Output ('{0},{1},{2}' -f $latitude, $longitude, $accuracy)

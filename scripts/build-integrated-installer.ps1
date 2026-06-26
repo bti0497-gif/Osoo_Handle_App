@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $false)]
-    [string]$AppVersion = '1.0.4',
+    [string]$AppVersion = '1.0.5',
 
     [Parameter(Mandatory = $false)]
     [string]$OutputDir = ''

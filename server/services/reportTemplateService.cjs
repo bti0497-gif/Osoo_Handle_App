@@ -119,13 +119,23 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
 
       const sourcePath = path.join(bundledDir, fileName);
       const targetPath = path.join(customDir, fileName);
+      const shouldReplacePlaceholder = (() => {
+        if (!fs.existsSync(targetPath)) return false;
+        try {
+          const sourceStat = fs.statSync(sourcePath);
+          const targetStat = fs.statSync(targetPath);
+          return targetStat.size > 0 && targetStat.size < 10000 && sourceStat.size > targetStat.size;
+        } catch {
+          return false;
+        }
+      })();
 
       // 같은 일지의 Excel/HWPX 양식을 함께 유지한다.
-      if (existingNames.has(normalizeTemplateKey(fileName))) {
+      if (existingNames.has(normalizeTemplateKey(fileName)) && !shouldReplacePlaceholder) {
         return;
       }
 
-      if (!fs.existsSync(targetPath)) {
+      if (!fs.existsSync(targetPath) || shouldReplacePlaceholder) {
         fs.copyFileSync(sourcePath, targetPath);
         existingNames.add(normalizeTemplateKey(fileName));
       }

@@ -19,12 +19,15 @@ export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
         setTemplateFileNames('');
     };
 
+    const normalizeSheets = (rawSheets = []) => (
+        rawSheets.map((s) => (typeof s === 'object' ? (s.sheet_name || s.name || '') : s))
+    );
+
     const checkExcelStatus = async () => {
         setIsMetadataLoading(true);
         try {
             const result = await SettingsModel.getExcelStatus();
-            const rawSheets = result.sheets || [];
-            const normalizedSheets = rawSheets.map(s => typeof s === 'object' ? (s.sheet_name || s.name || '') : s);
+            const normalizedSheets = normalizeSheets(result.sheets || []);
             const nextStatus = {
                 status: result.status,
                 fileName: result.fileName || null,
@@ -62,8 +65,7 @@ export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
             formData.append('excel_original', file);
             const result = await SettingsModel.uploadFiles(formData);
             if (result.success && result.sheets) {
-                const rawSheets = result.sheets || [];
-                const normalizedSheets = rawSheets.map(s => typeof s === 'object' ? (s.sheet_name || s.name || '') : s);
+                const normalizedSheets = normalizeSheets(result.sheets || []);
                 setExcelStatus({ status: 'ready', fileName: file.name, sheets: normalizedSheets });
                 setExcelSheets(normalizedSheets);
             } else {
@@ -71,7 +73,7 @@ export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
             }
         } catch (err) {
             setExcelStatus({ status: 'error', fileName: file.name, sheets: [] });
-            showAlert?.('엑셀 파일 처리 실패: ' + err.message);
+            showAlert?.('기존 운영 엑셀 원본 처리 실패: ' + err.message);
         } finally {
             setIsUploading(false);
         }
@@ -92,10 +94,10 @@ export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
             await SettingsModel.uploadFiles(formData);
             setTemplateFiles([]);
             setTemplateFileNames(files.map((file) => file.name).join(', '));
-            showAlert?.('선택한 양식 파일을 앱 로컬 폴더에 복사했습니다.');
+            showAlert?.('선택한 일지 양식을 로컬 템플릿 폴더에 복사했습니다.');
         } catch (err) {
             console.error('Template upload error:', err);
-            showAlert?.('양식 파일 복사 중 오류가 발생했습니다: ' + err.message);
+            showAlert?.('일지 양식 파일 복사 중 오류가 발생했습니다: ' + err.message);
             reloadSettings?.();
         } finally {
             setIsUploading(false);

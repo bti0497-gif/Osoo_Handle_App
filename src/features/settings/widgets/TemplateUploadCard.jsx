@@ -128,7 +128,7 @@ export default function TemplateUploadCard({
                         <>
                             <div style={{ width: '14px', height: '14px', border: '2px solid #e2e8f0', borderTopColor: '#64748b', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
                             <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b' }}>
-                                {status.status === 'uploading' ? '엑셀 데이터 저장 중 (첫 3개 시트)...' : '상태 확인 중...'}
+                                {status.status === 'uploading' ? '엑셀 원본 데이터를 저장하는 중입니다...' : '상태 확인 중...'}
                             </span>
                         </>
                     )}

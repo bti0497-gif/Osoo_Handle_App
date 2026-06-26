@@ -1,13 +1,24 @@
 const ExcelJS = require('exceljs');
 const path = require('path');
-const fs = require('fs');
 
-const COLUMNS = (() => {
-  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-  const res = [...letters];
-  letters.forEach(l => res.push('A' + l));
-  return res;
-})();
+function columnNumberToName(n) {
+  let value = Number(n);
+  let name = '';
+  while (value > 0) {
+    const mod = (value - 1) % 26;
+    name = String.fromCharCode(65 + mod) + name;
+    value = Math.floor((value - mod) / 26);
+  }
+  return name;
+}
+
+function buildColumnNames(maxColumn) {
+  // 기본 매핑 범위는 A~AZ이고, 현장 파일 확장에 대비해 ZZ까지 저장한다.
+  const limit = Math.max(52, Math.min(Number(maxColumn) || 52, 702));
+  return Array.from({ length: limit }, (_, index) => columnNumberToName(index + 1));
+}
+
+const COLUMNS = buildColumnNames(52);
 
 function formatDate(date) {
   if (!date) return null;
@@ -19,7 +30,7 @@ function formatDate(date) {
   } else {
     d = new Date(date);
   }
-  if (isNaN(d.getTime())) return null;
+  if (Number.isNaN(d.getTime())) return null;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
@@ -30,7 +41,8 @@ function cellToString(cellValue, formulaResult) {
     if (cellValue.result !== undefined) return cellToString(cellValue.result);
     if (formulaResult !== undefined) return cellToString(formulaResult);
     if (cellValue.text !== undefined) return String(cellValue.text);
-    if (cellValue.richText) return cellValue.richText.map(r => r.text).join('');
+    if (cellValue.richText) return cellValue.richText.map((r) => r.text).join('');
+    if (cellValue.hyperlink && cellValue.text) return String(cellValue.text);
     return String(cellValue);
   }
   if (typeof cellValue === 'number') {
@@ -42,13 +54,13 @@ function cellToString(cellValue, formulaResult) {
 async function parseAndStoreExcel(db, filePath) {
   const startMs = Date.now();
   const fileName = path.basename(filePath);
-  console.log(`[Excel] 파싱 시작: ${fileName}`);
+  console.log(`[Excel] 원본 파싱 시작: ${fileName}`);
 
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(filePath);
 
   const sheetsToProcess = workbook.worksheets;
-  console.log(`[Excel] 처리할 시트 ${sheetsToProcess.length}개: ${sheetsToProcess.map(s => s.name).join(', ')}`);
+  console.log(`[Excel] 처리할 시트 ${sheetsToProcess.length}개: ${sheetsToProcess.map((s) => s.name).join(', ')}`);
 
   db.prepare('DELETE FROM excel_raw_data').run();
   db.prepare('DELETE FROM excel_sheets').run();
@@ -57,23 +69,9 @@ async function parseAndStoreExcel(db, filePath) {
   const insertSheet = db.prepare('INSERT INTO excel_sheets (sheet_name, max_row, imported_at) VALUES (?, ?, ?)');
   const now = new Date().toISOString();
 
-  const todayStr = formatDate(new Date());
-  console.log(`[Excel] 기준 날짜 (오늘): ${todayStr}`);
-
-  const START_ROW = 3;
-
   for (const ws of sheetsToProcess) {
-    let maxDataRow = START_ROW - 1;
-    for (let r = START_ROW; r <= ws.rowCount; r += 1) {
-      const dateStr = formatDate(ws.getRow(r).getCell('A').value);
-      if (!dateStr) continue;
-      if (dateStr > todayStr) break;
-      maxDataRow = r;
-    }
-
-    if (maxDataRow < START_ROW) {
-      maxDataRow = Math.min(ws.rowCount, 2);
-    }
+    const maxDataRow = Math.max(ws.rowCount || 0, ws.actualRowCount || 0);
+    const columns = buildColumnNames(Math.max(ws.columnCount || 0, ws.actualColumnCount || 0));
 
     const batchInsert = db.transaction((sheetName, rows) => {
       for (const { rowNum, col, value } of rows) {
@@ -81,21 +79,10 @@ async function parseAndStoreExcel(db, filePath) {
       }
     });
 
-    const headerBatch = [];
-    for (let r = 1; r < START_ROW; r++) {
-      const row = ws.getRow(r);
-      for (const col of COLUMNS) {
-        const cell = row.getCell(col);
-        const val = cellToString(cell.value, cell.result);
-        if (val !== null) headerBatch.push({ rowNum: r, col, value: val });
-      }
-    }
-    if (headerBatch.length > 0) batchInsert(ws.name, headerBatch);
-
     const batch = [];
-    for (let r = START_ROW; r <= maxDataRow; r++) {
+    for (let r = 1; r <= maxDataRow; r += 1) {
       const row = ws.getRow(r);
-      for (const col of COLUMNS) {
+      for (const col of columns) {
         const cell = row.getCell(col);
         const val = cellToString(cell.value, cell.result);
         if (val !== null) {
@@ -112,12 +99,12 @@ async function parseAndStoreExcel(db, filePath) {
     }
 
     insertSheet.run(ws.name, maxDataRow, now);
-    console.log('[Excel] sheet "' + ws.name + '": rows ' + START_ROW + '~' + maxDataRow + ' processed (through ' + todayStr + ')');
+    console.log(`[Excel] sheet "${ws.name}": rows 1~${maxDataRow}, columns ${columns[0]}~${columns[columns.length - 1]} processed`);
   }
 
-  console.log('[Excel] all sheets processed in ' + (Date.now() - startMs) + 'ms');
+  console.log(`[Excel] 전체 시트 처리 완료: ${Date.now() - startMs}ms`);
 
-  return sheetsToProcess.map(ws => ws.name);
+  return sheetsToProcess.map((ws) => ws.name);
 }
 
 function getStoredSheets(db) {
@@ -127,7 +114,7 @@ function getStoredSheets(db) {
 function roundIfNumeric(val) {
   if (!val) return val;
   const num = Number(val);
-  if (isNaN(num)) return val;
+  if (Number.isNaN(num)) return val;
   if (Number.isInteger(num)) return String(num);
   return String(Math.round(num * 10) / 10);
 }
