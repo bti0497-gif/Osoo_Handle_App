@@ -1,9 +1,9 @@
 const { getCurrentRecordMetadata } = require('../syncMetadataService.cjs');
-const { getCellValue, hasStoredData, formatDate } = require('../excelService.cjs');
+const { getRangeCell, hasStoredData, formatDate, readExcelRange } = require('../excelService.cjs');
 
 function ensureExcelReady(db) {
   if (!hasStoredData(db)) {
-    throw new Error('엑셀 원본 데이터가 아직 준비되지 않았습니다. 먼저 파일을 업로드해 주세요.');
+    throw new Error('엑셀 원본 데이터가 아직 준비되지 않았습니다. 먼저 파일을 업로드해주세요.');
   }
 }
 
@@ -12,91 +12,56 @@ function toRoundedNumber(value, fallback = null) {
   return Number.isNaN(parsed) ? fallback : Math.round(parsed * 10) / 10;
 }
 
-function createProgress(config) {
+function createProgress(config = {}) {
+  const startRow = Number(config.startRow) || 1;
+  const endRow = Number(config.endRow) || startRow;
   return {
     current: 0,
-    total: config.endRow - config.startRow + 1,
+    total: Math.max(0, endRow - startRow + 1),
     status: 'processing',
     result: null,
   };
 }
 
-function saveFlowMapping(db, config, mapping, progress) {
-  const { sheet, startRow, endRow, dateCol } = config;
-  ensureExcelReady(db);
-
-  db.prepare('UPDATE app_settings SET flow_sheet = ?, flow_start_row = ?, flow_end_row = ?, flow_date_col = ? WHERE id = 1').run(sheet, startRow, endRow, dateCol);
-
-  const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('flow', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
-  Object.entries(mapping).forEach(([name, col]) => {
-    if (name.endsWith('_raw') || name.endsWith('_flow')) upsertStmt.run(name, col);
-  });
-
-  const metadata = getCurrentRecordMetadata(db, config || {});
-  const insertReading = db.prepare(`
-    INSERT INTO flow_readings (
-      date, type, raw_value, calculated_flow, site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(date, type) DO UPDATE SET
-      raw_value = COALESCE(excluded.raw_value, raw_value),
-      calculated_flow = COALESCE(excluded.calculated_flow, calculated_flow),
-      site_id = excluded.site_id,
-      site_name = excluded.site_name,
-      author = excluded.author,
-      last_modified = excluded.last_modified,
-      is_synced = excluded.is_synced
-  `);
-  const importedData = [];
-
-  const flows = {};
-  Object.keys(mapping).forEach((key) => {
-    if (!key.endsWith('_raw') && !key.endsWith('_flow')) return;
-    const lastUnderscore = key.lastIndexOf('_');
-    const name = key.substring(0, lastUnderscore);
-    const field = key.substring(lastUnderscore + 1);
-    if (!flows[name]) flows[name] = {};
-    flows[name][field] = mapping[key];
-  });
-
-  db.transaction(() => {
-    for (let r = startRow; r <= endRow; r += 1) {
-      const dateStr = getCellValue(db, sheet, r, dateCol);
-      const formatted = formatDate(dateStr) || dateStr;
-      if (!formatted) { progress.current += 1; continue; }
-      const rowResults = { date: formatted };
-      Object.entries(flows).forEach(([itemName, cols]) => {
-        const rawValue = toRoundedNumber(getCellValue(db, sheet, r, cols.raw || ''), null);
-        const calcFlow = toRoundedNumber(getCellValue(db, sheet, r, cols.flow || ''), null);
-        if (rawValue !== null || calcFlow !== null) {
-          insertReading.run(
-            formatted,
-            itemName,
-            rawValue,
-            calcFlow,
-            metadata.siteId,
-            metadata.siteName,
-            metadata.author,
-            metadata.createdAt,
-            metadata.lastModified,
-            metadata.isSynced
-          );
-          if (rawValue !== null) rowResults[`${itemName}_계산`] = rawValue;
-          if (calcFlow !== null) rowResults[`${itemName}_유량`] = calcFlow;
-        }
-      });
-      if (Object.keys(rowResults).length > 1) importedData.push(rowResults);
-      progress.current += 1;
+function collectColumns(...sources) {
+  const columns = new Set();
+  for (const source of sources) {
+    if (!source) continue;
+    if (typeof source === 'string') {
+      if (source.trim()) columns.add(source.trim().toUpperCase());
+      continue;
     }
-  })();
+    if (Array.isArray(source)) {
+      source.forEach((value) => {
+        if (value) columns.add(String(value).trim().toUpperCase());
+      });
+      continue;
+    }
+    Object.values(source).forEach((value) => {
+      if (typeof value === 'string' && value.trim()) {
+        columns.add(value.trim().toUpperCase());
+      } else if (value && typeof value === 'object') {
+        Object.values(value).forEach((nested) => {
+          if (nested) columns.add(String(nested).trim().toUpperCase());
+        });
+      }
+    });
+  }
+  return Array.from(columns);
+}
 
-  progress.status = 'completed';
-  progress.result = importedData;
-  return { message: '유량 데이터 임포트 완료', count: importedData.length };
+function formatRowDate(value) {
+  return formatDate(value) || String(value || '').trim();
+}
+
+function saveMappingSettings(db, sql, config) {
+  const { sheet, startRow, endRow, dateCol } = config;
+  db.prepare(sql).run(sheet, startRow, endRow, dateCol);
 }
 
 function groupInventoryMappings(mapping) {
   const grouped = {};
-  Object.keys(mapping).forEach((key) => {
+  Object.keys(mapping || {}).forEach((key) => {
     const lastUnderscore = key.lastIndexOf('_');
     if (lastUnderscore === -1) return;
     const name = key.substring(0, lastUnderscore);
@@ -123,32 +88,109 @@ function filterInventoryMappingByActiveItems(db, category, mapping) {
   );
 }
 
-function saveInventoryMapping(db, config, mapping, progress, options) {
+async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
+  const { sheet, startRow, endRow, dateCol } = config;
+  ensureExcelReady(db);
+
+  saveMappingSettings(
+    db,
+    'UPDATE app_settings SET flow_sheet = ?, flow_start_row = ?, flow_end_row = ?, flow_date_col = ? WHERE id = 1',
+    config
+  );
+
+  const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('flow', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
+  Object.entries(mapping || {}).forEach(([name, col]) => {
+    if (name.endsWith('_raw') || name.endsWith('_flow')) upsertStmt.run(name, col);
+  });
+
+  const flows = {};
+  Object.keys(mapping || {}).forEach((key) => {
+    if (!key.endsWith('_raw') && !key.endsWith('_flow')) return;
+    const lastUnderscore = key.lastIndexOf('_');
+    const name = key.substring(0, lastUnderscore);
+    const field = key.substring(lastUnderscore + 1);
+    if (!flows[name]) flows[name] = {};
+    flows[name][field] = mapping[key];
+  });
+
+  const rows = await readExcelRange(db, appDataPath, sheet, startRow, endRow, collectColumns(dateCol, flows));
+  const metadata = getCurrentRecordMetadata(db, config || {});
+  const insertReading = db.prepare(`
+    INSERT INTO flow_readings (
+      date, type, raw_value, calculated_flow, site_id, site_name, author, created_at, last_modified, is_synced
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(date, type) DO UPDATE SET
+      raw_value = COALESCE(excluded.raw_value, raw_value),
+      calculated_flow = COALESCE(excluded.calculated_flow, calculated_flow),
+      site_id = excluded.site_id,
+      site_name = excluded.site_name,
+      author = excluded.author,
+      last_modified = excluded.last_modified,
+      is_synced = excluded.is_synced
+  `);
+  const importedData = [];
+
+  db.transaction(() => {
+    for (let r = startRow; r <= endRow; r += 1) {
+      const formatted = formatRowDate(getRangeCell(rows, r, dateCol));
+      if (!formatted) { progress.current += 1; continue; }
+      const rowResults = { date: formatted };
+      Object.entries(flows).forEach(([itemName, cols]) => {
+        const rawValue = toRoundedNumber(getRangeCell(rows, r, cols.raw || ''), null);
+        const calcFlow = toRoundedNumber(getRangeCell(rows, r, cols.flow || ''), null);
+        if (rawValue !== null || calcFlow !== null) {
+          insertReading.run(
+            formatted,
+            itemName,
+            rawValue,
+            calcFlow,
+            metadata.siteId,
+            metadata.siteName,
+            metadata.author,
+            metadata.createdAt,
+            metadata.lastModified,
+            metadata.isSynced
+          );
+          if (rawValue !== null) rowResults[`${itemName}_검침`] = rawValue;
+          if (calcFlow !== null) rowResults[`${itemName}_유량`] = calcFlow;
+        }
+      });
+      if (Object.keys(rowResults).length > 1) importedData.push(rowResults);
+      progress.current += 1;
+    }
+  })();
+
+  progress.status = 'completed';
+  progress.result = importedData;
+  return { message: '유량 데이터 임포트 완료', count: importedData.length };
+}
+
+async function saveInventoryMapping(db, appDataPath, config, mapping, progress, options) {
   const { sheet, startRow, endRow, dateCol } = config;
   ensureExcelReady(db);
   const scopedMapping = options.category
     ? filterInventoryMappingByActiveItems(db, options.category, mapping)
     : mapping;
 
-  db.prepare(options.updateSettingsSql).run(sheet, startRow, endRow, dateCol);
+  saveMappingSettings(db, options.updateSettingsSql, config);
   const upsertStmt = db.prepare(options.upsertConfigSql);
-  Object.entries(scopedMapping).forEach(([key, col]) => upsertStmt.run(key, col));
+  Object.entries(scopedMapping || {}).forEach(([key, col]) => upsertStmt.run(key, col));
 
   const grouped = groupInventoryMappings(scopedMapping);
+  const rows = await readExcelRange(db, appDataPath, sheet, startRow, endRow, collectColumns(dateCol, grouped));
   const metadata = getCurrentRecordMetadata(db, config || {});
   const insertStmt = db.prepare(options.insertSql);
   const importedData = [];
 
   db.transaction(() => {
     for (let r = startRow; r <= endRow; r += 1) {
-      const dateStr = getCellValue(db, sheet, r, dateCol);
-      const formatted = formatDate(dateStr) || dateStr;
+      const formatted = formatRowDate(getRangeCell(rows, r, dateCol));
       if (!formatted) { progress.current += 1; continue; }
       const rowResults = { date: formatted };
       Object.entries(grouped).forEach(([itemName, cols]) => {
-        const purchase = toRoundedNumber(getCellValue(db, sheet, r, cols.purchase || ''), 0);
-        const usage = toRoundedNumber(getCellValue(db, sheet, r, cols.usage || ''), 0);
-        const inventory = toRoundedNumber(getCellValue(db, sheet, r, cols.inventory || ''), 0);
+        const purchase = toRoundedNumber(getRangeCell(rows, r, cols.purchase || ''), 0);
+        const usage = toRoundedNumber(getRangeCell(rows, r, cols.usage || ''), 0);
+        const inventory = toRoundedNumber(getRangeCell(rows, r, cols.inventory || ''), 0);
         if (purchase || usage || inventory) {
           insertStmt.run(
             itemName,
@@ -168,9 +210,7 @@ function saveInventoryMapping(db, config, mapping, progress, options) {
           rowResults[`${itemName}_재고`] = inventory;
         }
       });
-      if (Object.keys(rowResults).length > 1) {
-        importedData.push(rowResults);
-      }
+      if (Object.keys(rowResults).length > 1) importedData.push(rowResults);
       progress.current += 1;
     }
   })();
@@ -180,8 +220,8 @@ function saveInventoryMapping(db, config, mapping, progress, options) {
   return { message: options.successMessage, count: importedData.length };
 }
 
-function saveKitMapping(db, config, mapping, progress) {
-  return saveInventoryMapping(db, config, mapping, progress, {
+function saveKitMapping(db, appDataPath, config, mapping, progress) {
+  return saveInventoryMapping(db, appDataPath, config, mapping, progress, {
     category: 'kit',
     updateSettingsSql: 'UPDATE app_settings SET kit_sheet = ?, kit_start_row = ?, kit_end_row = ?, kit_date_col = ? WHERE id = 1',
     upsertConfigSql: "INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('kit', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell",
@@ -203,8 +243,8 @@ function saveKitMapping(db, config, mapping, progress) {
   });
 }
 
-function saveMedicineMapping(db, config, mapping, progress) {
-  return saveInventoryMapping(db, config, mapping, progress, {
+function saveMedicineMapping(db, appDataPath, config, mapping, progress) {
+  return saveInventoryMapping(db, appDataPath, config, mapping, progress, {
     category: 'medicine',
     updateSettingsSql: 'UPDATE app_settings SET med_sheet = ?, med_start_row = ?, med_end_row = ?, med_date_col = ? WHERE id = 1',
     upsertConfigSql: "INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('medicine', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell",
@@ -226,14 +266,18 @@ function saveMedicineMapping(db, config, mapping, progress) {
   });
 }
 
-function saveWaterMapping(db, config, mapping, progress) {
+async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
   const { sheet, startRow, endRow, dateCol } = config;
   ensureExcelReady(db);
 
-  db.prepare('UPDATE app_settings SET water_sheet = ?, water_start_row = ?, water_end_row = ?, water_date_col = ? WHERE id = 1').run(sheet, startRow, endRow, dateCol);
+  saveMappingSettings(
+    db,
+    'UPDATE app_settings SET water_sheet = ?, water_start_row = ?, water_end_row = ?, water_date_col = ? WHERE id = 1',
+    config
+  );
 
   const itemDefinitions = [
-    { aliases: ['암모니아성질소', '암모니아성 질소', 'NH3-N'], itemCode: 'nh3_n', itemName: '암모니아성질소(NH3-N)', unit: 'mg/L' },
+    { aliases: ['암모니아성질소', '암모니아 질소', 'NH3-N'], itemCode: 'nh3_n', itemName: '암모니아성질소(NH3-N)', unit: 'mg/L' },
     { aliases: ['질산성질소', '질산성 질소', 'NO3-N'], itemCode: 'no3_n', itemName: '질산성질소(NO3-N)', unit: 'mg/L' },
     { aliases: ['인산염인', '오르토인산염', 'PO4-P'], itemCode: 'po4_p', itemName: '인산염인(PO4-P)', unit: 'mg/L' },
     { aliases: ['알칼리도', 'ALK'], itemCode: 'alkalinity', itemName: '알칼리도(ALK)', unit: 'mg/L' },
@@ -252,7 +296,7 @@ function saveWaterMapping(db, config, mapping, progress) {
   );
 
   const locations = {};
-  const scopedEntries = Object.entries(mapping).filter(([key]) => {
+  const scopedEntries = Object.entries(mapping || {}).filter(([key]) => {
     if (key === 'date') return false;
     const lastUnderscore = key.lastIndexOf('_');
     if (lastUnderscore === -1) return false;
@@ -276,6 +320,14 @@ function saveWaterMapping(db, config, mapping, progress) {
     locations[locName].push({ ...definition, col });
   });
 
+  const rows = await readExcelRange(
+    db,
+    appDataPath,
+    sheet,
+    startRow,
+    endRow,
+    collectColumns(dateCol, scopedEntries.map(([, col]) => col))
+  );
   const insertWater = db.prepare(`
     INSERT INTO qntech_water_quality (
       date, measurement_group, measurement_order, source_type, source_label,
@@ -306,8 +358,7 @@ function saveWaterMapping(db, config, mapping, progress) {
     const dateOrderCounter = new Map();
 
     for (let r = startRow; r <= endRow; r += 1) {
-      const dateStr = getCellValue(db, sheet, r, dateCol);
-      const formatted = formatDate(dateStr) || dateStr;
+      const formatted = formatRowDate(getRangeCell(rows, r, dateCol));
       if (!formatted) { progress.current += 1; continue; }
 
       if (!cleanedDates.has(formatted)) {
@@ -322,7 +373,7 @@ function saveWaterMapping(db, config, mapping, progress) {
 
       Object.entries(locations).forEach(([locName, definitions]) => {
         definitions.forEach((definition) => {
-          const resultNumeric = toRoundedNumber(getCellValue(db, sheet, r, definition.col), null);
+          const resultNumeric = toRoundedNumber(getRangeCell(rows, r, definition.col), null);
           if (resultNumeric === null) return;
           insertWater.run(
             formatted,

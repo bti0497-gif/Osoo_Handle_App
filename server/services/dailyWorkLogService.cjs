@@ -1309,8 +1309,8 @@ async function buildBatchExportExcel({ db, appDataPath, templateInfo, manifest, 
         `<sheet name="${pageDate}" sheetId="${newSheetId}" r:id="${newRId}"/></sheets>`
       );
 
-      // ?몄뇙?곸뿭 ??definedName?????쒗듃?먮룄 ?곸슜
-      // localSheetId???쒗듃 ?쒖꽌 (0-based index)
+      // 인쇄영역 definedName을 새 시트에도 적용
+      // localSheetId는 시트 순서 (0-based index)
       const printAreaRegex = /<definedName\s+name="_xlnm\.Print_Area"[^>]*>([^<]+)<\/definedName>/;
       const printAreaMatch = printAreaRegex.exec(wbXml);
       if (printAreaMatch) {

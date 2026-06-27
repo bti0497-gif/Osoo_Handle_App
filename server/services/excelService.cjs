@@ -1,5 +1,6 @@
-const ExcelJS = require('exceljs');
+const fs = require('fs');
 const path = require('path');
+const JSZip = require('jszip');
 
 function columnNumberToName(n) {
   let value = Number(n);
@@ -13,110 +14,275 @@ function columnNumberToName(n) {
 }
 
 function buildColumnNames(maxColumn) {
-  // 기본 매핑 범위는 A~AZ이고, 현장 파일 확장에 대비해 ZZ까지 저장한다.
   const limit = Math.max(52, Math.min(Number(maxColumn) || 52, 702));
   return Array.from({ length: limit }, (_, index) => columnNumberToName(index + 1));
 }
 
 const COLUMNS = buildColumnNames(52);
 
+function decodeXml(text) {
+  return String(text || '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
+function normalizeColumnName(col) {
+  return String(col || '').trim().toUpperCase();
+}
+
+function normalizeRowNumber(rowNum) {
+  const parsed = Number(rowNum);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
+}
+
+function columnNameToNumber(name) {
+  return normalizeColumnName(name).split('').reduce((acc, ch) => acc * 26 + ch.charCodeAt(0) - 64, 0);
+}
+
+function excelSerialToDate(serial) {
+  return new Date(Math.round((serial - 25569) * 864e5));
+}
+
 function formatDate(date) {
-  if (!date) return null;
+  if (date === null || date === undefined || date === '') return null;
   let d;
   if (date instanceof Date) {
     d = date;
   } else if (typeof date === 'number') {
-    d = new Date(Math.round((date - 25569) * 864e5));
+    d = excelSerialToDate(date);
   } else {
-    d = new Date(date);
+    const text = String(date).trim();
+    const maybeSerial = Number(text);
+    if (Number.isFinite(maybeSerial) && maybeSerial > 25569 && maybeSerial < 100000) {
+      d = excelSerialToDate(maybeSerial);
+    } else {
+      d = new Date(text);
+    }
   }
   if (Number.isNaN(d.getTime())) return null;
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function cellToString(cellValue, formulaResult) {
-  if (cellValue === null || cellValue === undefined) return null;
-  if (cellValue instanceof Date) return formatDate(cellValue);
-  if (typeof cellValue === 'object') {
-    if (cellValue.result !== undefined) return cellToString(cellValue.result);
-    if (formulaResult !== undefined) return cellToString(formulaResult);
-    if (cellValue.text !== undefined) return String(cellValue.text);
-    if (cellValue.richText) return cellValue.richText.map((r) => r.text).join('');
-    if (cellValue.hyperlink && cellValue.text) return String(cellValue.text);
-    return String(cellValue);
+function roundIfNumeric(val) {
+  if (val === null || val === undefined || val === '') return val;
+  const num = Number(val);
+  if (Number.isNaN(num)) return val;
+  if (Number.isInteger(num)) return String(num);
+  return String(Math.round(num * 10) / 10);
+}
+
+function getExcelOriginalPath(db, appDataPath) {
+  const row = db.prepare('SELECT excel_template_path FROM app_settings WHERE id = 1').get();
+  const storedPath = String(row?.excel_template_path || '').trim();
+  if (!storedPath) return null;
+
+  if (storedPath.startsWith('appdata/')) {
+    return path.join(appDataPath, ...storedPath.replace(/^appdata\//, '').split('/'));
   }
-  if (typeof cellValue === 'number') {
-    return Number.isInteger(cellValue) ? String(cellValue) : String(Math.round(cellValue * 10) / 10);
+
+  if (path.isAbsolute(storedPath)) {
+    return storedPath;
   }
-  return String(cellValue);
+
+  return path.join(appDataPath, storedPath);
+}
+
+async function loadZip(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    throw new Error('기존 운영 엑셀 원본 파일을 찾을 수 없습니다. 설정에서 파일을 다시 선택해주세요.');
+  }
+  return JSZip.loadAsync(fs.readFileSync(filePath));
+}
+
+async function getText(zip, entryName) {
+  const entry = zip.file(entryName);
+  return entry ? entry.async('string') : '';
+}
+
+function parseAttributes(tagText) {
+  const attrs = {};
+  const regex = /([\w:]+)="([^"]*)"/g;
+  let match;
+  while ((match = regex.exec(tagText))) {
+    attrs[match[1]] = decodeXml(match[2]);
+  }
+  return attrs;
+}
+
+async function getSheetEntries(zip) {
+  const workbookXml = await getText(zip, 'xl/workbook.xml');
+  const relsXml = await getText(zip, 'xl/_rels/workbook.xml.rels');
+  const rels = new Map();
+  const relRegex = /<Relationship\b([^>]*)\/>/g;
+  let relMatch;
+  while ((relMatch = relRegex.exec(relsXml))) {
+    const attrs = parseAttributes(relMatch[1]);
+    if (attrs.Id && attrs.Target) {
+      const target = attrs.Target.startsWith('/') ? attrs.Target.replace(/^\//, '') : `xl/${attrs.Target}`;
+      rels.set(attrs.Id, target.replace(/\\/g, '/'));
+    }
+  }
+
+  const sheets = [];
+  const sheetRegex = /<sheet\b([^>]*)\/>/g;
+  let sheetMatch;
+  while ((sheetMatch = sheetRegex.exec(workbookXml))) {
+    const attrs = parseAttributes(sheetMatch[1]);
+    const relId = attrs['r:id'];
+    sheets.push({
+      name: attrs.name,
+      sheetId: attrs.sheetId,
+      relId,
+      path: rels.get(relId),
+    });
+  }
+  return sheets;
+}
+
+async function getSheetPath(zip, sheetName) {
+  const sheets = await getSheetEntries(zip);
+  const found = sheets.find((sheet) => sheet.name === sheetName);
+  if (!found?.path) {
+    throw new Error(`엑셀 시트를 찾을 수 없습니다: ${sheetName}`);
+  }
+  return found.path;
+}
+
+function extractTextFromSi(siXml) {
+  const parts = [];
+  const textRegex = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+  let match;
+  while ((match = textRegex.exec(siXml))) {
+    parts.push(decodeXml(match[1]));
+  }
+  return parts.join('');
+}
+
+async function readSharedStrings(zip) {
+  const xml = await getText(zip, 'xl/sharedStrings.xml');
+  if (!xml) return [];
+  const values = [];
+  const siRegex = /<si\b[^>]*>([\s\S]*?)<\/si>/g;
+  let match;
+  while ((match = siRegex.exec(xml))) {
+    values.push(extractTextFromSi(match[1]));
+  }
+  return values;
+}
+
+function getCellValueFromXml(cellAttrs, cellXml, sharedStrings) {
+  const type = cellAttrs.t || '';
+  if (type === 'inlineStr') {
+    const inlineMatch = /<is\b[^>]*>([\s\S]*?)<\/is>/.exec(cellXml);
+    return inlineMatch ? extractTextFromSi(inlineMatch[1]) : null;
+  }
+
+  const valueMatch = /<v\b[^>]*>([\s\S]*?)<\/v>/.exec(cellXml);
+  if (!valueMatch) return null;
+  const raw = decodeXml(valueMatch[1]);
+
+  if (type === 's') {
+    return sharedStrings[Number(raw)] ?? '';
+  }
+
+  if (type === 'str') {
+    return raw;
+  }
+
+  return roundIfNumeric(raw);
+}
+
+function readRowsFromSheetXml(sheetXml, sharedStrings, startRow, endRow, columns) {
+  const from = normalizeRowNumber(startRow);
+  const to = Math.max(from, normalizeRowNumber(endRow));
+  const wanted = new Set(columns.map(normalizeColumnName).filter(Boolean));
+  const rows = new Map();
+  const rowRegex = /<row\b([^>]*)>([\s\S]*?)<\/row>/g;
+  let rowMatch;
+
+  while ((rowMatch = rowRegex.exec(sheetXml))) {
+    const rowAttrs = parseAttributes(rowMatch[1]);
+    const rowNum = Number(rowAttrs.r);
+    if (!Number.isFinite(rowNum) || rowNum < from) continue;
+    if (rowNum > to) break;
+
+    const rowValues = {};
+    const cellRegex = /<c\b([^>]*)>([\s\S]*?)<\/c>/g;
+    let cellMatch;
+    while ((cellMatch = cellRegex.exec(rowMatch[2]))) {
+      const cellAttrs = parseAttributes(cellMatch[1]);
+      const address = cellAttrs.r || '';
+      const addressMatch = /^([A-Z]+)(\d+)$/i.exec(address);
+      if (!addressMatch) continue;
+      const col = normalizeColumnName(addressMatch[1]);
+      if (wanted.size > 0 && !wanted.has(col)) continue;
+      rowValues[col] = getCellValueFromXml(cellAttrs, cellMatch[2], sharedStrings);
+    }
+    rows.set(rowNum, rowValues);
+  }
+
+  return rows;
 }
 
 async function parseAndStoreExcel(db, filePath) {
   const startMs = Date.now();
   const fileName = path.basename(filePath);
-  console.log(`[Excel] 원본 파싱 시작: ${fileName}`);
+  console.log(`[Excel] 원본 시트 목록 읽기 시작: ${fileName}`);
 
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(filePath);
-
-  const sheetsToProcess = workbook.worksheets;
-  console.log(`[Excel] 처리할 시트 ${sheetsToProcess.length}개: ${sheetsToProcess.map((s) => s.name).join(', ')}`);
+  const zip = await loadZip(filePath);
+  const sheets = await getSheetEntries(zip);
 
   db.prepare('DELETE FROM excel_raw_data').run();
   db.prepare('DELETE FROM excel_sheets').run();
 
-  const insertCell = db.prepare('INSERT OR REPLACE INTO excel_raw_data (sheet_name, row_num, col, value) VALUES (?, ?, ?, ?)');
   const insertSheet = db.prepare('INSERT INTO excel_sheets (sheet_name, max_row, imported_at) VALUES (?, ?, ?)');
   const now = new Date().toISOString();
-
-  for (const ws of sheetsToProcess) {
-    const maxDataRow = Math.max(ws.rowCount || 0, ws.actualRowCount || 0);
-    const columns = buildColumnNames(Math.max(ws.columnCount || 0, ws.actualColumnCount || 0));
-
-    const batchInsert = db.transaction((sheetName, rows) => {
-      for (const { rowNum, col, value } of rows) {
-        insertCell.run(sheetName, rowNum, col, value);
-      }
-    });
-
-    const batch = [];
-    for (let r = 1; r <= maxDataRow; r += 1) {
-      const row = ws.getRow(r);
-      for (const col of columns) {
-        const cell = row.getCell(col);
-        const val = cellToString(cell.value, cell.result);
-        if (val !== null) {
-          batch.push({ rowNum: r, col, value: val });
-        }
-      }
-      if (batch.length >= 5000) {
-        batchInsert(ws.name, [...batch]);
-        batch.length = 0;
-      }
-    }
-    if (batch.length > 0) {
-      batchInsert(ws.name, batch);
-    }
-
-    insertSheet.run(ws.name, maxDataRow, now);
-    console.log(`[Excel] sheet "${ws.name}": rows 1~${maxDataRow}, columns ${columns[0]}~${columns[columns.length - 1]} processed`);
+  for (const sheet of sheets) {
+    insertSheet.run(sheet.name, 0, now);
   }
 
-  console.log(`[Excel] 전체 시트 처리 완료: ${Date.now() - startMs}ms`);
-
-  return sheetsToProcess.map((ws) => ws.name);
+  console.log(`[Excel] 시트 목록 저장 완료: ${sheets.length}개, ${Date.now() - startMs}ms`);
+  return sheets.map((sheet) => sheet.name);
 }
 
 function getStoredSheets(db) {
   return db.prepare('SELECT sheet_name, max_row, imported_at FROM excel_sheets ORDER BY id').all();
 }
 
-function roundIfNumeric(val) {
-  if (!val) return val;
-  const num = Number(val);
-  if (Number.isNaN(num)) return val;
-  if (Number.isInteger(num)) return String(num);
-  return String(Math.round(num * 10) / 10);
+async function readExcelRange(db, appDataPath, sheetName, startRow, endRow, columns = []) {
+  const filePath = getExcelOriginalPath(db, appDataPath);
+  const zip = await loadZip(filePath);
+  const [sheetPath, sharedStrings] = await Promise.all([
+    getSheetPath(zip, sheetName),
+    readSharedStrings(zip),
+  ]);
+  const sheetXml = await getText(zip, sheetPath);
+  return readRowsFromSheetXml(sheetXml, sharedStrings, startRow, endRow, columns);
+}
+
+async function readExcelRow(db, appDataPath, sheetName, rowNum, maxColumn = 52) {
+  const columns = buildColumnNames(maxColumn);
+  const rows = await readExcelRange(db, appDataPath, sheetName, rowNum, rowNum, columns);
+  const values = rows.get(normalizeRowNumber(rowNum)) || {};
+  const result = {};
+  for (const col of columns) {
+    let value = values[col];
+    if (col === 'A') {
+      value = formatDate(value) || value;
+    }
+    result[col] = roundIfNumeric(value) || '';
+  }
+  return result;
+}
+
+function getRangeCell(rangeRows, rowNum, col) {
+  const row = rangeRows.get(Number(rowNum));
+  if (!row) return null;
+  const value = row[normalizeColumnName(col)];
+  return value === undefined || value === '' ? null : value;
 }
 
 function getStoredRow(db, sheetName, rowNum) {
@@ -138,4 +304,18 @@ function hasStoredData(db) {
   return count.cnt > 0;
 }
 
-module.exports = { parseAndStoreExcel, getStoredSheets, getStoredRow, getCellValue, hasStoredData, formatDate, COLUMNS };
+module.exports = {
+  COLUMNS,
+  buildColumnNames,
+  cellToString: getCellValueFromXml,
+  formatDate,
+  getCellValue,
+  getExcelOriginalPath,
+  getRangeCell,
+  getStoredRow,
+  getStoredSheets,
+  hasStoredData,
+  parseAndStoreExcel,
+  readExcelRange,
+  readExcelRow,
+};

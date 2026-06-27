@@ -210,7 +210,7 @@ function registerLazyApplication() {
     return next();
   });
 
-  // --- Tier 1: registry 湲곕컲 lazy wrapper ?깅줉 ---
+  // --- Tier 1: registry 기반 lazy wrapper 등록 ---
   const tier1Entries = routeRegistry.filter(r => r.tier === 1);
   const tier1RouterRefs = {};
   for (const entry of tier1Entries) {
@@ -233,7 +233,7 @@ function registerLazyApplication() {
     });
   }
 
-  // --- Tier 2: registry 湲곕컲 makeLazy ?깅줉 ---
+  // --- Tier 2: registry 기반 makeLazy 등록 ---
   for (const entry of routeRegistry.filter(r => r.tier === 2)) {
     app.use(entry.path, makeLazy(entry.module, ...resolveArgs(entry.args, ctx)));
   }
@@ -251,7 +251,7 @@ function registerLazyApplication() {
     }
   }
 
-  // --- /api/preload-trigger: registry 湲곕컲 ?먮룞??---
+  // --- /api/preload-trigger: registry 기반 자동 로드 ---
   app.post('/api/preload-trigger', (req, res) => {
     res.json({ ok: true });
     setImmediate(() => {

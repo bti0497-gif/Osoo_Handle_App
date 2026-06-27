@@ -49,7 +49,7 @@ export default function TemplateUploadCard({
                             color: '#475569',
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
-                            textOverflow: 'ellipsis'
+                            textOverflow: 'ellipsis',
                         }}
                     />
                     {onOpenFolder && (
@@ -88,22 +88,23 @@ export default function TemplateUploadCard({
                         </button>
                     )}
                 </div>
-                <label style={{
-                    height: '50px',
-                    padding: '0 20px',
-                    backgroundColor: '#f1f5f9',
-                    color: '#1e293b',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '12px',
-                    fontSize: '0.8125rem',
-                    fontWeight: 900,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '6px',
-                    transition: 'all 0.1s'
-                }}
+                <label
+                    style={{
+                        height: '50px',
+                        padding: '0 20px',
+                        backgroundColor: '#f1f5f9',
+                        color: '#1e293b',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '12px',
+                        fontSize: '0.8125rem',
+                        fontWeight: 900,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        transition: 'all 0.1s',
+                    }}
                     onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#e2e8f0'; }}
                     onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f1f5f9'; }}
                 >

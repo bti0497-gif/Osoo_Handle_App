@@ -28,7 +28,39 @@ function openLocalFolder(folderPath) {
   }
 
   if (process.platform === 'win32') {
-    spawn('explorer.exe', [folderPath], { detached: true, stdio: 'ignore' }).unref();
+    try {
+      const explorer = spawn('explorer.exe', [folderPath], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+      });
+      explorer.on('error', () => {
+        spawn('powershell.exe', [
+          '-NoProfile',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-Command',
+          'Start-Process',
+          '-FilePath',
+          'explorer.exe',
+          '-ArgumentList',
+          folderPath,
+        ], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+      });
+      explorer.unref();
+    } catch {
+      spawn('powershell.exe', [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        'Start-Process',
+        '-FilePath',
+        'explorer.exe',
+        '-ArgumentList',
+        folderPath,
+      ], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+    }
     return;
   }
   if (process.platform === 'darwin') {
@@ -200,9 +232,9 @@ module.exports = function (db, baseDir, appDataPath) {
   });
 
   // 엑셀 미리보기(DB에서 임시 조회) API
-  router.post('/api/settings/excel-preview', (req, res) => {
+  router.post('/api/settings/excel-preview', async (req, res) => {
     try {
-      res.json(appSettingsService.getExcelPreview(db, req.body || {}));
+      res.json(await appSettingsService.getExcelPreview(db, appDataPath, req.body || {}));
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
@@ -210,11 +242,11 @@ module.exports = function (db, baseDir, appDataPath) {
   router.get('/api/settings/import-progress', (req, res) => { res.json(importProgress); });
 
   // 흐름 매핑 설정 + DB에서 임포트 수행
-  router.post('/api/settings/save-flow-mapping', (req, res) => {
+  router.post('/api/settings/save-flow-mapping', async (req, res) => {
     const { config, mapping } = req.body;
     importProgress = mappingSettingsService.createProgress(config);
     try {
-      const result = mappingSettingsService.saveFlowMapping(db, config, mapping, importProgress);
+      const result = await mappingSettingsService.saveFlowMapping(db, appDataPath, config, mapping, importProgress);
       res.json({ success: true, ...result });
     } catch (e) {
       console.error('Flow mapping error:', e);
@@ -226,11 +258,11 @@ module.exports = function (db, baseDir, appDataPath) {
 
   // 킷 매핑 설정 + DB에서 임포트 수행
   // mapping 형식: "킷명_purchase", "킷명_usage", "킷명_inventory"
-  router.post('/api/settings/save-kit-mapping', (req, res) => {
+  router.post('/api/settings/save-kit-mapping', async (req, res) => {
     const { config, mapping } = req.body;
     importProgress = mappingSettingsService.createProgress(config);
     try {
-      const result = mappingSettingsService.saveKitMapping(db, config, mapping, importProgress);
+      const result = await mappingSettingsService.saveKitMapping(db, appDataPath, config, mapping, importProgress);
       res.json({ success: true, ...result });
     } catch (e) {
       console.error('Kit mapping error:', e);
@@ -242,11 +274,11 @@ module.exports = function (db, baseDir, appDataPath) {
 
   // 약품 매핑 설정 + DB에서 임포트 수행
   // mapping 형식: "약품명_purchase", "약품명_usage", "약품명_inventory"
-  router.post('/api/settings/save-medicine-mapping', (req, res) => {
+  router.post('/api/settings/save-medicine-mapping', async (req, res) => {
     const { config, mapping } = req.body;
     importProgress = mappingSettingsService.createProgress(config);
     try {
-      const result = mappingSettingsService.saveMedicineMapping(db, config, mapping, importProgress);
+      const result = await mappingSettingsService.saveMedicineMapping(db, appDataPath, config, mapping, importProgress);
       res.json({ success: true, ...result });
     } catch (e) {
       console.error('Medicine mapping error:', e);
@@ -257,11 +289,11 @@ module.exports = function (db, baseDir, appDataPath) {
   });
 
   // 수질 매핑 설정 + DB에서 임포트 수행
-  router.post('/api/settings/save-water-mapping', (req, res) => {
+  router.post('/api/settings/save-water-mapping', async (req, res) => {
     const { config, mapping } = req.body;
     importProgress = mappingSettingsService.createProgress(config);
     try {
-      const result = mappingSettingsService.saveWaterMapping(db, config, mapping, importProgress);
+      const result = await mappingSettingsService.saveWaterMapping(db, appDataPath, config, mapping, importProgress);
       res.json({ success: true, ...result });
     } catch (e) {
       console.error('Water mapping error:', e);

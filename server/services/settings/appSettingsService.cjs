@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { getStoredSheets, getStoredRow, hasStoredData } = require('../excelService.cjs');
+const { getStoredSheets, hasStoredData, readExcelRow } = require('../excelService.cjs');
 const { isDriveConfigured, getDriveRootFolderId, getOrCreateFolder } = require('../driveService.cjs');
 const { DRIVE_CATEGORY } = require('../drivePathService.cjs');
 const { listReportTemplates } = require('../reportTemplateService.cjs');
@@ -233,13 +233,13 @@ function getExcelStatus(db) {
   };
 }
 
-function getExcelPreview(db, payload) {
+async function getExcelPreview(db, appDataPath, payload) {
   const { sheet, row } = payload || {};
   if (!hasStoredData(db)) {
     return { success: false, message: '엑셀 데이터가 아직 준비되지 않았습니다' };
   }
 
-  const data = getStoredRow(db, sheet, row);
+  const data = await readExcelRow(db, appDataPath, sheet, row);
   return { success: true, data };
 }
 

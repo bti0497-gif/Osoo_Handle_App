@@ -31,7 +31,7 @@ export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
             const nextStatus = {
                 status: result.status,
                 fileName: result.fileName || null,
-                sheets: normalizedSheets
+                sheets: normalizedSheets,
             };
             setExcelStatus(nextStatus);
             setExcelSheets(normalizedSheets);
@@ -94,7 +94,7 @@ export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
             await SettingsModel.uploadFiles(formData);
             setTemplateFiles([]);
             setTemplateFileNames(files.map((file) => file.name).join(', '));
-            showAlert?.('선택한 일지 양식을 로컬 템플릿 폴더에 복사했습니다.');
+            showAlert?.('선택한 일지 양식을 로컬 템플릿 폴더로 복사했습니다.');
         } catch (err) {
             console.error('Template upload error:', err);
             showAlert?.('일지 양식 파일 복사 중 오류가 발생했습니다: ' + err.message);
@@ -106,7 +106,14 @@ export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
 
     const handleOpenLocalFolder = async (target) => {
         try {
-            await SettingsModel.openLocalFolder(target);
+            const result = await SettingsModel.openLocalFolder(target);
+            const label = target === 'reports'
+                ? '일지 양식 저장 폴더'
+                : '기존 운영 엑셀 원본 저장 폴더';
+            if (result?.path && window.electronAPI?.openFile) {
+                await window.electronAPI.openFile(result.path).catch(() => undefined);
+            }
+            showAlert?.(`${label}를 열었습니다.\n창이 보이지 않으면 작업 표시줄 또는 앱 뒤쪽 창을 확인해주세요.\n${result?.path || ''}`);
         } catch (err) {
             showAlert?.('로컬 폴더를 열 수 없습니다: ' + err.message);
         }

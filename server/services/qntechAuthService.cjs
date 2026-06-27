@@ -158,7 +158,7 @@ async function graphqlRequest(baseUrl, cookieJar, query, variables, referer = '/
   try {
     parsed = JSON.parse(response.body.toString('utf8'));
   } catch (error) {
-    throw new Error(`QnTECH GraphQL ?묐떟??JSON???꾨떃?덈떎. status=${response.statusCode}`);
+    throw new Error(`QnTECH GraphQL 응답이 JSON이 아닙니다. status=${response.statusCode}`);
   }
 
   if (response.statusCode >= 400) {

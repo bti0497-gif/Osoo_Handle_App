@@ -55,7 +55,7 @@ function isSheetsConfigured() {
 function rowToMember(row) {
   // 구형 시트(10열, site_name2 포함) → 신형 시트(10열, phone 포함) 마이그레이션 지원
   const getAt = (index) => row[index] ?? '';
-  const isOldFormat = Array.isArray(row) && row.length >= 11; // 11???댁긽 = site_name2 ?덉쓬
+  const isOldFormat = Array.isArray(row) && row.length >= 11; // 11열 이상 = site_name2 있음
 
   let id, name, password, role, site_name1, phone, target_lat, target_lng, radius_m, notes;
 
@@ -154,7 +154,7 @@ async function ensureHeader(sheetId) {
       HEADER_ROW, // 새 헤더
       ...allRows.slice(1).map(row => {
         // 구형: [id, name, password, role, site_name1, site_name2, target_lat, target_lng, radius_m, notes, ...]
-        // ?좏삎: [id, name, password, role, site_name1, phone, target_lat, target_lng, radius_m, notes]
+        // 신형: [id, name, password, role, site_name1, phone, target_lat, target_lng, radius_m, notes]
         return [
           row[0] || '',        // id
           row[1] || '',        // name
