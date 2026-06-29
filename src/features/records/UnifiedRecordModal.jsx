@@ -70,6 +70,8 @@ const buttonBaseStyle = {
     color: '#334155',
 };
 
+const ADMIN_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
+
 function DateOnlyInput({ value, onChange, style }) {
     const pickerRef = useRef(null);
 
@@ -227,6 +229,7 @@ const buildFlowGroups = (items = []) => {
 export default function UnifiedRecordModal({
     isOpen,
     mode = 'add',
+    currentUser = null,
     initialTab = 'flow',
     initialDate = '',
     contexts = {},
@@ -240,6 +243,7 @@ export default function UnifiedRecordModal({
     onValidationError,
     onDateChange,
 }) {
+    const canUseBaselineStatus = ADMIN_ROLES.has(String(currentUser?.role || '').trim().toLowerCase());
     const [activeTab, setActiveTab] = useState(initialTab);
     const [date, setDate] = useState(initialDate);
     const [selectedByTab, setSelectedByTab] = useState({});
@@ -583,6 +587,7 @@ export default function UnifiedRecordModal({
         const medicineItemsToSave = [];
         const kitItemsToSave = [];
         const waterItemsToSave = [];
+        const effectiveSaveStatusMode = canUseBaselineStatus ? saveStatusMode : 'manual';
 
         if (targetTabs.has('flow')) {
             (resolvedContexts.flow?.items || []).forEach((item) => {
@@ -624,7 +629,7 @@ export default function UnifiedRecordModal({
                     sludge_export: isSludge ? reading : null,
                     is_manual: true,
                     is_reset: false,
-                    input_status: saveStatusMode === 'baseline' ? 'baseline' : 'manual',
+                    input_status: effectiveSaveStatusMode === 'baseline' ? 'baseline' : 'manual',
                 });
             });
         }
@@ -648,7 +653,7 @@ export default function UnifiedRecordModal({
                     usage_amount: usage,
                     current_inventory: inventory,
                     input_status: (
-                        saveStatusMode === 'baseline'
+                        effectiveSaveStatusMode === 'baseline'
                             ? 'baseline'
                             : ((purchase === null && toNumberOrNull(values.usage) === null)
                                 ? 'defaulted'
@@ -703,7 +708,7 @@ export default function UnifiedRecordModal({
                             : `manual:${date}:${round.value}`,
                         measurement_order: round.value,
                         source_type: round.sourceType || 'manual',
-                        input_status: round.sourceType === 'qntech' ? 'imported' : (saveStatusMode === 'baseline' ? 'baseline' : 'manual'),
+                        input_status: round.sourceType === 'qntech' ? 'imported' : (effectiveSaveStatusMode === 'baseline' ? 'baseline' : 'manual'),
                         source_label: round.label,
                         qntech_project_id: round.qntechProjectId || null,
                         location: item.key || item.label,
@@ -1311,7 +1316,7 @@ export default function UnifiedRecordModal({
                 overflow: 'hidden',
                 transform: 'translateY(-6px)',
             }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '210px 1fr 118px auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: canUseBaselineStatus ? '210px 1fr 118px auto auto' : '210px 1fr auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #e2e8f0' }}>
                     <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 17, fontWeight: 900, color: '#0f172a', whiteSpace: 'nowrap' }}>
                             통합 데이터 입력
@@ -1348,21 +1353,23 @@ export default function UnifiedRecordModal({
                         })}
                     </div>
 
-                    <select
-                        value={saveStatusMode}
-                        onChange={(event) => setSaveStatusMode(event.target.value)}
-                        title="저장구분"
-                        style={{
-                            ...inputStyle,
-                            width: 118,
-                            textAlign: 'left',
-                            fontSize: 12,
-                            fontWeight: 900,
-                        }}
-                    >
-                        <option value="manual">일반 입력</option>
-                        <option value="baseline">기준값</option>
-                    </select>
+                    {canUseBaselineStatus && (
+                        <select
+                            value={saveStatusMode}
+                            onChange={(event) => setSaveStatusMode(event.target.value)}
+                            title="저장구분"
+                            style={{
+                                ...inputStyle,
+                                width: 118,
+                                textAlign: 'left',
+                                fontSize: 12,
+                                fontWeight: 900,
+                            }}
+                        >
+                            <option value="manual">일반 입력</option>
+                            <option value="baseline">기준값</option>
+                        </select>
+                    )}
 
                     <DateOnlyInput
                         value={date}

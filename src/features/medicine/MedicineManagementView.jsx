@@ -236,6 +236,7 @@ const MedicineManagementView = ({ currentUser }) => {
             <UnifiedRecordModal
                 isOpen={modalState.open}
                 mode={modalState.mode}
+                currentUser={currentUser}
                 initialTab={modalState.tab}
                 initialDate={modalState.mode === 'add' ? todayStr : (selectedDate || todayStr)}
                 contexts={buildModalContexts()}
