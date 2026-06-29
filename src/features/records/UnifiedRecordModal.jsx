@@ -8,6 +8,11 @@ const TAB_META = [
     { id: 'kit', label: '키트관리' },
 ];
 
+const TAB_LABEL_BY_ID = TAB_META.reduce((acc, tab) => {
+    acc[tab.id] = tab.label;
+    return acc;
+}, {});
+
 const WATER_FIELD_META = [
     { id: 'nh3_n', label: '암모니아성질소', code: 'NH3-N' },
     { id: 'no3_n', label: '질산성질소', code: 'NO3-N' },
@@ -25,6 +30,8 @@ const toNumberOrNull = (value) => {
     const parsed = Number(String(value).replace(/,/g, ''));
     return Number.isFinite(parsed) ? parsed : null;
 };
+
+const hasValue = (value) => value !== '' && value !== null && value !== undefined;
 
 const round1 = (value) => Math.round(value * 10) / 10;
 
@@ -176,14 +183,15 @@ function buildInitialDraft(tabId, item, roundValue) {
 
     if (tabId === 'medicine' || tabId === 'kit') {
         const purchase = item.values?.purchase ?? '';
-        const usage = toNumberOrNull(item.values?.usage) ?? 0;
+        const usage = item.values?.usage ?? '';
         const previousInventory = toNumberOrNull(item.previous?.inventory) || 0;
         const savedInventory = toNumberOrNull(item.values?.inventory);
+        const numericUsage = toNumberOrNull(usage) ?? 0;
         return {
             purchase,
             usage,
             inventory: savedInventory
-                ?? round1(previousInventory + (toNumberOrNull(purchase) || 0) - usage),
+                ?? round1(previousInventory + (toNumberOrNull(purchase) || 0) - numericUsage),
         };
     }
 
@@ -242,6 +250,7 @@ export default function UnifiedRecordModal({
     const [rangeStartDate, setRangeStartDate] = useState(initialDate);
     const [rangeEndDate, setRangeEndDate] = useState(initialDate);
     const [waterInputMode, setWaterInputMode] = useState('manual');
+    const [savedTabs, setSavedTabs] = useState([]);
     const wasOpenRef = useRef(false);
     const initialWaterSignature = JSON.stringify({
         measurementOrder: contexts.water?.measurementOrder || 1,
@@ -269,6 +278,7 @@ export default function UnifiedRecordModal({
             setSelectedByTab({});
             setDraft({});
             setDefaultPurchaseAppliedByTab({});
+            setSavedTabs([]);
             setWaterRounds(rounds);
             setSelectedWaterRound(rounds[0]?.value || 1);
             if (isOpening) {
@@ -529,7 +539,42 @@ export default function UnifiedRecordModal({
         }
     };
 
-    const buildAllTabSavePlan = () => {
+    const hasPersistedTabData = (tabId) => {
+        if (tabId === 'flow') {
+            const requiredItems = (resolvedContexts.flow?.items || []).filter((item) => !isSludgeFlowItem(item));
+            return requiredItems.length > 0 && requiredItems.every((item) => {
+                const values = buildInitialDraft('flow', item);
+                return toNumberOrNull(values.reading) !== null;
+            });
+        }
+
+        if (tabId === 'medicine' || tabId === 'kit') {
+            return (resolvedContexts[tabId]?.items || []).some((item) => {
+                const values = item.values || {};
+                return hasValue(values.purchase) || hasValue(values.usage) || hasValue(values.inventory);
+            });
+        }
+
+        if (tabId === 'water') {
+            return (resolvedContexts.water?.items || []).some((item) => {
+                const valuesByRound = item.valuesByRound || {};
+                return Object.values(valuesByRound).some((values) => (
+                    WATER_FIELD_META.some((field) => toNumberOrNull(values?.[field.id]) !== null)
+                ));
+            });
+        }
+
+        return false;
+    };
+
+    const hasDraftTabData = (tabId) => Object.keys(draft).some((key) => key.startsWith(`${tabId}:`));
+
+    const buildSavePlan = ({
+        tabIds = ['flow', 'medicine', 'water', 'kit'],
+        validateFlow = true,
+        allowFlowDefaults = false,
+    } = {}) => {
+        const targetTabs = new Set(tabIds);
         const flowMissing = [];
         const notices = [];
         const flowItemsToSave = [];
@@ -537,31 +582,48 @@ export default function UnifiedRecordModal({
         const kitItemsToSave = [];
         const waterItemsToSave = [];
 
-        (resolvedContexts.flow?.items || []).forEach((item) => {
-            const values = getDraftForItem('flow', item);
-            const reading = toNumberOrNull(values.reading);
-            const calculatedFlow = toNumberOrNull(values.calculatedFlow);
-            const isSludge = isSludgeFlowItem(item);
+        if (targetTabs.has('flow')) {
+            (resolvedContexts.flow?.items || []).forEach((item) => {
+                const values = getDraftForItem('flow', item);
+                const reading = toNumberOrNull(values.reading);
+                const calculatedFlow = toNumberOrNull(values.calculatedFlow);
+                const isSludge = isSludgeFlowItem(item);
 
-            // 슬러지 반출이 없는 날은 빈칸이 정상이다.
-            if (reading === null && isSludge) return;
-            if (reading === null) {
-                flowMissing.push({
-                    tab: 'flow',
-                    item,
-                    message: `${item.label || item.key} 검침값`,
+                // 슬러지 반출이 없는 날은 빈칸이 정상이다.
+                if (reading === null && isSludge) return;
+                if (reading === null) {
+                    const previousReading = toNumberOrNull(item?.previous?.reading);
+                    if (allowFlowDefaults && previousReading !== null) {
+                        flowItemsToSave.push({
+                            type: item.key || item.name || item.label,
+                            raw_value: previousReading,
+                            calculated_flow: 0,
+                            sludge_export: null,
+                            is_manual: true,
+                            is_reset: false,
+                        });
+                        notices.push(`${item.label || item.key} 유량은 전날 검침값을 기준으로 0 처리했습니다.`);
+                        return;
+                    }
+                    if (validateFlow) {
+                        flowMissing.push({
+                            tab: 'flow',
+                            item,
+                            message: `${item.label || item.key} 검침값`,
+                        });
+                    }
+                    return;
+                }
+                flowItemsToSave.push({
+                    type: item.key || item.name || item.label,
+                    raw_value: reading,
+                    calculated_flow: calculatedFlow,
+                    sludge_export: isSludge ? reading : null,
+                    is_manual: true,
+                    is_reset: false,
                 });
-                return;
-            }
-            flowItemsToSave.push({
-                type: item.key || item.name || item.label,
-                raw_value: reading,
-                calculated_flow: calculatedFlow,
-                sludge_export: isSludge ? reading : null,
-                is_manual: true,
-                is_reset: false,
             });
-        });
+        }
 
         const zeroUsageMedicines = [];
         const collectInventoryItems = (tab, nameField, target) => {
@@ -585,8 +647,12 @@ export default function UnifiedRecordModal({
             });
         };
 
-        collectInventoryItems('medicine', 'medicine_name', medicineItemsToSave);
-        collectInventoryItems('kit', 'kit_name', kitItemsToSave);
+        if (targetTabs.has('medicine')) {
+            collectInventoryItems('medicine', 'medicine_name', medicineItemsToSave);
+        }
+        if (targetTabs.has('kit')) {
+            collectInventoryItems('kit', 'kit_name', kitItemsToSave);
+        }
 
         const waterUsageByKit = new Map([
             ['nh3_n', { kitName: '암모니아성질소(NH3-N)', count: 0 }],
@@ -596,51 +662,71 @@ export default function UnifiedRecordModal({
         ]);
         let hasAnyWaterValue = false;
         let hasPartialWaterInput = false;
-        const rounds = waterRounds.length > 0
-            ? waterRounds
-            : [{ value: 1, label: '1회차', sourceType: 'manual' }];
-        rounds.forEach((round) => {
-            (resolvedContexts.water?.items || []).forEach((item) => {
-                const values = getDraftForItem('water', item, round.value);
-                const enabledFields = WATER_FIELD_META.filter(
-                    (field) => field.id !== 'po4_p' || isPo4pInputEnabled(item)
-                );
-                const hasAny = enabledFields.some((field) => toNumberOrNull(values[field.id]) !== null);
-                const missingFields = enabledFields.filter((field) => toNumberOrNull(values[field.id]) === null);
-                if (!hasAny) return;
-                hasAnyWaterValue = true;
-                if (missingFields.length > 0) {
-                    hasPartialWaterInput = true;
-                }
-                enabledFields.forEach((field) => {
-                    if (toNumberOrNull(values[field.id]) !== null) {
-                        const usage = waterUsageByKit.get(field.id);
-                        if (usage) usage.count += 1;
+        if (targetTabs.has('water')) {
+            const rounds = waterRounds.length > 0
+                ? waterRounds
+                : [{ value: 1, label: '1회차', sourceType: 'manual' }];
+            rounds.forEach((round) => {
+                (resolvedContexts.water?.items || []).forEach((item) => {
+                    const values = getDraftForItem('water', item, round.value);
+                    const enabledFields = WATER_FIELD_META.filter(
+                        (field) => field.id !== 'po4_p' || isPo4pInputEnabled(item)
+                    );
+                    const hasAny = enabledFields.some((field) => toNumberOrNull(values[field.id]) !== null);
+                    const missingFields = enabledFields.filter((field) => toNumberOrNull(values[field.id]) === null);
+                    if (!hasAny) return;
+                    hasAnyWaterValue = true;
+                    if (missingFields.length > 0) {
+                        hasPartialWaterInput = true;
                     }
-                });
-                waterItemsToSave.push({
-                    date,
-                    measurement_group: round.sourceType === 'qntech'
-                        ? round.measurementGroup
-                        : `manual:${date}:${round.value}`,
-                    measurement_order: round.value,
-                    source_type: round.sourceType || 'manual',
-                    source_label: round.label,
-                    qntech_project_id: round.qntechProjectId || null,
-                    location: item.key || item.label,
-                    ...WATER_FIELD_META.reduce((acc, field) => {
-                        acc[field.id] = field.id === 'po4_p' && !isPo4pInputEnabled(item)
-                            ? null
-                            : toNumberOrNull(values[field.id]);
-                        return acc;
-                    }, {}),
+                    enabledFields.forEach((field) => {
+                        if (toNumberOrNull(values[field.id]) !== null) {
+                            const usage = waterUsageByKit.get(field.id);
+                            if (usage) usage.count += 1;
+                        }
+                    });
+                    waterItemsToSave.push({
+                        date,
+                        measurement_group: round.sourceType === 'qntech'
+                            ? round.measurementGroup
+                            : `manual:${date}:${round.value}`,
+                        measurement_order: round.value,
+                        source_type: round.sourceType || 'manual',
+                        source_label: round.label,
+                        qntech_project_id: round.qntechProjectId || null,
+                        location: item.key || item.label,
+                        ...WATER_FIELD_META.reduce((acc, field) => {
+                            acc[field.id] = field.id === 'po4_p' && !isPo4pInputEnabled(item)
+                                ? null
+                                : toNumberOrNull(values[field.id]);
+                            return acc;
+                        }, {}),
+                    });
                 });
             });
-        });
+        }
 
         waterUsageByKit.forEach(({ kitName, count }) => {
             if (count <= 0) return;
-            const kitRow = kitItemsToSave.find((item) => item.kit_name === kitName);
+            let kitRow = kitItemsToSave.find((item) => item.kit_name === kitName);
+            if (!kitRow) {
+                const kitContext = (resolvedContexts.kit?.items || []).find(
+                    (item) => (item.key || item.name || item.label) === kitName
+                );
+                if (!kitContext) return;
+                const values = getDraftForItem('kit', kitContext);
+                const purchase = toNumberOrNull(values.purchase) ?? 0;
+                const usage = toNumberOrNull(values.usage) ?? 0;
+                const previousInventory = toNumberOrNull(kitContext?.previous?.inventory) || 0;
+                kitRow = {
+                    date,
+                    kit_name: kitName,
+                    purchase_amount: purchase,
+                    usage_amount: usage,
+                    current_inventory: round1(previousInventory + purchase - usage),
+                };
+                kitItemsToSave.push(kitRow);
+            }
             if (!kitRow) return;
             if (kitRow.usage_amount < count) {
                 const kitContext = (resolvedContexts.kit?.items || []).find(
@@ -658,9 +744,9 @@ export default function UnifiedRecordModal({
             notices.push(`사용되지 않은 약품: ${zeroUsageMedicines.join(', ')}`);
         }
         const hasAnyKitUsage = kitItemsToSave.some((item) => item.usage_amount > 0);
-        if (!hasAnyWaterValue && !hasAnyKitUsage) {
+        if (targetTabs.has('water') && !hasAnyWaterValue && !hasAnyKitUsage) {
             notices.push('실험분석값과 키트 사용량이 없습니다.');
-        } else if (hasPartialWaterInput) {
+        } else if (targetTabs.has('water') && hasPartialWaterInput) {
             notices.push('실험분석에 빠진 항목이 있습니다.');
         }
 
@@ -674,9 +760,27 @@ export default function UnifiedRecordModal({
         };
     };
 
+    const savePlan = async (plan) => {
+        const result = await saveAllTabs(plan);
+        if (!result.success) {
+            notifyValidation(`일부 데이터 저장에 실패했습니다. ${result.error || ''}`.trim());
+            return null;
+        }
+
+        if (result.savedTabs.length > 0) {
+            setSavedTabs((prev) => Array.from(new Set([...prev, ...result.savedTabs])));
+            await onSaveComplete?.({ date, savedTabs: result.savedTabs });
+        }
+        return result;
+    };
+
     const handleSave = async () => {
         if (isLoadingUnifiedData || isSaving) return;
-        const plan = buildAllTabSavePlan();
+        const plan = buildSavePlan({
+            tabIds: [activeTab],
+            validateFlow: activeTab === 'flow',
+            allowFlowDefaults: activeTab === 'flow',
+        });
 
         if (plan.flowMissing.length > 0) {
             focusMissingInput(plan.flowMissing[0]);
@@ -684,18 +788,53 @@ export default function UnifiedRecordModal({
             return;
         }
 
-        const result = await saveAllTabs(plan);
-        if (!result.success) {
-            notifyValidation(`일부 데이터 저장에 실패했습니다. ${result.error || ''}`.trim());
-            return;
-        }
-
-        await onSaveComplete?.({ date, savedTabs: result.savedTabs });
+        const result = await savePlan(plan);
+        if (!result) return;
         if (plan.notices.length > 0) {
             notifyValidation(plan.notices.join('\n'));
         } else {
-            notifyValidation('입력된 데이터가 저장되었습니다.');
+            notifyValidation(`${TAB_LABEL_BY_ID[activeTab] || '현재 탭'} 데이터가 저장되었습니다.`);
         }
+    };
+
+    const handleClose = async () => {
+        if (isLoadingUnifiedData || isSaving) return;
+
+        const completedTabs = new Set([
+            ...savedTabs,
+            ...TAB_META.filter((tab) => hasPersistedTabData(tab.id)).map((tab) => tab.id),
+        ]);
+        const incompleteTabs = TAB_META
+            .filter((tab) => !completedTabs.has(tab.id))
+            .map((tab) => tab.id);
+        const dirtyUnsavedTabs = TAB_META
+            .filter((tab) => hasDraftTabData(tab.id) && !savedTabs.includes(tab.id))
+            .map((tab) => tab.id);
+        const tabsToDefaultSave = Array.from(new Set([
+            ...incompleteTabs.filter((tabId) => tabId === 'flow' || tabId === 'medicine' || tabId === 'kit'),
+            ...dirtyUnsavedTabs,
+        ]));
+
+        if (incompleteTabs.length > 0 || dirtyUnsavedTabs.length > 0) {
+            const incompleteLabels = incompleteTabs.map((tabId) => TAB_LABEL_BY_ID[tabId] || tabId).join(', ');
+            const dirtyLabels = dirtyUnsavedTabs.map((tabId) => TAB_LABEL_BY_ID[tabId] || tabId).join(', ');
+            const lines = [];
+            if (incompleteLabels) lines.push(`아직 작성 완료로 확인되지 않은 탭: ${incompleteLabels}`);
+            if (dirtyLabels) lines.push(`저장되지 않은 입력값이 있는 탭: ${dirtyLabels}`);
+            if (tabsToDefaultSave.length > 0) {
+                lines.push('유량 미작성 항목은 전날 검침값으로 유량 0 처리하고, 약품/키트 미작성 항목은 기본값 0과 전일 재고 기준으로 저장한 뒤 닫습니다.');
+            }
+            lines.push('계속 닫으시겠습니까?');
+            if (!window.confirm(lines.join('\n'))) return;
+        }
+
+        if (tabsToDefaultSave.length > 0) {
+            const plan = buildSavePlan({ tabIds: tabsToDefaultSave, validateFlow: false, allowFlowDefaults: true });
+            const result = await savePlan(plan);
+            if (!result) return;
+        }
+
+        onClose?.();
     };
 
     const renderWaterSidebar = () => {
@@ -1209,7 +1348,7 @@ export default function UnifiedRecordModal({
                         style={{ width: 138 }}
                     />
 
-                    <button type="button" onClick={onClose} style={{ border: 0, background: 'transparent', cursor: 'pointer', color: '#94a3b8', padding: 4, height: 34 }}>
+                    <button type="button" onClick={handleClose} style={{ border: 0, background: 'transparent', cursor: 'pointer', color: '#94a3b8', padding: 4, height: 34 }}>
                         <span className="material-icons" style={{ fontSize: 25 }}>close</span>
                     </button>
                 </div>
@@ -1294,7 +1433,7 @@ export default function UnifiedRecordModal({
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '12px 18px', borderTop: '1px solid #e2e8f0' }}>
-                    <button type="button" onClick={onClose} style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', fontWeight: 800, color: '#475569' }}>
+                    <button type="button" onClick={handleClose} style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', fontWeight: 800, color: '#475569' }}>
                         닫기
                     </button>
                     <button
@@ -1312,7 +1451,7 @@ export default function UnifiedRecordModal({
                             opacity: isLoadingUnifiedData || isSaving ? 0.65 : 1,
                         }}
                     >
-                        {isLoadingUnifiedData ? '데이터 확인 중...' : isSaving ? '전체 저장 중...' : '전체 저장하기'}
+                        {isLoadingUnifiedData ? '데이터 확인 중...' : isSaving ? '저장 중...' : `${TAB_LABEL_BY_ID[activeTab] || '현재 탭'} 저장하기`}
                     </button>
                 </div>
             </div>
