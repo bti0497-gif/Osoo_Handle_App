@@ -371,10 +371,11 @@ module.exports = function (db, baseDir, appDataPath) {
         const stmt = db.prepare(`
           INSERT INTO medicine_logs
             (medicine_name, date, purchase_amount, usage_amount, current_inventory,
-             site_id, site_name, author, created_at, last_modified, is_synced)
-          VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 0)
+             input_status, site_id, site_name, author, created_at, last_modified, is_synced)
+          VALUES (?, ?, ?, 0, 0, 'manual', ?, ?, ?, ?, ?, 0)
           ON CONFLICT(medicine_name, date) DO UPDATE SET
             purchase_amount = excluded.purchase_amount,
+            input_status    = excluded.input_status,
             site_id         = excluded.site_id,
             last_modified   = excluded.last_modified,
             is_synced       = 0
@@ -391,10 +392,11 @@ module.exports = function (db, baseDir, appDataPath) {
         const stmt = db.prepare(`
           INSERT INTO kit_logs
             (kit_name, date, purchase_amount, usage_amount, current_inventory,
-             site_id, site_name, author, created_at, last_modified, is_synced)
-          VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 0)
+             input_status, site_id, site_name, author, created_at, last_modified, is_synced)
+          VALUES (?, ?, ?, 0, 0, 'manual', ?, ?, ?, ?, ?, 0)
           ON CONFLICT(kit_name, date) DO UPDATE SET
             purchase_amount = excluded.purchase_amount,
+            input_status    = excluded.input_status,
             site_id         = excluded.site_id,
             last_modified   = excluded.last_modified,
             is_synced       = 0

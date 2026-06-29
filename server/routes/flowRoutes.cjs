@@ -130,7 +130,8 @@ module.exports = function (db) {
         dayReadings.forEach(r => {
           row[r.type] = {
             raw: r.raw_value,
-            diff: r.calculated_flow
+            diff: r.calculated_flow,
+            input_status: r.input_status || 'manual'
           };
         });
         return row;
@@ -149,14 +150,15 @@ module.exports = function (db) {
       const stmt = db.prepare(`
         INSERT INTO flow_readings (
           date, type, raw_value, calculated_flow, is_reset, is_manual, sludge_export,
-          site_id, site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          input_status, site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(date, type) DO UPDATE SET
           raw_value = excluded.raw_value,
           calculated_flow = excluded.calculated_flow,
           is_reset = excluded.is_reset,
           is_manual = excluded.is_manual,
           sludge_export = excluded.sludge_export,
+          input_status = excluded.input_status,
           site_id = excluded.site_id,
           site_name = excluded.site_name,
           author = excluded.author,
@@ -178,6 +180,7 @@ module.exports = function (db) {
             is_reset ? 1 : 0,
             is_manual ? 1 : 0,
             sludgeAmount,
+            String(item.input_status || item.inputStatus || 'manual').trim() || 'manual',
             metadata.siteId,
             metadata.siteName,
             metadata.author,
@@ -238,14 +241,15 @@ module.exports = function (db) {
       const info = db.prepare(`
         INSERT INTO flow_readings (
           date, type, raw_value, calculated_flow, is_reset, is_manual, sludge_export,
-          site_id, site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          input_status, site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(date, type) DO UPDATE SET
           raw_value = excluded.raw_value,
           calculated_flow = excluded.calculated_flow,
           is_reset = excluded.is_reset,
           is_manual = excluded.is_manual,
           sludge_export = excluded.sludge_export,
+          input_status = excluded.input_status,
           site_id = excluded.site_id,
           site_name = excluded.site_name,
           author = excluded.author,
@@ -259,6 +263,7 @@ module.exports = function (db) {
         is_reset ? 1 : 0,
         is_manual ? 1 : 0,
         sludgeAmount,
+        String(req.body.input_status || req.body.inputStatus || 'manual').trim() || 'manual',
         metadata.siteId,
         metadata.siteName,
         metadata.author,

@@ -2,8 +2,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { db } = require('../database.cjs');
+const { db, appDataPath } = require('../database.cjs');
 const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
+const { recordDiagnostic } = require('./diagnosticLogService.cjs');
 
 // 3. 현장 정보(현장명, 관리자명) 가져오기
 function getSiteInfo() {
@@ -84,6 +85,7 @@ const TABLE_MAPPINGS = {
     calculated_flow: row.calculated_flow,
     is_reset: Boolean(row.is_reset),
     is_manual: Boolean(row.is_manual),
+    input_status: row.input_status || 'manual',
     sludge_export: row.sludge_export,
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
@@ -99,6 +101,7 @@ const TABLE_MAPPINGS = {
     purchase_amount: row.purchase_amount,
     usage_amount: row.usage_amount,
     current_inventory: row.current_inventory,
+    input_status: row.input_status || 'manual',
     photo_url: row.photo_url || null,
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
@@ -113,6 +116,7 @@ const TABLE_MAPPINGS = {
     measurement_group: row.measurement_group,
     measurement_order: row.measurement_order,
     source_type: row.source_type,
+    input_status: row.input_status || 'manual',
     source_label: row.source_label,
     qntech_project_id: row.qntech_project_id,
     location: row.location,
@@ -135,6 +139,7 @@ const TABLE_MAPPINGS = {
     purchase_amount: row.purchase_amount,
     usage_amount: row.usage_amount,
     current_inventory: row.current_inventory,
+    input_status: row.input_status || 'manual',
     photo_url: row.photo_url || null,
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
@@ -165,8 +170,64 @@ const TABLE_NATURAL_KEYS = {
   facility_logs: ['site_id', 'date', 'location', 'facility_name'],
 };
 
+const BIGQUERY_FIELD_TYPES = {
+  site_id: 'STRING',
+  site_name: 'STRING',
+  author: 'STRING',
+  local_id: 'INTEGER',
+  created_at: 'TIMESTAMP',
+  date: 'DATE',
+  type: 'STRING',
+  raw_value: 'FLOAT',
+  calculated_flow: 'FLOAT',
+  is_reset: 'BOOLEAN',
+  is_manual: 'BOOLEAN',
+  input_status: 'STRING',
+  sludge_export: 'FLOAT',
+  updated_at: 'TIMESTAMP',
+  uploaded_at: 'TIMESTAMP',
+  medicine_name: 'STRING',
+  purchase_amount: 'FLOAT',
+  usage_amount: 'FLOAT',
+  current_inventory: 'FLOAT',
+  photo_url: 'STRING',
+  measurement_group: 'STRING',
+  measurement_order: 'INTEGER',
+  source_type: 'STRING',
+  source_label: 'STRING',
+  qntech_project_id: 'STRING',
+  location: 'STRING',
+  item_name: 'STRING',
+  item_code: 'STRING',
+  result_value: 'STRING',
+  result_numeric: 'FLOAT',
+  unit: 'STRING',
+  kit_name: 'STRING',
+  facility_name: 'STRING',
+  content: 'STRING',
+  company: 'STRING',
+  price: 'INTEGER',
+  notes: 'STRING',
+};
+
 function quoteIdentifier(value) {
   return `\`${String(value).replace(/`/g, '')}\``;
+}
+
+async function ensureTargetTableColumns(table, rows) {
+  if (!rows.length) return;
+  const [metadata] = await table.getMetadata();
+  const schemaFields = metadata.schema?.fields || [];
+  const existing = new Set(schemaFields.map((field) => field.name));
+  const missing = Object.keys(rows[0])
+    .filter((name) => !existing.has(name))
+    .map((name) => ({ name, type: BIGQUERY_FIELD_TYPES[name] || 'STRING' }));
+  if (missing.length === 0) return;
+  await table.setMetadata({
+    schema: {
+      fields: [...schemaFields, ...missing],
+    },
+  });
 }
 
 // 5. 단일 테이블 동기화 함수
@@ -218,6 +279,7 @@ async function syncTable(tableName) {
 
   try {
     // 5-4. BigQuery 전송 (Load Job - 로컬 파일 업로드)
+    await ensureTargetTableColumns(targetTable, bqRows);
     const [targetMetadata] = await targetTable.getMetadata();
     await stagingTable.create({ schema: targetMetadata.schema });
 
@@ -273,6 +335,14 @@ async function syncTable(tableName) {
 
     try { await stagingTable.delete({ ignoreNotFound: true }); } catch (_) {}
     console.log(`[BigQuery] ${tableName}: ${rows.length} rows synced.`);
+    recordDiagnostic(db, appDataPath, {
+      level: 'info',
+      area: 'bigquery',
+      action: `sync:${tableName}`,
+      result: 'ok',
+      message: `${tableName} ${rows.length} rows synced`,
+      details: { tableName, count: rows.length },
+    });
     return { success: true, count: rows.length };
 
   } catch (err) {
@@ -289,6 +359,14 @@ async function syncTable(tableName) {
     let errorMsg = err.message;
     if (err.errors) errorMsg = JSON.stringify(err.errors);
     console.error(`[BigQuery] ${tableName} sync failed, rolling back local state:`, errorMsg);
+    recordDiagnostic(db, appDataPath, {
+      level: 'error',
+      area: 'bigquery',
+      action: `sync:${tableName}`,
+      result: 'failed',
+      message: errorMsg,
+      details: { tableName, rowCount: rows.length, error: err },
+    });
     return { success: false, error: errorMsg };
   }
 }

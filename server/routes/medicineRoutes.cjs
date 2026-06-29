@@ -41,12 +41,13 @@ module.exports = function (db) {
       const stmt = db.prepare(`
         INSERT INTO medicine_logs (
           medicine_name, date, purchase_amount, usage_amount, current_inventory,
-          site_id, site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          input_status, site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(medicine_name, date) DO UPDATE SET
           purchase_amount = excluded.purchase_amount,
           usage_amount = excluded.usage_amount,
           current_inventory = excluded.current_inventory,
+          input_status = excluded.input_status,
           site_id = excluded.site_id,
           site_name = excluded.site_name,
           author = excluded.author,
@@ -63,6 +64,7 @@ module.exports = function (db) {
             item.purchase_amount || 0,
             item.usage_amount || 0,
             item.current_inventory || 0,
+            String(item.input_status || item.inputStatus || 'manual').trim() || 'manual',
             metadata.siteId,
             metadata.siteName,
             metadata.author,
@@ -120,10 +122,11 @@ module.exports = function (db) {
       const upsertStmt = db.prepare(`
         INSERT INTO medicine_logs (
           medicine_name, date, purchase_amount, usage_amount, current_inventory,
-          site_id, site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)
+          input_status, site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(medicine_name, date) DO UPDATE SET
           purchase_amount = excluded.purchase_amount,
+          input_status = excluded.input_status,
           site_id = excluded.site_id,
           site_name = excluded.site_name,
           author = excluded.author,
@@ -144,6 +147,7 @@ module.exports = function (db) {
             name,
             date,
             amount,
+            String(item.input_status || item.inputStatus || 'manual').trim() || 'manual',
             metadata.siteId,
             metadata.siteName,
             metadata.author,
@@ -180,12 +184,13 @@ module.exports = function (db) {
       const info = db.prepare(`
         INSERT INTO medicine_logs (
           medicine_name, date, purchase_amount, usage_amount, current_inventory,
-          site_id, site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          input_status, site_id, site_name, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(medicine_name, date) DO UPDATE SET
           purchase_amount = excluded.purchase_amount,
           usage_amount = excluded.usage_amount,
           current_inventory = excluded.current_inventory,
+          input_status = excluded.input_status,
           site_id = excluded.site_id,
           site_name = excluded.site_name,
           author = excluded.author,
@@ -197,6 +202,7 @@ module.exports = function (db) {
         purchase_amount || 0,
         usage_amount || 0,
         current_inventory,
+        String(req.body.input_status || req.body.inputStatus || 'manual').trim() || 'manual',
         metadata.siteId,
         metadata.siteName,
         metadata.author,

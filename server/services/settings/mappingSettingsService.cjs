@@ -117,11 +117,12 @@ async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
   const metadata = getCurrentRecordMetadata(db, config || {});
   const insertReading = db.prepare(`
     INSERT INTO flow_readings (
-      date, type, raw_value, calculated_flow, site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      date, type, raw_value, calculated_flow, input_status, site_id, site_name, author, created_at, last_modified, is_synced
+    ) VALUES (?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?)
     ON CONFLICT(date, type) DO UPDATE SET
       raw_value = COALESCE(excluded.raw_value, raw_value),
       calculated_flow = COALESCE(excluded.calculated_flow, calculated_flow),
+      input_status = excluded.input_status,
       site_id = excluded.site_id,
       site_name = excluded.site_name,
       author = excluded.author,
@@ -226,13 +227,14 @@ function saveKitMapping(db, appDataPath, config, mapping, progress) {
     updateSettingsSql: 'UPDATE app_settings SET kit_sheet = ?, kit_start_row = ?, kit_end_row = ?, kit_date_col = ? WHERE id = 1',
     upsertConfigSql: "INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('kit', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell",
     insertSql: `
-      INSERT INTO kit_logs (
-        kit_name, date, purchase_amount, usage_amount, current_inventory, site_id, site_name, author, created_at, last_modified, is_synced
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO kit_logs (
+        kit_name, date, purchase_amount, usage_amount, current_inventory, input_status, site_id, site_name, author, created_at, last_modified, is_synced
+      ) VALUES (?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?)
       ON CONFLICT(kit_name, date) DO UPDATE SET
         purchase_amount = excluded.purchase_amount,
         usage_amount = excluded.usage_amount,
         current_inventory = excluded.current_inventory,
+        input_status = excluded.input_status,
         site_id = excluded.site_id,
         site_name = excluded.site_name,
         author = excluded.author,
@@ -249,13 +251,14 @@ function saveMedicineMapping(db, appDataPath, config, mapping, progress) {
     updateSettingsSql: 'UPDATE app_settings SET med_sheet = ?, med_start_row = ?, med_end_row = ?, med_date_col = ? WHERE id = 1',
     upsertConfigSql: "INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('medicine', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell",
     insertSql: `
-      INSERT INTO medicine_logs (
-        medicine_name, date, purchase_amount, usage_amount, current_inventory, site_id, site_name, author, created_at, last_modified, is_synced
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO medicine_logs (
+        medicine_name, date, purchase_amount, usage_amount, current_inventory, input_status, site_id, site_name, author, created_at, last_modified, is_synced
+      ) VALUES (?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?)
       ON CONFLICT(medicine_name, date) DO UPDATE SET
         purchase_amount = excluded.purchase_amount,
         usage_amount = excluded.usage_amount,
         current_inventory = excluded.current_inventory,
+        input_status = excluded.input_status,
         site_id = excluded.site_id,
         site_name = excluded.site_name,
         author = excluded.author,
@@ -332,12 +335,13 @@ async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
     INSERT INTO qntech_water_quality (
       date, measurement_group, measurement_order, source_type, source_label,
       location, item_name, item_code, result_value, result_numeric, unit,
-      site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      input_status, site_id, site_name, author, created_at, last_modified, is_synced
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?)
     ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET
       measurement_order = excluded.measurement_order,
       source_type = excluded.source_type,
       source_label = excluded.source_label,
+      input_status = excluded.input_status,
       item_name = excluded.item_name,
       result_value = excluded.result_value,
       result_numeric = excluded.result_numeric,

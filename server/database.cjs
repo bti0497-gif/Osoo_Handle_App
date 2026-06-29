@@ -74,6 +74,7 @@ db.exec(`
     calculated_flow REAL,
     is_reset BOOLEAN DEFAULT 0,
     is_manual BOOLEAN DEFAULT 0,
+    input_status TEXT DEFAULT 'manual',
     sludge_export REAL,
     site_name TEXT,
     author TEXT,
@@ -89,6 +90,7 @@ db.exec(`
     purchase_amount REAL,
     usage_amount REAL,
     current_inventory REAL,
+    input_status TEXT DEFAULT 'manual',
     site_name TEXT,
     author TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -123,6 +125,7 @@ db.exec(`
     measurement_group TEXT NOT NULL DEFAULT '',
     measurement_order INTEGER DEFAULT 1,
     source_type TEXT DEFAULT 'manual',
+    input_status TEXT DEFAULT 'manual',
     source_label TEXT,
     qntech_project_id TEXT,
     location TEXT,
@@ -176,6 +179,7 @@ db.exec(`
     purchase_amount REAL,
     usage_amount REAL,
     current_inventory REAL,
+    input_status TEXT DEFAULT 'manual',
     site_name TEXT,
     author TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -196,6 +200,24 @@ db.exec(`
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
     is_synced INTEGER DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS app_diagnostic_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    level TEXT DEFAULT 'info',
+    area TEXT,
+    action TEXT,
+    result TEXT,
+    message TEXT,
+    details_json TEXT,
+    site_id TEXT,
+    site_name TEXT,
+    app_version TEXT,
+    uploaded_at TEXT,
+    drive_file_id TEXT,
+    drive_web_view_link TEXT,
+    upload_attempts INTEGER DEFAULT 0,
+    upload_error TEXT
   );
   CREATE TABLE IF NOT EXISTS app_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -691,6 +713,7 @@ db.transaction(() => {
 // --- Sync Columns Migration (BigQuery Synchronization) ---
 // 동기화 대상 테이블 목록
 const syncTables = ['flow_readings', 'medicine_logs', 'water_quality', 'qntech_water_quality', 'kit_logs', 'facility_logs'];
+const inputStatusTables = ['flow_readings', 'medicine_logs', 'qntech_water_quality', 'kit_logs'];
 const syncDefaults = db.prepare('SELECT site_name, manager_name FROM app_settings WHERE id = 1').get() || {};
 const defaultSiteName = syncDefaults.site_name || 'Unknown Site';
 const defaultAuthor = syncDefaults.manager_name || 'Unknown Author';
@@ -734,6 +757,24 @@ syncTables.forEach(tableName => {
       created_at = COALESCE(created_at, last_modified, datetime('now', 'localtime'))
   `).run(defaultSiteName, defaultAuthor);
 });
+
+inputStatusTables.forEach(tableName => {
+  ensureColumn(tableName, 'input_status', "TEXT DEFAULT 'manual'");
+  db.prepare(`
+    UPDATE ${tableName}
+    SET input_status = COALESCE(NULLIF(input_status, ''), 'manual')
+  `).run();
+});
+
+ensureColumn('app_diagnostic_logs', 'site_id', 'TEXT');
+ensureColumn('app_diagnostic_logs', 'site_name', 'TEXT');
+ensureColumn('app_diagnostic_logs', 'app_version', 'TEXT');
+ensureColumn('app_diagnostic_logs', 'uploaded_at', 'TEXT');
+ensureColumn('app_diagnostic_logs', 'drive_file_id', 'TEXT');
+ensureColumn('app_diagnostic_logs', 'drive_web_view_link', 'TEXT');
+ensureColumn('app_diagnostic_logs', 'upload_attempts', 'INTEGER DEFAULT 0');
+ensureColumn('app_diagnostic_logs', 'upload_error', 'TEXT');
+db.prepare('CREATE INDEX IF NOT EXISTS idx_app_diagnostic_logs_uploaded ON app_diagnostic_logs (uploaded_at, created_at)').run();
 
 // attendance 테이블은 이미 is_synced가 있으므로 last_modified만 확인
 const attendanceSyncCols = db.prepare("PRAGMA table_info(attendance)").all().map(c => c.name);

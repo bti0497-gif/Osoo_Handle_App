@@ -58,6 +58,7 @@ const SCHEMAS = {
     { name: 'calculated_flow', type: 'FLOAT' },
     { name: 'is_reset', type: 'BOOLEAN' },
     { name: 'is_manual', type: 'BOOLEAN' },
+    { name: 'input_status', type: 'STRING' },
     { name: 'sludge_export', type: 'FLOAT' },
     { name: 'updated_at', type: 'TIMESTAMP' }, // 로컬 수정 시간
     { name: 'uploaded_at', type: 'TIMESTAMP' }  // 서버 전송 시간
@@ -73,6 +74,7 @@ const SCHEMAS = {
     { name: 'purchase_amount', type: 'FLOAT' },
     { name: 'usage_amount', type: 'FLOAT' },
     { name: 'current_inventory', type: 'FLOAT' },
+    { name: 'input_status', type: 'STRING' },
     { name: 'photo_url', type: 'STRING' },
     { name: 'updated_at', type: 'TIMESTAMP' },
     { name: 'uploaded_at', type: 'TIMESTAMP' }
@@ -103,6 +105,7 @@ const SCHEMAS = {
     { name: 'measurement_group', type: 'STRING' },
     { name: 'measurement_order', type: 'INTEGER' },
     { name: 'source_type', type: 'STRING' },
+    { name: 'input_status', type: 'STRING' },
     { name: 'source_label', type: 'STRING' },
     { name: 'qntech_project_id', type: 'STRING' },
     { name: 'location', type: 'STRING' },
@@ -125,6 +128,7 @@ const SCHEMAS = {
     { name: 'purchase_amount', type: 'FLOAT' },
     { name: 'usage_amount', type: 'FLOAT' },
     { name: 'current_inventory', type: 'FLOAT' },
+    { name: 'input_status', type: 'STRING' },
     { name: 'photo_url', type: 'STRING' },
     { name: 'updated_at', type: 'TIMESTAMP' },
     { name: 'uploaded_at', type: 'TIMESTAMP' }

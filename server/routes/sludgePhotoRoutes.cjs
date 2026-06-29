@@ -542,13 +542,13 @@ module.exports = function (db, baseDir, appDataPath) {
         ).get(date);
         if (flowRow) {
           db.prepare(
-            "UPDATE flow_readings SET sludge_export = ?, last_modified = ?, is_synced = 0 WHERE date = ? AND type = '슬러지'"
+            "UPDATE flow_readings SET sludge_export = ?, input_status = COALESCE(NULLIF(input_status, ''), 'manual'), last_modified = ?, is_synced = 0 WHERE date = ? AND type = '슬러지'"
           ).run(Number(sludge_amount), now, date);
         } else {
           db.prepare(`
             INSERT INTO flow_readings
-              (date, type, sludge_export, site_id, site_name, author, created_at, last_modified, is_synced)
-            VALUES (?, '슬러지', ?, ?, ?, ?, ?, ?, 0)
+              (date, type, sludge_export, input_status, site_id, site_name, author, created_at, last_modified, is_synced)
+            VALUES (?, '슬러지', ?, 'manual', ?, ?, ?, ?, ?, 0)
           `).run(date, Number(sludge_amount), metadata.siteId, metadata.siteName, metadata.author, now, now);
         }
       }

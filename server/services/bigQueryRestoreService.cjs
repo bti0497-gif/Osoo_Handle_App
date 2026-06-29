@@ -44,14 +44,15 @@ function restoreFlowRows(db, rows) {
   const stmt = db.prepare(`
     INSERT INTO flow_readings (
       date, type, raw_value, calculated_flow, is_reset, is_manual, sludge_export,
-      site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      input_status, site_id, site_name, author, created_at, last_modified, is_synced
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     ON CONFLICT(date, type) DO UPDATE SET
       raw_value = excluded.raw_value,
       calculated_flow = excluded.calculated_flow,
       is_reset = excluded.is_reset,
       is_manual = excluded.is_manual,
       sludge_export = excluded.sludge_export,
+      input_status = excluded.input_status,
       site_id = excluded.site_id,
       site_name = excluded.site_name,
       author = excluded.author,
@@ -68,6 +69,7 @@ function restoreFlowRows(db, rows) {
         row.is_reset ? 1 : 0,
         row.is_manual ? 1 : 0,
         row.sludge_export ?? null,
+        row.input_status || 'manual',
         row.site_id || null,
         row.site_name || null,
         row.author || null,
@@ -84,13 +86,14 @@ function restoreMedicineRows(db, tableName, nameColumn, rows) {
   const stmt = db.prepare(`
     INSERT INTO ${localTable} (
       ${localNameColumn}, date, purchase_amount, usage_amount, current_inventory, photo_url,
-      site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      input_status, site_id, site_name, author, created_at, last_modified, is_synced
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     ON CONFLICT(${localNameColumn}, date) DO UPDATE SET
       purchase_amount = excluded.purchase_amount,
       usage_amount = excluded.usage_amount,
       current_inventory = excluded.current_inventory,
       photo_url = COALESCE(excluded.photo_url, ${localTable}.photo_url),
+      input_status = excluded.input_status,
       site_id = excluded.site_id,
       site_name = excluded.site_name,
       author = excluded.author,
@@ -106,6 +109,7 @@ function restoreMedicineRows(db, tableName, nameColumn, rows) {
         row.usage_amount ?? null,
         row.current_inventory ?? null,
         row.photo_url || null,
+        row.input_status || 'manual',
         row.site_id || null,
         row.site_name || null,
         row.author || null,
@@ -121,11 +125,12 @@ function restoreQntechWaterRows(db, rows) {
     INSERT INTO qntech_water_quality (
       date, measurement_group, measurement_order, source_type, source_label, qntech_project_id,
       location, item_name, item_code, result_value, result_numeric, unit,
-      site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      input_status, site_id, site_name, author, created_at, last_modified, is_synced
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET
       measurement_order = excluded.measurement_order,
       source_type = excluded.source_type,
+      input_status = excluded.input_status,
       source_label = excluded.source_label,
       qntech_project_id = excluded.qntech_project_id,
       item_name = excluded.item_name,
@@ -153,6 +158,7 @@ function restoreQntechWaterRows(db, rows) {
         row.result_value ?? null,
         row.result_numeric ?? null,
         row.unit || null,
+        row.input_status || 'manual',
         row.site_id || null,
         row.site_name || null,
         row.author || null,

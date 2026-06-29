@@ -84,10 +84,11 @@ function syncAnalysisKitUsageForRange(db, startDate, endDate, metadata = {}) {
   const upsertUsageStmt = db.prepare(`
     INSERT INTO kit_logs (
       kit_name, date, purchase_amount, usage_amount, current_inventory,
-      site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, 0, ?, 0, ?, ?, ?, ?, ?, ?)
+      input_status, site_id, site_name, author, created_at, last_modified, is_synced
+    ) VALUES (?, ?, 0, ?, 0, 'imported', ?, ?, ?, ?, ?, ?)
     ON CONFLICT(kit_name, date) DO UPDATE SET
       usage_amount = excluded.usage_amount,
+      input_status = excluded.input_status,
       site_id = excluded.site_id,
       site_name = excluded.site_name,
       author = excluded.author,

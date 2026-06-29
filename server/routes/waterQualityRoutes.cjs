@@ -76,6 +76,7 @@ function buildWaterItemRows(item, metadata) {
     measurement_group: normalizeMeasurementGroup(item),
     measurement_order: normalizeMeasurementOrder(item),
     source_type: normalizeSourceType(item),
+    input_status: String(item.input_status || item.inputStatus || (item.qntech_project_id ? 'imported' : 'manual')).trim() || 'manual',
     source_label: item.source_label ?? null,
     qntech_project_id: item.qntech_project_id ?? null,
     location: item.location || '유입수',
@@ -104,11 +105,12 @@ function createUpsertStatement(db) {
     INSERT INTO qntech_water_quality (
       date, measurement_group, measurement_order, source_type, source_label, qntech_project_id,
       location, item_name, item_code, result_value, result_numeric, unit,
-      site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      input_status, site_id, site_name, author, created_at, last_modified, is_synced
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET
       measurement_order = excluded.measurement_order,
       source_type = excluded.source_type,
+      input_status = excluded.input_status,
       source_label = excluded.source_label,
       qntech_project_id = excluded.qntech_project_id,
       item_name = excluded.item_name,
@@ -137,6 +139,7 @@ function runUpsert(stmt, row) {
     row.result_value,
     row.result_numeric,
     row.unit,
+    row.input_status,
     row.site_id,
     row.site_name,
     row.author,

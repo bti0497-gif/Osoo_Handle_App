@@ -85,12 +85,13 @@ module.exports = function (db) {
             const stmt = db.prepare(`
                 INSERT INTO kit_logs (
                     kit_name, date, purchase_amount, usage_amount, current_inventory,
-                    site_id, site_name, author, created_at, last_modified, is_synced
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    input_status, site_id, site_name, author, created_at, last_modified, is_synced
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(kit_name, date) DO UPDATE SET
                     purchase_amount = excluded.purchase_amount,
                     usage_amount = excluded.usage_amount,
                     current_inventory = excluded.current_inventory,
+                    input_status = excluded.input_status,
                     site_id = excluded.site_id,
                     site_name = excluded.site_name,
                     author = excluded.author,
@@ -107,6 +108,7 @@ module.exports = function (db) {
                         item.purchase_amount || 0,
                         item.usage_amount || 0,
                         item.current_inventory || 0,
+                        String(item.input_status || item.inputStatus || 'manual').trim() || 'manual',
                         metadata.siteId,
                         metadata.siteName,
                         metadata.author,
@@ -164,10 +166,11 @@ module.exports = function (db) {
             const upsertStmt = db.prepare(`
                 INSERT INTO kit_logs (
                     kit_name, date, purchase_amount, usage_amount, current_inventory,
-                    site_id, site_name, author, created_at, last_modified, is_synced
-                ) VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)
+                    input_status, site_id, site_name, author, created_at, last_modified, is_synced
+                ) VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(kit_name, date) DO UPDATE SET
                     purchase_amount = excluded.purchase_amount,
+                    input_status = excluded.input_status,
                     site_id = excluded.site_id,
                     site_name = excluded.site_name,
                     author = excluded.author,
@@ -184,6 +187,7 @@ module.exports = function (db) {
                     const amount = Number(item.purchaseAmount ?? 0);
                     upsertStmt.run(
                         kitName, date, amount,
+                        String(item.input_status || item.inputStatus || 'manual').trim() || 'manual',
                         metadata.siteId, metadata.siteName, metadata.author,
                         metadata.createdAt, metadata.lastModified, metadata.isSynced
                     );
@@ -228,10 +232,11 @@ module.exports = function (db) {
             const upsertUsageStmt = db.prepare(`
                 INSERT INTO kit_logs (
                     kit_name, date, purchase_amount, usage_amount, current_inventory,
-                    site_id, site_name, author, created_at, last_modified, is_synced
-                ) VALUES (?, ?, 0, ?, 0, ?, ?, ?, ?, ?, ?)
+                    input_status, site_id, site_name, author, created_at, last_modified, is_synced
+                ) VALUES (?, ?, 0, ?, 0, 'imported', ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(kit_name, date) DO UPDATE SET
                     usage_amount = excluded.usage_amount,
+                    input_status = excluded.input_status,
                     site_id = excluded.site_id,
                     site_name = excluded.site_name,
                     author = excluded.author,

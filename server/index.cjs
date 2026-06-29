@@ -172,7 +172,25 @@ function registerLazyApplication() {
   const { warmUpExcelPdfConverter } = require('./services/excelPdfService.cjs');
   const { triggerSync: triggerBigQuerySync } = require('./services/bigQueryTriggerService.cjs');
   const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
+  const { recordDiagnostic, uploadPendingDiagnostics, sanitize } = require('./services/diagnosticLogService.cjs');
   const ctx = { db, appDataPath, BASE_DIR };
+  recordDiagnostic(db, appDataPath, {
+    level: 'info',
+    area: 'server',
+    action: 'startup',
+    result: 'ok',
+    message: 'local server initialized',
+  });
+  let diagnosticUploadTimer = null;
+  const scheduleDiagnosticUpload = () => {
+    if (diagnosticUploadTimer) return;
+    diagnosticUploadTimer = setTimeout(() => {
+      diagnosticUploadTimer = null;
+      uploadPendingDiagnostics(db, appDataPath).catch((error) => {
+        console.warn('[diagnostic] upload failed:', error.message);
+      });
+    }, 15_000);
+  };
 
   // --- Tier 0: 즉시 등록 (registry 기반) ---
   for (const entry of routeRegistry.filter(r => r.tier === 0)) {
@@ -200,10 +218,32 @@ function registerLazyApplication() {
     const shouldWatchMethod = method === 'POST' || method === 'PUT' || method === 'DELETE';
     const shouldWatchPath = BIGQUERY_IMMEDIATE_SYNC_PREFIXES.some((prefix) => req.path.startsWith(prefix));
     if (!shouldWatchMethod || !shouldWatchPath) return next();
+    const startedAt = Date.now();
+    const requestBody = sanitize(req.body || {});
     const originalEnd = res.end;
     res.end = function wrappedEnd(...args) {
       if (res.statusCode >= 200 && res.statusCode < 400) {
         triggerBigQuerySync(`after-save:${method}:${req.path}`);
+      }
+      try {
+        const responseText = args?.[0] ? String(args[0]).slice(0, 2000) : '';
+        recordDiagnostic(db, appDataPath, {
+          level: res.statusCode >= 400 ? 'error' : 'info',
+          area: 'api',
+          action: `${method} ${req.path}`,
+          result: res.statusCode >= 400 ? 'failed' : 'ok',
+          message: `${method} ${req.path} -> ${res.statusCode}`,
+          details: {
+            statusCode: res.statusCode,
+            durationMs: Date.now() - startedAt,
+            query: sanitize(req.query || {}),
+            body: requestBody,
+            response: res.statusCode >= 400 ? responseText : undefined,
+          },
+        });
+        scheduleDiagnosticUpload();
+      } catch (error) {
+        console.warn('[diagnostic] request log failed:', error.message);
       }
       return originalEnd.apply(this, args);
     };
@@ -252,6 +292,12 @@ function registerLazyApplication() {
   }
 
   // --- /api/preload-trigger: registry 기반 자동 로드 ---
+  setInterval(() => {
+    uploadPendingDiagnostics(db, appDataPath).catch((error) => {
+      console.warn('[diagnostic] periodic upload failed:', error.message);
+    });
+  }, 10 * 60 * 1000);
+
   app.post('/api/preload-trigger', (req, res) => {
     res.json({ ok: true });
     setImmediate(() => {

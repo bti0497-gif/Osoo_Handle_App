@@ -250,6 +250,7 @@ export default function UnifiedRecordModal({
     const [rangeStartDate, setRangeStartDate] = useState(initialDate);
     const [rangeEndDate, setRangeEndDate] = useState(initialDate);
     const [waterInputMode, setWaterInputMode] = useState('manual');
+    const [saveStatusMode, setSaveStatusMode] = useState('manual');
     const [savedTabs, setSavedTabs] = useState([]);
     const wasOpenRef = useRef(false);
     const initialWaterSignature = JSON.stringify({
@@ -279,6 +280,7 @@ export default function UnifiedRecordModal({
             setDraft({});
             setDefaultPurchaseAppliedByTab({});
             setSavedTabs([]);
+            setSaveStatusMode('manual');
             setWaterRounds(rounds);
             setSelectedWaterRound(rounds[0]?.value || 1);
             if (isOpening) {
@@ -601,6 +603,7 @@ export default function UnifiedRecordModal({
                             sludge_export: null,
                             is_manual: true,
                             is_reset: false,
+                            input_status: 'defaulted',
                         });
                         notices.push(`${item.label || item.key} 유량은 전날 검침값을 기준으로 0 처리했습니다.`);
                         return;
@@ -621,6 +624,7 @@ export default function UnifiedRecordModal({
                     sludge_export: isSludge ? reading : null,
                     is_manual: true,
                     is_reset: false,
+                    input_status: saveStatusMode === 'baseline' ? 'baseline' : 'manual',
                 });
             });
         }
@@ -643,6 +647,13 @@ export default function UnifiedRecordModal({
                     purchase_amount: purchase ?? 0,
                     usage_amount: usage,
                     current_inventory: inventory,
+                    input_status: (
+                        saveStatusMode === 'baseline'
+                            ? 'baseline'
+                            : ((purchase === null && toNumberOrNull(values.usage) === null)
+                                ? 'defaulted'
+                                : 'manual')
+                    ),
                 });
             });
         };
@@ -692,6 +703,7 @@ export default function UnifiedRecordModal({
                             : `manual:${date}:${round.value}`,
                         measurement_order: round.value,
                         source_type: round.sourceType || 'manual',
+                        input_status: round.sourceType === 'qntech' ? 'imported' : (saveStatusMode === 'baseline' ? 'baseline' : 'manual'),
                         source_label: round.label,
                         qntech_project_id: round.qntechProjectId || null,
                         location: item.key || item.label,
@@ -724,6 +736,7 @@ export default function UnifiedRecordModal({
                     purchase_amount: purchase,
                     usage_amount: usage,
                     current_inventory: round1(previousInventory + purchase - usage),
+                    input_status: 'imported',
                 };
                 kitItemsToSave.push(kitRow);
             }
@@ -1298,7 +1311,7 @@ export default function UnifiedRecordModal({
                 overflow: 'hidden',
                 transform: 'translateY(-6px)',
             }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '210px 1fr auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '210px 1fr 118px auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #e2e8f0' }}>
                     <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 17, fontWeight: 900, color: '#0f172a', whiteSpace: 'nowrap' }}>
                             통합 데이터 입력
@@ -1334,6 +1347,22 @@ export default function UnifiedRecordModal({
                             );
                         })}
                     </div>
+
+                    <select
+                        value={saveStatusMode}
+                        onChange={(event) => setSaveStatusMode(event.target.value)}
+                        title="저장구분"
+                        style={{
+                            ...inputStyle,
+                            width: 118,
+                            textAlign: 'left',
+                            fontSize: 12,
+                            fontWeight: 900,
+                        }}
+                    >
+                        <option value="manual">일반 입력</option>
+                        <option value="baseline">기준값</option>
+                    </select>
 
                     <DateOnlyInput
                         value={date}

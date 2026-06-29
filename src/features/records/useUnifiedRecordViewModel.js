@@ -7,6 +7,7 @@ import { WaterQualityModel } from '../water/WaterQualityModel';
 const WATER_FIELDS = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity'];
 
 const hasValue = (value) => value !== '' && value !== null && value !== undefined;
+const isDefaulted = (row) => String(row?.input_status || row?.inputStatus || '').trim() === 'defaulted';
 
 const unwrapHistory = (result) => (
     Array.isArray(result) ? result : (Array.isArray(result?.history) ? result.history : [])
@@ -35,8 +36,8 @@ const mergeFlowContext = (baseContext = {}, history = [], date) => {
             return {
                 ...item,
                 values: {
-                    reading: hasCurrent ? (current.raw ?? '') : (baseValues.reading ?? ''),
-                    flow: hasCurrent ? (current.diff ?? '') : (baseValues.flow ?? ''),
+                    reading: hasCurrent ? (isDefaulted(current) ? '' : (current.raw ?? '')) : (baseValues.reading ?? ''),
+                    flow: hasCurrent ? (isDefaulted(current) ? '' : (current.diff ?? '')) : (baseValues.flow ?? ''),
                 },
                 previous: {
                     ...basePrevious,
@@ -60,9 +61,9 @@ const mergeInventoryContext = (baseContext = {}, history = [], date, nameField) 
         return {
             ...item,
             values: {
-                purchase: hasCurrent ? (current.purchase_amount ?? '') : (baseValues.purchase ?? ''),
-                usage: hasCurrent ? (current.usage_amount ?? '') : (baseValues.usage ?? ''),
-                inventory: hasCurrent ? (current.current_inventory ?? '') : (baseValues.inventory ?? ''),
+                purchase: hasCurrent ? (isDefaulted(current) ? '' : (current.purchase_amount ?? '')) : (baseValues.purchase ?? ''),
+                usage: hasCurrent ? (isDefaulted(current) ? '' : (current.usage_amount ?? '')) : (baseValues.usage ?? ''),
+                inventory: hasCurrent ? (isDefaulted(current) ? '' : (current.current_inventory ?? '')) : (baseValues.inventory ?? ''),
             },
             previous: {
                 ...basePrevious,

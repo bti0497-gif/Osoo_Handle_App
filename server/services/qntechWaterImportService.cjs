@@ -134,11 +134,12 @@ function persistWaterRows(db, importedRows) {
     INSERT INTO qntech_water_quality (
       date, measurement_group, measurement_order, source_type, source_label, qntech_project_id,
       location, item_name, item_code, result_value, result_numeric, unit,
-      site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      input_status, site_id, site_name, author, created_at, last_modified, is_synced
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?)
     ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET
       measurement_order = excluded.measurement_order,
       source_type = excluded.source_type,
+      input_status = excluded.input_status,
       source_label = excluded.source_label,
       qntech_project_id = excluded.qntech_project_id,
       item_name = excluded.item_name,
