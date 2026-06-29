@@ -111,6 +111,30 @@
 
 ---
 
+## PowerShell 한글 출력 및 인코딩 확인 지침
+
+Windows PowerShell/터미널 출력에서 한글이 깨져 보이는 현상이 있어도, 그것만으로 소스 파일이 깨졌다고 판단하지 않습니다.
+
+- 한글 깨짐 여부를 판단할 때는 `Get-Content` 출력만 믿지 말고, UTF-8 명시 읽기 또는 Node/Python으로 실제 파일 내용을 확인합니다.
+- PowerShell에서 파일을 읽을 때는 가능하면 `Get-Content -Encoding UTF8`을 사용합니다.
+- 더 정확한 확인이 필요하면 Node.js 또는 Python으로 UTF-8 디코딩하여 검사합니다.
+- `npm run validate`의 Mojibake 검증 결과가 PASS이면, 단순 터미널 출력 깨짐을 소스 오염으로 보고하지 않습니다.
+- 실제 소스 안에 `�`, `?쏀뭹`, `濡쒖뺄` 같은 깨진 문자열이 존재하는 경우에만 수정 대상으로 봅니다.
+- 검증용 코드 안에 의도적으로 들어간 Mojibake 탐지 패턴은 실제 UI/업무 문자열과 구분합니다.
+
+---
+
+## 릴리즈/배포 빌드 실행 지침
+
+릴리즈, Electron 빌드, 통합 설치파일 생성은 시간이 오래 걸릴 수 있으므로 짧은 제한시간으로 실행하지 않습니다.
+
+- `npm run electron:build`, `scripts/build-integrated-installer.ps1`, GitHub Release 업로드는 최소 20분 이상 타임아웃을 둡니다.
+- 통합 설치파일 생성 후에는 반드시 `npm run validate:asar` 또는 빌드 스크립트의 패키지 검증 결과를 확인합니다.
+- 릴리즈 파일을 다시 만들었으면 이전 해시는 폐기하고 새 SHA256 해시를 다시 산출합니다.
+- GitHub Release 자산을 덮어올린 뒤 `gh release view`로 실제 업로드된 자산명, digest, 대상 태그를 확인합니다.
+
+---
+
 ## 변경이 필요할 때
 
 다음 항목을 변경해야 하는 경우 **반드시 사용자에게 먼저 물어보세요**:
