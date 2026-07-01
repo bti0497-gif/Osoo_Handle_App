@@ -174,6 +174,7 @@ function registerLazyApplication() {
   const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
   const { recordDiagnostic, uploadPendingDiagnostics, sanitize } = require('./services/diagnosticLogService.cjs');
   const ctx = { db, appDataPath, BASE_DIR };
+  const DIAGNOSTIC_VERBOSE_INITIAL = process.env.DIAGNOSTIC_VERBOSE_INITIAL !== 'false';
   recordDiagnostic(db, appDataPath, {
     level: 'info',
     area: 'server',
@@ -192,6 +193,64 @@ function registerLazyApplication() {
     }, 15_000);
   };
 
+  // --- 초기 배포 진단 로그 ---
+  // 1.0.x 현장 안정화 기간에는 /api/ping을 제외한 API 흐름을 넓게 기록한다.
+  // 이후 운영 안정화 시 DIAGNOSTIC_VERBOSE_INITIAL=false 로 줄일 수 있다.
+  const BIGQUERY_IMMEDIATE_SYNC_PREFIXES = routeRegistry
+    .filter(r => r.watch)
+    .map(r => r.path);
+
+  app.use((req, res, next) => {
+    const method = String(req.method || '').toUpperCase();
+    const pathName = String(req.path || '');
+    const isApiPath = pathName.startsWith('/api/');
+    const shouldWatchMethod = method === 'POST' || method === 'PUT' || method === 'DELETE';
+    const shouldWatchPath = BIGQUERY_IMMEDIATE_SYNC_PREFIXES.some((prefix) => pathName.startsWith(prefix));
+    const shouldTriggerSync = shouldWatchMethod
+      && shouldWatchPath
+      && !pathName.startsWith('/api/auth')
+      && pathName !== '/api/preload-trigger';
+    const shouldLog = isApiPath
+      && pathName !== '/api/ping'
+      && (DIAGNOSTIC_VERBOSE_INITIAL || shouldTriggerSync);
+
+    if (!shouldLog && !shouldTriggerSync) return next();
+
+    const startedAt = Date.now();
+    const requestBody = sanitize(req.body || {});
+    const originalEnd = res.end;
+    res.end = function wrappedEnd(...args) {
+      if (res.statusCode >= 200 && res.statusCode < 400 && shouldTriggerSync) {
+        triggerBigQuerySync(`after-save:${method}:${pathName}`);
+      }
+
+      if (shouldLog) {
+        try {
+          const responseText = args?.[0] ? String(args[0]).slice(0, 2000) : '';
+          recordDiagnostic(db, appDataPath, {
+            level: res.statusCode >= 400 ? 'error' : 'info',
+            area: 'api',
+            action: `${method} ${pathName}`,
+            result: res.statusCode >= 400 ? 'failed' : 'ok',
+            message: `${method} ${pathName} -> ${res.statusCode}`,
+            details: {
+              statusCode: res.statusCode,
+              durationMs: Date.now() - startedAt,
+              query: sanitize(req.query || {}),
+              body: requestBody,
+              response: DIAGNOSTIC_VERBOSE_INITIAL || res.statusCode >= 400 ? responseText : undefined,
+            },
+          });
+          scheduleDiagnosticUpload();
+        } catch (error) {
+          console.warn('[diagnostic] request log failed:', error.message);
+        }
+      }
+      return originalEnd.apply(this, args);
+    };
+    return next();
+  });
+
   // --- Tier 0: 즉시 등록 (registry 기반) ---
   for (const entry of routeRegistry.filter(r => r.tier === 0)) {
     const router = require(entry.module)(...resolveArgs(entry.args, ctx));
@@ -206,49 +265,6 @@ function registerLazyApplication() {
   // --- Static file serving ---
   app.use('/uploads', express.static(path.join(appDataPath, 'uploads')));
   app.use('/사진관리', express.static(path.join(appDataPath, '사진관리')));
-
-  // --- BigQuery 캐시 prefix: registry에서 자동 추출 ---
-  const BIGQUERY_IMMEDIATE_SYNC_PREFIXES = routeRegistry
-    .filter(r => r.watch)
-    .map(r => r.path);
-
-  // --- BigQuery 감시 미들웨어 ---
-  app.use((req, res, next) => {
-    const method = String(req.method || '').toUpperCase();
-    const shouldWatchMethod = method === 'POST' || method === 'PUT' || method === 'DELETE';
-    const shouldWatchPath = BIGQUERY_IMMEDIATE_SYNC_PREFIXES.some((prefix) => req.path.startsWith(prefix));
-    if (!shouldWatchMethod || !shouldWatchPath) return next();
-    const startedAt = Date.now();
-    const requestBody = sanitize(req.body || {});
-    const originalEnd = res.end;
-    res.end = function wrappedEnd(...args) {
-      if (res.statusCode >= 200 && res.statusCode < 400) {
-        triggerBigQuerySync(`after-save:${method}:${req.path}`);
-      }
-      try {
-        const responseText = args?.[0] ? String(args[0]).slice(0, 2000) : '';
-        recordDiagnostic(db, appDataPath, {
-          level: res.statusCode >= 400 ? 'error' : 'info',
-          area: 'api',
-          action: `${method} ${req.path}`,
-          result: res.statusCode >= 400 ? 'failed' : 'ok',
-          message: `${method} ${req.path} -> ${res.statusCode}`,
-          details: {
-            statusCode: res.statusCode,
-            durationMs: Date.now() - startedAt,
-            query: sanitize(req.query || {}),
-            body: requestBody,
-            response: res.statusCode >= 400 ? responseText : undefined,
-          },
-        });
-        scheduleDiagnosticUpload();
-      } catch (error) {
-        console.warn('[diagnostic] request log failed:', error.message);
-      }
-      return originalEnd.apply(this, args);
-    };
-    return next();
-  });
 
   // --- Tier 1: registry 기반 lazy wrapper 등록 ---
   const tier1Entries = routeRegistry.filter(r => r.tier === 1);
