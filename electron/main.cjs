@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu } = require('elec
 const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
-const { setupAutoUpdater, checkForUpdates } = require('./updater.cjs');
+const { setupAutoUpdater, checkForUpdates, markUserActivity } = require('./updater.cjs');
 
 function isBrokenPipeError(error) {
   return error && (error.code === 'EPIPE' || /EPIPE|broken pipe/i.test(String(error.message || '')));
@@ -285,7 +285,11 @@ app.whenReady().then(() => {
   createTray();
 
   if (!isDev) {
-    setupAutoUpdater(mainWindow);
+    setupAutoUpdater(mainWindow, {
+      onBeforeInstall: () => {
+        isQuitting = true;
+      },
+    });
   }
 });
 
@@ -341,6 +345,11 @@ ipcMain.handle('app:hideToTray', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.hide();
   }
+  return { ok: true };
+});
+
+ipcMain.handle('app:markUserActivity', () => {
+  markUserActivity();
   return { ok: true };
 });
 

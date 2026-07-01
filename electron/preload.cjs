@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkVersionChanged: () => ipcRenderer.invoke('app:checkVersionChanged'),
   clearVersionMarker: () => ipcRenderer.invoke('app:clearVersionMarker'),
   hideToTray: () => ipcRenderer.invoke('app:hideToTray'),
+  markUserActivity: () => ipcRenderer.invoke('app:markUserActivity'),
   invokeRoadwork: (channel, ...args) => {
     const allowed = [
       'roadwork:getPreloadPath',
