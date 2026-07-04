@@ -18,6 +18,13 @@ export default function WaterMappingPanel({
   showConfirm,
   handleSaveWaterMapping,
 }) {
+        const previewValue = (colKey) => {
+            const value = sampleRowData[colKey];
+            if (value === null || value === undefined || value === '') return '-- No Data --';
+            if (typeof value === 'object') return '-- No Data --';
+            return value;
+        };
+
         const activeLocations = locationItems.filter(i => i.checked);
         const isMbr = String(siteInfo?.method || '').trim().toUpperCase() === 'MBR';
         const waterBaseParams = [
@@ -81,7 +88,7 @@ export default function WaterMappingPanel({
                                     {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
                                 </select>
                                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: waterConfig.dateCol ? '#059669' : '#94a3b8', backgroundColor: waterConfig.dateCol ? '#f0fdf4' : '#f1f5f9', padding: '6px 10px', borderRadius: '6px', width: 'fit-content', minWidth: '100px', textAlign: 'center' }}>
-                                    {(waterConfig.dateCol && sampleRowData[waterConfig.dateCol]) || '-- No Data --'}
+                                    {waterConfig.dateCol ? previewValue(waterConfig.dateCol) : '-- No Data --'}
                                 </span>
                             </div>
 
@@ -114,7 +121,7 @@ export default function WaterMappingPanel({
                                                     </div>
                                                     <div style={{ gridColumn: '4 / 5', gridRow: lIdx + 1, display: 'flex', alignItems: 'center', padding: '5px 0' }}>
                                                         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: hasCol ? '#059669' : '#94a3b8', backgroundColor: hasCol ? '#f0fdf4' : '#f1f5f9', padding: '6px 10px', borderRadius: '6px', minWidth: '100px', textAlign: 'center' }}>
-                                                            {(hasCol && sampleRowData[colKey]) || '-- No Data --'}
+                                                            {hasCol ? previewValue(colKey) : '-- No Data --'}
                                                         </span>
                                                     </div>
                                                 </React.Fragment>

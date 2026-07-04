@@ -8,7 +8,8 @@ function ensureExcelReady(db) {
 }
 
 function toRoundedNumber(value, fallback = null) {
-  const parsed = parseFloat(value || '');
+  if (value === null || value === undefined || value === '') return fallback;
+  const parsed = parseFloat(String(value).replace(/,/g, ''));
   return Number.isNaN(parsed) ? fallback : Math.round(parsed * 10) / 10;
 }
 
@@ -54,6 +55,34 @@ function formatRowDate(value) {
   return formatDate(value) || String(value || '').trim();
 }
 
+function findFirstDateRow(rows, startRow, endRow, dateCol, scanRange = 30) {
+  const from = Math.max(1, Number(startRow) - scanRange);
+  const to = Math.max(Number(endRow) + scanRange, Number(startRow) + scanRange);
+  for (let r = from; r <= to; r += 1) {
+    if (formatRowDate(getRangeCell(rows, r, dateCol))) return r;
+  }
+  return null;
+}
+
+function collectMappedDates(rows, startRow, endRow, dateCol, label) {
+  const dates = [];
+  const seen = new Set();
+  for (let r = startRow; r <= endRow; r += 1) {
+    const formatted = formatRowDate(getRangeCell(rows, r, dateCol));
+    if (!formatted || seen.has(formatted)) continue;
+    dates.push(formatted);
+    seen.add(formatted);
+  }
+  if (dates.length === 0) {
+    const suggestedRow = findFirstDateRow(rows, startRow, endRow, dateCol);
+    const suggestion = suggestedRow
+      ? ` 가까운 날짜 행은 ${suggestedRow}행입니다.`
+      : '';
+    throw new Error(`${label} 시작행(${startRow})부터 종료행(${endRow}) 사이의 날짜를 확인할 수 없습니다. 날짜 칼럼(${dateCol})과 시작행/종료행을 다시 확인해주세요.${suggestion}`);
+  }
+  return dates;
+}
+
 function saveMappingSettings(db, sql, config) {
   const { sheet, startRow, endRow, dateCol } = config;
   db.prepare(sql).run(sheet, startRow, endRow, dateCol);
@@ -90,7 +119,6 @@ function filterInventoryMappingByActiveItems(db, category, mapping) {
 
 async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
   const { sheet, startRow, endRow, dateCol } = config;
-  ensureExcelReady(db);
 
   saveMappingSettings(
     db,
@@ -103,6 +131,8 @@ async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
     if (name.endsWith('_raw') || name.endsWith('_flow')) upsertStmt.run(name, col);
   });
 
+  ensureExcelReady(db);
+
   const flows = {};
   Object.keys(mapping || {}).forEach((key) => {
     if (!key.endsWith('_raw') && !key.endsWith('_flow')) return;
@@ -113,15 +143,18 @@ async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
     flows[name][field] = mapping[key];
   });
 
-  const rows = await readExcelRange(db, appDataPath, sheet, startRow, endRow, collectColumns(dateCol, flows));
+  const scanStartRow = Math.max(1, Number(startRow) - 30);
+  const scanEndRow = Math.max(Number(endRow) + 30, Number(startRow) + 30);
+  const rows = await readExcelRange(db, appDataPath, sheet, scanStartRow, scanEndRow, collectColumns(dateCol, flows));
+  const mappedDates = collectMappedDates(rows, startRow, endRow, dateCol, '유량 데이터');
   const metadata = getCurrentRecordMetadata(db, config || {});
   const insertReading = db.prepare(`
     INSERT INTO flow_readings (
       date, type, raw_value, calculated_flow, input_status, site_id, site_name, author, created_at, last_modified, is_synced
     ) VALUES (?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?)
     ON CONFLICT(date, type) DO UPDATE SET
-      raw_value = COALESCE(excluded.raw_value, raw_value),
-      calculated_flow = COALESCE(excluded.calculated_flow, calculated_flow),
+      raw_value = excluded.raw_value,
+      calculated_flow = excluded.calculated_flow,
       input_status = excluded.input_status,
       site_id = excluded.site_id,
       site_name = excluded.site_name,
@@ -132,6 +165,14 @@ async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
   const importedData = [];
 
   db.transaction(() => {
+    const flowNames = Object.keys(flows).filter(Boolean);
+    if (flowNames.length > 0 && mappedDates.length > 0) {
+      const placeholders = flowNames.map(() => '?').join(',');
+      const datePlaceholders = mappedDates.map(() => '?').join(',');
+      db.prepare(`DELETE FROM flow_readings WHERE date IN (${datePlaceholders}) AND type IN (${placeholders})`)
+        .run(...mappedDates, ...flowNames);
+    }
+
     for (let r = startRow; r <= endRow; r += 1) {
       const formatted = formatRowDate(getRangeCell(rows, r, dateCol));
       if (!formatted) { progress.current += 1; continue; }
@@ -168,7 +209,6 @@ async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
 
 async function saveInventoryMapping(db, appDataPath, config, mapping, progress, options) {
   const { sheet, startRow, endRow, dateCol } = config;
-  ensureExcelReady(db);
   const scopedMapping = options.category
     ? filterInventoryMappingByActiveItems(db, options.category, mapping)
     : mapping;
@@ -177,22 +217,35 @@ async function saveInventoryMapping(db, appDataPath, config, mapping, progress, 
   const upsertStmt = db.prepare(options.upsertConfigSql);
   Object.entries(scopedMapping || {}).forEach(([key, col]) => upsertStmt.run(key, col));
 
+  ensureExcelReady(db);
+
   const grouped = groupInventoryMappings(scopedMapping);
-  const rows = await readExcelRange(db, appDataPath, sheet, startRow, endRow, collectColumns(dateCol, grouped));
+  const scanStartRow = Math.max(1, Number(startRow) - 30);
+  const scanEndRow = Math.max(Number(endRow) + 30, Number(startRow) + 30);
+  const rows = await readExcelRange(db, appDataPath, sheet, scanStartRow, scanEndRow, collectColumns(dateCol, grouped));
+  const mappedDates = collectMappedDates(rows, startRow, endRow, dateCol, options.label || '재고 데이터');
   const metadata = getCurrentRecordMetadata(db, config || {});
   const insertStmt = db.prepare(options.insertSql);
   const importedData = [];
 
   db.transaction(() => {
+    const itemNames = Object.keys(grouped).filter(Boolean);
+    if (itemNames.length > 0 && mappedDates.length > 0 && options.deleteSqlPrefix) {
+      const placeholders = itemNames.map(() => '?').join(',');
+      const datePlaceholders = mappedDates.map(() => '?').join(',');
+      db.prepare(`${options.deleteSqlPrefix} date IN (${datePlaceholders}) AND ${options.nameColumn} IN (${placeholders})`)
+        .run(...mappedDates, ...itemNames);
+    }
+
     for (let r = startRow; r <= endRow; r += 1) {
       const formatted = formatRowDate(getRangeCell(rows, r, dateCol));
       if (!formatted) { progress.current += 1; continue; }
       const rowResults = { date: formatted };
       Object.entries(grouped).forEach(([itemName, cols]) => {
-        const purchase = toRoundedNumber(getRangeCell(rows, r, cols.purchase || ''), 0);
-        const usage = toRoundedNumber(getRangeCell(rows, r, cols.usage || ''), 0);
-        const inventory = toRoundedNumber(getRangeCell(rows, r, cols.inventory || ''), 0);
-        if (purchase || usage || inventory) {
+        const purchase = toRoundedNumber(getRangeCell(rows, r, cols.purchase || ''), null);
+        const usage = toRoundedNumber(getRangeCell(rows, r, cols.usage || ''), null);
+        const inventory = toRoundedNumber(getRangeCell(rows, r, cols.inventory || ''), null);
+        if (purchase !== null || usage !== null || inventory !== null) {
           insertStmt.run(
             itemName,
             formatted,
@@ -206,9 +259,9 @@ async function saveInventoryMapping(db, appDataPath, config, mapping, progress, 
             metadata.lastModified,
             metadata.isSynced
           );
-          rowResults[`${itemName}_입고`] = purchase;
-          rowResults[`${itemName}_사용`] = usage;
-          rowResults[`${itemName}_재고`] = inventory;
+          if (purchase !== null) rowResults[`${itemName}_입고`] = purchase;
+          if (usage !== null) rowResults[`${itemName}_사용`] = usage;
+          if (inventory !== null) rowResults[`${itemName}_재고`] = inventory;
         }
       });
       if (Object.keys(rowResults).length > 1) importedData.push(rowResults);
@@ -224,6 +277,9 @@ async function saveInventoryMapping(db, appDataPath, config, mapping, progress, 
 function saveKitMapping(db, appDataPath, config, mapping, progress) {
   return saveInventoryMapping(db, appDataPath, config, mapping, progress, {
     category: 'kit',
+    label: '키트 데이터',
+    nameColumn: 'kit_name',
+    deleteSqlPrefix: 'DELETE FROM kit_logs WHERE',
     updateSettingsSql: 'UPDATE app_settings SET kit_sheet = ?, kit_start_row = ?, kit_end_row = ?, kit_date_col = ? WHERE id = 1',
     upsertConfigSql: "INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('kit', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell",
     insertSql: `
@@ -248,6 +304,9 @@ function saveKitMapping(db, appDataPath, config, mapping, progress) {
 function saveMedicineMapping(db, appDataPath, config, mapping, progress) {
   return saveInventoryMapping(db, appDataPath, config, mapping, progress, {
     category: 'medicine',
+    label: '약품 데이터',
+    nameColumn: 'medicine_name',
+    deleteSqlPrefix: 'DELETE FROM medicine_logs WHERE',
     updateSettingsSql: 'UPDATE app_settings SET med_sheet = ?, med_start_row = ?, med_end_row = ?, med_date_col = ? WHERE id = 1',
     upsertConfigSql: "INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('medicine', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell",
     insertSql: `
@@ -271,7 +330,6 @@ function saveMedicineMapping(db, appDataPath, config, mapping, progress) {
 
 async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
   const { sheet, startRow, endRow, dateCol } = config;
-  ensureExcelReady(db);
 
   saveMappingSettings(
     db,
@@ -314,6 +372,8 @@ async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
   const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('water_mapping', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
   scopedEntries.forEach(([key, col]) => upsertStmt.run(key, col));
 
+  ensureExcelReady(db);
+
   scopedEntries.forEach(([key, col]) => {
     const lastUnderscore = key.lastIndexOf('_');
     const paramName = key.substring(0, lastUnderscore);
@@ -323,14 +383,17 @@ async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
     locations[locName].push({ ...definition, col });
   });
 
+  const scanStartRow = Math.max(1, Number(startRow) - 30);
+  const scanEndRow = Math.max(Number(endRow) + 30, Number(startRow) + 30);
   const rows = await readExcelRange(
     db,
     appDataPath,
     sheet,
-    startRow,
-    endRow,
+    scanStartRow,
+    scanEndRow,
     collectColumns(dateCol, scopedEntries.map(([, col]) => col))
   );
+  const mappedDates = collectMappedDates(rows, startRow, endRow, dateCol, '수질 데이터');
   const insertWater = db.prepare(`
     INSERT INTO qntech_water_quality (
       date, measurement_group, measurement_order, source_type, source_label,
@@ -357,7 +420,11 @@ async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
 
   db.transaction(() => {
     const metadata = getCurrentRecordMetadata(db, config || {});
-    const deleteImportedByDate = db.prepare("DELETE FROM qntech_water_quality WHERE date = ? AND (source_type = 'excel' OR measurement_group = '')");
+    if (mappedDates.length > 0) {
+      const datePlaceholders = mappedDates.map(() => '?').join(',');
+      db.prepare(`DELETE FROM qntech_water_quality WHERE date IN (${datePlaceholders}) AND (source_type = 'excel' OR measurement_group LIKE 'excel:%' OR measurement_group = '')`)
+        .run(...mappedDates);
+    }
     const cleanedDates = new Set();
     const dateOrderCounter = new Map();
 
@@ -365,10 +432,7 @@ async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
       const formatted = formatRowDate(getRangeCell(rows, r, dateCol));
       if (!formatted) { progress.current += 1; continue; }
 
-      if (!cleanedDates.has(formatted)) {
-        deleteImportedByDate.run(formatted);
-        cleanedDates.add(formatted);
-      }
+      if (!cleanedDates.has(formatted)) cleanedDates.add(formatted);
 
       const nextOrder = (dateOrderCounter.get(formatted) || 0) + 1;
       dateOrderCounter.set(formatted, nextOrder);

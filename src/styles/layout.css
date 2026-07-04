@@ -222,12 +222,52 @@
   display: flex;
   align-items: center;
   gap: 1.5rem;
+  min-width: 0;
 }
 
 .status-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.status-update-button {
+  height: 24px;
+  max-width: 210px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  background: #334155;
+  color: #f8fafc;
+  padding: 0 0.5rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.status-update-button:disabled {
+  cursor: wait;
+  opacity: 0.8;
+}
+
+.status-update-downloaded {
+  border-color: #22c55e;
+  background: #166534;
+}
+
+.status-update-error {
+  border-color: #f97316;
+  background: #7c2d12;
+}
+
+.status-update-detail {
+  color: #cbd5e1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .current-menu-highlight {

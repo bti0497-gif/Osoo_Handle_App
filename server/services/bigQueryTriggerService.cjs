@@ -1,4 +1,5 @@
 const { syncAll } = require('./bigQuerySyncService.cjs');
+const { isAdminSessionActive, getActiveUser } = require('./activeUserSessionService.cjs');
 
 const DEFAULT_IDLE_DELAY_MS = 30 * 60 * 1000;
 const configuredIdleMinutes = Number(process.env.BIGQUERY_SYNC_IDLE_MINUTES || 30);
@@ -30,6 +31,17 @@ async function runSync(reason = 'manual') {
   const isEnabled = String(process.env.BIGQUERY_SYNC_ENABLED || 'true') === 'true';
   if (!isEnabled) {
     return { queued: false, skipped: true, reason: 'BIGQUERY_SYNC_ENABLED=false' };
+  }
+
+  if (isAdminSessionActive()) {
+    const activeUser = getActiveUser();
+    console.log(`[BigQuery Trigger] ${reason} 동기화 건너뜀: admin 세션 활성 (${activeUser?.name || 'admin'})`);
+    return {
+      queued: false,
+      skipped: true,
+      reason: 'admin-session-active',
+      activeUser,
+    };
   }
 
   if (isSyncing) {

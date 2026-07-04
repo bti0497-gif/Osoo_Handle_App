@@ -31,7 +31,8 @@ const SettingsView = ({ currentUser }) => {
         importProgress, setImportProgress, importedData, showDataModal, setShowDataModal,
     } = shellState;
     const {
-        siteInfo, availableSites, selectedSiteId, isSiteListLoading, handleSiteSelection, handleCaptureSiteLocation, handleApply,
+        siteInfo, availableSites, selectedSiteId, isSiteListLoading, handleSiteSelection, handleCaptureSiteLocation,
+        handleApply, handleClearBigQueryOperationalData,
     } = basicSiteState;
     const {
         flowItems, medicineItems, kitItems, locationItems,
@@ -254,6 +255,7 @@ const SettingsView = ({ currentUser }) => {
             handleOpenLocalFolder={handleOpenLocalFolder}
             excelStatus={excelStatus}
             handleApply={handleApply}
+            handleClearBigQueryOperationalData={handleClearBigQueryOperationalData}
         />
     );
 

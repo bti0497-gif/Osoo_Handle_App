@@ -159,38 +159,46 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
-    useEffect(() => {
-        if (!isOpen || !date) return undefined;
-        let cancelled = false;
+    const reloadContexts = useCallback(async ({ force = false } = {}) => {
+        if (!date) return;
         const baseContexts = contextsRef.current;
         setIsLoading(true);
 
-        Promise.all([
-            FlowModel.fetchHistory(),
-            MedicineModel.fetchHistory(),
-            KitModel.fetchHistory(),
-            WaterQualityModel.fetchHistory(),
-        ]).then(([flowResult, medicineResult, kitResult, waterResult]) => {
-            if (cancelled) return;
+        try {
+            const [flowResult, medicineResult, kitResult, waterResult] = await Promise.all([
+                FlowModel.fetchHistory({ force }),
+                MedicineModel.fetchHistory({ force }),
+                KitModel.fetchHistory({ force }),
+                WaterQualityModel.fetchHistory({ force }),
+            ]);
             setResolvedContexts({
                 flow: mergeFlowContext(baseContexts.flow, unwrapHistory(flowResult), date),
                 medicine: mergeInventoryContext(baseContexts.medicine, unwrapHistory(medicineResult), date, 'medicine_name'),
                 kit: mergeInventoryContext(baseContexts.kit, unwrapHistory(kitResult), date, 'kit_name'),
                 water: mergeWaterContext(baseContexts.water, unwrapHistory(waterResult), date),
             });
-        }).catch((error) => {
-            if (!cancelled) {
-                console.error('[unified-record] failed to load contexts:', error);
-                setResolvedContexts(baseContexts);
-            }
-        }).finally(() => {
-            if (!cancelled) setIsLoading(false);
-        });
+        } catch (error) {
+            console.error('[unified-record] failed to load contexts:', error);
+            setResolvedContexts(baseContexts);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [date]);
+
+    useEffect(() => {
+        if (!isOpen || !date) return undefined;
+        let cancelled = false;
+
+        Promise.resolve()
+            .then(() => reloadContexts({ force: false }))
+            .catch((error) => {
+                if (!cancelled) console.error('[unified-record] failed to load contexts:', error);
+            });
 
         return () => {
             cancelled = true;
         };
-    }, [isOpen, date, signature]);
+    }, [isOpen, date, signature, reloadContexts]);
 
     const saveAllTabs = useCallback(async ({ flowItems, medicineItems, waterItems, kitItems }) => {
         const savedTabs = [];
@@ -216,13 +224,16 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                 if (!result?.success) throw new Error(result?.error || '키트관리 저장에 실패했습니다.');
                 savedTabs.push('kit');
             }
+            if (savedTabs.length > 0) {
+                await reloadContexts({ force: true });
+            }
             return { success: true, savedTabs };
         } catch (error) {
             return { success: false, savedTabs, error: error.message };
         } finally {
             setIsSaving(false);
         }
-    }, [date]);
+    }, [date, reloadContexts]);
 
     return {
         contexts: resolvedContexts,

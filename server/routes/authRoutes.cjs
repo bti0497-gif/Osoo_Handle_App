@@ -24,6 +24,12 @@ function triggerBigQuerySync(...args) {
 function syncRecentCertificateCacheForSite(...args) {
   return require('../services/certificateCacheSyncService.cjs').syncRecentCertificateCacheForSite(...args);
 }
+function setActiveUser(...args) {
+  return require('../services/activeUserSessionService.cjs').setActiveUser(...args);
+}
+function clearActiveUser(...args) {
+  return require('../services/activeUserSessionService.cjs').clearActiveUser(...args);
+}
 
 module.exports = (db) => {
     const router = express.Router();
@@ -351,6 +357,7 @@ module.exports = (db) => {
                     db.prepare('DELETE FROM members WHERE id = ? OR name = ?').run(member.id, member.name);
                     return res.status(401).json({ success: false, message: 'admin 계정은 로컬 캐시 로그인을 사용할 수 없습니다.' });
                 }
+                setActiveUser(member, 'local-login');
                 closeStaleOpenSessions(member);
                 try {
                     await syncRecentCertificateCacheForSite({
@@ -399,12 +406,14 @@ module.exports = (db) => {
             const role = String(member.role || 'user').trim();
             const isAdmin = role === 'admin' || role === 'group_admin' || name === 'admin';
             if (isAdmin) {
+                setActiveUser(member, 'discovery-login');
                 return res.json({ success: true, member, source: 'sheets' });
             }
 
             syncLocalMembers([member]);
             syncMemberSiteLinks(member);
             const localMember = db.prepare('SELECT * FROM members WHERE id = ? OR name = ? LIMIT 1').get(member.id, member.name);
+            setActiveUser(localMember || member, 'discovery-login');
             closeStaleOpenSessions(localMember || member);
             triggerBigQuerySync('login-success:sheets');
 
@@ -554,12 +563,22 @@ module.exports = (db) => {
         const logoutTime = getLocalTime();
 
         try {
+            clearActiveUser(memberId);
             db.prepare(`
         UPDATE attendance 
         SET logout_time = ?, auto_logout = ?, is_synced = 0 
         WHERE member_id = ? AND date = ? AND logout_time IS NULL
       `).run(logoutTime, autoLogout ? 1 : 0, memberId, dateKST);
 
+            res.json({ success: true });
+        } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    router.post('/logout-current', (req, res) => {
+        try {
+            clearActiveUser();
             res.json({ success: true });
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });

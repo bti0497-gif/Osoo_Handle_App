@@ -87,6 +87,14 @@ export const AuthModel = {
         }
     },
 
+    async clearServerActiveSession() {
+        try {
+            await apiClient.post('/api/auth/logout-current', {});
+        } catch (e) {
+            console.warn('[AuthModel] 서버 활성 세션 해제 실패:', e);
+        }
+    },
+
     async syncAttendanceBQ() {
         try {
             const data = await apiClient.post('/api/auth/sync-attendance-bq', {});

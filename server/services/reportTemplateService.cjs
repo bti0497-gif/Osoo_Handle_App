@@ -45,6 +45,11 @@ function getBundledReportTemplateDirs(baseDir) {
     candidates.push(workspaceDir);
   }
 
+  const siblingResourcesDir = path.join(path.dirname(baseDir), 'templates', 'reports');
+  if (fs.existsSync(siblingResourcesDir)) {
+    candidates.push(siblingResourcesDir);
+  }
+
   if (process.resourcesPath) {
     const packagedDir = path.join(process.resourcesPath, 'templates', 'reports');
     if (fs.existsSync(packagedDir)) {
@@ -66,16 +71,32 @@ function listFiles(dirPath) {
     .sort((left, right) => left.localeCompare(right, 'ko'));
 }
 
+function isOfficeLockFile(fileName) {
+  return String(fileName || '').startsWith('~$');
+}
+
 function removeDisallowedTemplates(dirPath) {
   const files = listFiles(dirPath);
   files.forEach((fileName) => {
+    if (isOfficeLockFile(fileName)) {
+      return;
+    }
+
     if (isAllowedReportTemplateName(fileName)) {
       return;
     }
 
     const fullPath = path.join(dirPath, fileName);
     if (fs.existsSync(fullPath)) {
-      fs.unlinkSync(fullPath);
+      try {
+        fs.unlinkSync(fullPath);
+      } catch (error) {
+        if (error?.code === 'EBUSY' || error?.code === 'EPERM') {
+          console.warn(`[Report Template] 삭제할 수 없는 파일을 건너뜁니다: ${fullPath} (${error.code})`);
+          return;
+        }
+        throw error;
+      }
     }
   });
 }
@@ -148,12 +169,13 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
 function listReportTemplates(baseDir, appDataPath) {
   const customDir = syncBundledTemplatesToAppData(baseDir, appDataPath);
   return listFiles(customDir)
+    .filter((fileName) => !isOfficeLockFile(fileName))
     .filter((fileName) => isAllowedReportTemplateName(fileName))
     .map((fileName) => ({
-    fileName,
-    relativePath: path.posix.join('templates', 'reports', fileName),
-    isExcelTemplate: isExcelReportTemplate(fileName),
-    isHwpxTemplate: isHwpxReportTemplate(fileName),
+      fileName,
+      relativePath: path.posix.join('templates', 'reports', fileName),
+      isExcelTemplate: isExcelReportTemplate(fileName),
+      isHwpxTemplate: isHwpxReportTemplate(fileName),
     }));
 }
 
@@ -161,6 +183,7 @@ function resolveReportTemplatePath(baseDir, appDataPath, templateName, options =
   const customDir = syncBundledTemplatesToAppData(baseDir, appDataPath);
   const { excelOnly = false, hwpxOnly = false } = options;
   const availableTemplates = listFiles(customDir)
+    .filter((fileName) => !isOfficeLockFile(fileName))
     .filter((fileName) => isAllowedReportTemplateName(fileName))
     .filter((fileName) => !excelOnly || isExcelReportTemplate(fileName))
     .filter((fileName) => !hwpxOnly || isHwpxReportTemplate(fileName));

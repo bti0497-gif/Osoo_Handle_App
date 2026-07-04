@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const JSZip = require('jszip');
+const ExcelJS = require('exceljs');
 
 function columnNumberToName(n) {
   let value = Number(n);
@@ -19,6 +20,9 @@ function buildColumnNames(maxColumn) {
 }
 
 const COLUMNS = buildColumnNames(52);
+const OPERATIONAL_SHEET_COUNT = 3;
+const MIN_UNIX_DATE_MS = Date.UTC(2000, 0, 1);
+const MAX_UNIX_DATE_MS = Date.UTC(2100, 0, 1);
 
 function decodeXml(text) {
   return String(text || '')
@@ -52,12 +56,14 @@ function formatDate(date) {
   if (date instanceof Date) {
     d = date;
   } else if (typeof date === 'number') {
-    d = excelSerialToDate(date);
+    d = date >= MIN_UNIX_DATE_MS && date <= MAX_UNIX_DATE_MS ? new Date(date) : excelSerialToDate(date);
   } else {
     const text = String(date).trim();
     const maybeSerial = Number(text);
     if (Number.isFinite(maybeSerial) && maybeSerial > 25569 && maybeSerial < 100000) {
       d = excelSerialToDate(maybeSerial);
+    } else if (Number.isFinite(maybeSerial) && maybeSerial >= MIN_UNIX_DATE_MS && maybeSerial <= MAX_UNIX_DATE_MS) {
+      d = new Date(maybeSerial);
     } else {
       d = new Date(text);
     }
@@ -68,10 +74,41 @@ function formatDate(date) {
 
 function roundIfNumeric(val) {
   if (val === null || val === undefined || val === '') return val;
+  if (val instanceof Date) return val;
   const num = Number(val);
   if (Number.isNaN(num)) return val;
   if (Number.isInteger(num)) return String(num);
   return String(Math.round(num * 10) / 10);
+}
+
+function normalizeExcelJsValue(value) {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value;
+  if (typeof value !== 'object') return value;
+
+  if (Object.prototype.hasOwnProperty.call(value, 'result')) {
+    return normalizeExcelJsValue(value.result);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'value')) {
+    return normalizeExcelJsValue(value.value);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'text')) {
+    return value.text;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'richText') && Array.isArray(value.richText)) {
+    return value.richText.map((part) => part.text || '').join('');
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'hyperlink')) {
+    return value.text || value.hyperlink || '';
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(value, 'formula')
+    || Object.prototype.hasOwnProperty.call(value, 'sharedFormula')
+    || Object.prototype.hasOwnProperty.call(value, 'error')
+  ) {
+    return null;
+  }
+  return null;
 }
 
 function getExcelOriginalPath(db, appDataPath) {
@@ -227,6 +264,61 @@ function readRowsFromSheetXml(sheetXml, sharedStrings, startRow, endRow, columns
   return rows;
 }
 
+async function readRowsFromWorkbookStream(filePath, sheetName, startRow, endRow, columns) {
+  const from = normalizeRowNumber(startRow);
+  const to = Math.max(from, normalizeRowNumber(endRow));
+  const wantedColumns = columns.map(normalizeColumnName).filter(Boolean);
+  const wanted = new Set(wantedColumns);
+  const rows = new Map();
+
+  const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(filePath, {
+    entries: 'emit',
+    sharedStrings: 'cache',
+    styles: 'cache',
+    hyperlinks: 'ignore',
+    worksheets: 'emit',
+  });
+
+  let foundSheet = false;
+  for await (const worksheetReader of workbookReader) {
+    if (worksheetReader.name !== sheetName) {
+      continue;
+    }
+
+    foundSheet = true;
+    for await (const row of worksheetReader) {
+      if (row.number < from) continue;
+      if (row.number > to) break;
+
+      const rowValues = {};
+      if (wanted.size > 0) {
+        for (const col of wantedColumns) {
+          const value = normalizeExcelJsValue(row.getCell(columnNameToNumber(col)).value);
+          if (value !== null && value !== undefined && value !== '') {
+            rowValues[col] = roundIfNumeric(value);
+          }
+        }
+      } else {
+        row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+          const col = columnNumberToName(colNumber);
+          const value = normalizeExcelJsValue(cell.value);
+          if (value !== null && value !== undefined && value !== '') {
+            rowValues[col] = roundIfNumeric(value);
+          }
+        });
+      }
+      rows.set(row.number, rowValues);
+    }
+    break;
+  }
+
+  if (!foundSheet) {
+    throw new Error(`엑셀 시트를 찾을 수 없습니다: ${sheetName}`);
+  }
+
+  return rows;
+}
+
 async function parseAndStoreExcel(db, filePath) {
   const startMs = Date.now();
   const fileName = path.basename(filePath);
@@ -234,18 +326,19 @@ async function parseAndStoreExcel(db, filePath) {
 
   const zip = await loadZip(filePath);
   const sheets = await getSheetEntries(zip);
+  const sheetsToStore = sheets.slice(0, OPERATIONAL_SHEET_COUNT);
 
   db.prepare('DELETE FROM excel_raw_data').run();
   db.prepare('DELETE FROM excel_sheets').run();
 
   const insertSheet = db.prepare('INSERT INTO excel_sheets (sheet_name, max_row, imported_at) VALUES (?, ?, ?)');
   const now = new Date().toISOString();
-  for (const sheet of sheets) {
+  for (const sheet of sheetsToStore) {
     insertSheet.run(sheet.name, 0, now);
   }
 
-  console.log(`[Excel] 시트 목록 저장 완료: ${sheets.length}개, ${Date.now() - startMs}ms`);
-  return sheets.map((sheet) => sheet.name);
+  console.log(`[Excel] 매핑용 시트 목록 저장 완료: ${sheetsToStore.length}/${sheets.length}개, ${Date.now() - startMs}ms`);
+  return sheetsToStore.map((sheet) => sheet.name);
 }
 
 function getStoredSheets(db) {
@@ -254,6 +347,12 @@ function getStoredSheets(db) {
 
 async function readExcelRange(db, appDataPath, sheetName, startRow, endRow, columns = []) {
   const filePath = getExcelOriginalPath(db, appDataPath);
+  try {
+    return await readRowsFromWorkbookStream(filePath, sheetName, startRow, endRow, columns);
+  } catch (streamError) {
+    console.warn('[Excel] 스트리밍 셀 읽기 실패, XML 파서로 재시도:', streamError.message);
+  }
+
   const zip = await loadZip(filePath);
   const [sheetPath, sharedStrings] = await Promise.all([
     getSheetPath(zip, sheetName),
@@ -273,7 +372,8 @@ async function readExcelRow(db, appDataPath, sheetName, rowNum, maxColumn = 52) 
     if (col === 'A') {
       value = formatDate(value) || value;
     }
-    result[col] = roundIfNumeric(value) || '';
+    const rounded = roundIfNumeric(value);
+    result[col] = rounded === null || rounded === undefined ? '' : rounded;
   }
   return result;
 }
@@ -289,7 +389,8 @@ function getStoredRow(db, sheetName, rowNum) {
   const rows = db.prepare('SELECT col, value FROM excel_raw_data WHERE sheet_name = ? AND row_num = ?').all(sheetName, rowNum);
   const result = {};
   for (const { col, value } of rows) {
-    result[col] = roundIfNumeric(value) || '';
+    const rounded = roundIfNumeric(value);
+    result[col] = rounded === null || rounded === undefined ? '' : rounded;
   }
   return result;
 }

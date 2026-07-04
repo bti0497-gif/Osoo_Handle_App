@@ -10,17 +10,48 @@ const initialSyncService = require('../services/settings/initialSyncService.cjs'
 const mappingSettingsService = require('../services/settings/mappingSettingsService.cjs');
 const siteSettingsService = require('../services/settings/siteSettingsService.cjs');
 const templateSettingsService = require('../services/settings/templateSettingsService.cjs');
+const bigQueryAdminCleanupService = require('../services/bigQueryAdminCleanupService.cjs');
 const {
   getCustomReportTemplatesDir,
   syncBundledTemplatesToAppData,
 } = require('../services/reportTemplateService.cjs');
 const router = express.Router();
 
+function triggerBigQuerySync(reason) {
+  try {
+    require('../services/bigQueryTriggerService.cjs').triggerSync(reason);
+  } catch (err) {
+    console.warn('[Settings] BigQuery 동기화 예약 실패:', err.message);
+  }
+}
+
 // 기본 설정: 사원/사이트 마스터는 중앙관서에서 직접 관리하며 앱의 초기 셋업 동기화 비활성화
 const ENABLE_INITIAL_SYNC_TO_SHEETS = process.env.ENABLE_INITIAL_SYNC_TO_SHEETS === 'true';
 const ENABLE_SITE_MEMBER_BIGQUERY_SYNC = process.env.ENABLE_SITE_MEMBER_BIGQUERY_SYNC === 'true';
 
-let importProgress = { current: 0, total: 0, status: 'idle', result: null };
+function createIdleImportProgress() {
+  return { current: 0, total: 0, status: 'idle', result: null };
+}
+
+const importProgressByType = {
+  flow: createIdleImportProgress(),
+  kit: createIdleImportProgress(),
+  medicine: createIdleImportProgress(),
+  water: createIdleImportProgress(),
+};
+
+function setImportProgress(type, progress) {
+  importProgressByType[type] = progress;
+  return importProgressByType[type];
+}
+
+function getImportProgress(type) {
+  const normalizedType = String(type || '').trim();
+  if (normalizedType && importProgressByType[normalizedType]) {
+    return importProgressByType[normalizedType];
+  }
+  return importProgressByType;
+}
 
 function openLocalFolder(folderPath) {
   if (!fs.existsSync(folderPath)) {
@@ -28,38 +59,28 @@ function openLocalFolder(folderPath) {
   }
 
   if (process.platform === 'win32') {
+    const launchWithPowerShell = () => {
+      const child = spawn('powershell.exe', [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        'Start-Process -FilePath explorer.exe -ArgumentList @($args[0])',
+        folderPath,
+      ], { detached: true, stdio: 'ignore', windowsHide: false });
+      child.unref();
+    };
+
     try {
       const explorer = spawn('explorer.exe', [folderPath], {
         detached: true,
         stdio: 'ignore',
         windowsHide: false,
       });
-      explorer.on('error', () => {
-        spawn('powershell.exe', [
-          '-NoProfile',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-Command',
-          'Start-Process',
-          '-FilePath',
-          'explorer.exe',
-          '-ArgumentList',
-          folderPath,
-        ], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
-      });
+      explorer.once('error', launchWithPowerShell);
       explorer.unref();
     } catch {
-      spawn('powershell.exe', [
-        '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-Command',
-        'Start-Process',
-        '-FilePath',
-        'explorer.exe',
-        '-ArgumentList',
-        folderPath,
-      ], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+      launchWithPowerShell();
     }
     return;
   }
@@ -169,6 +190,16 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
+  router.post('/api/settings/bigquery/clear-operational-data', async (req, res) => {
+    try {
+      const confirmed = req.body?.confirmed === true;
+      const result = await bigQueryAdminCleanupService.clearOperationalBigQueryDataForCurrentSite(db, { confirmed });
+      res.json({ success: true, ...result });
+    } catch (e) {
+      res.status(e.statusCode || 500).json({ success: false, message: e.message });
+    }
+  });
+
   // 사이트/사원 부트스트랩(로컬 + BigQuery 이중 동기화)
   router.post('/api/settings/bootstrap-site-member', async (req, res) => {
     try {
@@ -239,14 +270,15 @@ module.exports = function (db, baseDir, appDataPath) {
   });
 
   // 임포트 진행 상태 확인 API
-  router.get('/api/settings/import-progress', (req, res) => { res.json(importProgress); });
+  router.get('/api/settings/import-progress', (req, res) => { res.json(getImportProgress(req.query?.type)); });
 
   // 흐름 매핑 설정 + DB에서 임포트 수행
   router.post('/api/settings/save-flow-mapping', async (req, res) => {
     const { config, mapping } = req.body;
-    importProgress = mappingSettingsService.createProgress(config);
+    const importProgress = setImportProgress('flow', mappingSettingsService.createProgress(config));
     try {
       const result = await mappingSettingsService.saveFlowMapping(db, appDataPath, config, mapping, importProgress);
+      triggerBigQuerySync('settings:flow-mapping-import');
       res.json({ success: true, ...result });
     } catch (e) {
       console.error('Flow mapping error:', e);
@@ -260,9 +292,10 @@ module.exports = function (db, baseDir, appDataPath) {
   // mapping 형식: "킷명_purchase", "킷명_usage", "킷명_inventory"
   router.post('/api/settings/save-kit-mapping', async (req, res) => {
     const { config, mapping } = req.body;
-    importProgress = mappingSettingsService.createProgress(config);
+    const importProgress = setImportProgress('kit', mappingSettingsService.createProgress(config));
     try {
       const result = await mappingSettingsService.saveKitMapping(db, appDataPath, config, mapping, importProgress);
+      triggerBigQuerySync('settings:kit-mapping-import');
       res.json({ success: true, ...result });
     } catch (e) {
       console.error('Kit mapping error:', e);
@@ -276,9 +309,10 @@ module.exports = function (db, baseDir, appDataPath) {
   // mapping 형식: "약품명_purchase", "약품명_usage", "약품명_inventory"
   router.post('/api/settings/save-medicine-mapping', async (req, res) => {
     const { config, mapping } = req.body;
-    importProgress = mappingSettingsService.createProgress(config);
+    const importProgress = setImportProgress('medicine', mappingSettingsService.createProgress(config));
     try {
       const result = await mappingSettingsService.saveMedicineMapping(db, appDataPath, config, mapping, importProgress);
+      triggerBigQuerySync('settings:medicine-mapping-import');
       res.json({ success: true, ...result });
     } catch (e) {
       console.error('Medicine mapping error:', e);
@@ -291,9 +325,10 @@ module.exports = function (db, baseDir, appDataPath) {
   // 수질 매핑 설정 + DB에서 임포트 수행
   router.post('/api/settings/save-water-mapping', async (req, res) => {
     const { config, mapping } = req.body;
-    importProgress = mappingSettingsService.createProgress(config);
+    const importProgress = setImportProgress('water', mappingSettingsService.createProgress(config));
     try {
       const result = await mappingSettingsService.saveWaterMapping(db, appDataPath, config, mapping, importProgress);
+      triggerBigQuerySync('settings:water-mapping-import');
       res.json({ success: true, ...result });
     } catch (e) {
       console.error('Water mapping error:', e);

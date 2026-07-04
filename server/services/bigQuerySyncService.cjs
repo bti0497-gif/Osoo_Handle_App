@@ -5,6 +5,7 @@ const path = require('path');
 const { db, appDataPath } = require('../database.cjs');
 const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
 const { recordDiagnostic } = require('./diagnosticLogService.cjs');
+const { isAdminSessionActive, getActiveUser } = require('./activeUserSessionService.cjs');
 
 // 3. 현장 정보(현장명, 관리자명) 가져오기
 function getSiteInfo() {
@@ -373,6 +374,19 @@ async function syncTable(tableName) {
 
 // 6. 전체 테이블 동기화 함수 (스케줄러에서 호출)
 async function syncAll() {
+  if (isAdminSessionActive()) {
+    const activeUser = getActiveUser();
+    console.log(`[BigQuery] 전체 동기화 건너뜀: admin 세션 활성 (${activeUser?.name || 'admin'})`);
+    return {
+      skipped: {
+        success: true,
+        count: 0,
+        skipped: true,
+        reason: 'admin-session-active',
+      },
+    };
+  }
+
   const results = {};
   for (const tableName of Object.keys(TABLE_MAPPINGS)) {
     // 서버 시작 시 '진행 중' 상태(is_synced=2)로 남아있는 레코드가 있다면

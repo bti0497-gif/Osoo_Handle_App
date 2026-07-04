@@ -374,9 +374,10 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
 
         try {
             setIsOutputProcessing(true);
-            const result = outputFormat === 'pdf'
+            const effectiveOutputFormat = isDailyWorkLog ? outputFormat : 'excel';
+            const result = effectiveOutputFormat === 'pdf'
                 ? await DailyLogModel.fetchExportPdf(dateRangeStr, templateName, siteName, requestContext)
-                : outputFormat === 'hwpx'
+                : effectiveOutputFormat === 'hwpx'
                     ? await DailyLogModel.fetchExportHwpx(dateRangeStr, templateName, siteName, requestContext)
                     : await DailyLogModel.fetchExportExcel(dateRangeStr, templateName, siteName, requestContext);
             if (result && result.success) {
@@ -384,7 +385,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
                     ? `\n${result.files.join('\n')}`
                     : '';
                 alertTitle = '일지 생성 완료';
-                alertMessage = outputFormat === 'pdf'
+                alertMessage = effectiveOutputFormat === 'pdf'
                     ? `${result.pageCount || sortedDates.length}페이지 PDF 생성이 완료되었습니다.${fileList}`
                     : `${templateName} 생성이 완료되었습니다.${fileList}`;
             } else {
@@ -393,7 +394,8 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
             }
         } catch (error) {
             alertTitle = '내보내기 실패';
-            const formatLabel = outputFormat === 'pdf' ? 'PDF' : outputFormat === 'hwpx' ? 'HWPX' : '엑셀';
+            const effectiveOutputFormat = isDailyWorkLog ? outputFormat : 'excel';
+            const formatLabel = effectiveOutputFormat === 'pdf' ? 'PDF' : effectiveOutputFormat === 'hwpx' ? 'HWPX' : '엑셀';
             alertMessage = error?.data?.userMessage || error?.message || `${formatLabel} 내보내기를 시작하지 못했습니다.`;
         } finally {
             setIsOutputProcessing(false);

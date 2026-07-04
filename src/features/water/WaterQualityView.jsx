@@ -406,7 +406,6 @@ const WaterQualityView = ({ currentUser }) => {
     };
 
     const renderRowHeader = (row) => {
-        const label = row.displayLabel || row.sourceLabel || '';
         return (
             <div style={{
                 width: '100%',
@@ -420,9 +419,8 @@ const WaterQualityView = ({ currentUser }) => {
                 fontSize: 10.5,
                 color: row.rowKey === selectedRowKey ? '#92400e' : row.date === todayStr ? '#1d4ed8' : row.isFuture ? '#a0aec0' : '#475569',
                 background: row.rowKey === selectedRowKey ? '#fde68a' : row.date === todayStr ? '#dbeafe' : '#f8fafc',
-            }}>
+            }} title={row.displayLabel || row.sourceLabel || ''}>
                 <span>{row.date}</span>
-                {label && <span style={{ fontSize: 9, color: '#64748b' }}>{label}</span>}
             </div>
         );
     };

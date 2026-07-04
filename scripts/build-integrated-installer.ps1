@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $false)]
-    [string]$AppVersion = '1.0.6',
+    [string]$AppVersion = '1.0.8',
 
     [Parameter(Mandatory = $false)]
     [string]$OutputDir = ''
@@ -101,7 +101,7 @@ module.exports = {
     allowElevation: false,
     allowToChangeInstallationDirectory: false,
   },
-  publish: null,
+  publish: base.publish,
 };
 "@
 Set-Content -LiteralPath $configFile -Value $configText -Encoding utf8

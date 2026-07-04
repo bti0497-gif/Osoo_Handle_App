@@ -248,8 +248,8 @@ function getProcessFlowBindings(db, date, context = {}) {
     FROM config_items
     WHERE category = 'flow'
       AND is_active = 1
-      AND item_name NOT LIKE '%\_raw' ESCAPE '\'
-      AND item_name NOT LIKE '%\_flow' ESCAPE '\'
+      AND item_name NOT LIKE '%\\_raw' ESCAPE '\\'
+      AND item_name NOT LIKE '%\\_flow' ESCAPE '\\'
     ORDER BY display_order, id
   `).all().map((row) => String(row.item_name || '').trim());
   const hasParshall = activeFlowNames.some((name) => name.includes('파샬'));

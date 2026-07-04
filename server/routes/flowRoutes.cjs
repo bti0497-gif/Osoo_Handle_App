@@ -28,7 +28,7 @@ module.exports = function (db) {
       : null;
     const rows = dbConn.prepare(`
       SELECT id, date, raw_value, sludge_export, calculated_flow,
-             is_reset, is_manual, is_synced, last_modified
+             is_reset, is_manual, is_synced, last_modified, input_status
       FROM flow_readings
       WHERE type = ? AND (? IS NULL OR date >= ?)
       ORDER BY date ASC, id ASC
@@ -58,6 +58,8 @@ module.exports = function (db) {
       const hasRaw = rawNum != null && Number.isFinite(rawNum);
       let flow = null;
       const isExplicit = explicitDates.has(row.date);
+      const inputStatus = String(row.input_status || '').trim().toLowerCase();
+      const shouldPreserveStoredFlow = (inputStatus === 'imported' || inputStatus === 'baseline');
 
       if (type === '슬러지') {
         const sludgeRaw = row.sludge_export ?? row.raw_value;
@@ -70,7 +72,12 @@ module.exports = function (db) {
           prevSludgeYear = year;
           prevSludgeCumulative = 0;
         }
-        if (isExplicit && hasStoredFlow) {
+        if (shouldPreserveStoredFlow) {
+          flow = hasStoredFlow ? storedFlow : null;
+          if (hasStoredFlow) {
+            prevSludgeCumulative = flow;
+          }
+        } else if (isExplicit && hasStoredFlow) {
           flow = storedFlow;
           prevSludgeCumulative = flow;
         } else if (hasSludge) {
@@ -79,7 +86,7 @@ module.exports = function (db) {
         }
       } else if (hasRaw) {
         const storedFlow = row.calculated_flow == null ? null : Number(row.calculated_flow);
-        if ((isExplicit || row.is_manual || row.is_reset) && storedFlow != null) {
+        if ((isExplicit || shouldPreserveStoredFlow || row.is_manual || row.is_reset) && storedFlow != null) {
           flow = storedFlow;
         } else if (prevRaw != null && Number.isFinite(prevRaw)) {
           flow = Math.round((rawNum - prevRaw) * 10) / 10;

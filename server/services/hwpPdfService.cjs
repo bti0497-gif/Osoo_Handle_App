@@ -32,6 +32,42 @@ function execFileAsync(file, args, options = {}) {
   });
 }
 
+function decodeXmlEntities(value) {
+  return String(value || '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function normalizePowerShellError(output) {
+  const text = String(output || '').trim();
+  if (!text) return '';
+
+  if (!text.includes('#< CLIXML')) {
+    return text;
+  }
+
+  const messages = [];
+  const regex = /<S\s+S="Error">([\s\S]*?)<\/S>/g;
+  let match = regex.exec(text);
+  while (match) {
+    messages.push(
+      decodeXmlEntities(match[1])
+        .replace(/_x000D__x000A_/g, '\n')
+        .replace(/_x000D_/g, '\r')
+        .replace(/_x000A_/g, '\n')
+        .replace(/_x0009_/g, '\t')
+        .trim()
+    );
+    match = regex.exec(text);
+  }
+
+  const normalized = messages.filter(Boolean).join('\n').trim();
+  return normalized || text.replace('#< CLIXML', '').trim();
+}
+
 function securityModulePath() {
   const appDataRoot = process.env.APPDATA || process.env.LOCALAPPDATA || process.cwd();
   return path.join(appDataRoot, 'Osoo_Handle_App', 'security', 'FilePathCheckerModuleExample.dll');
@@ -122,7 +158,7 @@ async function runHwpToPdfConversion(sourcePath, outputPath) {
       { timeout: 180000, windowsHide: true, maxBuffer: 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error) {
-          const detail = String(stderr || stdout || error.message).trim();
+          const detail = normalizePowerShellError(stderr || stdout || error.message);
           reject(new Error(`한글 PDF 변환 실패: ${detail}`));
           return;
         }

@@ -31,6 +31,13 @@ export default function InventoryMappingPanel({
   showConfirm,
   onSave,
 }) {
+  const previewValue = (colKey) => {
+    const value = sampleRowData[colKey];
+    if (value === null || value === undefined || value === '') return '-- No Data --';
+    if (typeof value === 'object') return '-- No Data --';
+    return value;
+  };
+
   const activeItems = items.filter(i => i.checked);
   const rows = [
     { key: '__date__', label: '날짜 (Date)', isDate: true },
@@ -84,7 +91,7 @@ export default function InventoryMappingPanel({
                     {alphabet.map(l => <option key={l} value={l}>{l}열</option>)}
                   </select>
                   <span style={{ fontSize: '0.75rem', fontWeight: 700, color: dateCol ? '#059669' : '#94a3b8', backgroundColor: dateCol ? '#f0fdf4' : '#f1f5f9', padding: '6px 10px', borderRadius: '6px', width: 'fit-content', minWidth: '100px', textAlign: 'center' }}>
-                    {(dateCol && sampleRowData[dateCol]) || '-- No Data --'}
+                    {dateCol ? previewValue(dateCol) : '-- No Data --'}
                   </span>
                 </div>
               );
@@ -113,7 +120,7 @@ export default function InventoryMappingPanel({
                         </div>
                         <div style={{ gridColumn: '4 / 5', gridRow: rIdx + 1, display: 'flex', alignItems: 'center', padding: '5px 0' }}>
                           <span style={{ fontSize: '0.75rem', fontWeight: 700, color: hasCol ? '#059669' : '#94a3b8', backgroundColor: hasCol ? '#f0fdf4' : '#f1f5f9', padding: '6px 10px', borderRadius: '6px', minWidth: '100px', textAlign: 'center' }}>
-                            {(hasCol && sampleRowData[colKey]) || '-- No Data --'}
+                            {hasCol ? previewValue(colKey) : '-- No Data --'}
                           </span>
                         </div>
                       </React.Fragment>

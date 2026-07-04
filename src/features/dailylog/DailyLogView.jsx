@@ -28,7 +28,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
     const lastAlertMessageRef = useRef('');
 
     useEffect(() => {
-        if (manifestErrorCode !== 'REPORT_TEMPLATE_MISSING' || !manifestError) {
+        if (!['REPORT_TEMPLATE_MISSING', 'REPORT_HWPX_TEMPLATE_MISSING'].includes(manifestErrorCode) || !manifestError) {
             return;
         }
 
@@ -48,7 +48,9 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
     };
 
     const isDailyWorkLog = templateName === '일일업무일지';
-    const outputFormatLabel = outputFormat === 'pdf' ? 'PDF' : outputFormat === 'hwpx' ? 'HWPX' : '엑셀';
+    const outputFormatLabel = isDailyWorkLog
+        ? (outputFormat === 'pdf' ? 'PDF' : outputFormat === 'hwpx' ? 'HWPX' : '엑셀')
+        : '엑셀';
     const exportButtonLabel = isDailyWorkLog
         ? `${outputFormatLabel} 업무일지 출력`
         : '분석일지 출력';

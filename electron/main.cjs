@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu } = require('elec
 const path = require('path');
 const fs = require('fs');
 const { fork } = require('child_process');
-const { setupAutoUpdater, checkForUpdates, markUserActivity } = require('./updater.cjs');
+const { setupAutoUpdater, checkForUpdates, installDownloadedUpdateAndQuit, hasDownloadedUpdate } = require('./updater.cjs');
 
 function isBrokenPipeError(error) {
   return error && (error.code === 'EPIPE' || /EPIPE|broken pipe/i.test(String(error.message || '')));
@@ -118,7 +118,7 @@ function startServer() {
   serverProcess.on('exit', (code) => {
     console.log(`[Server] Process exited with code ${code}`);
     serverProcess = null;
-    if (mainWindow && !mainWindow.isDestroyed()) {
+    if (!isQuitting && mainWindow && !mainWindow.isDestroyed()) {
       setTimeout(() => startServer(), 2000);
     }
   });
@@ -132,6 +132,41 @@ function stopServer() {
     serverProcess.kill();
     serverProcess = null;
   }
+}
+
+function stopServerGracefully(timeoutMs = 3000) {
+  if (useExternalServer || !serverProcess) return Promise.resolve();
+  const proc = serverProcess;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (serverProcess === proc) serverProcess = null;
+      resolve();
+    };
+
+    const timer = setTimeout(() => {
+      try {
+        if (!proc.killed) proc.kill('SIGKILL');
+      } catch (_) {}
+      finish();
+    }, timeoutMs);
+    timer.unref?.();
+
+    proc.once('exit', () => {
+      clearTimeout(timer);
+      finish();
+    });
+
+    try {
+      proc.kill();
+    } catch (_) {
+      clearTimeout(timer);
+      finish();
+    }
+  });
 }
 
 function createWindow() {
@@ -286,8 +321,9 @@ app.whenReady().then(() => {
 
   if (!isDev) {
     setupAutoUpdater(mainWindow, {
-      onBeforeInstall: () => {
+      onBeforeInstall: async () => {
         isQuitting = true;
+        await stopServerGracefully();
       },
     });
   }
@@ -341,15 +377,18 @@ ipcMain.handle('app:checkForUpdates', () => {
   return checkForUpdates();
 });
 
+ipcMain.handle('app:installUpdate', async () => {
+  if (!hasDownloadedUpdate()) {
+    return { ok: false, reason: 'no-downloaded-update' };
+  }
+  const started = await installDownloadedUpdateAndQuit();
+  return { ok: started };
+});
+
 ipcMain.handle('app:hideToTray', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.hide();
   }
-  return { ok: true };
-});
-
-ipcMain.handle('app:markUserActivity', () => {
-  markUserActivity();
   return { ok: true };
 });
 

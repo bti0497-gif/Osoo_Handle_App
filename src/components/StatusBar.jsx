@@ -2,6 +2,12 @@ import React, { useState, useEffect } from 'react';
 
 const StatusBar = ({ title, helpText }) => {
     const [time, setTime] = useState(new Date().toLocaleTimeString());
+    const [updateState, setUpdateState] = useState({
+        status: 'idle',
+        label: '업데이트 확인',
+        detail: '',
+        percent: 0,
+    });
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -9,6 +15,91 @@ const StatusBar = ({ title, helpText }) => {
         }, 1000);
         return () => clearInterval(timer);
     }, []);
+
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api) return undefined;
+
+        api.onUpdateChecking?.(() => {
+            setUpdateState({ status: 'checking', label: '확인 중', detail: '', percent: 0 });
+        });
+        api.onUpdateAvailable?.((info) => {
+            setUpdateState({
+                status: 'available',
+                label: '다운로드 중',
+                detail: info?.version ? `v${info.version}` : '',
+                percent: 0,
+            });
+        });
+        api.onUpdateNotAvailable?.(() => {
+            setUpdateState({ status: 'idle', label: '최신 버전', detail: '', percent: 0 });
+        });
+        api.onUpdateProgress?.((progress) => {
+            const percent = Math.max(0, Math.min(100, Math.round(Number(progress?.percent) || 0)));
+            setUpdateState({
+                status: 'downloading',
+                label: `다운로드 ${percent}%`,
+                detail: '',
+                percent,
+            });
+        });
+        api.onUpdateDownloaded?.((info) => {
+            setUpdateState({
+                status: 'downloaded',
+                label: '업데이트 설치',
+                detail: info?.version ? `v${info.version}` : '',
+                percent: 100,
+            });
+        });
+        api.onUpdateInstalling?.(() => {
+            setUpdateState({ status: 'installing', label: '설치 중', detail: '재시작 예정', percent: 100 });
+        });
+        api.onUpdateError?.((message) => {
+            setUpdateState({
+                status: 'error',
+                label: '업데이트 오류',
+                detail: String(message || '').slice(0, 32),
+                percent: 0,
+            });
+        });
+
+        return undefined;
+    }, []);
+
+    const handleUpdateClick = async () => {
+        const api = window.electronAPI;
+        if (!api || updateState.status === 'checking' || updateState.status === 'downloading' || updateState.status === 'installing') {
+            return;
+        }
+
+        try {
+            if (updateState.status === 'downloaded') {
+                setUpdateState((prev) => ({ ...prev, status: 'installing', label: '설치 중', detail: '재시작 예정' }));
+                const result = await api.installUpdate?.();
+                if (result && result.ok === false) {
+                    setUpdateState({ status: 'idle', label: '업데이트 확인', detail: '', percent: 0 });
+                }
+                return;
+            }
+
+            setUpdateState({ status: 'checking', label: '확인 중', detail: '', percent: 0 });
+            await api.checkForUpdates?.();
+        } catch (err) {
+            setUpdateState({
+                status: 'error',
+                label: '업데이트 오류',
+                detail: String(err?.message || err || '').slice(0, 32),
+                percent: 0,
+            });
+        }
+    };
+
+    const updateDisabled = ['checking', 'downloading', 'installing'].includes(updateState.status);
+    const updateIcon = updateState.status === 'downloaded'
+        ? 'system_update_alt'
+        : updateState.status === 'error'
+            ? 'error'
+            : 'system_update';
 
     return (
         <footer className="status-bar">
@@ -24,6 +115,17 @@ const StatusBar = ({ title, helpText }) => {
             </div>
 
             <div className="status-right">
+                <button
+                    type="button"
+                    className={`status-update-button status-update-${updateState.status}`}
+                    onClick={handleUpdateClick}
+                    disabled={updateDisabled}
+                    title={updateState.detail || updateState.label}
+                >
+                    <span className="material-icons" style={{ fontSize: '14px' }}>{updateIcon}</span>
+                    <span>{updateState.label}</span>
+                    {updateState.detail ? <span className="status-update-detail">{updateState.detail}</span> : null}
+                </button>
                 <div className="status-item">
                     <span className="material-icons" style={{ fontSize: '14px', color: '#94a3b8' }}>login</span>
                     <span>현재 시간: <span style={{ color: 'white' }}>{time}</span></span>

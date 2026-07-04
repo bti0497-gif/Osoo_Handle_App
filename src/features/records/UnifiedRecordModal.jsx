@@ -588,6 +588,8 @@ export default function UnifiedRecordModal({
         const kitItemsToSave = [];
         const waterItemsToSave = [];
         const effectiveSaveStatusMode = canUseBaselineStatus ? saveStatusMode : 'manual';
+        const isAdminUser = ADMIN_ROLES.has(String(currentUser?.role || '').trim().toLowerCase());
+        const shouldAutoAdjustKitUsageFromWater = !isAdminUser && effectiveSaveStatusMode !== 'baseline';
 
         if (targetTabs.has('flow')) {
             (resolvedContexts.flow?.items || []).forEach((item) => {
@@ -695,12 +697,14 @@ export default function UnifiedRecordModal({
                     if (missingFields.length > 0) {
                         hasPartialWaterInput = true;
                     }
-                    enabledFields.forEach((field) => {
-                        if (toNumberOrNull(values[field.id]) !== null) {
-                            const usage = waterUsageByKit.get(field.id);
-                            if (usage) usage.count += 1;
-                        }
-                    });
+                    if (shouldAutoAdjustKitUsageFromWater) {
+                        enabledFields.forEach((field) => {
+                            if (toNumberOrNull(values[field.id]) !== null) {
+                                const usage = waterUsageByKit.get(field.id);
+                                if (usage) usage.count += 1;
+                            }
+                        });
+                    }
                     waterItemsToSave.push({
                         date,
                         measurement_group: round.sourceType === 'qntech'
@@ -723,40 +727,42 @@ export default function UnifiedRecordModal({
             });
         }
 
-        waterUsageByKit.forEach(({ kitName, count }) => {
-            if (count <= 0) return;
-            let kitRow = kitItemsToSave.find((item) => item.kit_name === kitName);
-            if (!kitRow) {
-                const kitContext = (resolvedContexts.kit?.items || []).find(
-                    (item) => (item.key || item.name || item.label) === kitName
-                );
-                if (!kitContext) return;
-                const values = getDraftForItem('kit', kitContext);
-                const purchase = toNumberOrNull(values.purchase) ?? 0;
-                const usage = toNumberOrNull(values.usage) ?? 0;
-                const previousInventory = toNumberOrNull(kitContext?.previous?.inventory) || 0;
-                kitRow = {
-                    date,
-                    kit_name: kitName,
-                    purchase_amount: purchase,
-                    usage_amount: usage,
-                    current_inventory: round1(previousInventory + purchase - usage),
-                    input_status: 'imported',
-                };
-                kitItemsToSave.push(kitRow);
-            }
-            if (!kitRow) return;
-            if (kitRow.usage_amount < count) {
-                const kitContext = (resolvedContexts.kit?.items || []).find(
-                    (item) => (item.key || item.name || item.label) === kitName
-                );
-                const previousInventory = toNumberOrNull(kitContext?.previous?.inventory) || 0;
-                kitRow.usage_amount = count;
-                kitRow.current_inventory = round1(
-                    previousInventory + kitRow.purchase_amount - kitRow.usage_amount
-                );
-            }
-        });
+        if (shouldAutoAdjustKitUsageFromWater) {
+            waterUsageByKit.forEach(({ kitName, count }) => {
+                if (count <= 0) return;
+                let kitRow = kitItemsToSave.find((item) => item.kit_name === kitName);
+                if (!kitRow) {
+                    const kitContext = (resolvedContexts.kit?.items || []).find(
+                        (item) => (item.key || item.name || item.label) === kitName
+                    );
+                    if (!kitContext) return;
+                    const values = getDraftForItem('kit', kitContext);
+                    const purchase = toNumberOrNull(values.purchase) ?? 0;
+                    const usage = toNumberOrNull(values.usage) ?? 0;
+                    const previousInventory = toNumberOrNull(kitContext?.previous?.inventory) || 0;
+                    kitRow = {
+                        date,
+                        kit_name: kitName,
+                        purchase_amount: purchase,
+                        usage_amount: usage,
+                        current_inventory: round1(previousInventory + purchase - usage),
+                        input_status: 'imported',
+                    };
+                    kitItemsToSave.push(kitRow);
+                }
+                if (!kitRow) return;
+                if (kitRow.usage_amount < count) {
+                    const kitContext = (resolvedContexts.kit?.items || []).find(
+                        (item) => (item.key || item.name || item.label) === kitName
+                    );
+                    const previousInventory = toNumberOrNull(kitContext?.previous?.inventory) || 0;
+                    kitRow.usage_amount = count;
+                    kitRow.current_inventory = round1(
+                        previousInventory + kitRow.purchase_amount - kitRow.usage_amount
+                    );
+                }
+            });
+        }
 
         if (zeroUsageMedicines.length > 0) {
             notices.push(`사용되지 않은 약품: ${zeroUsageMedicines.join(', ')}`);
@@ -787,6 +793,15 @@ export default function UnifiedRecordModal({
 
         if (result.savedTabs.length > 0) {
             setSavedTabs((prev) => Array.from(new Set([...prev, ...result.savedTabs])));
+            setDraft((prev) => {
+                const savedTabSet = new Set(result.savedTabs);
+                return Object.fromEntries(
+                    Object.entries(prev).filter(([key]) => {
+                        const tabId = key.split(':')[0];
+                        return !savedTabSet.has(tabId);
+                    })
+                );
+            });
             await onSaveComplete?.({ date, savedTabs: result.savedTabs });
         }
         return result;

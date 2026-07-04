@@ -15,6 +15,20 @@ export default function FlowMappingPanel({
   handleSaveFlowMapping,
   getFlowRowsForExcelMapping,
 }) {
+        const isSludgeFlow = (name) => String(name || '').includes('슬러지');
+        const isRequiredMappingComplete = () => (
+            Boolean(flowConfig.dateCol)
+            && activeFlows.every((flow) => (
+                Boolean(flowMapping[`${flow.name}_raw`])
+                && (isSludgeFlow(flow.name) || Boolean(flowMapping[`${flow.name}_flow`]))
+            ))
+        );
+        const previewValue = (colKey) => {
+            const value = sampleRowData[colKey];
+            if (value === null || value === undefined || value === '') return '-- No Data --';
+            if (typeof value === 'object') return '-- No Data --';
+            return value;
+        };
         // 1계열: 체크된 검침항목만. 2계열: 반송 1·2는 매핑 행을 항상 노출(적산·누계 각각)
         const activeFlows = getFlowRowsForExcelMapping();
         const syncRowRangeWhenSameSheet = (setter, nextRows) => {
@@ -77,15 +91,16 @@ export default function FlowMappingPanel({
                                     backgroundColor: flowConfig.dateCol ? '#f0fdf4' : '#f1f5f9',
                                     padding: '6px 10px', borderRadius: '6px', width: 'fit-content', minWidth: '100px', textAlign: 'center'
                                 }}>
-                                    {(flowConfig.dateCol && sampleRowData[flowConfig.dateCol]) || '-- No Data --'}
+                                    {flowConfig.dateCol ? previewValue(flowConfig.dateCol) : '-- No Data --'}
                                 </span>
                             </div>
 
                             {/* 유량 그룹 */}
                             {activeFlows.map((flow, flowIdx) => {
+                                const isSludge = isSludgeFlow(flow.name);
                                 const groupRows = [
-                                    { key: `${flow.name}_raw`, suffix: '적산', suffixColor: '#3b82f6' },
-                                    { key: `${flow.name}_flow`, suffix: '누계', suffixColor: '#f59e0b' }
+                                    { key: `${flow.name}_raw`, suffix: isSludge ? '반출량' : '적산', suffixColor: '#3b82f6' },
+                                    { key: `${flow.name}_flow`, suffix: isSludge ? '누계(선택)' : '누계', suffixColor: '#f59e0b', optional: isSludge }
                                 ];
                                 return (
                                     <div key={flow.name} style={{ display: 'grid', gridTemplateColumns: '120px 50px 140px 1fr', columnGap: '8px', borderBottom: flowIdx < activeFlows.length - 1 ? '1px solid #e2e8f0' : 'none', paddingBottom: flowIdx < activeFlows.length - 1 ? '6px' : 0, marginBottom: flowIdx < activeFlows.length - 1 ? '6px' : 0, padding: '0 12px' }}>
@@ -105,8 +120,9 @@ export default function FlowMappingPanel({
                                                             const selectedCol = e.target.value;
                                                             const newMapping = { ...flowMapping, [row.key]: selectedCol };
 
-                                                            // 적산 선택 시 누계가 비어있거나 이미 값이 있어도 편의를 위해 덮어씌움 (사용자 요청: 자동으로 다음 열 매핑)
-                                                            if (row.key.endsWith('_raw') && selectedCol) {
+                                                            // 적산 선택 시 누계가 비어있거나 이미 값이 있어도 편의를 위해 덮어씌움.
+                                                            // 단, 슬러지는 누계가 선택 항목이므로 원본에 없는 누계열을 임의로 잡지 않는다.
+                                                            if (!isSludge && row.key.endsWith('_raw') && selectedCol) {
                                                                 const flowKey = row.key.replace('_raw', '_flow');
                                                                 const nextColIdx = alphabet.indexOf(selectedCol);
                                                                 if (nextColIdx !== -1 && nextColIdx < alphabet.length - 1) {
@@ -122,7 +138,7 @@ export default function FlowMappingPanel({
                                                     </div>
                                                     <div style={{ gridColumn: '4 / 5', gridRow: rIdx + 1, display: 'flex', alignItems: 'center', padding: '5px 0' }}>
                                                         <span style={{ fontSize: '0.75rem', fontWeight: 700, color: hasCol ? '#059669' : '#94a3b8', backgroundColor: hasCol ? '#f0fdf4' : '#f1f5f9', padding: '6px 10px', borderRadius: '6px', minWidth: '100px', textAlign: 'center' }}>
-                                                            {(hasCol && sampleRowData[colKey]) || '-- No Data --'}
+                                                            {hasCol ? previewValue(colKey) : (row.optional ? '선택사항' : '-- No Data --')}
                                                         </span>
                                                     </div>
                                                 </React.Fragment>
@@ -156,9 +172,9 @@ export default function FlowMappingPanel({
                         </button>
                         <button
                             onClick={async () => {
-                                const isAllMapped = activeFlows.every(f => flowMapping[`${f.name}_raw`] && flowMapping[`${f.name}_flow`]) && flowConfig.dateCol;
+                                const isAllMapped = isRequiredMappingComplete();
                                 if (!isAllMapped) {
-                                    await showAlert("모든 항목의 콤보박스 선택이 완료되어야 저장할 수 있습니다.");
+                                    await showAlert("날짜와 필수 검침항목의 콤보박스 선택이 완료되어야 저장할 수 있습니다.\n슬러지 누계는 원본에 없으면 비워두어도 됩니다.");
                                     return;
                                 }
                                 const confirmed = await showConfirm("기존 유량데이터를 데이터베이스에 저장하시겠습니까?\n(저장 시 기존 데이터가 덮어씌워 보완될 수 있습니다.)");
@@ -166,17 +182,17 @@ export default function FlowMappingPanel({
                                     handleSaveFlowMapping();
                                 }
                             }}
-                            disabled={!(activeFlows.every(f => flowMapping[`${f.name}_raw`] && flowMapping[`${f.name}_flow`]) && flowConfig.dateCol)}
+                            disabled={!isRequiredMappingComplete()}
                             style={{
                                 width: '240px',
                                 height: '50px',
-                                backgroundColor: (activeFlows.every(f => flowMapping[`${f.name}_raw`] && flowMapping[`${f.name}_flow`]) && flowConfig.dateCol) ? '#1e293b' : '#cbd5e1',
+                                backgroundColor: isRequiredMappingComplete() ? '#1e293b' : '#cbd5e1',
                                 color: 'white',
                                 border: 'none',
                                 borderRadius: '12px',
                                 fontSize: '0.9375rem',
                                 fontWeight: 900,
-                                cursor: (activeFlows.every(f => flowMapping[`${f.name}_raw`] && flowMapping[`${f.name}_flow`]) && flowConfig.dateCol) ? 'pointer' : 'not-allowed',
+                                cursor: isRequiredMappingComplete() ? 'pointer' : 'not-allowed',
                                 transition: 'all 0.2s',
                                 display: 'flex',
                                 alignItems: 'center',

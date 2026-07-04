@@ -75,6 +75,10 @@ export const SettingsModel = {
         return apiClient.post('/api/settings/open-local-folder', { target });
     },
 
+    async clearBigQueryOperationalData() {
+        return mutateSettings(() => apiClient.post('/api/settings/bigquery/clear-operational-data', { confirmed: true }));
+    },
+
     async getExcelPreview(sheet, row) {
         return apiClient.post('/api/settings/excel-preview', { sheet, row });
     },
@@ -126,8 +130,8 @@ export const SettingsModel = {
         return apiClient.get('/api/settings/excel-status');
     },
 
-    async getImportProgress() {
-        return apiClient.get('/api/settings/import-progress');
+    async getImportProgress(type) {
+        return apiClient.get('/api/settings/import-progress', type ? { type } : {});
     },
 
     async addConfigItem(category, name) {

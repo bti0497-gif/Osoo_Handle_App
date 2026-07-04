@@ -2,6 +2,7 @@ const express = require('express');
 const { importQntechWaterValues, importQntechWaterPhotos, importQntechWaterAll, importQntechWaterRange } = require('../services/qntechWaterImportService.cjs');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const { syncAnalysisKitUsageForRange } = require('../services/kitUsageSyncService.cjs');
+const { isAdminSessionActive } = require('../services/activeUserSessionService.cjs');
 
 const router = express.Router();
 
@@ -159,6 +160,38 @@ function collectDateRangeFromItems(items = []) {
   return { startDate: dates[0], endDate: dates[dates.length - 1] };
 }
 
+function getInputStatusFromPayload(payload = {}) {
+  return String(
+    payload.input_status
+    || payload.inputStatus
+    || payload.save_status_mode
+    || payload.saveStatusMode
+    || ''
+  ).trim().toLowerCase();
+}
+
+function getKitUsageSyncSkipReason(payload = {}) {
+  if (isAdminSessionActive()) {
+    return 'admin-session-active';
+  }
+
+  const inputStatus = getInputStatusFromPayload(payload);
+  if (inputStatus === 'baseline' || inputStatus === 'imported') {
+    return `input-status:${inputStatus}`;
+  }
+
+  return null;
+}
+
+function maybeSyncAnalysisKitUsageForRange(db, startDate, endDate, metadata, payload = {}) {
+  const skipReason = getKitUsageSyncSkipReason(payload);
+  if (skipReason) {
+    return { skipped: true, reason: skipReason, startDate, endDate };
+  }
+
+  return syncAnalysisKitUsageForRange(db, startDate, endDate, metadata);
+}
+
 module.exports = function (db, baseDir) {
   let rangeImportProgress = {
     status: 'idle',
@@ -207,7 +240,7 @@ module.exports = function (db, baseDir) {
       insertMany(Array.isArray(items) ? items : []);
       const range = collectDateRangeFromItems(items);
       const kitUsageSync = range
-        ? syncAnalysisKitUsageForRange(db, range.startDate, range.endDate, metadata)
+        ? maybeSyncAnalysisKitUsageForRange(db, range.startDate, range.endDate, metadata, req.body)
         : null;
       res.json({ success: true, kitUsageSync });
     } catch (err) {
@@ -241,12 +274,12 @@ module.exports = function (db, baseDir) {
       const result = await importQntechWaterAll(db, baseDir, date);
       const metadata = getCurrentRecordMetadata(db, req.body);
       const kitUsageSync = result?.date && !result?.summary?.matchedExistingData
-        ? syncAnalysisKitUsageForRange(db, result.date, result.date, metadata)
+        ? maybeSyncAnalysisKitUsageForRange(db, result.date, result.date, metadata, req.body)
         : null;
       res.json({
         ...result,
         kitUsageSync,
-        kitUsageSkipped: Boolean(result?.summary?.matchedExistingData),
+        kitUsageSkipped: Boolean(result?.summary?.matchedExistingData) || Boolean(kitUsageSync?.skipped),
       });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message, error: err.message });
@@ -271,7 +304,7 @@ module.exports = function (db, baseDir) {
       });
       const metadata = getCurrentRecordMetadata(db, req.body);
       const kitUsageSync = (result.kitSyncDates || []).map((syncDate) => (
-        syncAnalysisKitUsageForRange(db, syncDate, syncDate, metadata)
+        maybeSyncAnalysisKitUsageForRange(db, syncDate, syncDate, metadata, req.body)
       ));
 
       rangeImportProgress = {
@@ -304,7 +337,7 @@ module.exports = function (db, baseDir) {
       }
       const date = String(req.body?.date || '').trim().slice(0, 10);
       const kitUsageSync = /^\d{4}-\d{2}-\d{2}$/.test(date)
-        ? syncAnalysisKitUsageForRange(db, date, date, metadata)
+        ? maybeSyncAnalysisKitUsageForRange(db, date, date, metadata, req.body)
         : null;
       res.json({ success: true, id: lastId, kitUsageSync });
     } catch (err) {

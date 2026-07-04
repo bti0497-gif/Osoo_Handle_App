@@ -200,7 +200,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         hasLoadedSettings,
         isAppSiteConfigured,
         resetItemListsToDefaults: resetAllItemListsToDefaults,
-        reloadSettings: () => loadSettings(),
+        reloadSettings: () => loadSettings({ force: true }),
         showAlert,
         showConfirm,
     });
@@ -292,11 +292,11 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         return [...normalizedDefaults, ...extraItems];
     };
 
-    const loadSettings = async () => {
+    const loadSettings = async (options = {}) => {
         try {
             setIsSiteListLoading(true);
             const [data, sitesData] = await Promise.all([
-                SettingsModel.getSettings(),
+                SettingsModel.getSettings({ force: options.force }),
                 SettingsModel.getSites().catch(() => null)
             ]);
 
@@ -411,12 +411,11 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                         setWaterItems(baseWater.map(i => ({ name: i.item_name, checked: !!i.is_active })));
                     }
 
-                    // 매핑 정보 복원: 'water_mapping' 카테고리와 'water' 카테고리의 레거시 매핑 데이터 병합
+                    // 매핑 정보 복원: 신규 water_mapping 카테고리만 신뢰한다.
+                    // 레거시 water 카테고리의 밑줄 포함 항목은 파라미터/장소 설정과 충돌할 수 있어 복원하지 않는다.
                     const waterMappings = data.configItems.filter(i => i.category === 'water_mapping');
-                    const legacyWaterMappings = data.configItems.filter(i => i.category === 'water' && i.item_name.includes('_'));
 
                     const restoredWaterMapping = {};
-                    legacyWaterMappings.forEach(i => { if (i.excel_cell) restoredWaterMapping[i.item_name] = i.excel_cell; });
                     waterMappings.forEach(i => { if (i.excel_cell) restoredWaterMapping[i.item_name] = i.excel_cell; });
 
                     if (Object.keys(restoredWaterMapping).length > 0) {
@@ -486,6 +485,40 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         }
     };
 
+    const handleClearBigQueryOperationalData = async () => {
+        try {
+            const siteName = String(siteInfo.siteName || '').trim();
+            if (!siteName) {
+                showAlert?.('BigQuery 데이터를 초기화하려면 먼저 현장을 선택하고 저장해주세요.');
+                return;
+            }
+
+            const firstConfirmed = await showConfirm?.(
+                `[주의] 현재 현장(${siteName})의 BigQuery 운영 데이터를 삭제합니다.\n\n삭제 대상: 유량, 약품, 수질, 키트\n제외 대상: 출결/위치 데이터\n\n계속하시겠습니까?`
+            );
+            if (!firstConfirmed) return;
+
+            const secondConfirmed = await showConfirm?.(
+                `정말 삭제하시겠습니까?\n\n이 작업은 BigQuery 서버 데이터에 직접 적용되며 되돌릴 수 없습니다.\n현장: ${siteName}`
+            );
+            if (!secondConfirmed) return;
+
+            const result = await SettingsModel.clearBigQueryOperationalData();
+            if (!result?.success) {
+                throw new Error(result?.message || 'BigQuery 초기화 실패');
+            }
+
+            showAlert?.(
+                `BigQuery 운영 데이터 초기화 완료\n` +
+                `현장: ${result.siteName || siteName}\n` +
+                `삭제 건수: ${result.totalDeleted ?? 0}건`
+            );
+        } catch (err) {
+            console.error('BigQuery operational clear error:', err);
+            showAlert?.('BigQuery 운영 데이터 초기화 중 오류: ' + err.message);
+        }
+    };
+
     // --- Flow Option Save ---
     const handleSaveFlowOption = async (option) => {
         try {
@@ -543,6 +576,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         handleSiteSelection,
         handleCaptureSiteLocation,
         handleApply,
+        handleClearBigQueryOperationalData,
     };
 
     const itemState = {

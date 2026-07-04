@@ -5,9 +5,20 @@ const path = require('path');
 
 const router = express.Router();
 
+function resolveLocationScriptPath(baseDir) {
+  const candidates = [
+    path.join(baseDir, 'scripts', 'get_location.ps1'),
+    path.join(path.dirname(baseDir), 'scripts', 'get_location.ps1'),
+    path.join(process.cwd(), 'scripts', 'get_location.ps1'),
+    path.join(path.dirname(process.cwd()), 'scripts', 'get_location.ps1'),
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+}
+
 module.exports = function locationRoutes(baseDir) {
   router.get('/api/location/current', (req, res) => {
-    const scriptPath = path.join(baseDir, 'scripts', 'get_location.ps1');
+    const scriptPath = resolveLocationScriptPath(baseDir);
 
     if (!fs.existsSync(scriptPath)) {
       return res.status(500).json({

@@ -318,6 +318,8 @@ export const useAuthViewModel = () => {
                 clearAutoLogoutTimer();
                 if (isFieldWorker(u)) {
                     await AuthModel.recordLogout(u, false);
+                } else {
+                    await AuthModel.clearServerActiveSession();
                 }
             } catch (err) {
                 console.error('Logout sync failed:', err);

@@ -20,7 +20,7 @@ export const useMappingSettings = ({
     const [importedData, setImportedData] = useState(null);
     const [showDataModal, setShowDataModal] = useState(false);
 
-    const saveMappingWithProgress = async ({ config, mapping, save, clearCache }) => {
+    const saveMappingWithProgress = async ({ type, config, mapping, save, clearCache }) => {
         try {
             setImportProgress({
                 current: 0,
@@ -30,7 +30,7 @@ export const useMappingSettings = ({
             });
             const res = await save({ config, mapping });
             if (res.success) {
-                const prog = await SettingsModel.getImportProgress();
+                const prog = await SettingsModel.getImportProgress(type);
                 setImportedData(prog.result);
                 setImportProgress({
                     current: prog.total,
@@ -55,6 +55,7 @@ export const useMappingSettings = ({
     };
 
     const handleSaveFlowMapping = () => saveMappingWithProgress({
+        type: 'flow',
         config: flowConfig,
         mapping: flowMapping,
         save: SettingsModel.saveFlowMapping,
@@ -62,6 +63,7 @@ export const useMappingSettings = ({
     });
 
     const handleSaveMedicineMapping = () => saveMappingWithProgress({
+        type: 'medicine',
         config: medicineConfig,
         mapping: medicineMapping,
         save: SettingsModel.saveMedicineMapping,
@@ -69,6 +71,7 @@ export const useMappingSettings = ({
     });
 
     const handleSaveWaterMapping = () => saveMappingWithProgress({
+        type: 'water',
         config: waterConfig,
         mapping: waterMapping,
         save: SettingsModel.saveWaterMapping,
@@ -76,6 +79,7 @@ export const useMappingSettings = ({
     });
 
     const handleSaveKitMapping = () => saveMappingWithProgress({
+        type: 'kit',
         config: kitConfig,
         mapping: kitMapping,
         save: SettingsModel.saveKitMapping,
