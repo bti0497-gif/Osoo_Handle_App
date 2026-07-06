@@ -208,27 +208,44 @@ function findMedicinePreviousInventory(db, date, keywords, context = {}) {
   return row?.current_inventory ?? '';
 }
 
-function getDeterministicSludgeTime(date) {
-  const seed = String(date || '').replace(/\D/g, '').split('').reduce((sum, digit) => sum + Number(digit), 0);
-  return `08:${String((seed % 6) * 10).padStart(2, '0')}`;
+function formatSludgeTime(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const match = raw.match(/(\d{1,2}):(\d{2})/);
+  if (!match) return '';
+  return `${String(match[1]).padStart(2, '0')}:${match[2]}`;
 }
 
 function getSludgeDetails(db, date, amount, monthlyTotal) {
   const numericAmount = Number(amount);
   if (amount === null || amount === undefined || amount === '' || !Number.isFinite(numericAmount) || numericAmount <= 0) {
-    return { 시간: '', 업체명: '', 반출량: '', 계근량: '', 월간누계: '' };
+    return {
+      시간: '',
+      반출시간: '',
+      업체명: '',
+      슬러지업체: '',
+      반출업체: '',
+      반출량: '',
+      계근량: '',
+      월간누계: '',
+    };
   }
   const log = db.prepare(`
-    SELECT sludge_amount
+    SELECT sludge_amount, sludge_photo_taken_at, last_modified
     FROM sludge_photo_logs
     WHERE date = ?
     LIMIT 1
   `).get(date) || {};
   const settings = db.prepare('SELECT company_name FROM sludge_export_settings WHERE id = 1').get() || {};
   const resolvedAmount = log.sludge_amount ?? amount;
+  const companyName = settings.company_name || '';
+  const timeText = formatSludgeTime(log.sludge_photo_taken_at || log.last_modified);
   return {
-    시간: getDeterministicSludgeTime(date),
-    업체명: settings.company_name || '',
+    시간: timeText,
+    반출시간: timeText,
+    업체명: companyName,
+    슬러지업체: companyName,
+    반출업체: companyName,
     반출량: resolvedAmount,
     계근량: resolvedAmount,
     월간누계: monthlyTotal,

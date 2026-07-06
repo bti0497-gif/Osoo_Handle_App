@@ -529,6 +529,11 @@ export default function UnifiedRecordModal({
         else window.alert(message);
     };
 
+    const logOperationalNotice = (message, extra = {}) => {
+        if (!message) return;
+        console.info('[UnifiedRecordModal]', message, { date, activeTab, ...extra });
+    };
+
     const focusMissingInput = (missing) => {
         if (!missing) return;
         setActiveTab(missing.tab);
@@ -820,9 +825,7 @@ export default function UnifiedRecordModal({
         const result = await savePlan(plan);
         if (!result) return;
         if (plan.notices.length > 0) {
-            notifyValidation(plan.notices.join('\n'));
-        } else {
-            notifyValidation(`${TAB_LABEL_BY_ID[activeTab] || '현재 탭'} 데이터가 저장되었습니다.`);
+            logOperationalNotice('저장 중 자동 처리된 항목이 있습니다.', { notices: plan.notices });
         }
     };
 
@@ -847,14 +850,15 @@ export default function UnifiedRecordModal({
         if (incompleteTabs.length > 0 || dirtyUnsavedTabs.length > 0) {
             const incompleteLabels = incompleteTabs.map((tabId) => TAB_LABEL_BY_ID[tabId] || tabId).join(', ');
             const dirtyLabels = dirtyUnsavedTabs.map((tabId) => TAB_LABEL_BY_ID[tabId] || tabId).join(', ');
-            const lines = [];
-            if (incompleteLabels) lines.push(`아직 작성 완료로 확인되지 않은 탭: ${incompleteLabels}`);
-            if (dirtyLabels) lines.push(`저장되지 않은 입력값이 있는 탭: ${dirtyLabels}`);
-            if (tabsToDefaultSave.length > 0) {
-                lines.push('유량 미작성 항목은 전날 검침값으로 유량 0 처리하고, 약품/키트 미작성 항목은 기본값 0과 전일 재고 기준으로 저장한 뒤 닫습니다.');
-            }
-            lines.push('계속 닫으시겠습니까?');
-            if (!window.confirm(lines.join('\n'))) return;
+            logOperationalNotice('닫기 전 저장 확인이 필요한 탭이 있습니다.', {
+                incompleteTabs: incompleteLabels,
+                dirtyTabs: dirtyLabels,
+                defaultSaveTabs: tabsToDefaultSave,
+            });
+            const confirmMessage = tabsToDefaultSave.length > 0
+                ? '아직 저장되지 않은 입력이 있습니다. 필요한 항목을 자동 저장하고 닫을까요?'
+                : '아직 저장되지 않은 입력이 있습니다. 닫을까요?';
+            if (!window.confirm(confirmMessage)) return;
         }
 
         if (tabsToDefaultSave.length > 0) {
