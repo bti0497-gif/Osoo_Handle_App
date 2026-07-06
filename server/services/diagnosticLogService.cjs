@@ -41,6 +41,10 @@ function sanitize(value, depth = 0) {
 }
 
 function getAppVersion() {
+  // main 프로세스가 fork 시 OSOO_APP_VERSION으로 주입한 버전을 최우선으로 사용한다.
+  // (asar 패키징 시 package.json이 app.asar.unpacked에 없어 require가 실패하기 때문)
+  const envVersion = String(process.env.OSOO_APP_VERSION || '').trim();
+  if (envVersion) return envVersion;
   try {
     const pkg = require('../../package.json');
     return pkg.version || '';

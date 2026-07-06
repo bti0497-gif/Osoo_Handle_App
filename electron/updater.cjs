@@ -4,9 +4,6 @@ let checkingForUpdate = false;
 let installingUpdate = false;
 let downloadedVersion = null;
 
-const DAILY_UPDATE_CHECK_HOUR = Number(process.env.OSOO_DAILY_UPDATE_CHECK_HOUR || 9);
-const DAILY_UPDATE_CHECK_MINUTE = Number(process.env.OSOO_DAILY_UPDATE_CHECK_MINUTE || 0);
-
 try {
   ({ autoUpdater } = require('electron-updater'));
 } catch (error) {
@@ -36,28 +33,6 @@ function checkForUpdates(reason = 'manual') {
     .finally(() => {
       checkingForUpdate = false;
     });
-}
-
-function scheduleDailyUpdateCheck() {
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(
-    Number.isFinite(DAILY_UPDATE_CHECK_HOUR) ? DAILY_UPDATE_CHECK_HOUR : 9,
-    Number.isFinite(DAILY_UPDATE_CHECK_MINUTE) ? DAILY_UPDATE_CHECK_MINUTE : 0,
-    0,
-    0
-  );
-  if (next <= now) {
-    next.setDate(next.getDate() + 1);
-  }
-
-  const delayMs = next.getTime() - now.getTime();
-  const timer = setTimeout(() => {
-    checkForUpdates('daily-09:00').catch((err) => {
-      console.error('[Updater] Daily check failed:', err.message);
-    }).finally(scheduleDailyUpdateCheck);
-  }, delayMs);
-  timer.unref?.();
 }
 
 function setupAutoUpdater(mainWindow, options = {}) {
@@ -111,11 +86,6 @@ function setupAutoUpdater(mainWindow, options = {}) {
     console.error('[Updater] Error:', err);
     sendUpdateEvent(mainWindow, 'update:error', err.message);
   });
-
-  checkForUpdates('startup').catch((err) => {
-    console.error('[Updater] Startup check failed:', err.message);
-  });
-  scheduleDailyUpdateCheck();
 
   return true;
 }

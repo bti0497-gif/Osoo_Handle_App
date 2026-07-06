@@ -300,12 +300,12 @@ function findFlowByKeyword(flows, keyword) {
  * @param {Array} flows - 해당 날짜의 flow_readings 목록
  * @param {string} keyword - '내부반송' 또는 '외부반송'
  * @param {string} flowOption - 'single1' | 'single2' | 'combined'
- * @returns {{ raw_value, calculated_flow }} ?먮뒗 null
+ * @returns {{ raw_value, calculated_flow }} 아니면 null
  */
 function getFlowByOption(flows, keyword, flowOption) {
   // 1계열 현장이면 기존 방식 그대로
   if (!flowOption || flowOption === 'single1') {
-    // 1怨꾩뿴: '이미반송유량값 또는 '이미반송유량값' 형태
+    // 1계열: '내부반송유량값' 또는 '외부반송유량값' 형태
     return flows.find(f => {
       const t = String(f.type || '').trim();
       return t.includes(keyword) && !t.endsWith('2');
@@ -313,7 +313,7 @@ function getFlowByOption(flows, keyword, flowOption) {
   }
 
   if (flowOption === 'single2') {
-    // 2怨꾩뿴만 '이미반송유량값' 형태
+    // 2계열만 '내부반송유량값2' 형태
     return flows.find(f => {
       const t = String(f.type || '').trim();
       return t.includes(keyword) && t.endsWith('2');

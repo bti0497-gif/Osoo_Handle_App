@@ -49,7 +49,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
 
     const isDailyWorkLog = templateName === '일일업무일지';
     const outputFormatLabel = isDailyWorkLog
-        ? (outputFormat === 'pdf' ? 'PDF' : outputFormat === 'hwpx' ? 'HWPX' : '엑셀')
+        ? (outputFormat === 'hwpx' ? '한글' : 'PDF')
         : '엑셀';
     const exportButtonLabel = isDailyWorkLog
         ? `${outputFormatLabel} 업무일지 출력`
@@ -100,7 +100,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                         <div style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#475569', marginBottom: '0.75rem' }}>출력 형식</div>
                         <div style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(3, 1fr)',
+                            gridTemplateColumns: 'repeat(2, 1fr)',
                             gap: '6px',
                             backgroundColor: '#f8fafc',
                             border: '1px solid #e2e8f0',
@@ -108,8 +108,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                             padding: '6px'
                         }}>
                             {[
-                                { id: 'hwpx', label: 'HWPX' },
-                                { id: 'excel', label: '엑셀' },
+                                { id: 'hwpx', label: '한글' },
                                 { id: 'pdf', label: 'PDF' },
                             ].map((format) => {
                                 const selected = outputFormat === format.id;

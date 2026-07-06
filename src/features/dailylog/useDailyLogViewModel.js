@@ -68,6 +68,12 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
     // 달력 표시 기준이 되는 년/월
     const [calendarActiveStartDate, setCalendarActiveStartDate] = useState(new Date(today));
 
+    useEffect(() => {
+        if (isDailyWorkLog && outputFormat === 'excel') {
+            setOutputFormat('pdf');
+        }
+    }, [isDailyWorkLog, outputFormat]);
+
     // 사이트 이름 설정 가져오기
     useEffect(() => {
         SettingsModel.getSettings().then(res => {
@@ -374,7 +380,9 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
 
         try {
             setIsOutputProcessing(true);
-            const effectiveOutputFormat = isDailyWorkLog ? outputFormat : 'excel';
+            const effectiveOutputFormat = isDailyWorkLog
+                ? (outputFormat === 'hwpx' ? 'hwpx' : 'pdf')
+                : 'excel';
             const result = effectiveOutputFormat === 'pdf'
                 ? await DailyLogModel.fetchExportPdf(dateRangeStr, templateName, siteName, requestContext)
                 : effectiveOutputFormat === 'hwpx'
@@ -394,8 +402,10 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
             }
         } catch (error) {
             alertTitle = '내보내기 실패';
-            const effectiveOutputFormat = isDailyWorkLog ? outputFormat : 'excel';
-            const formatLabel = effectiveOutputFormat === 'pdf' ? 'PDF' : effectiveOutputFormat === 'hwpx' ? 'HWPX' : '엑셀';
+            const effectiveOutputFormat = isDailyWorkLog
+                ? (outputFormat === 'hwpx' ? 'hwpx' : 'pdf')
+                : 'excel';
+            const formatLabel = effectiveOutputFormat === 'pdf' ? 'PDF' : effectiveOutputFormat === 'hwpx' ? '한글' : '엑셀';
             alertMessage = error?.data?.userMessage || error?.message || `${formatLabel} 내보내기를 시작하지 못했습니다.`;
         } finally {
             setIsOutputProcessing(false);

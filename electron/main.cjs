@@ -104,6 +104,8 @@ function startServer() {
       ELECTRON: '1',
       OSOO_PACKAGED: app.isPackaged ? '1' : '0',
       OSOO_APP_DATA_PATH: app.getPath('userData'),
+      // 진단 로그가 asar 패키징 환경에서도 정확한 버전을 기록하도록 main 프로세스에서 주입.
+      OSOO_APP_VERSION: app.getVersion(),
     }
   });
 
@@ -306,6 +308,21 @@ function createTray() {
   });
 }
 
+// 단일 인스턴스 락: 이미 실행 중인 경우 두 번째 창은 종료하고 기존 창을 포커스한다.
+// 트레이 아이콘이 2개 뜨거나 두 프로세스가 같은 DB를 잡고 충돌하는 것을 방지한다.
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 app.whenReady().then(() => {
   try {
     require('./roadworkDumpHelper.cjs')(ipcMain, app, { isDev });
@@ -373,8 +390,8 @@ ipcMain.handle('shell:openFile', async (_event, filePath) => {
   if (err) throw new Error(err);
   return { ok: true };
 });
-ipcMain.handle('app:checkForUpdates', () => {
-  return checkForUpdates();
+ipcMain.handle('app:checkForUpdates', (_event, reason = 'manual') => {
+  return checkForUpdates(reason);
 });
 
 ipcMain.handle('app:installUpdate', async () => {
@@ -383,6 +400,10 @@ ipcMain.handle('app:installUpdate', async () => {
   }
   const started = await installDownloadedUpdateAndQuit();
   return { ok: started };
+});
+
+ipcMain.handle('app:getUpdateStatus', () => {
+  return { hasDownloadedUpdate: hasDownloadedUpdate() };
 });
 
 ipcMain.handle('app:hideToTray', () => {

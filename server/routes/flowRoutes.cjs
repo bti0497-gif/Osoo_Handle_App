@@ -57,7 +57,6 @@ module.exports = function (db) {
       const rawNum = row.raw_value == null ? null : Number(row.raw_value);
       const hasRaw = rawNum != null && Number.isFinite(rawNum);
       let flow = null;
-      const isExplicit = explicitDates.has(row.date);
       const inputStatus = String(row.input_status || '').trim().toLowerCase();
       const shouldPreserveStoredFlow = (inputStatus === 'imported' || inputStatus === 'baseline');
 
@@ -77,19 +76,25 @@ module.exports = function (db) {
           if (hasStoredFlow) {
             prevSludgeCumulative = flow;
           }
-        } else if (isExplicit && hasStoredFlow) {
-          flow = storedFlow;
-          prevSludgeCumulative = flow;
         } else if (hasSludge) {
+          // 슬러지 반출량은 연간 누적 계산이므로, 반출량이 바뀌면
+          // prevSludgeCumulative 기준으로 재계산한다.
           flow = Math.round((prevSludgeCumulative + sludgeNum) * 10) / 10;
           prevSludgeCumulative = flow;
         }
       } else if (hasRaw) {
         const storedFlow = row.calculated_flow == null ? null : Number(row.calculated_flow);
-        if ((isExplicit || shouldPreserveStoredFlow || row.is_manual || row.is_reset) && storedFlow != null) {
+        // 검침값(raw)은 자동 계산 대상이므로, raw가 바뀌면 calculated_flow도
+        // prevRaw 기준으로 재계산한다. 단 사용자가 직접 유량을 지정한(is_manual),
+        // 리셋 지점(is_reset), 엑셀 임포트/관리자 지정(imported/baseline)은 보존.
+        if ((shouldPreserveStoredFlow || row.is_manual || row.is_reset) && storedFlow != null) {
           flow = storedFlow;
         } else if (prevRaw != null && Number.isFinite(prevRaw)) {
-          flow = Math.round((rawNum - prevRaw) * 10) / 10;
+          // 검침값은 누적이므로 어제보다 작을 수 없다. 작아지면(마이너스) 0으로
+          // 클램프한다. 필요하면 전날 검침값을 먼저 수정하거나 '초기화'로 처리한다.
+          const diff = rawNum - prevRaw;
+          flow = Math.round(diff * 10) / 10;
+          if (flow < 0) flow = 0;
         }
         prevRaw = rawNum;
       }

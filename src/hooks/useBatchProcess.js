@@ -1,5 +1,15 @@
 import { useState, useCallback } from 'react';
 
+const waitForNextPaint = () => new Promise((resolve) => {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+        setTimeout(resolve, 0);
+        return;
+    }
+    window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(resolve);
+    });
+});
+
 /**
  * 일괄 작업(Batch)의 진행 상태를 관리하는 커스텀 훅
  * 
@@ -60,6 +70,10 @@ export const useBatchProcess = () => {
         setIsProcessing(true);
         setIsFinished(false);
 
+        // 진행창이 화면에 먼저 그려진 뒤 실제 네트워크/파일 작업을 시작한다.
+        // QnTECH처럼 응답이 오래 걸리는 작업에서 "눌렀는데 아무 반응 없음"으로 보이지 않게 한다.
+        await waitForNextPaint();
+
         let hasError = false;
 
         for (let i = 0; i < items.length; i++) {
@@ -68,6 +82,7 @@ export const useBatchProcess = () => {
 
             // 처리 시작
             updateTaskStatus(taskId, 'processing', '처리 중...');
+            await waitForNextPaint();
 
             try {
                 // 개별 항목 처리 대기

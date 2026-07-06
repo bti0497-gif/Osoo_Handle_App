@@ -374,9 +374,18 @@ export default function UnifiedRecordModal({
         setDraft((prev) => {
             const isSludge = isSludgeFlowItem(item);
             const key = getDraftKeyForItem('flow', item);
+            const current = prev[key] || buildInitialDraft('flow', item);
+            const nextDirty = {
+                ...(current.__dirty || {}),
+                [field]: true,
+            };
+            if (field === 'reading') {
+                delete nextDirty.calculatedFlow;
+            }
             const nextDraft = {
-                ...(prev[key] || buildInitialDraft('flow', item)),
+                ...current,
                 [field]: value,
+                __dirty: nextDirty,
             };
 
             if (isSludge && field === 'reading') {
@@ -391,19 +400,11 @@ export default function UnifiedRecordModal({
                 }
             }
 
-            if (!isSludge && mode !== 'edit' && field === 'reading') {
+            if (!isSludge && field === 'reading') {
                 const reading = toNumberOrNull(value);
                 const previousReading = toNumberOrNull(item?.previous?.reading);
                 if (reading !== null && previousReading !== null) {
-                    nextDraft.calculatedFlow = round1(reading - previousReading);
-                }
-            }
-
-            if (!isSludge && mode !== 'edit' && field === 'calculatedFlow') {
-                const calculatedFlow = toNumberOrNull(value);
-                const previousReading = toNumberOrNull(item?.previous?.reading);
-                if (calculatedFlow !== null && previousReading !== null) {
-                    nextDraft.reading = round1(previousReading + calculatedFlow);
+                    nextDraft.calculatedFlow = round1(Math.max(0, reading - previousReading));
                 }
             }
 
@@ -418,19 +419,14 @@ export default function UnifiedRecordModal({
             const nextDraft = {
                 ...current,
                 [field]: value,
+                __dirty: {
+                    ...(current.__dirty || {}),
+                    [field]: true,
+                },
             };
 
             if (field === 'purchase' || field === 'usage') {
                 Object.assign(nextDraft, recalculateInventoryDraft(item, nextDraft));
-            }
-
-            if (field === 'inventory') {
-                const inventory = toNumberOrNull(value);
-                const previousInventory = toNumberOrNull(item?.previous?.inventory) || 0;
-                const purchase = toNumberOrNull(nextDraft.purchase) || 0;
-                if (inventory !== null) {
-                    nextDraft.usage = round1(previousInventory + purchase - inventory);
-                }
             }
 
             return { ...prev, [key]: nextDraft };
@@ -629,7 +625,7 @@ export default function UnifiedRecordModal({
                     raw_value: reading,
                     calculated_flow: calculatedFlow,
                     sludge_export: isSludge ? reading : null,
-                    is_manual: true,
+                    is_manual: Boolean(values.__dirty?.calculatedFlow),
                     is_reset: false,
                     input_status: effectiveSaveStatusMode === 'baseline' ? 'baseline' : 'manual',
                 });
@@ -955,38 +951,46 @@ export default function UnifiedRecordModal({
                             <span style={labelStyle}>종료 날짜</span>
                             <DateOnlyInput value={rangeEndDate} onChange={setRangeEndDate} style={{ width: '100%' }} />
                         </label>
-                        <button
-                            type="button"
-                            onClick={async () => {
-                                await onImportQntechRange?.(rangeStartDate, rangeEndDate);
-                            }}
-                            disabled={isImportingQntech || !rangeStartDate || !rangeEndDate}
-                            style={{
-                                ...buttonBaseStyle,
-                                borderColor: '#0f766e',
-                                background: '#f0fdfa',
-                                color: '#115e59',
-                                cursor: isImportingQntech || !rangeStartDate || !rangeEndDate ? 'not-allowed' : 'pointer',
-                            }}
-                        >
-                            {isImportingQntech ? '불러오는 중...' : '불러오기'}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={async () => {
-                                await onImportQntech?.(date);
-                            }}
-                            disabled={isImportingQntech || !date}
-                            style={{
-                                ...buttonBaseStyle,
-                                borderColor: '#2563eb',
-                                background: '#eff6ff',
-                                color: '#1d4ed8',
-                                cursor: isImportingQntech || !date ? 'not-allowed' : 'pointer',
-                            }}
-                        >
-                            현재 날짜만 불러오기
-                        </button>
+                        {(() => {
+                            // 시작/종료 날짜가 같으면 단일 날짜, 다르면 기간으로 판단하여
+                            // 사용자가 헷갈리지 않도록 한 번에 하나의 불러오기 버튼만 활성화한다.
+                            const hasBoth = Boolean(rangeStartDate && rangeEndDate);
+                            const isSameDay = hasBoth && rangeStartDate === rangeEndDate;
+                            const isRange = hasBoth && !isSameDay;
+                            return (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        if (isRange) {
+                                            await onImportQntechRange?.(rangeStartDate, rangeEndDate);
+                                        } else if (isSameDay) {
+                                            await onImportQntech?.(rangeStartDate);
+                                        }
+                                    }}
+                                    disabled={isImportingQntech || !hasBoth}
+                                    style={{
+                                        ...buttonBaseStyle,
+                                        borderColor: '#2563eb',
+                                        background: '#eff6ff',
+                                        color: '#1d4ed8',
+                                        cursor: isImportingQntech || !hasBoth ? 'not-allowed' : 'pointer',
+                                    }}
+                                >
+                                    {isImportingQntech
+                                        ? '불러오는 중...'
+                                        : isRange
+                                            ? `${rangeStartDate} ~ ${rangeEndDate} 기간 불러오기`
+                                            : isSameDay
+                                                ? `${rangeStartDate} 불러오기`
+                                                : '불러오기'}
+                                </button>
+                                <span style={{ fontSize: '0.6875rem', color: '#94a3b8', fontWeight: 700, lineHeight: 1.5 }}>
+                                    시작·종료 날짜가 같으면 해당일만, 다르면 기간을 불러옵니다.
+                                </span>
+                            </>
+                            );
+                        })()}
                     </div>
                 )}
             </div>
@@ -1193,7 +1197,7 @@ export default function UnifiedRecordModal({
                                                     height: 30,
                                                     padding: '0 7px',
                                                     textAlign: 'right',
-                                                    background: field === 'inventory' ? '#f8fafc' : '#fff',
+                                                    background: '#fff',
                                                     boxSizing: 'border-box',
                                                 }}
                                                 value={values[field] ?? ''}

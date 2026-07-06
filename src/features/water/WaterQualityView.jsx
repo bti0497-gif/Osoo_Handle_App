@@ -43,6 +43,28 @@ const formatImportProgressDate = (dateString) => {
     return `${Number(month)}월 ${Number(day)}일`;
 };
 
+const buildQntechImportMessage = (result) => {
+    const rowCnt = result?.summary?.importedRowCount || 0;
+    const photoCnt = result?.summary?.savedPhotoCount || 0;
+    const driveErrors = result?.summary?.driveUploadErrorCount || 0;
+    if (rowCnt === 0 && photoCnt === 0) {
+        return 'QnTECH에 해당 날짜 데이터가 없습니다.';
+    }
+    return driveErrors > 0
+        ? `값 ${rowCnt}건, 사진 ${photoCnt}건 저장됨, Drive 실패 ${driveErrors}건`
+        : `값 ${rowCnt}건, 사진 ${photoCnt}건 저장됨`;
+};
+
+const waitForUiPaint = () => new Promise((resolve) => {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+        setTimeout(resolve, 0);
+        return;
+    }
+    window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(resolve);
+    });
+});
+
 const normalizeDisplayWaterValue = (value) => {
     if (value === null || value === undefined || value === '') return '';
     if (typeof value === 'number' && Number.isNaN(value)) return '초과';
@@ -295,13 +317,34 @@ const WaterQualityView = ({ currentUser }) => {
             showToast?.('오늘보다 미래 날짜는 불러올 수 없습니다.', 'error');
             return null;
         }
-        const result = await handleImportFromQntech(targetDate);
+        let importedResult = null;
+        const success = await batchProcess.executeBatch(
+            [targetDate],
+            (dateStr) => ({ id: dateStr, title: `${formatImportProgressDate(dateStr)} QnTECH 데이터` }),
+            async (dateStr, updateMessage) => {
+                updateMessage('QnTECH 서버에 접속 중...');
+                await waitForUiPaint();
+                const result = await handleImportFromQntech(dateStr, true);
+                importedResult = result;
+                updateMessage(buildQntechImportMessage(result));
+            },
+            { stopOnError: true }
+        );
+
         setModalState((prev) => ({
             ...prev,
             date: targetDate,
             mode: 'edit',
         }));
-        return result;
+
+        if (success) {
+            const message = buildQntechImportMessage(importedResult);
+            showToast?.(message, importedResult?.summary?.importedRowCount || importedResult?.summary?.savedPhotoCount ? 'success' : 'warning');
+        } else {
+            showToast?.('QnTECH 불러오기에 실패했습니다.', 'error');
+        }
+
+        return importedResult;
     };
 
     const handleQntechImportRangeClick = async (startDate, endDate) => {
@@ -341,13 +384,14 @@ const WaterQualityView = ({ currentUser }) => {
             (dateStr) => ({ id: dateStr, title: `${formatImportProgressDate(dateStr)} 데이터` }),
             async (dateStr, updateMessage) => {
                 updateMessage('QnTECH 서버에서 수집 중...');
+                await waitForUiPaint();
                 const result = await handleImportFromQntech(dateStr, true);
                 const rowCnt = result?.summary?.importedRowCount || 0;
                 const photoCnt = result?.summary?.savedPhotoCount || 0;
                 totalImportedRowCount += rowCnt;
                 totalSavedPhotoCount += photoCnt;
                 totalDriveUploadErrorCount += result?.summary?.driveUploadErrorCount || 0;
-                updateMessage(`값 ${rowCnt}건, 사진 ${photoCnt}건 저장됨`);
+                updateMessage(buildQntechImportMessage(result));
             },
             { stopOnError: false }
         );
@@ -484,7 +528,7 @@ const WaterQualityView = ({ currentUser }) => {
 
             <BatchProgressDialog
                 isOpen={batchProcess.tasks.length > 0}
-                title="QnTECH 데이터 일괄 가져오기"
+                title={batchProcess.tasks.length > 1 ? 'QnTECH 데이터 일괄 가져오기' : 'QnTECH 데이터 가져오기'}
                 tasks={batchProcess.tasks}
                 progress={batchProcess.progress}
                 isProcessing={batchProcess.isProcessing}

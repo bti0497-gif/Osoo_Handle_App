@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { TAB_LABELS, DEFAULT_TAB } from './core/constants';
 import { useAuthViewModel, LoginView, SyncService } from './features/auth';
 import SplashLoadingView from './components/SplashLoadingView';
@@ -80,6 +80,9 @@ function App() {
         percent: 0,
         label: '',
     });
+    const [forcedUpdateNotice, setForcedUpdateNotice] = useState(null);
+    const updateCheckKeyRef = useRef(null);
+    const forcedUpdateActiveRef = useRef(false);
 
     useEffect(() => {
         // 로딩 완료 시 1회 시도
@@ -87,6 +90,128 @@ function App() {
             SyncService.startBackgroundSync().catch(console.error);
         }
     }, [isLoading]);
+
+    useEffect(() => {
+        const api = window.electronAPI;
+        if (!api) return undefined;
+
+        const installSoon = () => {
+            window.setTimeout(() => {
+                api.installUpdate?.().catch((err) => {
+                    setForcedUpdateNotice({
+                        title: '업데이트 설치 실패',
+                        message: `업데이트 설치를 시작하지 못했습니다.\n${err?.message || err || ''}`,
+                        detail: '',
+                        percent: 0,
+                    });
+                });
+            }, 1200);
+        };
+
+        api.onUpdateAvailable?.((info) => {
+            forcedUpdateActiveRef.current = true;
+            setForcedUpdateNotice({
+                title: '새 버전이 검색되어 업그레이드를 진행합니다',
+                message: `새 버전${info?.version ? ` v${info.version}` : ''}이 검색되어 업그레이드를 진행합니다.\n작업 세션은 유지되며, 설치 후 앱이 다시 시작됩니다.`,
+                detail: '업데이트 파일 다운로드 준비 중...',
+                percent: 0,
+            });
+        });
+        api.onUpdateProgress?.((progress) => {
+            if (!forcedUpdateActiveRef.current) return;
+            const percent = Math.max(0, Math.min(100, Math.round(Number(progress?.percent) || 0)));
+            setForcedUpdateNotice((prev) => ({
+                title: prev?.title || '새 버전이 검색되어 업그레이드를 진행합니다',
+                message: prev?.message || '새 버전이 검색되어 업그레이드를 진행합니다.',
+                detail: `업데이트 파일 다운로드 중... ${percent}%`,
+                percent,
+            }));
+        });
+        api.onUpdateDownloaded?.((info) => {
+            forcedUpdateActiveRef.current = true;
+            setForcedUpdateNotice({
+                title: '업데이트 설치 중',
+                message: `새 버전${info?.version ? ` v${info.version}` : ''} 다운로드가 완료되었습니다.\n곧 앱을 재시작하고 업그레이드를 적용합니다.`,
+                detail: '설치 준비 중...',
+                percent: 100,
+            });
+            installSoon();
+        });
+        api.onUpdateInstalling?.(() => {
+            forcedUpdateActiveRef.current = true;
+            setForcedUpdateNotice({
+                title: '업데이트 설치 중',
+                message: '업그레이드를 적용하기 위해 앱을 재시작합니다.',
+                detail: '잠시만 기다려주세요.',
+                percent: 100,
+            });
+        });
+        api.onUpdateNotAvailable?.(() => {
+            if (forcedUpdateActiveRef.current) {
+                forcedUpdateActiveRef.current = false;
+                setForcedUpdateNotice(null);
+            }
+        });
+        api.onUpdateError?.((message) => {
+            if (!forcedUpdateActiveRef.current) return;
+            setForcedUpdateNotice({
+                title: '업데이트 확인 실패',
+                message: `업데이트 확인 또는 다운로드 중 오류가 발생했습니다.\n${message || ''}`,
+                detail: '네트워크 상태를 확인한 뒤 앱을 다시 실행해주세요.',
+                percent: 0,
+            });
+        });
+
+        return undefined;
+    }, []);
+
+    // 로그인 완료 시 한 번만 업데이트를 확인한다. 시간 기반 체크와 선택형 설치는 사용하지 않는다.
+    useEffect(() => {
+        if (!isAuthenticated || !user?.id) {
+            updateCheckKeyRef.current = null;
+            forcedUpdateActiveRef.current = false;
+            setForcedUpdateNotice(null);
+            return undefined;
+        }
+
+        const api = window.electronAPI;
+        if (!api?.checkForUpdates) return undefined;
+        const checkKey = `${user.id}::${user.site_id || 'default'}`;
+        if (updateCheckKeyRef.current === checkKey) return undefined;
+        updateCheckKeyRef.current = checkKey;
+
+        api.getUpdateStatus?.().then((status) => {
+            if (status?.hasDownloadedUpdate) {
+                forcedUpdateActiveRef.current = true;
+                setForcedUpdateNotice({
+                    title: '업데이트 설치 중',
+                    message: '다운로드된 새 버전이 있어 업그레이드를 진행합니다.\n작업 세션은 유지되며, 설치 후 앱이 다시 시작됩니다.',
+                    detail: '설치 준비 중...',
+                    percent: 100,
+                });
+                window.setTimeout(() => {
+                    api.installUpdate?.().catch((err) => {
+                        setForcedUpdateNotice({
+                            title: '업데이트 설치 실패',
+                            message: `업데이트 설치를 시작하지 못했습니다.\n${err?.message || err || ''}`,
+                            detail: '',
+                            percent: 0,
+                        });
+                    });
+                }, 1200);
+                return;
+            }
+            api.checkForUpdates('login').catch((err) => {
+                console.warn('[Update] login update check failed:', err);
+            });
+        }).catch(() => {
+            api.checkForUpdates('login').catch((err) => {
+                console.warn('[Update] login update check failed:', err);
+            });
+        });
+
+        return undefined;
+    }, [isAuthenticated, user?.id, user?.site_id]);
 
     useEffect(() => {
         // 온라인 이벤트 리스너 등록 (1회만)
@@ -256,10 +381,50 @@ function App() {
                 </main>
             </div>
 
-            <StatusBar 
-                title={TAB_LABELS[activeTab] || TAB_LABELS[DEFAULT_TAB]} 
-                helpText={getHelpText()} 
+            <StatusBar
+                title={TAB_LABELS[activeTab] || TAB_LABELS[DEFAULT_TAB]}
+                helpText={getHelpText()}
             />
+
+            {forcedUpdateNotice && (
+                <div style={{
+                    position: 'fixed', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.55)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+                }}>
+                    <div style={{
+                        backgroundColor: 'white', borderRadius: '12px', padding: '1.75rem 2rem',
+                        width: '420px', maxWidth: '90vw', boxShadow: '0 20px 50px rgba(0,0,0,0.25)',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.85rem' }}>
+                            <span className="material-icons" style={{ color: '#2563eb', fontSize: '26px' }}>system_update</span>
+                            <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 900, color: '#1e293b' }}>
+                                {forcedUpdateNotice.title}
+                            </h3>
+                        </div>
+                        <p style={{ margin: '0 0 1.4rem', fontSize: '0.875rem', lineHeight: 1.6, color: '#475569', whiteSpace: 'pre-line' }}>
+                            {forcedUpdateNotice.message}
+                        </p>
+                        <div style={{
+                            height: 8,
+                            borderRadius: 999,
+                            backgroundColor: '#e2e8f0',
+                            overflow: 'hidden',
+                            marginBottom: '0.75rem',
+                        }}>
+                            <div style={{
+                                width: `${Math.max(8, Math.min(100, forcedUpdateNotice.percent || 8))}%`,
+                                height: '100%',
+                                borderRadius: 999,
+                                backgroundColor: '#2563eb',
+                                transition: 'width 180ms ease',
+                            }} />
+                        </div>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#64748b' }}>
+                            {forcedUpdateNotice.detail || '업데이트를 준비 중입니다.'}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
