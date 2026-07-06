@@ -42,11 +42,11 @@ const formatValue = (value) => {
 };
 
 const inputStyle = {
-    height: 34,
+    height: 38,
     border: '1px solid #cbd5e1',
     borderRadius: 6,
-    padding: '0 10px',
-    fontSize: 13,
+    padding: '0 12px',
+    fontSize: 15,
     fontWeight: 700,
     color: '#0f172a',
     textAlign: 'right',
@@ -54,18 +54,18 @@ const inputStyle = {
 };
 
 const labelStyle = {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: 800,
     color: '#475569',
 };
 
 const buttonBaseStyle = {
-    height: 34,
+    height: 38,
     borderRadius: 7,
     border: '1px solid #cbd5e1',
     background: '#fff',
     cursor: 'pointer',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: 900,
     color: '#334155',
 };
@@ -904,7 +904,7 @@ export default function UnifiedRecordModal({
                     <>
                         <div style={{ overflowY: 'auto', padding: 10, display: 'grid', alignContent: 'start', gap: 6, flex: 1, minHeight: 0 }}>
                             {waterRounds.length === 0 && (
-                                <div style={{ padding: '18px 8px', color: '#94a3b8', fontSize: 12, fontWeight: 800, textAlign: 'center' }}>
+                                <div style={{ padding: '18px 8px', color: '#94a3b8', fontSize: 14, fontWeight: 800, textAlign: 'center' }}>
                                     등록된 회차가 없습니다.
                                 </div>
                             )}
@@ -923,12 +923,12 @@ export default function UnifiedRecordModal({
                                             padding: '9px 11px',
                                             cursor: 'pointer',
                                             textAlign: 'left',
-                                            fontSize: 13,
+                                            fontSize: 15,
                                             fontWeight: 850,
                                         }}
                                     >
                                         <div>{round.label}</div>
-                                        <div style={{ marginTop: 2, fontSize: 10, color: '#94a3b8', fontWeight: 700 }}>
+                                        <div style={{ marginTop: 2, fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>
                                             {round.sourceType === 'qntech' ? 'QnTECH' : '수동입력'}
                                         </div>
                                     </button>
@@ -989,7 +989,7 @@ export default function UnifiedRecordModal({
                                                 ? `${rangeStartDate} 불러오기`
                                                 : '불러오기'}
                                 </button>
-                                <span style={{ fontSize: '0.6875rem', color: '#94a3b8', fontWeight: 700, lineHeight: 1.5 }}>
+                                <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700, lineHeight: 1.5 }}>
                                     시작·종료 날짜가 같으면 해당일만, 다르면 기간을 불러옵니다.
                                 </span>
                             </>
@@ -1004,7 +1004,7 @@ export default function UnifiedRecordModal({
     const renderFields = () => {
         if (activeTab !== 'water' && !selectedItem) {
             return (
-                <div style={{ padding: 24, color: '#94a3b8', fontWeight: 700, fontSize: 13 }}>
+                <div style={{ padding: 24, color: '#94a3b8', fontWeight: 700, fontSize: 15 }}>
                     선택할 항목이 없습니다.
                 </div>
             );
@@ -1031,7 +1031,7 @@ export default function UnifiedRecordModal({
                                 padding: '8px 10px',
                                 background: '#f8fafc',
                                 borderBottom: '1px solid #e2e8f0',
-                                fontSize: 12,
+                                fontSize: 14,
                                 fontWeight: 900,
                                 color: '#475569',
                                 textAlign: index === 0 ? 'left' : 'center',
@@ -1055,7 +1055,7 @@ export default function UnifiedRecordModal({
                             ];
                         return (
                             <React.Fragment key={item.key}>
-                                <div style={{ padding: '9px 10px', borderBottom: '1px solid #f1f5f9', fontSize: 13, fontWeight: 900, color: '#0f172a' }}>
+                                <div style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', fontSize: 15, fontWeight: 900, color: '#0f172a' }}>
                                     {item.label}
                                 </div>
                                 {fieldLabels.map(([field, label]) => (
@@ -1066,8 +1066,8 @@ export default function UnifiedRecordModal({
                                             style={{
                                                 ...inputStyle,
                                                 width: '100%',
-                                                height: 30,
-                                                padding: '0 7px',
+                                                height: 34,
+                                                padding: '0 8px',
                                                 textAlign: 'right',
                                                 background: field === 'calculatedFlow' ? '#f8fafc' : '#fff',
                                                 color: isSludgeItem && field === 'calculatedFlow' ? '#64748b' : inputStyle.color,
@@ -1170,7 +1170,7 @@ export default function UnifiedRecordModal({
                                     padding: '8px 10px',
                                     background: '#f8fafc',
                                     borderBottom: '1px solid #e2e8f0',
-                                    fontSize: 12,
+                                    fontSize: 14,
                                     fontWeight: 900,
                                     color: '#475569',
                                     textAlign: label === itemLabel ? 'left' : 'center',
@@ -1184,7 +1184,7 @@ export default function UnifiedRecordModal({
                             const values = getDraftForItem(activeTab, item);
                             return (
                                 <React.Fragment key={item.key}>
-                                    <div style={{ padding: '9px 10px', borderBottom: '1px solid #f1f5f9', fontSize: 13, fontWeight: 900, color: '#0f172a' }}>
+                                    <div style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', fontSize: 15, fontWeight: 900, color: '#0f172a' }}>
                                         {item.label}
                                     </div>
                                     {[
@@ -1198,8 +1198,8 @@ export default function UnifiedRecordModal({
                                                 style={{
                                                     ...inputStyle,
                                                     width: '100%',
-                                                    height: 30,
-                                                    padding: '0 7px',
+                                                    height: 34,
+                                                    padding: '0 8px',
                                                     textAlign: 'right',
                                                     background: '#fff',
                                                     boxSizing: 'border-box',
@@ -1242,12 +1242,12 @@ export default function UnifiedRecordModal({
                     borderBottom: '1px solid #e2e8f0',
                     columnGap: 8,
                 }}>
-                    <div style={{ fontSize: 11, fontWeight: 950, color: '#64748b' }}>항목</div>
+                    <div style={{ fontSize: 13, fontWeight: 950, color: '#64748b' }}>항목</div>
                     {activeLocations.map((location) => (
                         <div
                             key={location}
                             style={{
-                                fontSize: 11,
+                                fontSize: 13,
                                 fontWeight: 950,
                                 color: '#334155',
                                 textAlign: 'center',
@@ -1273,10 +1273,10 @@ export default function UnifiedRecordModal({
                         }}
                     >
                         <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 950, color: '#0f172a', lineHeight: 1.2 }}>
+                            <div style={{ fontSize: 15, fontWeight: 950, color: '#0f172a', lineHeight: 1.2 }}>
                                 {field.label}
                             </div>
-                            <div style={{ marginTop: 2, fontSize: 10.5, fontWeight: 900, color: '#64748b' }}>
+                            <div style={{ marginTop: 2, fontSize: 12, fontWeight: 900, color: '#64748b' }}>
                                 {field.code}
                             </div>
                         </div>
@@ -1291,10 +1291,10 @@ export default function UnifiedRecordModal({
                                         disabled={!enabled}
                                         style={{
                                             ...inputStyle,
-                                            height: 28,
-                                            width: 64,
+                                            height: 34,
+                                            width: 72,
                                             padding: '0 6px',
-                                            fontSize: 12,
+                                            fontSize: 14,
                                             boxSizing: 'border-box',
                                             background: enabled ? '#fff' : '#f1f5f9',
                                             color: enabled ? '#0f172a' : '#cbd5e1',
@@ -1328,7 +1328,7 @@ export default function UnifiedRecordModal({
         }}>
             <div style={{
                 width: 'min(860px, 94vw)',
-                height: 'min(520px, 84vh)',
+                height: 'min(560px, 88vh)',
                 background: '#fff',
                 borderRadius: 12,
                 boxShadow: '0 24px 80px rgba(15, 23, 42, 0.24)',
@@ -1341,10 +1341,10 @@ export default function UnifiedRecordModal({
             }}>
                 <div style={{ display: 'grid', gridTemplateColumns: canUseBaselineStatus ? '210px 1fr 118px auto auto' : '210px 1fr auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #e2e8f0' }}>
                     <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 17, fontWeight: 900, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: 19, fontWeight: 900, color: '#0f172a', whiteSpace: 'nowrap' }}>
                             통합 데이터 입력
                         </div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginTop: 2 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#64748b', marginTop: 2 }}>
                             {mode === 'edit' ? '선택 행 수정' : '새 데이터 추가'}
                         </div>
                     </div>
@@ -1358,13 +1358,13 @@ export default function UnifiedRecordModal({
                                     type="button"
                                     onClick={() => handleTabChange(tab.id)}
                                     style={{
-                                        height: 34,
+                                        height: 38,
                                         padding: '0 14px',
                                         border: `1px solid ${isActive ? '#1e293b' : '#e2e8f0'}`,
                                         borderRadius: 7,
                                         background: isActive ? '#1e293b' : '#fff',
                                         cursor: 'pointer',
-                                        fontSize: 13,
+                                        fontSize: 15,
                                         fontWeight: 900,
                                         color: isActive ? '#fff' : '#64748b',
                                         whiteSpace: 'nowrap',
@@ -1385,7 +1385,7 @@ export default function UnifiedRecordModal({
                                 ...inputStyle,
                                 width: 118,
                                 textAlign: 'left',
-                                fontSize: 12,
+                                fontSize: 14,
                                 fontWeight: 900,
                             }}
                         >
@@ -1432,13 +1432,13 @@ export default function UnifiedRecordModal({
                                                 padding: '9px 11px',
                                                 cursor: 'pointer',
                                                 textAlign: 'left',
-                                                fontSize: 13,
+                                            fontSize: 15,
                                                 fontWeight: 850,
                                             }}
                                         >
                                             {item.label}
                                             {activeTab === 'flow' && item.items?.length > 1 && (
-                                                <div style={{ marginTop: 4, fontSize: 11, color: '#64748b', fontWeight: 800 }}>
+                                                <div style={{ marginTop: 4, fontSize: 12, color: '#64748b', fontWeight: 800 }}>
                                                     {item.items.length}개 유량계
                                                 </div>
                                             )}
@@ -1452,7 +1452,7 @@ export default function UnifiedRecordModal({
 
                     <main style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                         <div style={{ padding: '14px 18px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
-                            <div style={{ fontSize: 15, fontWeight: 900, color: '#0f172a' }}>
+                            <div style={{ fontSize: 17, fontWeight: 900, color: '#0f172a' }}>
                                 {activeTab === 'water'
                                     ? `수질분석 ${selectedRound?.label || ''}`
                                     : activeTab === 'flow'
@@ -1472,7 +1472,7 @@ export default function UnifiedRecordModal({
                                         ? [{ label: '날짜', value: date }, { label: '항목', value: `${currentItems.length}개` }]
                                         : (selectedItem?.summary || [])
                                 ).map((item) => (
-                                    <div key={item.label} style={{ fontSize: 12, color: '#64748b', fontWeight: 800 }}>
+                                    <div key={item.label} style={{ fontSize: 14, color: '#64748b', fontWeight: 800 }}>
                                         {item.label}: <span style={{ color: '#0f172a' }}>{formatValue(item.value)}</span>
                                     </div>
                                 ))}
