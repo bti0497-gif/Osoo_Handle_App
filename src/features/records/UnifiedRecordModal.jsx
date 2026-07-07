@@ -400,11 +400,31 @@ export default function UnifiedRecordModal({
                 }
             }
 
+            if (isSludge && field === 'calculatedFlow') {
+                const monthlyExport = toNumberOrNull(value);
+                const previousMonthlyExport = toNumberOrNull(item?.previous?.monthlyExport)
+                    ?? toNumberOrNull(item?.previous?.monthly_export)
+                    ?? 0;
+                if (monthlyExport !== null) {
+                    nextDraft.reading = round1(Math.max(0, monthlyExport - previousMonthlyExport));
+                }
+            }
+
             if (!isSludge && field === 'reading') {
                 const reading = toNumberOrNull(value);
                 const previousReading = toNumberOrNull(item?.previous?.reading);
                 if (reading !== null && previousReading !== null) {
                     nextDraft.calculatedFlow = round1(Math.max(0, reading - previousReading));
+                } else if (reading !== null) {
+                    nextDraft.calculatedFlow = reading;
+                }
+            }
+
+            if (!isSludge && field === 'calculatedFlow') {
+                const calculatedFlow = toNumberOrNull(value);
+                const previousReading = toNumberOrNull(item?.previous?.reading) ?? 0;
+                if (calculatedFlow !== null) {
+                    nextDraft.reading = round1(previousReading + calculatedFlow);
                 }
             }
 
@@ -576,6 +596,15 @@ export default function UnifiedRecordModal({
 
     const hasDraftTabData = (tabId) => Object.keys(draft).some((key) => key.startsWith(`${tabId}:`));
 
+    const hasDraftForItem = (tabId, item) => (
+        Object.prototype.hasOwnProperty.call(draft, getDraftKeyForItem(tabId, item))
+    );
+
+    const hasPersistedInventoryValues = (item) => {
+        const values = item?.values || {};
+        return hasValue(values.purchase) || hasValue(values.usage) || hasValue(values.inventory);
+    };
+
     const buildSavePlan = ({
         tabIds = ['flow', 'medicine', 'water', 'kit'],
         validateFlow = true,
@@ -630,7 +659,7 @@ export default function UnifiedRecordModal({
                     raw_value: reading,
                     calculated_flow: calculatedFlow,
                     sludge_export: isSludge ? reading : null,
-                    is_manual: Boolean(values.__dirty?.calculatedFlow),
+                    is_manual: false,
                     is_reset: false,
                     input_status: effectiveSaveStatusMode === 'baseline' ? 'baseline' : 'manual',
                 });
@@ -640,13 +669,18 @@ export default function UnifiedRecordModal({
         const zeroUsageMedicines = [];
         const collectInventoryItems = (tab, nameField, target) => {
             (resolvedContexts[tab]?.items || []).forEach((item) => {
+                const isDrafted = hasDraftForItem(tab, item);
+                if (!isDrafted && !hasPersistedInventoryValues(item)) {
+                    return;
+                }
+
                 const values = getDraftForItem(tab, item);
                 const purchase = toNumberOrNull(values.purchase);
                 const usage = toNumberOrNull(values.usage) ?? 0;
                 const previousInventory = toNumberOrNull(item?.previous?.inventory) || 0;
                 const inventory = toNumberOrNull(values.inventory)
                     ?? round1(previousInventory + (purchase || 0) - usage);
-                if (tab === 'medicine' && usage === 0) {
+                if (tab === 'medicine' && isDrafted && usage === 0) {
                     zeroUsageMedicines.push(item.label || item.key);
                 }
                 target.push({
@@ -655,6 +689,7 @@ export default function UnifiedRecordModal({
                     purchase_amount: purchase ?? 0,
                     usage_amount: usage,
                     current_inventory: inventory,
+                    inventory_is_manual: Boolean(values.__dirty?.inventory),
                     input_status: (
                         effectiveSaveStatusMode === 'baseline'
                             ? 'baseline'
@@ -832,39 +867,16 @@ export default function UnifiedRecordModal({
     const handleClose = async () => {
         if (isLoadingUnifiedData || isSaving) return;
 
-        const completedTabs = new Set([
-            ...savedTabs,
-            ...TAB_META.filter((tab) => hasPersistedTabData(tab.id)).map((tab) => tab.id),
-        ]);
-        const incompleteTabs = TAB_META
-            .filter((tab) => !completedTabs.has(tab.id))
-            .map((tab) => tab.id);
         const dirtyUnsavedTabs = TAB_META
             .filter((tab) => hasDraftTabData(tab.id) && !savedTabs.includes(tab.id))
             .map((tab) => tab.id);
-        const tabsToDefaultSave = Array.from(new Set([
-            ...incompleteTabs.filter((tabId) => tabId === 'flow' || tabId === 'medicine' || tabId === 'kit'),
-            ...dirtyUnsavedTabs,
-        ]));
 
-        if (incompleteTabs.length > 0 || dirtyUnsavedTabs.length > 0) {
-            const incompleteLabels = incompleteTabs.map((tabId) => TAB_LABEL_BY_ID[tabId] || tabId).join(', ');
+        if (dirtyUnsavedTabs.length > 0) {
             const dirtyLabels = dirtyUnsavedTabs.map((tabId) => TAB_LABEL_BY_ID[tabId] || tabId).join(', ');
-            logOperationalNotice('닫기 전 저장 확인이 필요한 탭이 있습니다.', {
-                incompleteTabs: incompleteLabels,
+            logOperationalNotice('저장하지 않고 닫기 확인이 필요한 입력이 있습니다.', {
                 dirtyTabs: dirtyLabels,
-                defaultSaveTabs: tabsToDefaultSave,
             });
-            const confirmMessage = tabsToDefaultSave.length > 0
-                ? '아직 저장되지 않은 입력이 있습니다. 필요한 항목을 자동 저장하고 닫을까요?'
-                : '아직 저장되지 않은 입력이 있습니다. 닫을까요?';
-            if (!window.confirm(confirmMessage)) return;
-        }
-
-        if (tabsToDefaultSave.length > 0) {
-            const plan = buildSavePlan({ tabIds: tabsToDefaultSave, validateFlow: false, allowFlowDefaults: true });
-            const result = await savePlan(plan);
-            if (!result) return;
+            if (!window.confirm('저장하지 않은 입력이 있습니다. 저장하지 않고 닫을까요?')) return;
         }
 
         onClose?.();
@@ -1062,7 +1074,6 @@ export default function UnifiedRecordModal({
                                     <div key={`${item.key}-${field}`} style={{ padding: '7px 8px', borderBottom: '1px solid #f1f5f9' }}>
                                         <input
                                             aria-label={`${item.label} ${label}`}
-                                            readOnly={isSludgeItem && field === 'calculatedFlow'}
                                             style={{
                                                 ...inputStyle,
                                                 width: '100%',
@@ -1070,8 +1081,8 @@ export default function UnifiedRecordModal({
                                                 padding: '0 8px',
                                                 textAlign: 'right',
                                                 background: field === 'calculatedFlow' ? '#f8fafc' : '#fff',
-                                                color: isSludgeItem && field === 'calculatedFlow' ? '#64748b' : inputStyle.color,
-                                                cursor: isSludgeItem && field === 'calculatedFlow' ? 'default' : 'text',
+                                                color: inputStyle.color,
+                                                cursor: 'text',
                                                 boxSizing: 'border-box',
                                             }}
                                             value={values[field] ?? ''}
@@ -1339,17 +1350,58 @@ export default function UnifiedRecordModal({
                 overflow: 'hidden',
                 transform: 'translateY(-6px)',
             }}>
-                <div style={{ display: 'grid', gridTemplateColumns: canUseBaselineStatus ? '210px 1fr 118px auto auto' : '210px 1fr auto auto', gap: 14, alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #e2e8f0' }}>
-                    <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 19, fontWeight: 900, color: '#0f172a', whiteSpace: 'nowrap' }}>
-                            통합 데이터 입력
+                <div style={{ display: 'grid', gap: 10, padding: '12px 16px 10px', borderBottom: '1px solid #e2e8f0' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(170px, 1fr) auto', gap: 12, alignItems: 'center', minWidth: 0 }}>
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 19, fontWeight: 900, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                                통합 데이터 입력
+                            </div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#64748b', marginTop: 2 }}>
+                                {mode === 'edit' ? '선택 행 수정' : '새 데이터 추가'}
+                            </div>
                         </div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: '#64748b', marginTop: 2 }}>
-                            {mode === 'edit' ? '선택 행 수정' : '새 데이터 추가'}
+
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', minWidth: 0 }}>
+                            {canUseBaselineStatus && (
+                                <select
+                                    value={saveStatusMode}
+                                    onChange={(event) => setSaveStatusMode(event.target.value)}
+                                    title="저장구분"
+                                    style={{
+                                        ...inputStyle,
+                                        width: 124,
+                                        height: 36,
+                                        textAlign: 'left',
+                                        fontSize: 14,
+                                        fontWeight: 900,
+                                        flex: '0 0 auto',
+                                    }}
+                                >
+                                    <option value="manual">일반 입력</option>
+                                    <option value="baseline">기준값</option>
+                                </select>
+                            )}
+
+                            <DateOnlyInput
+                                value={date}
+                                onChange={(nextDate) => {
+                                    setDate(nextDate);
+                                    setRangeStartDate(nextDate);
+                                    setRangeEndDate(nextDate);
+                                    setSelectedByTab({});
+                                    setDraft({});
+                                    onDateChange?.(nextDate);
+                                }}
+                                style={{ width: 140, flex: '0 0 auto' }}
+                            />
+
+                            <button type="button" onClick={handleClose} style={{ border: 0, background: 'transparent', cursor: 'pointer', color: '#94a3b8', padding: 4, height: 34, flex: '0 0 auto' }}>
+                                <span className="material-icons" style={{ fontSize: 25 }}>close</span>
+                            </button>
                         </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: 4, minWidth: 0, overflowX: 'auto' }}>
+                    <div style={{ display: 'flex', gap: 6, minWidth: 0, overflowX: 'auto', paddingBottom: 2 }}>
                         {TAB_META.map((tab) => {
                             const isActive = tab.id === activeTab;
                             return (
@@ -1368,6 +1420,7 @@ export default function UnifiedRecordModal({
                                         fontWeight: 900,
                                         color: isActive ? '#fff' : '#64748b',
                                         whiteSpace: 'nowrap',
+                                        flex: '0 0 auto',
                                     }}
                                 >
                                     {tab.label}
@@ -1375,41 +1428,6 @@ export default function UnifiedRecordModal({
                             );
                         })}
                     </div>
-
-                    {canUseBaselineStatus && (
-                        <select
-                            value={saveStatusMode}
-                            onChange={(event) => setSaveStatusMode(event.target.value)}
-                            title="저장구분"
-                            style={{
-                                ...inputStyle,
-                                width: 118,
-                                textAlign: 'left',
-                                fontSize: 14,
-                                fontWeight: 900,
-                            }}
-                        >
-                            <option value="manual">일반 입력</option>
-                            <option value="baseline">기준값</option>
-                        </select>
-                    )}
-
-                    <DateOnlyInput
-                        value={date}
-                        onChange={(nextDate) => {
-                            setDate(nextDate);
-                            setRangeStartDate(nextDate);
-                            setRangeEndDate(nextDate);
-                            setSelectedByTab({});
-                            setDraft({});
-                            onDateChange?.(nextDate);
-                        }}
-                        style={{ width: 138 }}
-                    />
-
-                    <button type="button" onClick={handleClose} style={{ border: 0, background: 'transparent', cursor: 'pointer', color: '#94a3b8', padding: 4, height: 34 }}>
-                        <span className="material-icons" style={{ fontSize: 25 }}>close</span>
-                    </button>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: (activeTab === 'medicine' || activeTab === 'kit') ? '1fr' : '210px 1fr', gap: 0, minHeight: 0, flex: 1 }}>

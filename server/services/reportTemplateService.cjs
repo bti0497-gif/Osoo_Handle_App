@@ -5,6 +5,8 @@ const EXCEL_TEMPLATE_EXTENSIONS = new Set(['.xlsx', '.xls', '.xlsm']);
 const HWPX_TEMPLATE_EXTENSIONS = new Set(['.hwpx']);
 const ALLOWED_REPORT_TEMPLATE_NAMES = [
   '일일업무일지',
+  '일일업무일지(A2O)',
+  '일일업무일지(MBR)',
   '수질분석일지',
   '약품관리대장',
   '약품입고일지',
@@ -21,6 +23,29 @@ function normalizeTemplateKey(value) {
 
 function getTemplateIdentity(value) {
   return normalizeTemplateKey(path.parse(String(value || '')).name);
+}
+
+function normalizeMethod(value) {
+  const method = String(value || '').replace(/\s+/g, '').toUpperCase();
+  if (method === 'A2O' || method === 'MBR') return method;
+  return '';
+}
+
+function getDailyWorkLogTemplateCandidates(templateName, method) {
+  const identity = getTemplateIdentity(templateName);
+  const baseIdentity = normalizeTemplateKey('일일업무일지');
+  const methodCode = normalizeMethod(method);
+  if (identity !== baseIdentity && !/^일일업무일지\((a2o|mbr)\)$/i.test(identity)) {
+    return [];
+  }
+
+  const candidates = [];
+  if (methodCode) {
+    candidates.push(normalizeTemplateKey(`일일업무일지(${methodCode})`));
+  }
+  candidates.push(identity);
+  candidates.push(baseIdentity);
+  return Array.from(new Set(candidates));
 }
 
 function isAllowedReportTemplateName(value) {
@@ -181,7 +206,7 @@ function listReportTemplates(baseDir, appDataPath) {
 
 function resolveReportTemplatePath(baseDir, appDataPath, templateName, options = {}) {
   const customDir = syncBundledTemplatesToAppData(baseDir, appDataPath);
-  const { excelOnly = false, hwpxOnly = false } = options;
+  const { excelOnly = false, hwpxOnly = false, method = '' } = options;
   const availableTemplates = listFiles(customDir)
     .filter((fileName) => !isOfficeLockFile(fileName))
     .filter((fileName) => isAllowedReportTemplateName(fileName))
@@ -196,7 +221,12 @@ function resolveReportTemplatePath(baseDir, appDataPath, templateName, options =
       return null;
     }
 
-    const matchedTemplate = availableTemplates.find((fileName) => isTemplateMatched(fileName, targetName));
+    const dailyWorkLogCandidates = getDailyWorkLogTemplateCandidates(targetName, method);
+    const matchedTemplate = dailyWorkLogCandidates.length > 0
+      ? dailyWorkLogCandidates
+        .map((candidate) => availableTemplates.find((fileName) => getTemplateIdentity(fileName) === candidate))
+        .find(Boolean)
+      : availableTemplates.find((fileName) => isTemplateMatched(fileName, targetName));
     targetName = matchedTemplate || '';
   }
 

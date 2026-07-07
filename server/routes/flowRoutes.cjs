@@ -84,10 +84,10 @@ module.exports = function (db) {
         }
       } else if (hasRaw) {
         const storedFlow = row.calculated_flow == null ? null : Number(row.calculated_flow);
-        // 검침값(raw)은 자동 계산 대상이므로, raw가 바뀌면 calculated_flow도
-        // prevRaw 기준으로 재계산한다. 단 사용자가 직접 유량을 지정한(is_manual),
-        // 리셋 지점(is_reset), 엑셀 임포트/관리자 지정(imported/baseline)은 보존.
-        if ((shouldPreserveStoredFlow || row.is_manual || row.is_reset) && storedFlow != null) {
+        // 검침값(raw)이 기준이다. 과거 날짜의 검침값/유량값이 수정되면
+        // 그 날짜의 raw를 기준으로 이후 날짜의 calculated_flow를 다시 계산한다.
+        // 리셋 지점만 저장값을 보존하고, 일반/임포트/관리자 값은 raw 차이로 정규화한다.
+        if (row.is_reset && storedFlow != null) {
           flow = storedFlow;
         } else if (prevRaw != null && Number.isFinite(prevRaw)) {
           // 검침값은 누적이므로 어제보다 작을 수 없다. 작아지면(마이너스) 0으로
@@ -95,6 +95,10 @@ module.exports = function (db) {
           const diff = rawNum - prevRaw;
           flow = Math.round(diff * 10) / 10;
           if (flow < 0) flow = 0;
+        } else if (storedFlow != null && Number.isFinite(storedFlow)) {
+          flow = storedFlow;
+        } else {
+          flow = rawNum;
         }
         prevRaw = rawNum;
       }
@@ -168,7 +172,7 @@ module.exports = function (db) {
           raw_value = excluded.raw_value,
           calculated_flow = excluded.calculated_flow,
           is_reset = excluded.is_reset,
-          is_manual = excluded.is_manual,
+          is_manual = 0,
           sludge_export = excluded.sludge_export,
           input_status = excluded.input_status,
           site_id = excluded.site_id,
@@ -190,7 +194,7 @@ module.exports = function (db) {
             raw_value,
             calculated_flow,
             is_reset ? 1 : 0,
-            is_manual ? 1 : 0,
+            0,
             sludgeAmount,
             String(item.input_status || item.inputStatus || 'manual').trim() || 'manual',
             metadata.siteId,
@@ -259,7 +263,7 @@ module.exports = function (db) {
           raw_value = excluded.raw_value,
           calculated_flow = excluded.calculated_flow,
           is_reset = excluded.is_reset,
-          is_manual = excluded.is_manual,
+          is_manual = 0,
           sludge_export = excluded.sludge_export,
           input_status = excluded.input_status,
           site_id = excluded.site_id,
@@ -273,7 +277,7 @@ module.exports = function (db) {
         raw_value,
         calculated_flow,
         is_reset ? 1 : 0,
-        is_manual ? 1 : 0,
+        0,
         sludgeAmount,
         String(req.body.input_status || req.body.inputStatus || 'manual').trim() || 'manual',
         metadata.siteId,

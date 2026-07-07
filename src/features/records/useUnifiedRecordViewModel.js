@@ -3,6 +3,7 @@ import { FlowModel } from '../flow/FlowModel';
 import { MedicineModel } from '../medicine/MedicineModel';
 import { KitModel } from '../kit/KitModel';
 import { WaterQualityModel } from '../water/WaterQualityModel';
+import { SettingsModel } from '../settings/SettingsModel';
 
 const WATER_FIELDS = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity'];
 
@@ -12,6 +13,20 @@ const isDefaulted = (row) => String(row?.input_status || row?.inputStatus || '')
 const unwrapHistory = (result) => (
     Array.isArray(result) ? result : (Array.isArray(result?.history) ? result.history : [])
 );
+
+const buildDefaultAmountMap = (result) => {
+    const map = new Map();
+    if (!result?.success || !Array.isArray(result.items)) return map;
+
+    result.items.forEach((item) => {
+        const name = String(item.item_name ?? item.itemName ?? item.name ?? '').trim();
+        if (!name) return;
+        const amount = Number(item.default_amount ?? item.defaultAmount ?? 0);
+        map.set(name, Number.isFinite(amount) ? amount : 0);
+    });
+
+    return map;
+};
 
 const latestBefore = (rows, date, predicate) => {
     for (let index = rows.length - 1; index >= 0; index -= 1) {
@@ -49,7 +64,7 @@ const mergeFlowContext = (baseContext = {}, history = [], date) => {
     };
 };
 
-const mergeInventoryContext = (baseContext = {}, history = [], date, nameField) => ({
+const mergeInventoryContext = (baseContext = {}, history = [], date, nameField, defaultAmounts = new Map()) => ({
     ...baseContext,
     items: (baseContext.items || []).map((item) => {
         const name = item.key || item.name || item.label;
@@ -58,8 +73,12 @@ const mergeInventoryContext = (baseContext = {}, history = [], date, nameField) 
         const previous = latestBefore(history, date, (row) => row?.[nameField] === name) || {};
         const baseValues = item.values || {};
         const basePrevious = item.previous || {};
+        const defaultAmount = defaultAmounts.has(String(name || '').trim())
+            ? defaultAmounts.get(String(name || '').trim())
+            : (hasValue(item.defaultPurchase) ? item.defaultPurchase : 0);
         return {
             ...item,
+            defaultPurchase: defaultAmount,
             values: {
                 purchase: hasCurrent ? (isDefaulted(current) ? '' : (current.purchase_amount ?? '')) : (baseValues.purchase ?? ''),
                 usage: hasCurrent ? (isDefaulted(current) ? '' : (current.usage_amount ?? '')) : (baseValues.usage ?? ''),
@@ -165,16 +184,27 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
         setIsLoading(true);
 
         try {
-            const [flowResult, medicineResult, kitResult, waterResult] = await Promise.all([
+            const [
+                flowResult,
+                medicineResult,
+                kitResult,
+                waterResult,
+                medicineDefaults,
+                kitDefaults,
+            ] = await Promise.all([
                 FlowModel.fetchHistory({ force }),
                 MedicineModel.fetchHistory({ force }),
                 KitModel.fetchHistory({ force }),
                 WaterQualityModel.fetchHistory({ force }),
+                SettingsModel.getMedicineDefaults().catch(() => ({ success: false, items: [] })),
+                SettingsModel.getKitDefaults().catch(() => ({ success: false, items: [] })),
             ]);
+            const medicineDefaultMap = buildDefaultAmountMap(medicineDefaults);
+            const kitDefaultMap = buildDefaultAmountMap(kitDefaults);
             setResolvedContexts({
                 flow: mergeFlowContext(baseContexts.flow, unwrapHistory(flowResult), date),
-                medicine: mergeInventoryContext(baseContexts.medicine, unwrapHistory(medicineResult), date, 'medicine_name'),
-                kit: mergeInventoryContext(baseContexts.kit, unwrapHistory(kitResult), date, 'kit_name'),
+                medicine: mergeInventoryContext(baseContexts.medicine, unwrapHistory(medicineResult), date, 'medicine_name', medicineDefaultMap),
+                kit: mergeInventoryContext(baseContexts.kit, unwrapHistory(kitResult), date, 'kit_name', kitDefaultMap),
                 water: mergeWaterContext(baseContexts.water, unwrapHistory(waterResult), date),
             });
         } catch (error) {

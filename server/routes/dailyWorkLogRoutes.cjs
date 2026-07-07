@@ -34,7 +34,7 @@ function buildMissingHwpxTemplateResponse() {
   return {
     code: 'REPORT_HWPX_TEMPLATE_MISSING',
     error: `${TEMPLATE_NAME} HWPX 양식을 찾을 수 없습니다.`,
-    userMessage: `설정에서 ${TEMPLATE_NAME}.hwpx 양식을 업로드해 주세요.`,
+    userMessage: `설정에서 ${TEMPLATE_NAME}(A2O).hwpx 및 ${TEMPLATE_NAME}(MBR).hwpx 양식을 업로드해 주세요.`,
   };
 }
 
@@ -53,10 +53,15 @@ function getMonthKeys(startDate, endDate) {
 }
 
 module.exports = function (db, baseDir, appDataPath) {
+  const getCurrentMethod = () => (
+    db.prepare('SELECT method FROM app_settings WHERE id = 1').get()?.method || ''
+  );
+
   const getRequestContext = (req) => ({
     siteId: req.query.siteId || req.query.site_id || '',
     siteName: req.query.siteName || req.query.site_name || '',
     author: req.query.author || '',
+    method: req.query.method || getCurrentMethod(),
   });
 
   const syncCertificateCacheForRange = async (range, context) => {
@@ -229,14 +234,17 @@ module.exports = function (db, baseDir, appDataPath) {
   router.get('/api/daily-work-log/export-pdf', async (req, res) => {
     const { startDate, endDate, date, templateName } = req.query;
     const resolvedTemplateName = templateName || TEMPLATE_NAME;
-    const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, resolvedTemplateName, { hwpxOnly: true });
+    const context = getRequestContext(req);
+    const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, resolvedTemplateName, {
+      hwpxOnly: true,
+      method: context.method,
+    });
     if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
       return res.status(404).json(buildMissingHwpxTemplateResponse());
     }
 
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      const context = getRequestContext(req);
       await restoreOperationalData(db, {
         startDate: range.startDate,
         endDate: range.endDate,
@@ -271,14 +279,17 @@ module.exports = function (db, baseDir, appDataPath) {
   router.get('/api/daily-work-log/export-hwpx', async (req, res) => {
     const { startDate, endDate, date, templateName } = req.query;
     const resolvedTemplateName = templateName || TEMPLATE_NAME;
-    const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, resolvedTemplateName, { hwpxOnly: true });
+    const context = getRequestContext(req);
+    const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, resolvedTemplateName, {
+      hwpxOnly: true,
+      method: context.method,
+    });
     if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
       return res.status(404).json(buildMissingHwpxTemplateResponse());
     }
 
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      const context = getRequestContext(req);
       await restoreOperationalData(db, {
         startDate: range.startDate,
         endDate: range.endDate,

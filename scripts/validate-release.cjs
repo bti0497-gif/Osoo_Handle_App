@@ -50,6 +50,24 @@ function checkFileExists(filePath, description) {
   }
 }
 
+function validateReportTemplateFiles(rootDir, description) {
+  const reportsDir = path.join(rootDir, 'templates', 'reports');
+  const requiredTemplates = [
+    '일일업무일지.xlsx',
+    '일일업무일지(A2O).hwpx',
+    '일일업무일지(MBR).hwpx',
+  ];
+
+  for (const fileName of requiredTemplates) {
+    const filePath = path.join(reportsDir, fileName);
+    if (fs.existsSync(filePath)) {
+      success(`${description} 일지 양식 확인: ${path.relative(BASE_DIR, filePath)}`);
+    } else {
+      error(`${description} 일지 양식 누락: ${filePath}`);
+    }
+  }
+}
+
 function validateRequiredFiles() {
   console.log(`\n${colors.blue}▶ 필수 파일 검증${colors.reset}`);
   
@@ -57,6 +75,7 @@ function validateRequiredFiles() {
   checkFileExists(path.join(BASE_DIR, 'electron-builder.config.js'), 'electron-builder.config.js');
   checkFileExists(path.join(BASE_DIR, 'server', 'config', 'runtimeConfig.cjs'), '런타임 설정 로더');
   checkFileExists(path.join(BASE_DIR, 'scripts', 'provision-runtime-config.cjs'), '런타임 설정 프로비저닝 도구');
+  validateReportTemplateFiles(BASE_DIR, '원본');
 
   const configText = fs.readFileSync(path.join(BASE_DIR, 'electron-builder.config.js'), 'utf8');
   if (configText.includes("'.env.local'")) {
@@ -121,6 +140,97 @@ function validateRuntimeConfigPackagingContract() {
     if (installScriptText.includes(name)) success(`통합 설치파일 자격증명 항목 확인: ${name}`);
     else error(`통합 설치파일 자격증명 항목 누락: ${name}`);
   }
+}
+
+function validateRegressionContracts() {
+  console.log(`\n${colors.blue}▶ 현장 회귀 방지 계약 검증${colors.reset}`);
+
+  const unifiedViewModelPath = path.join(BASE_DIR, 'src', 'features', 'records', 'useUnifiedRecordViewModel.js');
+  const unifiedModalPath = path.join(BASE_DIR, 'src', 'features', 'records', 'UnifiedRecordModal.jsx');
+  const dailyWorkLogRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'dailyWorkLogRoutes.cjs');
+  const reportTemplateServicePath = path.join(BASE_DIR, 'server', 'services', 'reportTemplateService.cjs');
+  const flowRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'flowRoutes.cjs');
+  const medicineRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineRoutes.cjs');
+  const kitRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'kitRoutes.cjs');
+
+  const readText = (filePath) => (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '');
+  const viewModelText = readText(unifiedViewModelPath);
+  const modalText = readText(unifiedModalPath);
+  const dailyWorkLogText = readText(dailyWorkLogRoutesPath);
+  const reportTemplateText = readText(reportTemplateServicePath);
+  const flowRoutesText = readText(flowRoutesPath);
+  const medicineRoutesText = readText(medicineRoutesPath);
+  const kitRoutesText = readText(kitRoutesPath);
+
+  const checkSource = (condition, passMessage, failMessage) => {
+    if (condition) success(passMessage);
+    else error(failMessage);
+  };
+
+  checkSource(
+    viewModelText.includes('SettingsModel.getMedicineDefaults()') &&
+      viewModelText.includes('SettingsModel.getKitDefaults()') &&
+      viewModelText.includes('medicineDefaultMap') &&
+      viewModelText.includes('kitDefaultMap') &&
+      viewModelText.includes('defaultPurchase: defaultAmount'),
+    '통합 모달 약품/키트 기본 구매량 로딩 계약 유지',
+    '통합 모달에서 약품/키트 기본 구매량 로딩 또는 defaultPurchase 매핑이 빠졌습니다'
+  );
+
+  checkSource(
+    modalText.includes('defaultPurchaseAppliedByTab') &&
+      modalText.includes('Number(item.defaultPurchase)') &&
+      modalText.includes('purchase: nextApplied'),
+    '통합 모달 구매량 적용 버튼 계약 유지',
+    '통합 모달 구매량 적용 버튼이 기본 구매량을 구매량 칸에 반영하지 못할 수 있습니다'
+  );
+
+  checkSource(
+    modalText.includes('hasDraftForItem') &&
+      modalText.includes('hasPersistedInventoryValues') &&
+      modalText.includes('if (!isDrafted && !hasPersistedInventoryValues(item))') &&
+      modalText.includes('inventory_is_manual'),
+    '약품/키트 저장 대상 및 재고 기준점 계약 유지',
+    '약품/키트 빈 행 제외 또는 직접 재고 수정 기준점 계약이 깨졌습니다'
+  );
+
+  const handleCloseMatch = modalText.match(/const handleClose = async \(\) => \{[\s\S]*?\n    const renderWaterSidebar/);
+  const handleCloseBody = handleCloseMatch ? handleCloseMatch[0] : '';
+  checkSource(
+    handleCloseBody &&
+      !handleCloseBody.includes('savePlan(') &&
+      !handleCloseBody.includes('buildSavePlan(') &&
+      !handleCloseBody.includes('자동 저장') &&
+      handleCloseBody.includes('저장하지 않고 닫을까요?'),
+    '통합 모달 닫기 버튼 저장 금지 계약 유지',
+    '통합 모달 닫기/X 버튼에서 자동 저장이 다시 동작할 수 있습니다'
+  );
+
+  checkSource(
+    modalText.includes("if (!isSludge && field === 'reading')") &&
+      modalText.includes("if (!isSludge && field === 'calculatedFlow')") &&
+      modalText.includes('nextDraft.reading = round1(previousReading + calculatedFlow)') &&
+      flowRoutesText.includes('일반/임포트/관리자 값은 raw 차이로 정규화'),
+    '유량 검침값/유량값 상호 계산 및 이후 재계산 계약 유지',
+    '유량 검침값/유량값 상호 계산 또는 이후 유량 재계산 계약이 깨졌습니다'
+  );
+
+  checkSource(
+    medicineRoutesText.includes('item.inventory_is_manual || item.inventoryIsManual') &&
+      kitRoutesText.includes('item.inventory_is_manual || item.inventoryIsManual'),
+    '약품/키트 직접 재고 수정 시에만 재고 기준점 지정 계약 유지',
+    '약품/키트 구매/사용 저장만으로 재고 기준점이 생길 수 있습니다'
+  );
+
+  checkSource(
+    dailyWorkLogText.includes('getCurrentMethod') &&
+      dailyWorkLogText.includes('method: context.method') &&
+      reportTemplateText.includes("'일일업무일지(A2O)'") &&
+      reportTemplateText.includes("'일일업무일지(MBR)'") &&
+      reportTemplateText.includes('getDailyWorkLogTemplateCandidates'),
+    '공법별 일일업무일지 HWPX 양식 선택 계약 유지',
+    '공법별 일일업무일지 HWPX 양식 선택 로직이 빠졌습니다'
+  );
 }
 
 function validateRouteRegistry() {
@@ -226,6 +336,7 @@ function validateAsarPackage(asarPath) {
   console.log(`\n${colors.blue}▶ ASAR 패키지 검증${colors.reset}`);
   
   const unpackPath = asarPath.replace('.asar', '.asar.unpacked');
+  const resourcesPath = path.dirname(asarPath);
   
   // asar 파일 존재 확인
   if (fs.existsSync(asarPath)) {
@@ -270,6 +381,8 @@ function validateAsarPackage(asarPath) {
       : [];
     if (leakedBigQueryKeys.length) error(`패키지에 BigQuery 키 포함됨: ${leakedBigQueryKeys.join(', ')}`);
     else success('패키지 BigQuery 키 미포함');
+
+    validateReportTemplateFiles(resourcesPath, '패키지 리소스');
   } else {
     warn(`asar.unpacked 디렉토리 없음: ${unpackPath}`);
   }
@@ -453,6 +566,7 @@ function printSummary() {
   
   validateRequiredFiles();
   validateRuntimeConfigPackagingContract();
+  validateRegressionContracts();
   validateRouteRegistry();
   validateApiSpec();
   validateEnvVariables();

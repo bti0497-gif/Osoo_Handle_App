@@ -129,7 +129,7 @@ module.exports = function (db) {
                 }
                 const touched = touchedByKit.get(item.kit_name);
                 touched.dates.add(item.date);
-                if (item.current_inventory !== null && item.current_inventory !== undefined) {
+                if (item.inventory_is_manual || item.inventoryIsManual) {
                     touched.explicitDates.add(item.date);
                 }
             });
