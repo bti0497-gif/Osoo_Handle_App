@@ -15,6 +15,15 @@ function deleteMember(...args) {
 function isSheetsConfigured(...args) {
   return require('../services/membersSheetsService.cjs').isSheetsConfigured(...args);
 }
+function getMembersFromDriveBackup(...args) {
+  return require('../services/membersDriveBackupService.cjs').getMembersFromDriveBackup(...args);
+}
+function findMemberInDriveBackup(...args) {
+  return require('../services/membersDriveBackupService.cjs').findMemberInDriveBackup(...args);
+}
+function syncMembersBackupToDrive(...args) {
+  return require('../services/membersDriveBackupService.cjs').syncMembersBackupToDrive(...args);
+}
 function detectRemoteSession(...args) {
   return require('../services/remoteSessionDetectService.cjs').detectRemoteSession(...args);
 }
@@ -136,6 +145,33 @@ module.exports = (db) => {
             upsertLocalMember(member);
         }
     });
+
+    const getMembersWithDriveFallback = async () => {
+        let sheetsError = null;
+        if (isSheetsConfigured()) {
+            try {
+                const members = await getMembers();
+                if (Array.isArray(members) && members.length > 0) {
+                    syncMembersBackupToDrive(members).catch((backupErr) => {
+                        console.warn('[auth] Drive 회원 백업 갱신 실패:', backupErr.message);
+                    });
+                    return { members, source: 'sheets' };
+                }
+                console.warn('[auth] Sheets 회원 목록이 비어 있어 Drive JSON 백업으로 재시도합니다.');
+            } catch (err) {
+                sheetsError = err;
+                console.warn('[auth] Sheets 회원 조회 실패, Drive JSON 백업으로 재시도:', err.message);
+            }
+        }
+
+        const driveMembers = await getMembersFromDriveBackup();
+        if (driveMembers.length > 0) {
+            return { members: driveMembers, source: 'drive-json', sheetsError };
+        }
+
+        if (sheetsError) throw sheetsError;
+        return { members: [], source: 'none' };
+    };
 
     const parseSiteNames = (siteName1) => String(siteName1 || '')
         .split(',')
@@ -389,15 +425,21 @@ module.exports = (db) => {
         }
 
         try {
-            if (!isSheetsConfigured()) {
-                return res.status(503).json({ success: false, message: 'Google Sheets 회원 조회가 설정되지 않았습니다.' });
-            }
-
-            const members = await getMembers();
-            const member = members.find((row) => (
+            const lookup = await getMembersWithDriveFallback();
+            const members = lookup.members || [];
+            let member = members.find((row) => (
                 String(row?.name || '').trim() === name
                 && String(row?.password || '') === password
             ));
+            let source = lookup.source;
+            if (!member) {
+                member = await findMemberInDriveBackup(name, password);
+                if (member) source = 'drive-json';
+            }
+
+            if (!member && lookup.source === 'none') {
+                return res.status(503).json({ success: false, message: '회원 조회 설정을 확인할 수 없습니다. Google Sheets 또는 Drive members.json을 확인해 주세요.' });
+            }
 
             if (!member) {
                 return res.status(401).json({ success: false, message: '이름 또는 비밀번호가 일치하지 않습니다.' });
@@ -406,8 +448,8 @@ module.exports = (db) => {
             const role = String(member.role || 'user').trim();
             const isAdmin = role === 'admin' || role === 'group_admin' || name === 'admin';
             if (isAdmin) {
-                setActiveUser(member, 'discovery-login');
-                return res.json({ success: true, member, source: 'sheets' });
+                setActiveUser(member, `discovery-login:${source}`);
+                return res.json({ success: true, member, source });
             }
 
             syncLocalMembers([member]);
@@ -420,7 +462,7 @@ module.exports = (db) => {
             return res.json({
                 success: true,
                 member: enrichMemberWithSites(localMember || member),
-                source: 'sheets'
+                source
             });
         } catch (err) {
             return res.status(500).json({ success: false, error: err.message });
