@@ -31,7 +31,7 @@ jobs:
       - name: Build Electron app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --config electron-builder.config.js --publish always
+        run: npx electron-builder --config electron-builder.config.cjs --publish always
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

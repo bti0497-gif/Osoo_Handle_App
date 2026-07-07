@@ -14,7 +14,7 @@
     "start": "node start.cjs",
     "electron:dev": "npm run build && electron .",
     "electron:build": "npx @electron/rebuild --force --arch=x64 --electron-version=40.6.0 && npm run build && electron-builder --config electron-builder.config.cjs",
-    "electron:publish": "npx @electron/rebuild --force --arch=x64 --electron-version=40.6.0 && npm run build && electron-builder --config electron-builder.config.js --publish always",
+    "electron:publish": "npx @electron/rebuild --force --arch=x64 --electron-version=40.6.0 && npm run build && electron-builder --config electron-builder.config.cjs --publish always",
     "validate": "node scripts/validate-release.cjs",
     "validate:asar": "node scripts/validate-release.cjs --asar-path ./release/win-unpacked/resources/app.asar",
     "validate:api": "node scripts/validate-release.cjs --api-test",

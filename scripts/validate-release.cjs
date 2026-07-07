@@ -73,11 +73,18 @@ function validateRequiredFiles() {
   
   checkFileExists(path.join(BASE_DIR, 'package.json'), 'package.json');
   checkFileExists(path.join(BASE_DIR, 'electron-builder.config.js'), 'electron-builder.config.js');
+  checkFileExists(path.join(BASE_DIR, 'electron-builder.config.cjs'), 'electron-builder.config.cjs');
   checkFileExists(path.join(BASE_DIR, 'server', 'config', 'runtimeConfig.cjs'), '런타임 설정 로더');
   checkFileExists(path.join(BASE_DIR, 'scripts', 'provision-runtime-config.cjs'), '런타임 설정 프로비저닝 도구');
   validateReportTemplateFiles(BASE_DIR, '원본');
 
-  const configText = fs.readFileSync(path.join(BASE_DIR, 'electron-builder.config.js'), 'utf8');
+  const wrapperConfigText = fs.readFileSync(path.join(BASE_DIR, 'electron-builder.config.js'), 'utf8');
+  const configText = fs.readFileSync(path.join(BASE_DIR, 'electron-builder.config.cjs'), 'utf8');
+  if (wrapperConfigText.includes("import config from './electron-builder.config.cjs'")) {
+    success('electron-builder.config.js가 CommonJS 본문 대신 .cjs 설정을 참조함');
+  } else {
+    error('electron-builder.config.js가 .cjs 설정 wrapper가 아닙니다');
+  }
   if (configText.includes("'.env.local'")) {
     error('electron-builder에 .env.local 포함 규칙이 남아 있습니다');
   } else {
