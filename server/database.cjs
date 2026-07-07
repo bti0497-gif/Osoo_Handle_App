@@ -411,6 +411,20 @@ function normalizeLegacyQntechValueExpression(columnName) {
   return `CASE WHEN ${columnName} IN ('-1', '-1.0', '-1.00') THEN '초과' ELSE CAST(${columnName} AS TEXT) END`;
 }
 
+function selectExistingColumn(columnNames, candidates, fallback = 'NULL') {
+  const found = candidates.find((columnName) => columnNames.includes(columnName));
+  return found || fallback;
+}
+
+function coalesceExistingExpressions(columnNames, entries, fallback = 'NULL') {
+  const expressions = entries
+    .filter((entry) => columnNames.includes(entry.column))
+    .map((entry) => entry.expression || entry.column);
+  if (expressions.length === 0) return fallback;
+  if (expressions.length === 1) return expressions[0];
+  return `COALESCE(${expressions.join(', ')})`;
+}
+
 function migrateLegacyWaterQualitySchema() {
   const waterColumnInfo = db.prepare("PRAGMA table_info(water_quality)").all();
   const waterColumnNames = waterColumnInfo.map((item) => item.name);
@@ -425,6 +439,25 @@ function migrateLegacyWaterQualitySchema() {
   const backupTableName = `water_quality_legacy_backup_${Date.now()}`;
   db.exec(`ALTER TABLE water_quality RENAME TO ${backupTableName}`);
   createCertificateWaterQualityTable();
+
+  const sourceDate = selectExistingColumn(
+    waterColumnNames,
+    ['report_date', 'date', 'sample_date', 'uploaded_at', 'created_at'],
+    "date('now')"
+  );
+  const category = coalesceExistingExpressions(waterColumnNames, [
+    { column: 'certificate_category' },
+    { column: 'category' },
+    { column: 'source_payload_json', expression: "json_extract(source_payload_json, '$.certificate_file.category')" },
+  ]);
+  const driveFileName = coalesceExistingExpressions(waterColumnNames, [
+    { column: 'certificate_file_name' },
+    { column: 'drive_file_name' },
+    { column: 'source_payload_json', expression: "json_extract(source_payload_json, '$.certificate_file.file_name')" },
+  ]);
+  const selectOrNull = (columnName) => selectExistingColumn(waterColumnNames, [columnName]);
+  const selectOrDefault = (columnName, fallback) => selectExistingColumn(waterColumnNames, [columnName], fallback);
+
   db.exec(`
     INSERT INTO water_quality (
       id, uploaded_at, report_date, category, site_name, site_name_raw,
@@ -432,23 +465,23 @@ function migrateLegacyWaterQualitySchema() {
       created_at, last_modified, is_synced
     )
     SELECT
-      id,
-      created_at AS uploaded_at,
-      report_date,
-      COALESCE(certificate_category, json_extract(source_payload_json, '$.certificate_file.category')) AS category,
-      site_name,
-      site_name_raw,
-      bod,
-      ss,
-      tn,
-      tp,
-      mlss,
-      total_coliform,
-      COALESCE(certificate_file_name, json_extract(source_payload_json, '$.certificate_file.file_name')) AS drive_file_name,
-      source_pdf_name,
-      created_at,
-      last_modified,
-      is_synced
+      ${selectOrDefault('id', 'NULL')},
+      ${selectOrDefault('uploaded_at', selectOrDefault('created_at', "datetime('now', 'localtime')"))} AS uploaded_at,
+      ${sourceDate} AS report_date,
+      ${category} AS category,
+      ${selectOrNull('site_name')} AS site_name,
+      ${selectOrNull('site_name_raw')} AS site_name_raw,
+      ${selectOrNull('bod')} AS bod,
+      ${selectOrNull('ss')} AS ss,
+      ${selectOrNull('tn')} AS tn,
+      ${selectOrNull('tp')} AS tp,
+      ${selectOrNull('mlss')} AS mlss,
+      ${selectOrNull('total_coliform')} AS total_coliform,
+      ${driveFileName} AS drive_file_name,
+      ${selectOrNull('source_pdf_name')} AS source_pdf_name,
+      ${selectOrDefault('created_at', "datetime('now', 'localtime')")} AS created_at,
+      ${selectOrDefault('last_modified', selectOrDefault('created_at', "datetime('now', 'localtime')"))} AS last_modified,
+      ${selectOrDefault('is_synced', '0')} AS is_synced
     FROM ${backupTableName}
   `);
   db.exec(`DROP TABLE ${backupTableName}`);
@@ -464,6 +497,11 @@ if (hasOperationalWaterColumns) {
   db.transaction(() => {
     const selectOrNull = (columnName) => waterColumnNames.includes(columnName) ? columnName : 'NULL';
     const selectOrDefault = (columnName, fallback) => waterColumnNames.includes(columnName) ? columnName : fallback;
+    const legacyDateExpression = selectExistingColumn(
+      waterColumnNames,
+      ['date', 'report_date', 'sample_date', 'created_at', 'uploaded_at'],
+      "''"
+    );
     const itemMappings = [
       ['암모니아성질소(NH3-N)', 'nh3_n', 'mg/L'],
       ['질산성질소(NO3-N)', 'no3_n', 'mg/L'],
@@ -496,9 +534,12 @@ if (hasOperationalWaterColumns) {
         is_synced = excluded.is_synced
     `);
 
-    const rows = db.prepare(`
+    const valueSelects = itemMappings.map(([, columnName]) => (
+      `${normalizeLegacyQntechValueExpression(columnName)} AS ${columnName}`
+    ));
+    const rows = itemMappings.length > 0 ? db.prepare(`
       SELECT
-        ${selectOrDefault('date', "''")} AS date,
+        ${legacyDateExpression} AS date,
         ${selectOrNull('site_id')} AS site_id,
         ${selectOrNull('site_name')} AS site_name,
         ${selectOrDefault('measurement_group', "''")} AS measurement_group,
@@ -507,13 +548,13 @@ if (hasOperationalWaterColumns) {
         ${selectOrNull('source_label')} AS source_label,
         ${selectOrNull('qntech_project_id')} AS qntech_project_id,
         ${selectOrDefault('location', "'기본'")} AS location,
-        ${itemMappings.map(([, columnName]) => `${normalizeLegacyQntechValueExpression(columnName)} AS ${columnName}`).join(', ')},
+        ${valueSelects.join(', ')},
         ${selectOrNull('author')} AS author,
         ${selectOrDefault('created_at', "datetime('now', 'localtime')")} AS created_at,
         ${selectOrDefault('last_modified', "datetime('now', 'localtime')")} AS last_modified,
         ${selectOrDefault('is_synced', '0')} AS is_synced
       FROM water_quality
-    `).all();
+    `).all() : [];
 
     for (const row of rows) {
       if (!row.date) continue;
@@ -552,6 +593,7 @@ if (hasOperationalWaterColumns) {
 }
 
 [
+  ['report_date', 'DATE'],
   ['uploaded_at', 'TEXT'],
   ['category', 'TEXT'],
   ['site_name', 'TEXT'],
