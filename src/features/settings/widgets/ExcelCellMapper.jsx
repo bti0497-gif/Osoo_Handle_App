@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 export default function ExcelCellMapper({
     config,
@@ -11,17 +11,57 @@ export default function ExcelCellMapper({
     onStartRowChange,
     onEndRowChange,
 }) {
+    const [startRowDraft, setStartRowDraft] = useState(String(config.startRow || ''));
+    const [endRowDraft, setEndRowDraft] = useState(String(config.endRow || ''));
+    const startTimerRef = useRef(null);
+    const endTimerRef = useRef(null);
+
+    useEffect(() => {
+        setStartRowDraft(String(config.startRow || ''));
+    }, [config.startRow]);
+
+    useEffect(() => {
+        setEndRowDraft(String(config.endRow || ''));
+    }, [config.endRow]);
+
+    useEffect(() => () => {
+        if (startTimerRef.current) clearTimeout(startTimerRef.current);
+        if (endTimerRef.current) clearTimeout(endTimerRef.current);
+    }, []);
+
     const updateStartRow = (value) => {
         const start = parseInt(value, 10) || 1;
         const end = start + 30;
-        setConfig({ ...config, startRow: start, endRow: end });
+        setConfig((prev) => ({ ...prev, startRow: start, endRow: end }));
         onStartRowChange?.(start, end);
     };
 
     const updateEndRow = (value) => {
         const end = parseInt(value, 10) || 31;
-        setConfig({ ...config, endRow: end });
+        setConfig((prev) => ({ ...prev, endRow: end }));
         onEndRowChange?.(end);
+    };
+
+    const scheduleStartRowUpdate = (value) => {
+        setStartRowDraft(value);
+        if (startTimerRef.current) clearTimeout(startTimerRef.current);
+        startTimerRef.current = setTimeout(() => updateStartRow(value), 350);
+    };
+
+    const scheduleEndRowUpdate = (value) => {
+        setEndRowDraft(value);
+        if (endTimerRef.current) clearTimeout(endTimerRef.current);
+        endTimerRef.current = setTimeout(() => updateEndRow(value), 350);
+    };
+
+    const commitStartRowNow = () => {
+        if (startTimerRef.current) clearTimeout(startTimerRef.current);
+        updateStartRow(startRowDraft);
+    };
+
+    const commitEndRowNow = () => {
+        if (endTimerRef.current) clearTimeout(endTimerRef.current);
+        updateEndRow(endRowDraft);
     };
 
     return (
@@ -54,8 +94,15 @@ export default function ExcelCellMapper({
                 <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>{startLabel}</label>
                 <input
                     type="number"
-                    value={config.startRow}
-                    onChange={(e) => updateStartRow(e.target.value)}
+                    value={startRowDraft}
+                    onChange={(e) => scheduleStartRowUpdate(e.target.value)}
+                    onBlur={commitStartRowNow}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitStartRowNow();
+                        }
+                    }}
                     style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
                 />
             </div>
@@ -63,8 +110,15 @@ export default function ExcelCellMapper({
                 <label style={{ display: 'block', fontSize: '0.625rem', fontWeight: 900, color: '#64748b', marginBottom: '6px' }}>{endLabel}</label>
                 <input
                     type="number"
-                    value={config.endRow}
-                    onChange={(e) => updateEndRow(e.target.value)}
+                    value={endRowDraft}
+                    onChange={(e) => scheduleEndRowUpdate(e.target.value)}
+                    onBlur={commitEndRowNow}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitEndRowNow();
+                        }
+                    }}
                     style={{ width: '100%', height: '40px', border: '1.5px solid #cbd5e1', borderRadius: '8px', padding: '0 12px', fontSize: '0.8125rem', fontWeight: 700 }}
                 />
             </div>

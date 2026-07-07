@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { SettingsModel } from '../SettingsModel';
 
 export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
@@ -11,6 +11,7 @@ export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
     const [isMetadataLoading, setIsMetadataLoading] = useState(false);
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
+    const previewRequestIdRef = useRef(0);
 
     const hydrateTemplateSettings = (settings = {}) => {
         if (settings.excel_template_path) {
@@ -43,14 +44,20 @@ export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
     };
 
     const loadExcelPreview = async (sheet, row) => {
+        const requestId = previewRequestIdRef.current + 1;
+        previewRequestIdRef.current = requestId;
         setIsPreviewLoading(true);
         try {
             const res = await SettingsModel.getExcelPreview(sheet, row);
+            if (requestId !== previewRequestIdRef.current) return;
             setSampleRowData(res.success ? res.data : {});
         } catch {
+            if (requestId !== previewRequestIdRef.current) return;
             setSampleRowData({});
         } finally {
-            setIsPreviewLoading(false);
+            if (requestId === previewRequestIdRef.current) {
+                setIsPreviewLoading(false);
+            }
         }
     };
 
