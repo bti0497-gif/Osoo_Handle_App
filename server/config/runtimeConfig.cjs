@@ -8,6 +8,11 @@ const PROJECT_ROOT = path.join(__dirname, '..', '..');
 const APP_DATA_ROOT = process.env.OSOO_APP_DATA_PATH
   || path.join(process.env.APPDATA || process.env.LOCALAPPDATA || PROJECT_ROOT, 'Osoo_Handle_App');
 const RUNTIME_CONFIG_DIR = path.join(APP_DATA_ROOT, 'config');
+const LEGACY_RUNTIME_CONFIG_DIR = path.join(
+  process.env.APPDATA || process.env.LOCALAPPDATA || PROJECT_ROOT,
+  'wastewater-treatment-plant',
+  'config'
+);
 const IS_PACKAGED = String(process.env.OSOO_PACKAGED || '0') === '1';
 
 function runtimeConfigPath(fileName) {
@@ -16,6 +21,11 @@ function runtimeConfigPath(fileName) {
 
 function resolveRuntimeConfigFile(fileName, developmentFallbacks = []) {
   const runtimePath = runtimeConfigPath(fileName);
+  if (fs.existsSync(runtimePath)) return runtimePath;
+
+  const legacyPath = path.join(LEGACY_RUNTIME_CONFIG_DIR, fileName);
+  if (fs.existsSync(legacyPath)) return legacyPath;
+
   if (fs.existsSync(runtimePath) || IS_PACKAGED) return runtimePath;
   return developmentFallbacks.find((candidate) => candidate && fs.existsSync(candidate)) || runtimePath;
 }
@@ -46,10 +56,11 @@ function getFirebaseServiceAccountPath() {
 }
 
 function findOAuthClientSecretPath() {
-  if (fs.existsSync(RUNTIME_CONFIG_DIR)) {
-    const runtimeMatch = fs.readdirSync(RUNTIME_CONFIG_DIR)
+  for (const dir of [RUNTIME_CONFIG_DIR, LEGACY_RUNTIME_CONFIG_DIR]) {
+    if (!fs.existsSync(dir)) continue;
+    const runtimeMatch = fs.readdirSync(dir)
       .find((name) => /^client_secret_.*\.json$/i.test(name));
-    if (runtimeMatch) return path.join(RUNTIME_CONFIG_DIR, runtimeMatch);
+    if (runtimeMatch) return path.join(dir, runtimeMatch);
   }
   if (IS_PACKAGED) return '';
   try {
@@ -64,6 +75,7 @@ function findOAuthClientSecretPath() {
 module.exports = {
   APP_DATA_ROOT,
   IS_PACKAGED,
+  LEGACY_RUNTIME_CONFIG_DIR,
   PROJECT_ROOT,
   RUNTIME_CONFIG_DIR,
   findOAuthClientSecretPath,

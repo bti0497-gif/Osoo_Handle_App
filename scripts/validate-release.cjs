@@ -75,6 +75,54 @@ function validateRequiredFiles() {
   }
 }
 
+function validateRuntimeConfigPackagingContract() {
+  console.log(`\n${colors.blue}▶ 런타임 설정 패키징 계약 검증${colors.reset}`);
+
+  const runtimeConfigPath = path.join(BASE_DIR, 'server', 'config', 'runtimeConfig.cjs');
+  const runtimeConfigText = fs.readFileSync(runtimeConfigPath, 'utf8');
+  if (runtimeConfigText.includes("'Osoo_Handle_App'") || runtimeConfigText.includes('"Osoo_Handle_App"')) {
+    success('앱 기본 런타임 설정 경로 확인: %APPDATA%\\Osoo_Handle_App\\config');
+  } else {
+    error('앱 기본 런타임 설정 경로가 Osoo_Handle_App\\config를 가리키지 않습니다');
+  }
+  if (runtimeConfigText.includes('LEGACY_RUNTIME_CONFIG_DIR') && runtimeConfigText.includes("'wastewater-treatment-plant'")) {
+    success('레거시 런타임 설정 경로 fallback 확인: %APPDATA%\\wastewater-treatment-plant\\config');
+  } else {
+    error('레거시 런타임 설정 fallback 누락: 기존 현장 설정을 읽을 수 없습니다');
+  }
+
+  const pathChecks = [
+    ['scripts/provision-runtime-config.cjs', ['Osoo_Handle_App', 'wastewater-treatment-plant']],
+    ['scripts/provision-runtime-config.ps1', ['Osoo_Handle_App', 'wastewater-treatment-plant']],
+    ['scripts/install-with-provisioning.ps1', ['Osoo_Handle_App']],
+    ['scripts/build-integrated-installer.ps1', ['Osoo_Handle_App', 'wastewater-treatment-plant']],
+  ];
+  for (const [relativePath, tokens] of pathChecks) {
+    const filePath = path.join(BASE_DIR, relativePath);
+    if (!fs.existsSync(filePath)) {
+      error(`런타임 설정 스크립트 누락: ${relativePath}`);
+      continue;
+    }
+    const text = fs.readFileSync(filePath, 'utf8');
+    for (const token of tokens) {
+      if (text.includes(token)) success(`${relativePath} 경로 토큰 확인: ${token}`);
+      else error(`${relativePath} 경로 토큰 누락: ${token}`);
+    }
+  }
+
+  const installScriptText = fs.readFileSync(path.join(BASE_DIR, 'scripts', 'build-integrated-installer.ps1'), 'utf8');
+  const requiredCredentialNames = [
+    '.env.local',
+    'google-key.json',
+    'bigquery-service-account.json',
+    'firebase-service-account.json',
+  ];
+  for (const name of requiredCredentialNames) {
+    if (installScriptText.includes(name)) success(`통합 설치파일 자격증명 항목 확인: ${name}`);
+    else error(`통합 설치파일 자격증명 항목 누락: ${name}`);
+  }
+}
+
 function validateRouteRegistry() {
   console.log(`\n${colors.blue}▶ 라우트 레지스트리 검증${colors.reset}`);
   
@@ -404,6 +452,7 @@ function printSummary() {
   const hasApiTest = args.includes('--api-test');
   
   validateRequiredFiles();
+  validateRuntimeConfigPackagingContract();
   validateRouteRegistry();
   validateApiSpec();
   validateEnvVariables();

@@ -53,3 +53,12 @@ npm run validate:asar
 ```
 
 자세한 절차는 `docs/RELEASE_GUIDE.md`를 따릅니다.
+
+## 패키징/설정 경로 원칙
+
+- 앱 런타임 설정의 기준 경로는 `%APPDATA%\Osoo_Handle_App\config`입니다.
+- 기존 현장 설치와의 호환을 위해 `%APPDATA%\wastewater-treatment-plant\config`도 fallback으로 읽습니다.
+- 설치/프로비저닝 스크립트는 `.env.local`, `google-key.json`, `bigquery-service-account.json`, `firebase-service-account.json`을 기준 경로에 반드시 복사하고, 호환 경로에도 함께 복사합니다.
+- 자격증명 파일은 설치 패키지 본문에 포함하지 않고, 설치/프로비저닝 단계에서 사용자 AppData에 배치합니다.
+- 릴리즈 전 `npm run validate`는 런타임 설정 경로 계약을 검증해야 하며, `npm run validate:asar`는 패키지 안에 자격증명이 포함되지 않았는지 확인해야 합니다.
+- 현장 로그인 장애가 발생하면 먼저 `%APPDATA%\Osoo_Handle_App\config\.env.local`과 `%APPDATA%\Osoo_Handle_App\config\google-key.json` 존재 여부를 확인합니다.

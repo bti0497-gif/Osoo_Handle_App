@@ -63,16 +63,22 @@ $includeLines = @(
     '!macro customInstall'
     '  SetShellVarContext current'
     '  DetailPrint "Installing shared service configuration."'
+    '  CreateDirectory "$APPDATA\Osoo_Handle_App\config"'
     '  CreateDirectory "$APPDATA\wastewater-treatment-plant\config"'
-    '  SetOutPath "$APPDATA\wastewater-treatment-plant\config"'
+    '  SetOutPath "$APPDATA\Osoo_Handle_App\config"'
 )
+foreach ($entry in $requiredFiles.GetEnumerator() | Sort-Object Key) {
+    $sourcePath = ConvertTo-NsisSourcePath $entry.Value
+    $includeLines += "  File /oname=$($entry.Key) `"$sourcePath`""
+}
+$includeLines += '  SetOutPath "$APPDATA\wastewater-treatment-plant\config"'
 foreach ($entry in $requiredFiles.GetEnumerator() | Sort-Object Key) {
     $sourcePath = ConvertTo-NsisSourcePath $entry.Value
     $includeLines += "  File /oname=$($entry.Key) `"$sourcePath`""
 }
 $includeLines += '  DetailPrint "Verifying shared service configuration."'
 foreach ($entry in $requiredFiles.GetEnumerator() | Sort-Object Key) {
-    $includeLines += "  IfFileExists `"`$APPDATA\wastewater-treatment-plant\config\$($entry.Key)`" +2 0"
+    $includeLines += "  IfFileExists `"`$APPDATA\Osoo_Handle_App\config\$($entry.Key)`" +2 0"
     $includeLines += "    Abort `"Failed to install required configuration: $($entry.Key)`""
 }
 $includeLines += @(
