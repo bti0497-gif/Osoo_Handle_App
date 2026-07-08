@@ -29,6 +29,7 @@ const { getGoogleServiceAccountPath, loadRuntimeEnv } = require('../config/runti
 loadRuntimeEnv();
 const KEY_FILE   = getGoogleServiceAccountPath();
 const SHEET_NAME = 'Wastewater_Sites';
+const SITE_LOCATIONS_SHEET_NAME = 'Wastewater_Site_Locations';
 const KMSC_SHEET_NAME = 'KMSC';
 const APP_SETTINGS_SHEET_NAME = 'Wastewater_App_Settings';
 const HEADER_ROW = [
@@ -46,6 +47,7 @@ const HEADER_ROW = [
   'qntech_site_id',
 ];
 const APP_SETTINGS_HEADER_ROW = ['setting_key', 'setting_value', 'notes'];
+const SITE_LOCATIONS_HEADER_ROW = ['id', 'site_name', 'target_lat', 'target_lng', 'radius_m', 'map_url', 'notes'];
 
 // 서비스 계정 인증
 const auth = new google.auth.GoogleAuth({
@@ -159,6 +161,30 @@ function rowToSite(row, header = HEADER_ROW) {
   };
 }
 
+function toFiniteNumberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(String(value).trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function rowToSiteLocation(row, header = SITE_LOCATIONS_HEADER_ROW) {
+  const index = headerIndex(header);
+  const get = (col) => row[index[col]] ?? '';
+  const id = String(get('id') || '').trim();
+  const siteName = String(get('site_name') || '').trim();
+  if (!id && !siteName) return null;
+
+  return {
+    id,
+    site_name: siteName,
+    target_lat: toFiniteNumberOrNull(get('target_lat')),
+    target_lng: toFiniteNumberOrNull(get('target_lng')),
+    radius_m: toFiniteNumberOrNull(get('radius_m')) ?? 500,
+    map_url: String(get('map_url') || '').trim(),
+    notes: String(get('notes') || '').trim(),
+  };
+}
+
 async function getKmscSiteSettings(sheetId) {
   try {
     const res = await sheets.spreadsheets.values.get({
@@ -185,6 +211,49 @@ async function getKmscSiteSettings(sheetId) {
   } catch (error) {
     if (error?.code === 400 || error?.code === 404) {
       return new Map();
+    }
+    throw error;
+  }
+}
+
+async function getSiteLocationSettings(sheetId) {
+  try {
+    await ensureNamedSheetExists(sheetId, SITE_LOCATIONS_SHEET_NAME);
+
+    const headerRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${SITE_LOCATIONS_SHEET_NAME}!1:1`
+    });
+    const existing = (headerRes.data.values || [])[0] || [];
+    const header = normalizeHeaderFor(existing, SITE_LOCATIONS_HEADER_ROW);
+    if (existing[0] !== 'id' || header.some((col, idx) => col !== existing[idx])) {
+      const endCol = columnLetter(header.length - 1);
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: `${SITE_LOCATIONS_SHEET_NAME}!A1:${endCol}1`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [header] }
+      });
+    }
+
+    const endCol = columnLetter(header.length - 1);
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: `${SITE_LOCATIONS_SHEET_NAME}!A2:${endCol}`
+    });
+
+    const byId = new Map();
+    const byName = new Map();
+    for (const row of res.data.values || []) {
+      const location = rowToSiteLocation(row, header);
+      if (!location) continue;
+      if (location.id) byId.set(location.id, location);
+      if (location.site_name) byName.set(location.site_name, location);
+    }
+    return { byId, byName };
+  } catch (error) {
+    if (error?.code === 400 || error?.code === 404) {
+      return { byId: new Map(), byName: new Map() };
     }
     throw error;
   }
@@ -353,6 +422,7 @@ async function getSites() {
   const header = await ensureHeader(sheetId);
   const endCol = columnLetter(header.length - 1);
   const kmscSettings = await getKmscSiteSettings(sheetId);
+  const locationSettings = await getSiteLocationSettings(sheetId);
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
@@ -364,12 +434,17 @@ async function getSites() {
     .map((row) => {
       const site = rowToSite(row, header);
       const kmsc = kmscSettings.get(String(site.site_name || '').trim());
-      if (!kmsc) return site;
+      const location = locationSettings.byId.get(String(site.id || '').trim())
+        || locationSettings.byName.get(String(site.site_name || '').trim())
+        || null;
       return {
         ...site,
-        water_analysis_user_id: kmsc.water_analysis_user_id || site.water_analysis_user_id,
-        water_analysis_password: kmsc.water_analysis_password || site.water_analysis_password,
-        qntech_site_id: kmsc.qntech_site_id || site.qntech_site_id,
+        target_lat: location?.target_lat ?? site.target_lat,
+        target_lng: location?.target_lng ?? site.target_lng,
+        radius_m: location?.radius_m ?? site.radius_m,
+        water_analysis_user_id: kmsc?.water_analysis_user_id || site.water_analysis_user_id,
+        water_analysis_password: kmsc?.water_analysis_password || site.water_analysis_password,
+        qntech_site_id: kmsc?.qntech_site_id || site.qntech_site_id,
       };
     });
 }

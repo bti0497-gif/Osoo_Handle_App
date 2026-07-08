@@ -215,6 +215,8 @@ function validateRegressionContracts() {
   const kitModelPath = path.join(BASE_DIR, 'src', 'features', 'kit', 'KitModel.js');
   const waterQualityModelPath = path.join(BASE_DIR, 'src', 'features', 'water', 'WaterQualityModel.js');
   const waterQualityRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'waterQualityRoutes.cjs');
+  const sitesSheetsServicePath = path.join(BASE_DIR, 'server', 'services', 'sitesSheetsService.cjs');
+  const siteSettingsServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'siteSettingsService.cjs');
 
   const readText = (filePath) => (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '');
   const viewModelText = readText(unifiedViewModelPath);
@@ -252,6 +254,8 @@ function validateRegressionContracts() {
   const kitModelText = readText(kitModelPath);
   const waterQualityModelText = readText(waterQualityModelPath);
   const waterQualityRoutesText = readText(waterQualityRoutesPath);
+  const sitesSheetsServiceText = readText(sitesSheetsServicePath);
+  const siteSettingsServiceText = readText(siteSettingsServicePath);
 
   const checkSource = (condition, passMessage, failMessage) => {
     if (condition) success(passMessage);
@@ -507,6 +511,19 @@ function validateRegressionContracts() {
       reportTemplateText.includes('shouldReplacePlaceholder'),
     '일지 양식 패키징 및 AppData 동기화 계약 유지',
     '일지 양식이 패키지 리소스에 포함되거나 AppData로 동기화되는 계약이 깨졌습니다'
+  );
+
+  checkSource(
+    sitesSheetsServiceText.includes("const SITE_LOCATIONS_SHEET_NAME = 'Wastewater_Site_Locations';") &&
+      sitesSheetsServiceText.includes("const SITE_LOCATIONS_HEADER_ROW = ['id', 'site_name', 'target_lat', 'target_lng', 'radius_m', 'map_url', 'notes'];") &&
+      sitesSheetsServiceText.includes('function rowToSiteLocation') &&
+      sitesSheetsServiceText.includes('async function getSiteLocationSettings') &&
+      sitesSheetsServiceText.includes('locationSettings.byId.get') &&
+      sitesSheetsServiceText.includes('target_lat: location?.target_lat ?? site.target_lat') &&
+      siteSettingsServiceText.includes('target_lat: site.target_lat') &&
+      siteSettingsServiceText.includes('target_lat: matched.target_lat'),
+    '구글시트 현장 위치 좌표 병합 계약 유지',
+    'Wastewater_Site_Locations 시트의 target_lat/target_lng/radius_m 병합 로직이 깨졌습니다'
   );
 }
 

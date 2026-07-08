@@ -90,6 +90,9 @@ async function listSites(db) {
           manager_name: site.manager_name,
           method: site.method,
           series: site.series,
+          target_lat: site.target_lat,
+          target_lng: site.target_lng,
+          radius_m: site.radius_m,
           qntech_site_id: site.qntech_site_id,
           is_active: site.is_active
         }));
@@ -250,6 +253,9 @@ async function selectSite(db, siteId) {
           manager_name: matched.manager_name,
           method: matched.method,
           series: matched.series,
+          target_lat: matched.target_lat,
+          target_lng: matched.target_lng,
+          radius_m: matched.radius_m,
           qntech_site_id: matched.qntech_site_id
         };
         upsertLocalSite(db, site);
