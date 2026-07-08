@@ -238,7 +238,7 @@ const MedicineManagementView = ({ currentUser }) => {
                 mode={modalState.mode}
                 currentUser={currentUser}
                 initialTab={modalState.tab}
-                initialDate={modalState.mode === 'add' ? todayStr : (selectedDate || todayStr)}
+                initialDate={selectedDate || todayStr}
                 contexts={buildModalContexts()}
                 onClose={() => setModalState((prev) => ({ ...prev, open: false }))}
                 onSaveComplete={handleSaveComplete}

@@ -1502,7 +1502,7 @@ export default function UnifiedRecordModal({
                             flex: 1,
                             overflowY: 'auto',
                             opacity: isLoadingUnifiedData ? 0.55 : 1,
-                            pointerEvents: isLoadingUnifiedData || isSaving ? 'none' : 'auto',
+                            pointerEvents: 'auto',
                         }}>
                             {renderFields()}
                         </div>

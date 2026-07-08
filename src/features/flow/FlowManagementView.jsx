@@ -103,7 +103,7 @@ const FlowManagementView = ({ currentUser }) => {
         }
     }, [history.length]);
 
-    const modalDate = modalState.mode === 'add' ? todayStr : (selectedDate || todayStr);
+    const modalDate = selectedDate || todayStr;
     const selectedRow = history.find((row) => row.date === selectedDate) || null;
     const modalRow = history.find((row) => row.date === modalDate) || null;
 

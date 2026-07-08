@@ -23,6 +23,7 @@ module.exports = {
     'node_modules/**/*',
     'package.json',
     '!server/config/google-key.json',
+    '!server/config/bigquery-service-account.json',
     '!server/config/work-jindan-*.json',
     '!server/config/firebase-service-account.json',
   ],

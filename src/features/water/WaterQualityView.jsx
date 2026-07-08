@@ -298,7 +298,7 @@ const WaterQualityView = ({ currentUser }) => {
             open: true,
             tab: 'water',
             mode,
-            date: mode === 'add' ? todayStr : (selectedRow?.date || todayStr),
+            date: selectedRow?.date || todayStr,
         });
     };
 

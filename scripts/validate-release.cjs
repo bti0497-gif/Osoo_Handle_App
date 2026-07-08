@@ -56,6 +56,11 @@ function validateReportTemplateFiles(rootDir, description) {
     '일일업무일지.xlsx',
     '일일업무일지(A2O).hwpx',
     '일일업무일지(MBR).hwpx',
+    '수질분석일지.xlsx',
+    '약품관리대장.xlsx',
+    '약품입고일지.xlsx',
+    '슬러지반출관리대장.xlsx',
+    '슬러지사진대지.xlsx',
   ];
 
   for (const fileName of requiredTemplates) {
@@ -92,6 +97,7 @@ function validateRequiredFiles() {
   }
   const requiredExclusions = [
     '!server/config/google-key.json',
+    '!server/config/bigquery-service-account.json',
     '!server/config/work-jindan-*.json',
     '!server/config/firebase-service-account.json',
   ];
@@ -137,6 +143,8 @@ function validateRuntimeConfigPackagingContract() {
   }
 
   const installScriptText = fs.readFileSync(path.join(BASE_DIR, 'scripts', 'build-integrated-installer.ps1'), 'utf8');
+  const provisionScriptText = fs.readFileSync(path.join(BASE_DIR, 'scripts', 'provision-runtime-config.cjs'), 'utf8');
+  const installWithProvisioningText = fs.readFileSync(path.join(BASE_DIR, 'scripts', 'install-with-provisioning.ps1'), 'utf8');
   const requiredCredentialNames = [
     '.env.local',
     'google-key.json',
@@ -146,6 +154,30 @@ function validateRuntimeConfigPackagingContract() {
   for (const name of requiredCredentialNames) {
     if (installScriptText.includes(name)) success(`통합 설치파일 자격증명 항목 확인: ${name}`);
     else error(`통합 설치파일 자격증명 항목 누락: ${name}`);
+
+    const hasPrimaryInstallDir = installScriptText.includes('SetOutPath "$APPDATA\\Osoo_Handle_App\\config"');
+    const hasLegacyInstallDir = installScriptText.includes('SetOutPath "$APPDATA\\wastewater-treatment-plant\\config"');
+    const genericInstallFileCount = (installScriptText.match(/File \/oname=\$\(\$entry\.Key\)/g) || []).length;
+    if (hasPrimaryInstallDir && hasLegacyInstallDir && genericInstallFileCount >= 2) success(`통합 설치파일 양쪽 config 경로 복사 확인: ${name}`);
+    else error(`통합 설치파일이 ${name}을 기본/레거시 config 경로 양쪽에 복사하지 않습니다`);
+
+    if (installScriptText.includes('$APPDATA\\Osoo_Handle_App\\config\\$($entry.Key)')) {
+      success(`통합 설치파일 기본 config 검증 확인: ${name}`);
+    } else {
+      error(`통합 설치파일 기본 config 검증 누락: ${name}`);
+    }
+
+    if (provisionScriptText.includes(`target: '${name}'`) && provisionScriptText.includes('runtimeConfigDir') && provisionScriptText.includes('legacyRuntimeConfigDir')) {
+      success(`provision-runtime-config.cjs 양쪽 config 복사 계약 확인: ${name}`);
+    } else {
+      error(`provision-runtime-config.cjs ${name} 복사 계약 누락`);
+    }
+
+    if (installWithProvisioningText.includes(`Name = '${name}'`) && installWithProvisioningText.includes(`Join-Path $runtimeConfigRoot $_`)) {
+      success(`install-with-provisioning.ps1 요구/검증 확인: ${name}`);
+    } else {
+      error(`install-with-provisioning.ps1 ${name} 요구/검증 누락`);
+    }
   }
 }
 
@@ -159,6 +191,30 @@ function validateRegressionContracts() {
   const flowRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'flowRoutes.cjs');
   const medicineRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineRoutes.cjs');
   const kitRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'kitRoutes.cjs');
+  const settingsModelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'SettingsModel.js');
+  const settingsViewModelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'useSettingsViewModel.js');
+  const settingsViewPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'SettingsView.jsx');
+  const basicSitePanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'BasicSitePanel.jsx');
+  const settingsRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'settingsRoutes.cjs');
+  const mappingServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'mappingSettingsService.cjs');
+  const inventoryMappingPanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'InventoryMappingPanel.jsx');
+  const flowMappingPanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'FlowMappingPanel.jsx');
+  const excelCellMapperPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'widgets', 'ExcelCellMapper.jsx');
+  const useMappingSettingsPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'hooks', 'useMappingSettings.js');
+  const appSettingsServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'appSettingsService.cjs');
+  const electronBuilderConfigPath = path.join(BASE_DIR, 'electron-builder.config.cjs');
+  const excelMappingTemplateContractPath = path.join(BASE_DIR, 'EXCEL_MAPPING_TEMPLATE_CONTRACT.md');
+  const unifiedRecordModalContractPath = path.join(BASE_DIR, 'UNIFIED_RECORD_MODAL_CONTRACT.md');
+  const flowManagementViewPath = path.join(BASE_DIR, 'src', 'features', 'flow', 'FlowManagementView.jsx');
+  const medicineManagementViewPath = path.join(BASE_DIR, 'src', 'features', 'medicine', 'MedicineManagementView.jsx');
+  const kitManagementViewPath = path.join(BASE_DIR, 'src', 'features', 'kit', 'KitManagementView.jsx');
+  const waterQualityViewPath = path.join(BASE_DIR, 'src', 'features', 'water', 'WaterQualityView.jsx');
+  const inventoryCascadeServicePath = path.join(BASE_DIR, 'server', 'services', 'inventoryCascadeService.cjs');
+  const flowModelPath = path.join(BASE_DIR, 'src', 'features', 'flow', 'FlowModel.js');
+  const medicineModelPath = path.join(BASE_DIR, 'src', 'features', 'medicine', 'MedicineModel.js');
+  const kitModelPath = path.join(BASE_DIR, 'src', 'features', 'kit', 'KitModel.js');
+  const waterQualityModelPath = path.join(BASE_DIR, 'src', 'features', 'water', 'WaterQualityModel.js');
+  const waterQualityRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'waterQualityRoutes.cjs');
 
   const readText = (filePath) => (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '');
   const viewModelText = readText(unifiedViewModelPath);
@@ -168,6 +224,34 @@ function validateRegressionContracts() {
   const flowRoutesText = readText(flowRoutesPath);
   const medicineRoutesText = readText(medicineRoutesPath);
   const kitRoutesText = readText(kitRoutesPath);
+  const settingsBigQueryClearText = [
+    settingsModelPath,
+    settingsViewModelPath,
+    settingsViewPath,
+    basicSitePanelPath,
+    settingsRoutesPath,
+  ].map(readText).join('\n');
+  const mappingServiceText = readText(mappingServicePath);
+  const inventoryMappingPanelText = readText(inventoryMappingPanelPath);
+  const flowMappingPanelText = readText(flowMappingPanelPath);
+  const excelCellMapperText = readText(excelCellMapperPath);
+  const useMappingSettingsText = readText(useMappingSettingsPath);
+  const settingsRoutesText = readText(settingsRoutesPath);
+  const appSettingsServiceText = readText(appSettingsServicePath);
+  const basicSitePanelText = readText(basicSitePanelPath);
+  const electronBuilderConfigText = readText(electronBuilderConfigPath);
+  const excelMappingTemplateContractText = readText(excelMappingTemplateContractPath);
+  const unifiedRecordModalContractText = readText(unifiedRecordModalContractPath);
+  const flowManagementViewText = readText(flowManagementViewPath);
+  const medicineManagementViewText = readText(medicineManagementViewPath);
+  const kitManagementViewText = readText(kitManagementViewPath);
+  const waterQualityViewText = readText(waterQualityViewPath);
+  const inventoryCascadeServiceText = readText(inventoryCascadeServicePath);
+  const flowModelText = readText(flowModelPath);
+  const medicineModelText = readText(medicineModelPath);
+  const kitModelText = readText(kitModelPath);
+  const waterQualityModelText = readText(waterQualityModelPath);
+  const waterQualityRoutesText = readText(waterQualityRoutesPath);
 
   const checkSource = (condition, passMessage, failMessage) => {
     if (condition) success(passMessage);
@@ -214,19 +298,107 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    unifiedRecordModalContractText.includes('If a user selects a date and clicks the open-input button') &&
+      unifiedRecordModalContractText.includes('The modal body must not use a blanket `pointer-events: none`') &&
+      unifiedRecordModalContractText.includes('Editing inventory marks that date as a manual inventory baseline') &&
+      unifiedRecordModalContractText.includes('Flow server save must upsert by `(date, type)`') &&
+      unifiedRecordModalContractText.includes('After a successful save, the modal must force reload contexts'),
+    '통합 입력 모달 날짜/입력/계산 계약 문서 확인',
+    'UNIFIED_RECORD_MODAL_CONTRACT.md가 누락되었거나 핵심 계약 문구가 빠졌습니다'
+  );
+
+  checkSource(
+    flowManagementViewText.includes('const modalDate = selectedDate || todayStr;') &&
+      medicineManagementViewText.includes('initialDate={selectedDate || todayStr}') &&
+      kitManagementViewText.includes('initialDate={selectedDate || todayStr}') &&
+      waterQualityViewText.includes('date: selectedRow?.date || todayStr,') &&
+      flowManagementViewText.includes('onCellDoubleClick={() => openModal(\'edit\')}') &&
+      medicineManagementViewText.includes('onCellDoubleClick={() => openModal(\'edit\')}') &&
+      kitManagementViewText.includes('onCellDoubleClick={() => openModal(\'edit\')}') &&
+      waterQualityViewText.includes('onCellDoubleClick={() => openModal(\'edit\')}'),
+    '통합 모달 선택 날짜 우선 열기 계약 유지',
+    '선택 날짜가 add/edit 모드에 의해 오늘 날짜로 덮일 수 있습니다'
+  );
+
+  checkSource(
     modalText.includes("if (!isSludge && field === 'reading')") &&
       modalText.includes("if (!isSludge && field === 'calculatedFlow')") &&
       modalText.includes('nextDraft.reading = round1(previousReading + calculatedFlow)') &&
-      flowRoutesText.includes('일반/임포트/관리자 값은 raw 차이로 정규화'),
+      flowRoutesText.includes('일반/임포트/관리자 값은 raw 차이로 정규화') &&
+      flowRoutesText.includes('recalculateFlowTypeCascade(db, type, metadata, [...dates].sort()[0], dates)') &&
+      flowRoutesText.includes('recalculateFlowTypeCascade(db, type, metadata, date, new Set([date]))'),
     '유량 검침값/유량값 상호 계산 및 이후 재계산 계약 유지',
     '유량 검침값/유량값 상호 계산 또는 이후 유량 재계산 계약이 깨졌습니다'
   );
 
   checkSource(
-    medicineRoutesText.includes('item.inventory_is_manual || item.inventoryIsManual') &&
-      kitRoutesText.includes('item.inventory_is_manual || item.inventoryIsManual'),
-    '약품/키트 직접 재고 수정 시에만 재고 기준점 지정 계약 유지',
-    '약품/키트 구매/사용 저장만으로 재고 기준점이 생길 수 있습니다'
+    modalText.includes("if (field === 'purchase' || field === 'usage')") &&
+      modalText.includes('Object.assign(nextDraft, recalculateInventoryDraft(item, nextDraft));') &&
+      modalText.includes('inventory_is_manual: Boolean(values.__dirty?.inventory)') &&
+      medicineRoutesText.includes('item.inventory_is_manual || item.inventoryIsManual') &&
+      kitRoutesText.includes('item.inventory_is_manual || item.inventoryIsManual') &&
+      inventoryCascadeServiceText.includes('normalizedExplicitDates.has(row.date)') &&
+      inventoryCascadeServiceText.includes('runningInventory + Number(row.purchase_amount || 0) - Number(row.usage_amount || 0)'),
+    '약품/키트 구매·사용·재고 자동계산 및 이후 재계산 계약 유지',
+    '약품/키트 구매/사용/재고 자동계산 또는 이후 재고 재계산 계약이 깨졌습니다'
+  );
+
+  checkSource(
+    !modalText.includes("pointerEvents: isLoadingUnifiedData || isSaving ? 'none' : 'auto'") &&
+      modalText.includes("pointerEvents: 'auto'") &&
+      modalText.includes('onChange={(e) => setFlowDraftFieldForItem(item, field, e.target.value)}') &&
+      modalText.includes('onChange={(e) => setInventoryDraftFieldForItem(activeTab, item, field, e.target.value)}') &&
+      modalText.includes('onChange={(e) => {') &&
+      modalText.includes("if (enabled) setWaterDraftField(item, field.id, e.target.value);"),
+    '통합 모달 텍스트 입력 클릭/수정 가능 계약 유지',
+    '통합 모달 입력 영역이 포인터 차단되거나 입력 onChange 연결이 깨졌습니다'
+  );
+
+  checkSource(
+    modalText.includes('const handleSave = async () =>') &&
+      modalText.includes('tabIds: [activeTab]') &&
+      modalText.includes('const result = await savePlan(plan);') &&
+      modalText.includes('if (!result) return;') &&
+      viewModelText.includes('const result = await FlowModel.bulkSave(date, flowItems);') &&
+      viewModelText.includes('const result = await MedicineModel.bulkSave(medicineItems);') &&
+      viewModelText.includes('const result = await WaterQualityModel.bulkSave(waterItems);') &&
+      viewModelText.includes('const result = await KitModel.bulkSave(kitItems);') &&
+      viewModelText.includes('if (!result?.success) throw new Error') &&
+      viewModelText.includes('await reloadContexts({ force: true });'),
+    '통합 모달 저장 버튼 및 저장 후 강제 재조회 계약 유지',
+    '통합 모달 저장 버튼이 현재 탭만 저장하지 않거나 저장 실패/재조회 처리가 깨졌습니다'
+  );
+
+  checkSource(
+    flowModelText.includes('clearHistoryCache();') &&
+      flowModelText.includes("return apiClient.post('/api/flows/bulk', { date, items });") &&
+      medicineModelText.includes('clearHistoryCache();') &&
+      medicineModelText.includes("return apiClient.post('/api/medicines/bulk', { items });") &&
+      kitModelText.includes('clearHistoryCache();') &&
+      kitModelText.includes("return apiClient.post('/api/kits/bulk', { items });") &&
+      waterQualityModelText.includes('clearHistoryCache();') &&
+      waterQualityModelText.includes("return apiClient.post('/api/water-quality/bulk', { items });"),
+    '통합 모달 Model bulk 저장 및 캐시 무효화 계약 유지',
+    '통합 모달 저장 Model이 bulk API를 호출하지 않거나 저장 전 캐시를 비우지 않습니다'
+  );
+
+  checkSource(
+    flowRoutesText.includes("router.post('/api/flows/bulk'") &&
+      flowRoutesText.includes('ON CONFLICT(date, type) DO UPDATE SET') &&
+      flowRoutesText.includes('raw_value = excluded.raw_value') &&
+      flowRoutesText.includes('calculated_flow = excluded.calculated_flow') &&
+      medicineRoutesText.includes("router.post('/api/medicines/bulk'") &&
+      medicineRoutesText.includes('ON CONFLICT(medicine_name, date) DO UPDATE SET') &&
+      medicineRoutesText.includes('purchase_amount = excluded.purchase_amount') &&
+      medicineRoutesText.includes('usage_amount = excluded.usage_amount') &&
+      kitRoutesText.includes("router.post('/api/kits/bulk'") &&
+      kitRoutesText.includes('ON CONFLICT(kit_name, date) DO UPDATE SET') &&
+      kitRoutesText.includes('current_inventory = excluded.current_inventory') &&
+      waterQualityRoutesText.includes("router.post('/api/water-quality/bulk'") &&
+      waterQualityRoutesText.includes('ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET') &&
+      waterQualityRoutesText.includes('result_numeric = excluded.result_numeric'),
+    '통합 모달 서버 upsert 수정 저장 계약 유지',
+    '통합 모달 서버 저장이 같은 날짜/항목을 수정 저장하는 upsert 계약에서 벗어났습니다'
   );
 
   checkSource(
@@ -238,6 +410,117 @@ function validateRegressionContracts() {
     '공법별 일일업무일지 HWPX 양식 선택 계약 유지',
     '공법별 일일업무일지 HWPX 양식 선택 로직이 빠졌습니다'
   );
+
+  checkSource(
+    !settingsBigQueryClearText.includes('clear-operational-data') &&
+      !settingsBigQueryClearText.includes('clearBigQueryOperationalData') &&
+      !settingsBigQueryClearText.includes('handleClearBigQueryOperationalData') &&
+      !settingsBigQueryClearText.includes('BigQuery 운영데이터 초기화') &&
+      !settingsBigQueryClearText.includes('BigQuery 운영 데이터 초기화'),
+    '설정 메뉴 BigQuery 운영데이터 초기화 제거 계약 유지',
+    '설정 메뉴 BigQuery 운영데이터 초기화 UI/API 호출이 다시 추가되었습니다'
+  );
+
+  checkSource(
+    excelMappingTemplateContractText.includes('Saved column letters are the source of truth') &&
+      excelMappingTemplateContractText.includes('purchase from `cols.purchase`') &&
+      excelMappingTemplateContractText.includes('Report templates under `templates/reports` are release assets'),
+    '엑셀 매핑/기본설정/양식 패키징 계약 문서 확인',
+    'EXCEL_MAPPING_TEMPLATE_CONTRACT.md가 누락되었거나 핵심 계약 문구가 빠졌습니다'
+  );
+
+  checkSource(
+    mappingServiceText.includes('function groupInventoryMappings(mapping)') &&
+      mappingServiceText.includes("const purchase = toRoundedNumber(getRangeCell(rows, r, cols.purchase || ''), null);") &&
+      mappingServiceText.includes("const usage = toRoundedNumber(getRangeCell(rows, r, cols.usage || ''), null);") &&
+      mappingServiceText.includes("const inventory = toRoundedNumber(getRangeCell(rows, r, cols.inventory || ''), null);") &&
+      mappingServiceText.includes("deleteSqlPrefix: 'DELETE FROM kit_logs WHERE'") &&
+      mappingServiceText.includes("deleteSqlPrefix: 'DELETE FROM medicine_logs WHERE'"),
+    '약품/키트 엑셀 칼럼 1:1 임포트 계약 유지',
+    '약품/키트 구매/사용/재고가 저장된 칼럼 문자와 1:1로 읽히지 않을 수 있습니다'
+  );
+
+  checkSource(
+    inventoryMappingPanelText.includes("const SUFFIXES = ['purchase', 'usage', 'inventory'];") &&
+      inventoryMappingPanelText.includes('setMapping({ ...mapping, [row.key]: e.target.value })') &&
+      inventoryMappingPanelText.includes('sampleRowData[colKey]') &&
+      !inventoryMappingPanelText.includes('nextColIdx') &&
+      !inventoryMappingPanelText.includes('alphabet.indexOf'),
+    '약품/키트 매핑 UI 직접 선택 계약 유지',
+    '약품/키트 매핑 UI에 다음 칼럼 자동선택 또는 비직접 매핑 로직이 들어갔습니다'
+  );
+
+  checkSource(
+    mappingServiceText.includes("const rawValue = toRoundedNumber(getRangeCell(rows, r, cols.raw || ''), null);") &&
+      mappingServiceText.includes("const calcFlow = toRoundedNumber(getRangeCell(rows, r, cols.flow || ''), null);") &&
+      flowMappingPanelText.includes("row.key.endsWith('_raw')") &&
+      flowMappingPanelText.includes("row.key.replace('_raw', '_flow')") &&
+      flowMappingPanelText.includes('alphabet[nextColIdx + 1]'),
+    '유량 매핑 UI 편의 기능과 1:1 임포트 계약 유지',
+    '유량 raw/flow 저장 칼럼 직접 임포트 또는 raw→flow UI 편의 기능 계약이 깨졌습니다'
+  );
+
+  checkSource(
+    excelCellMapperText.includes('const end = start + 30;') &&
+      excelCellMapperText.includes('onStartRowChange?.(start, end);') &&
+      excelCellMapperText.includes('onEndRowChange?.(end);') &&
+      !excelCellMapperText.includes('setMapping'),
+    '엑셀 시작/종료 행 위젯이 칼럼 매핑을 건드리지 않는 계약 유지',
+    '엑셀 행 범위 위젯이 칼럼 매핑 상태를 변경할 수 있습니다'
+  );
+
+  checkSource(
+    useMappingSettingsText.includes('SettingsModel.getImportProgress(type)') &&
+      settingsRoutesText.includes('importProgressByType') &&
+      settingsRoutesText.includes("flow: createIdleImportProgress()") &&
+      settingsRoutesText.includes("kit: createIdleImportProgress()") &&
+      settingsRoutesText.includes("medicine: createIdleImportProgress()") &&
+      settingsRoutesText.includes("water: createIdleImportProgress()") &&
+      settingsRoutesText.includes("setImportProgress('flow'") &&
+      settingsRoutesText.includes("setImportProgress('kit'") &&
+      settingsRoutesText.includes("setImportProgress('medicine'") &&
+      settingsRoutesText.includes("setImportProgress('water'"),
+    '엑셀 임포트 진행률 타입별 분리 계약 유지',
+    '엑셀 임포트 진행률이 타입별로 분리되지 않아 매핑 저장 결과가 섞일 수 있습니다'
+  );
+
+  checkSource(
+    basicSitePanelText.includes('BasicSiteHeaderPanel') &&
+      basicSitePanelText.includes('ItemManagementPanel') &&
+      basicSitePanelText.includes('MeasurementPlacePanel') &&
+      basicSitePanelText.includes('TemplateFilePanel') &&
+      appSettingsServiceText.includes('UPDATE app_settings') &&
+      appSettingsServiceText.includes('SET site_id = COALESCE(NULLIF(?, \'\'), site_id)') &&
+      appSettingsServiceText.includes('UPDATE config_items SET is_active = ?, display_order = ?') &&
+      appSettingsServiceText.includes('INSERT OR IGNORE INTO config_items'),
+    '기본정보 저장 위젯 및 설정 저장 계약 유지',
+    '기본정보 저장 위젯 구성 또는 설정 저장 계약이 바뀌었습니다'
+  );
+
+  checkSource(
+    electronBuilderConfigText.includes("'templates/**/*'") &&
+      electronBuilderConfigText.includes("{ from: 'templates', to: 'templates' }") &&
+      reportTemplateText.includes("'일일업무일지(A2O)'") &&
+      reportTemplateText.includes("'일일업무일지(MBR)'") &&
+      reportTemplateText.includes('process.resourcesPath') &&
+      reportTemplateText.includes('syncBundledTemplatesToAppData') &&
+      reportTemplateText.includes('shouldReplacePlaceholder'),
+    '일지 양식 패키징 및 AppData 동기화 계약 유지',
+    '일지 양식이 패키지 리소스에 포함되거나 AppData로 동기화되는 계약이 깨졌습니다'
+  );
+}
+
+function validateAuthSessionContract() {
+  console.log(`\n${colors.blue}▶ Auth/session/attendance contract validation${colors.reset}`);
+  try {
+    execSync('node scripts/validate-auth-contract.cjs', {
+      cwd: BASE_DIR,
+      stdio: 'inherit',
+    });
+    success('Auth/session/attendance contract validation passed');
+  } catch (e) {
+    error('Auth/session/attendance contract validation failed');
+  }
 }
 
 function validateRouteRegistry() {
@@ -374,6 +657,7 @@ function validateAsarPackage(asarPath) {
     const forbiddenFiles = [
       '.env.local',
       'server/config/google-key.json',
+      'server/config/bigquery-service-account.json',
       'server/config/firebase-service-account.json',
     ];
     forbiddenFiles.forEach((file) => {
@@ -574,6 +858,7 @@ function printSummary() {
   validateRequiredFiles();
   validateRuntimeConfigPackagingContract();
   validateRegressionContracts();
+  validateAuthSessionContract();
   validateRouteRegistry();
   validateApiSpec();
   validateEnvVariables();

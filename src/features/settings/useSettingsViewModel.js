@@ -485,40 +485,6 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         }
     };
 
-    const handleClearBigQueryOperationalData = async () => {
-        try {
-            const siteName = String(siteInfo.siteName || '').trim();
-            if (!siteName) {
-                showAlert?.('BigQuery 데이터를 초기화하려면 먼저 현장을 선택하고 저장해주세요.');
-                return;
-            }
-
-            const firstConfirmed = await showConfirm?.(
-                `[주의] 현재 현장(${siteName})의 BigQuery 운영 데이터를 삭제합니다.\n\n삭제 대상: 유량, 약품, 수질, 키트\n제외 대상: 출결/위치 데이터\n\n계속하시겠습니까?`
-            );
-            if (!firstConfirmed) return;
-
-            const secondConfirmed = await showConfirm?.(
-                `정말 삭제하시겠습니까?\n\n이 작업은 BigQuery 서버 데이터에 직접 적용되며 되돌릴 수 없습니다.\n현장: ${siteName}`
-            );
-            if (!secondConfirmed) return;
-
-            const result = await SettingsModel.clearBigQueryOperationalData();
-            if (!result?.success) {
-                throw new Error(result?.message || 'BigQuery 초기화 실패');
-            }
-
-            showAlert?.(
-                `BigQuery 운영 데이터 초기화 완료\n` +
-                `현장: ${result.siteName || siteName}\n` +
-                `삭제 건수: ${result.totalDeleted ?? 0}건`
-            );
-        } catch (err) {
-            console.error('BigQuery operational clear error:', err);
-            showAlert?.('BigQuery 운영 데이터 초기화 중 오류: ' + err.message);
-        }
-    };
-
     // --- Flow Option Save ---
     const handleSaveFlowOption = async (option) => {
         try {
@@ -576,7 +542,6 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         handleSiteSelection,
         handleCaptureSiteLocation,
         handleApply,
-        handleClearBigQueryOperationalData,
     };
 
     const itemState = {

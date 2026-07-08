@@ -10,7 +10,6 @@ const initialSyncService = require('../services/settings/initialSyncService.cjs'
 const mappingSettingsService = require('../services/settings/mappingSettingsService.cjs');
 const siteSettingsService = require('../services/settings/siteSettingsService.cjs');
 const templateSettingsService = require('../services/settings/templateSettingsService.cjs');
-const bigQueryAdminCleanupService = require('../services/bigQueryAdminCleanupService.cjs');
 const {
   getCustomReportTemplatesDir,
   syncBundledTemplatesToAppData,
@@ -185,16 +184,6 @@ module.exports = function (db, baseDir, appDataPath) {
     try {
       const site = await siteSettingsService.selectSite(db, req.body?.siteId);
       res.json({ success: true, site });
-    } catch (e) {
-      res.status(e.statusCode || 500).json({ success: false, message: e.message });
-    }
-  });
-
-  router.post('/api/settings/bigquery/clear-operational-data', async (req, res) => {
-    try {
-      const confirmed = req.body?.confirmed === true;
-      const result = await bigQueryAdminCleanupService.clearOperationalBigQueryDataForCurrentSite(db, { confirmed });
-      res.json({ success: true, ...result });
     } catch (e) {
       res.status(e.statusCode || 500).json({ success: false, message: e.message });
     }

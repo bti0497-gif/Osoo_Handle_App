@@ -244,7 +244,7 @@ const KitManagementView = ({ currentUser }) => {
                 mode={modalState.mode}
                 currentUser={currentUser}
                 initialTab={modalState.tab}
-                initialDate={modalState.mode === 'add' ? todayStr : (selectedDate || todayStr)}
+                initialDate={selectedDate || todayStr}
                 contexts={buildModalContexts()}
                 isSyncingAnalysisKits={isSyncingAnalysisKits}
                 onClose={() => setModalState((prev) => ({ ...prev, open: false }))}

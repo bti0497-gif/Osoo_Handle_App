@@ -75,10 +75,6 @@ export const SettingsModel = {
         return apiClient.post('/api/settings/open-local-folder', { target });
     },
 
-    async clearBigQueryOperationalData() {
-        return mutateSettings(() => apiClient.post('/api/settings/bigquery/clear-operational-data', { confirmed: true }));
-    },
-
     async getExcelPreview(sheet, row) {
         return apiClient.post('/api/settings/excel-preview', { sheet, row });
     },

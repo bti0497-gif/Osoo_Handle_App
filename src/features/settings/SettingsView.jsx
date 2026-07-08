@@ -32,7 +32,7 @@ const SettingsView = ({ currentUser }) => {
     } = shellState;
     const {
         siteInfo, availableSites, selectedSiteId, isSiteListLoading, handleSiteSelection, handleCaptureSiteLocation,
-        handleApply, handleClearBigQueryOperationalData,
+        handleApply,
     } = basicSiteState;
     const {
         flowItems, medicineItems, kitItems, locationItems,
@@ -255,7 +255,6 @@ const SettingsView = ({ currentUser }) => {
             handleOpenLocalFolder={handleOpenLocalFolder}
             excelStatus={excelStatus}
             handleApply={handleApply}
-            handleClearBigQueryOperationalData={handleClearBigQueryOperationalData}
         />
     );
 
