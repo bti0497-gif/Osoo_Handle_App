@@ -1,7 +1,7 @@
 import { apiClient } from '../../core/api';
 
 const QNTECH_IMPORT_TIMEOUT_MS = 180000;
-const QNTECH_RANGE_IMPORT_TIMEOUT_MS = 600000;
+const QNTECH_RANGE_START_TIMEOUT_MS = 30000;
 
 let historyCache = null;
 let historyPromise = null;
@@ -43,7 +43,7 @@ export const WaterQualityModel = {
 
     async importRangeFromQntech(startDate, endDate) {
         clearHistoryCache();
-        return apiClient.post('/api/water-quality/import-range-from-qntech', { startDate, endDate }, { timeout: QNTECH_RANGE_IMPORT_TIMEOUT_MS });
+        return apiClient.post('/api/water-quality/import-range-from-qntech', { startDate, endDate }, { timeout: QNTECH_RANGE_START_TIMEOUT_MS });
     },
 
     async fetchRangeImportProgress() {

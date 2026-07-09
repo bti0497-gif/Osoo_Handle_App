@@ -194,11 +194,13 @@ function maybeSyncAnalysisKitUsageForRange(db, startDate, endDate, metadata, pay
 
 module.exports = function (db, baseDir) {
   let rangeImportProgress = {
+    jobId: null,
     status: 'idle',
     totalDates: 0,
     completedDates: 0,
     currentDate: null,
-    message: ''
+    message: '',
+    result: null
   };
 
   router.get('/api/water-quality', (req, res) => {
@@ -288,42 +290,68 @@ module.exports = function (db, baseDir) {
 
   router.post('/api/water-quality/import-range-from-qntech', async (req, res) => {
     const { startDate, endDate } = req.body || {};
-    try {
-      rangeImportProgress = {
-        status: 'processing',
-        totalDates: 0,
-        completedDates: 0,
-        currentDate: null,
-        message: '기간 데이터를 준비하는 중...'
-      };
-
-      const result = await importQntechWaterRange(db, baseDir, startDate, endDate, {
-        onProgress: (progress) => {
-          rangeImportProgress = { ...rangeImportProgress, ...progress };
-        }
+    if (rangeImportProgress.status === 'processing') {
+      return res.json({
+        success: true,
+        accepted: false,
+        alreadyProcessing: true,
+        jobId: rangeImportProgress.jobId,
+        progress: rangeImportProgress
       });
-      const metadata = getCurrentRecordMetadata(db, req.body);
-      const kitUsageSync = (result.kitSyncDates || []).map((syncDate) => (
-        maybeSyncAnalysisKitUsageForRange(db, syncDate, syncDate, metadata, req.body)
-      ));
-
-      rangeImportProgress = {
-        ...rangeImportProgress,
-        status: 'completed',
-        totalDates: result.processedDates || rangeImportProgress.totalDates,
-        completedDates: result.processedDates || rangeImportProgress.completedDates,
-        currentDate: result.endDate || rangeImportProgress.currentDate,
-        message: '기간 데이터 불러오기가 완료되었습니다.'
-      };
-      res.json({ ...result, kitUsageSync });
-    } catch (err) {
-      rangeImportProgress = {
-        ...rangeImportProgress,
-        status: 'error',
-        message: err.message
-      };
-      res.status(500).json({ success: false, message: err.message, error: err.message });
     }
+
+    const jobId = `qntech-range-${Date.now()}`;
+    const payload = { ...(req.body || {}) };
+    const metadata = getCurrentRecordMetadata(db, payload);
+    rangeImportProgress = {
+      jobId,
+      status: 'processing',
+      totalDates: 0,
+      completedDates: 0,
+      currentDate: startDate || null,
+      message: '기간 데이터를 준비하는 중...',
+      result: null
+    };
+
+    res.status(202).json({
+      success: true,
+      accepted: true,
+      jobId,
+      progress: rangeImportProgress
+    });
+
+    void (async () => {
+      try {
+        const result = await importQntechWaterRange(db, baseDir, startDate, endDate, {
+          onProgress: (progress) => {
+            rangeImportProgress = { ...rangeImportProgress, ...progress, jobId };
+          }
+        });
+        const kitUsageSync = (result.kitSyncDates || []).map((syncDate) => (
+          maybeSyncAnalysisKitUsageForRange(db, syncDate, syncDate, metadata, payload)
+        ));
+        const completedResult = { ...result, kitUsageSync };
+
+        rangeImportProgress = {
+          ...rangeImportProgress,
+          jobId,
+          status: 'completed',
+          totalDates: result.processedDates || rangeImportProgress.totalDates,
+          completedDates: result.processedDates || rangeImportProgress.completedDates,
+          currentDate: result.endDate || rangeImportProgress.currentDate,
+          message: '기간 데이터 불러오기가 완료되었습니다.',
+          result: completedResult
+        };
+      } catch (err) {
+        rangeImportProgress = {
+          ...rangeImportProgress,
+          jobId,
+          status: 'error',
+          message: err.message,
+          result: null
+        };
+      }
+    })();
   });
 
   router.post('/api/water-quality', (req, res) => {

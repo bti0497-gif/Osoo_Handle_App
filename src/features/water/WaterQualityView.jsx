@@ -29,13 +29,6 @@ const WATER_LABEL_BY_ID = WATER_PARAMS.reduce((acc, item) => {
     return acc;
 }, {});
 
-const formatLocalDate = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-};
-
 const formatImportProgressDate = (dateString) => {
     if (!dateString) return '';
     const [year, month, day] = String(dateString).split('-');
@@ -141,6 +134,7 @@ const WaterQualityView = ({ currentUser }) => {
         refresh,
         isImportingFromQntech,
         handleImportFromQntech,
+        handleImportRangeFromQntech,
     } = useWaterQualityViewModel(currentUser, { showToast });
 
     const batchProcess = useBatchProcess();
@@ -368,32 +362,20 @@ const WaterQualityView = ({ currentUser }) => {
         const confirmed = await showConfirm?.('기간 불러오기는 즉시 저장됩니다. 기존 값이 있는 날짜는 값을 유지하고 사진을 함께 저장합니다. 계속할까요?');
         if (!confirmed) return;
 
-        const datesToImport = [];
-        let curr = new Date(startDate);
-        const end = new Date(endDate);
-        while (curr <= end) {
-            datesToImport.push(formatLocalDate(curr));
-            curr.setDate(curr.getDate() + 1);
-        }
-
-        let totalImportedRowCount = 0;
-        let totalSavedPhotoCount = 0;
-        let totalDriveUploadErrorCount = 0;
+        let rangeResult = null;
         const success = await batchProcess.executeBatch(
-            datesToImport,
-            (dateStr) => ({ id: dateStr, title: `${formatImportProgressDate(dateStr)} 데이터` }),
-            async (dateStr, updateMessage) => {
-                updateMessage('QnTECH 서버에서 수집 중...');
-                await waitForUiPaint();
-                const result = await handleImportFromQntech(dateStr, true);
-                const rowCnt = result?.summary?.importedRowCount || 0;
-                const photoCnt = result?.summary?.savedPhotoCount || 0;
-                totalImportedRowCount += rowCnt;
-                totalSavedPhotoCount += photoCnt;
-                totalDriveUploadErrorCount += result?.summary?.driveUploadErrorCount || 0;
-                updateMessage(buildQntechImportMessage(result));
+            [`${startDate}:${endDate}`],
+            () => ({ id: `${startDate}:${endDate}`, title: `${startDate} ~ ${endDate} 데이터` }),
+            async (_rangeId, updateMessage) => {
+                updateMessage('서버 백그라운드 작업을 시작하는 중...');
+                rangeResult = await handleImportRangeFromQntech(startDate, endDate, (progress) => {
+                    const count = progress.totalDates
+                        ? ` (${progress.completedDates || 0}/${progress.totalDates})`
+                        : '';
+                    updateMessage(`${progress.message || 'QnTECH 서버에서 수집 중...'}${count}`);
+                });
             },
-            { stopOnError: false }
+            { stopOnError: true }
         );
 
         if (success) {
@@ -401,6 +383,9 @@ const WaterQualityView = ({ currentUser }) => {
             if (startDate <= modalDate && modalDate <= endDate) {
                 setModalState((prev) => ({ ...prev, mode: 'edit' }));
             }
+            const totalImportedRowCount = rangeResult?.summary?.insertedRowCount || 0;
+            const totalSavedPhotoCount = rangeResult?.summary?.savedPhotoCount || 0;
+            const totalDriveUploadErrorCount = rangeResult?.summary?.driveUploadErrorCount || 0;
             showToast?.(
                 totalDriveUploadErrorCount > 0
                     ? `기간 데이터 불러오기 완료 - 값 ${totalImportedRowCount}건, 사진 ${totalSavedPhotoCount}건, Drive 실패 ${totalDriveUploadErrorCount}건`
@@ -408,7 +393,7 @@ const WaterQualityView = ({ currentUser }) => {
                 totalDriveUploadErrorCount > 0 ? 'warning' : 'success'
             );
         } else {
-            showToast?.(`일부 불러오기 실패 - 성공: 값 ${totalImportedRowCount}건, 사진 ${totalSavedPhotoCount}건`, 'error');
+            showToast?.('기간 데이터 불러오기에 실패했습니다. 진행상황은 다시 화면을 열어 확인할 수 있습니다.', 'error');
         }
     };
 

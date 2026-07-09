@@ -314,8 +314,31 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
         }
     };
 
-    const handleImportRangeFromQntech = async (startDate, endDate) => {
-        const result = await WaterQualityModel.importRangeFromQntech(startDate, endDate);
+    const handleImportRangeFromQntech = async (startDate, endDate, onProgress) => {
+        const started = await WaterQualityModel.importRangeFromQntech(startDate, endDate);
+        if (!started?.success) {
+            throw new Error(started?.error || 'QnTECH 기간 데이터 불러오기를 시작하지 못했습니다.');
+        }
+
+        const jobId = started.jobId;
+        let result = null;
+        while (!result) {
+            const progressResponse = await WaterQualityModel.fetchRangeImportProgress();
+            const progress = progressResponse?.progress;
+            if (!progress || (jobId && progress.jobId !== jobId)) {
+                throw new Error('QnTECH 기간 작업 상태를 확인할 수 없습니다.');
+            }
+            onProgress?.(progress);
+            if (progress.status === 'completed') {
+                result = progress.result;
+                break;
+            }
+            if (progress.status === 'error') {
+                throw new Error(progress.message || 'QnTECH 기간 데이터 불러오기에 실패했습니다.');
+            }
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+
         if (!result?.success) {
             throw new Error(result?.error || 'QnTECH 기간 데이터 불러오기에 실패했습니다.');
         }

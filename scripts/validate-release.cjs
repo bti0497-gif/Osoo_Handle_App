@@ -285,6 +285,7 @@ function validateRegressionContracts() {
   const medicineManagementViewPath = path.join(BASE_DIR, 'src', 'features', 'medicine', 'MedicineManagementView.jsx');
   const kitManagementViewPath = path.join(BASE_DIR, 'src', 'features', 'kit', 'KitManagementView.jsx');
   const waterQualityViewPath = path.join(BASE_DIR, 'src', 'features', 'water', 'WaterQualityView.jsx');
+  const waterQualityViewModelPath = path.join(BASE_DIR, 'src', 'features', 'water', 'useWaterQualityViewModel.js');
   const inventoryCascadeServicePath = path.join(BASE_DIR, 'server', 'services', 'inventoryCascadeService.cjs');
   const flowModelPath = path.join(BASE_DIR, 'src', 'features', 'flow', 'FlowModel.js');
   const medicineModelPath = path.join(BASE_DIR, 'src', 'features', 'medicine', 'MedicineModel.js');
@@ -324,6 +325,7 @@ function validateRegressionContracts() {
   const medicineManagementViewText = readText(medicineManagementViewPath);
   const kitManagementViewText = readText(kitManagementViewPath);
   const waterQualityViewText = readText(waterQualityViewPath);
+  const waterQualityViewModelText = readText(waterQualityViewModelPath);
   const inventoryCascadeServiceText = readText(inventoryCascadeServicePath);
   const flowModelText = readText(flowModelPath);
   const medicineModelText = readText(medicineModelPath);
@@ -600,6 +602,20 @@ function validateRegressionContracts() {
       siteSettingsServiceText.includes('target_lat: matched.target_lat'),
     '구글시트 현장 위치 좌표 병합 계약 유지',
     'Wastewater_Site_Locations 시트의 target_lat/target_lng/radius_m 병합 로직이 깨졌습니다'
+  );
+
+  checkSource(
+    waterQualityRoutesText.includes("status: 'processing'") &&
+      waterQualityRoutesText.includes('res.status(202).json') &&
+      waterQualityRoutesText.includes('void (async () =>') &&
+      waterQualityRoutesText.includes("status: 'completed'") &&
+      waterQualityRoutesText.includes('result: completedResult') &&
+      waterQualityViewModelText.includes('WaterQualityModel.fetchRangeImportProgress()') &&
+      waterQualityViewModelText.includes("progress.status === 'completed'") &&
+      waterQualityViewText.includes('handleImportRangeFromQntech(startDate, endDate') &&
+      !waterQualityViewText.includes('datesToImport'),
+    'QnTECH 기간 가져오기가 창 상태와 무관한 서버 백그라운드 작업으로 유지됨',
+    'QnTECH 기간 가져오기가 다시 렌더러 날짜 반복에 의존하거나 서버 작업 상태 계약이 깨졌습니다'
   );
 }
 
