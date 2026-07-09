@@ -7,6 +7,7 @@
 - [ ] `npm run build`
 - [ ] `npm run electron:build`
 - [ ] `npm run validate:asar`
+- [ ] `npm run validate:native` (패키지 Electron으로 better-sqlite3 실제 읽기/쓰기)
 - [ ] 자격증명 미포함 확인
 - [ ] EXE, blockmap, latest.yml 일치 확인
 - [ ] GitHub 정식 릴리스 게시

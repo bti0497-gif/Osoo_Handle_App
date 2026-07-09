@@ -28,13 +28,25 @@ jobs:
       - name: Validate release contracts
         run: npm run validate
 
+      - name: Rebuild native modules for Electron
+        run: npx @electron/rebuild --force --arch=x64 --electron-version=40.6.0
+
       - name: Build frontend
         run: npm run build
 
-      - name: Build Electron app
+      - name: Package Electron app without publishing
+        run: npx electron-builder --config electron-builder.config.cjs --dir
+
+      - name: Validate packaged files
+        run: npm run validate:asar
+
+      - name: Smoke test packaged native modules
+        run: npm run validate:native
+
+      - name: Build installer and publish verified package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --config electron-builder.config.cjs --publish always
+        run: npx electron-builder --config electron-builder.config.cjs --prepackaged release/win-unpacked --publish always
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

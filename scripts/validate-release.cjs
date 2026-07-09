@@ -181,6 +181,60 @@ function validateRuntimeConfigPackagingContract() {
   }
 }
 
+function validateNativeModuleReleaseContract() {
+  console.log(`\n${colors.blue}▶ Electron 네이티브 모듈 릴리즈 계약 검증${colors.reset}`);
+
+  const packageJson = JSON.parse(fs.readFileSync(path.join(BASE_DIR, 'package.json'), 'utf8'));
+  const buildScript = packageJson.scripts?.['electron:build'] || '';
+  const nativeValidationScript = packageJson.scripts?.['validate:native'] || '';
+  const workflowText = fs.readFileSync(path.join(BASE_DIR, '.github', 'workflows', 'release.yml'), 'utf8');
+  const integratedInstallerText = fs.readFileSync(
+    path.join(BASE_DIR, 'scripts', 'build-integrated-installer.ps1'),
+    'utf8'
+  );
+  const validatorPath = path.join(BASE_DIR, 'scripts', 'validate-packaged-native.cjs');
+  const smokePath = path.join(BASE_DIR, 'scripts', 'smoke-packaged-sqlite.cjs');
+
+  if (buildScript.includes('@electron/rebuild') && buildScript.includes('validate:native')) {
+    success('로컬 Electron 빌드가 네이티브 재빌드와 패키지 실행 검증을 강제함');
+  } else {
+    error('로컬 Electron 빌드의 네이티브 재빌드/실행 검증 계약이 누락되었습니다');
+  }
+
+  if (nativeValidationScript.includes('validate-packaged-native.cjs')) {
+    success('패키지 네이티브 모듈 검증 명령 확인');
+  } else {
+    error('validate:native 명령이 패키지 검증기를 실행하지 않습니다');
+  }
+
+  if (fs.existsSync(validatorPath) && fs.existsSync(smokePath)) {
+    success('패키지 better-sqlite3 실행 검증기 포함');
+  } else {
+    error('패키지 better-sqlite3 실행 검증기 파일이 누락되었습니다');
+  }
+
+  const rebuildIndex = workflowText.indexOf('Rebuild native modules for Electron');
+  const smokeIndex = workflowText.indexOf('Smoke test packaged native modules');
+  const publishIndex = workflowText.indexOf('Build installer and publish verified package');
+  if (rebuildIndex >= 0 && smokeIndex > rebuildIndex && publishIndex > smokeIndex) {
+    success('GitHub Release가 Electron 재빌드 → 실행 검증 → 게시 순서를 강제함');
+  } else {
+    error('GitHub Release 네이티브 모듈 검증 순서가 훼손되었습니다');
+  }
+
+  if (workflowText.includes('--prepackaged release/win-unpacked --publish always')) {
+    success('검증된 win-unpacked 패키지만 GitHub Release에 게시함');
+  } else {
+    error('GitHub Release가 검증된 사전 패키지를 게시하지 않습니다');
+  }
+
+  if (integratedInstallerText.includes('validate-packaged-native.cjs $unpackedRoot')) {
+    success('신규 현장 통합 설치파일도 패키지 네이티브 모듈 실행 검증을 강제함');
+  } else {
+    error('신규 현장 통합 설치파일의 네이티브 모듈 실행 검증이 누락되었습니다');
+  }
+}
+
 function validateRegressionContracts() {
   console.log(`\n${colors.blue}▶ 현장 회귀 방지 계약 검증${colors.reset}`);
 
@@ -874,6 +928,7 @@ function printSummary() {
   
   validateRequiredFiles();
   validateRuntimeConfigPackagingContract();
+  validateNativeModuleReleaseContract();
   validateRegressionContracts();
   validateAuthSessionContract();
   validateRouteRegistry();

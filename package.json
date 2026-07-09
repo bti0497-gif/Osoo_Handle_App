@@ -1,7 +1,7 @@
 {
   "name": "wastewater-treatment-plant",
   "private": true,
-  "version": "1.0.18",
+  "version": "1.0.19",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -13,10 +13,11 @@
     "server": "node server.cjs",
     "start": "node start.cjs",
     "electron:dev": "npm run build && electron .",
-    "electron:build": "npx @electron/rebuild --force --arch=x64 --electron-version=40.6.0 && npm run build && electron-builder --config electron-builder.config.cjs",
-    "electron:publish": "npx @electron/rebuild --force --arch=x64 --electron-version=40.6.0 && npm run build && electron-builder --config electron-builder.config.cjs --publish always",
+    "electron:build": "npx @electron/rebuild --force --arch=x64 --electron-version=40.6.0 && npm run build && electron-builder --config electron-builder.config.cjs && npm run validate:asar && npm run validate:native",
+    "electron:publish": "npm run electron:build && electron-builder --config electron-builder.config.cjs --prepackaged release/win-unpacked --publish always",
     "validate": "node scripts/validate-release.cjs",
     "validate:asar": "node scripts/validate-release.cjs --asar-path ./release/win-unpacked/resources/app.asar",
+    "validate:native": "node scripts/validate-packaged-native.cjs ./release/win-unpacked",
     "validate:api": "node scripts/validate-release.cjs --api-test",
     "clean:release": "node scripts/clean-release.cjs",
     "release:safe": "npm run clean:release && npx @electron/rebuild && npm run build && npm run validate && npm run validate:api && npm run electron:build && npm rebuild"

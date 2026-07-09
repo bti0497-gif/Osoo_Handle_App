@@ -147,6 +147,12 @@ try {
     }
 
     $unpackedRoot = Join-Path $outputRoot 'win-unpacked'
+    Write-Host 'Smoke testing packaged native modules...'
+    & node.exe scripts\validate-packaged-native.cjs $unpackedRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "패키지 네이티브 모듈 검증에 실패했습니다. 종료 코드: $LASTEXITCODE"
+    }
+
     if (Test-Path -LiteralPath $unpackedRoot) {
         Remove-Item -LiteralPath $unpackedRoot -Recurse -Force
     }

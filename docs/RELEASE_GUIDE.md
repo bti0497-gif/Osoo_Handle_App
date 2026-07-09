@@ -13,9 +13,12 @@ npm run validate
 npm run build
 npm run electron:build
 npm run validate:asar
+npm run validate:native
 ```
 
 설치파일에 `.env.local`, Google/Firebase/BigQuery 키와 OAuth JSON이 포함되지 않았는지 반드시 확인합니다.
+`validate:native`가 실패하면 설치파일을 게시하지 않습니다. 이 검사는 패키지에 포함된 Electron으로
+`better-sqlite3`를 직접 로드하고 메모리 DB 읽기/쓰기를 수행하여 Node ABI 불일치를 차단합니다.
 
 ## 신규 현장 설치 패키지
 
