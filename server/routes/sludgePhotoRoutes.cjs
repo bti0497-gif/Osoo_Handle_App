@@ -346,17 +346,28 @@ function resolveLocalSludgePhotoPath(appDataPath, row, label) {
 }
 
 function getMergedSludgeRows(db, start, end) {
+  const appSettings = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get() || {};
+  const siteId = String(appSettings.site_id || '').trim();
+  const siteName = String(appSettings.site_name || '').trim();
+  const photoScope = siteName ? ' AND (site_name = ? OR site_name IS NULL OR site_name = \'\')' : '';
+  const flowScope = siteId
+    ? ' AND (site_id = ? OR (site_id IS NULL AND (site_name = ? OR site_name IS NULL OR site_name = \'\')))'
+    : (siteName ? ' AND (site_name = ? OR site_name IS NULL OR site_name = \'\')' : '');
   const photoRows = db.prepare(
-    'SELECT * FROM sludge_photo_logs WHERE date >= ? AND date <= ? ORDER BY date ASC'
-  ).all(start, end);
+    `SELECT * FROM sludge_photo_logs WHERE date >= ? AND date <= ?${photoScope} ORDER BY date ASC`
+  ).all(...(siteName ? [start, end, siteName] : [start, end]));
 
   const flowRows = db.prepare(
     `SELECT date, sludge_export, raw_value, calculated_flow,
             site_name, author, created_at, last_modified
      FROM flow_readings
-     WHERE type = '슬러지' AND date >= ? AND date <= ?
+     WHERE type = '슬러지' AND date >= ? AND date <= ?${flowScope}
      ORDER BY date ASC`
-  ).all(start, end);
+  ).all(...(
+    siteId ? [start, end, siteId, siteName]
+      : siteName ? [start, end, siteName]
+        : [start, end]
+  ));
 
   const map = new Map();
   for (const r of photoRows) {
@@ -372,7 +383,7 @@ function getMergedSludgeRows(db, start, end) {
     const amount = rawAmount != null ? Number(rawAmount) : null;
     if (!map.has(date)) {
       // flow_readings만 있는 날짜는 실제 반출량 값이 있을 때만 표시
-      if (amount == null || !Number.isFinite(amount)) continue;
+      if (amount == null || !Number.isFinite(amount) || amount <= 0) continue;
       map.set(date, {
         date,
         sludge_amount: amount,
@@ -394,7 +405,14 @@ function getMergedSludgeRows(db, start, end) {
     }
   }
 
-  return Array.from(map.values()).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  return Array.from(map.values())
+    .filter((row) => {
+      const amount = Number(row?.sludge_amount);
+      const hasPositiveAmount = Number.isFinite(amount) && amount > 0;
+      const hasAttachedRecord = Boolean(row?.sludge_photo_path || row?.certificate_photo_path);
+      return hasPositiveAmount || hasAttachedRecord;
+    })
+    .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
 }
 
 module.exports = function (db, baseDir, appDataPath) {

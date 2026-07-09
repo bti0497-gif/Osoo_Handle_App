@@ -24,6 +24,8 @@ This document protects the integrated input modal used by flow, water, medicine,
 - In flow tabs, editing flow recalculates that day's reading from the previous reading plus edited flow.
 - Saving a past flow date triggers server-side recalculation of later flow values from raw readings.
 - Medicine and kit have inventory.
+- Empty medicine and kit purchase/usage inputs default to zero, and inventory carries forward from the previous date.
+- Empty sludge export defaults to zero, while its cumulative value carries forward.
 - Editing purchase or usage recalculates that day's inventory from previous inventory plus purchase minus usage.
 - Editing inventory marks that date as a manual inventory baseline.
 - Saving a past medicine or kit date triggers server-side recalculation of later inventory values.

@@ -16,6 +16,8 @@ This document protects the field setup workflow after an Excel file has been acc
 - Inventory mapping UI must not auto-select the next column. The user-selected dropdown value is saved as-is.
 - Flow mapping may keep the raw-to-flow next-column UI convenience, but import still reads `raw` and `flow` from their saved letters.
 - Start-row auto end-row selection is UI convenience only. It must not change saved column mappings.
+- Import accepts dates from `2000-01-01` through today's KST date only; formula-generated future rows and invalid legacy dates are ignored.
+- Re-import removes prior `imported` rows before applying the selected Excel range, while unrelated manual rows remain protected.
 - Saving an Excel mapping overwrites local DB rows for the mapped dates and mapped item names before inserting imported rows.
 - Import progress must be tracked per mapping type: `flow`, `medicine`, `kit`, `water`.
 

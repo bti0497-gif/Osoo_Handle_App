@@ -1,7 +1,14 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { getOrCreateFolderPath, getDriveRootFolderId, isDriveConfigured, uploadBufferToFolder } = require('./driveService.cjs');
+const {
+  drive,
+  findFolderPath,
+  getOrCreateFolderPath,
+  getDriveRootFolderId,
+  isDriveConfigured,
+  uploadBufferToFolder,
+} = require('./driveService.cjs');
 
 const SECRET_KEY_PATTERN = /(password|passwd|pwd|token|secret|key|credential|authorization|cookie|client_secret|refresh_token)/i;
 const MAX_STRING_LENGTH = 2000;
@@ -77,6 +84,110 @@ function ensureDiagnosticDir(appDataPath) {
   const dir = path.join(appDataPath, 'logs', 'diagnostics');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function getTodayKst() {
+  return new Date(Date.now() + (9 * 60 * 60 * 1000)).toISOString().slice(0, 10);
+}
+
+function getKstDayStartIso(dateKey) {
+  return new Date(`${dateKey}T00:00:00+09:00`).toISOString();
+}
+
+async function listDriveChildren(folderId) {
+  const items = [];
+  let pageToken;
+  do {
+    const response = await drive.files.list({
+      q: `'${String(folderId).replace(/'/g, "\\'")}' in parents and trashed=false`,
+      fields: 'nextPageToken, files(id, name, mimeType, createdTime)',
+      pageSize: 1000,
+      pageToken,
+      spaces: 'drive',
+      includeItemsFromAllDrives: true,
+      supportsAllDrives: true,
+    });
+    items.push(...(response.data.files || []));
+    pageToken = response.data.nextPageToken;
+  } while (pageToken);
+  return items;
+}
+
+async function deleteOldDriveDiagnosticFiles(folderId, cutoffIso, depth = 0) {
+  if (depth > 4) return 0;
+  const folderMimeType = 'application/vnd.google-apps.folder';
+  const children = await listDriveChildren(folderId);
+  let deletedCount = 0;
+
+  for (const item of children) {
+    if (item.mimeType === folderMimeType) {
+      deletedCount += await deleteOldDriveDiagnosticFiles(item.id, cutoffIso, depth + 1);
+      continue;
+    }
+    if (item.createdTime && item.createdTime < cutoffIso) {
+      await drive.files.delete({ fileId: item.id, supportsAllDrives: true });
+      deletedCount += 1;
+    }
+  }
+  return deletedCount;
+}
+
+async function cleanupOldDiagnosticsOnVersionStart(db, appDataPath) {
+  const version = getAppVersion();
+  if (!version) return { success: false, skipped: true, reason: 'version-unavailable' };
+
+  const markerPath = path.join(
+    ensureDiagnosticDir(appDataPath),
+    `.cleanup-${version.replace(/[^0-9A-Za-z._-]/g, '_')}.done`
+  );
+  if (fs.existsSync(markerPath)) {
+    return { success: true, skipped: true, reason: 'already-cleaned', version };
+  }
+
+  const todayKst = getTodayKst();
+  const cutoffIso = getKstDayStartIso(todayKst);
+  const localDelete = db.prepare('DELETE FROM app_diagnostic_logs WHERE created_at < ?').run(cutoffIso);
+  let localFileCount = 0;
+  const diagnosticDir = ensureDiagnosticDir(appDataPath);
+  for (const entry of fs.readdirSync(diagnosticDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !/^\d{4}-\d{2}-\d{2}_.*_diagnostics\.jsonl$/i.test(entry.name)) continue;
+    if (entry.name.slice(0, 10) >= todayKst) continue;
+    fs.unlinkSync(path.join(diagnosticDir, entry.name));
+    localFileCount += 1;
+  }
+
+  let driveFileCount = 0;
+  if (isDriveConfigured()) {
+    const diagnosticRoot = await findFolderPath(getDriveRootFolderId(), ['앱진단로그']);
+    if (diagnosticRoot?.id) {
+      driveFileCount = await deleteOldDriveDiagnosticFiles(diagnosticRoot.id, cutoffIso);
+    }
+  } else {
+    return {
+      success: false,
+      skipped: true,
+      reason: 'drive-not-configured',
+      localRowCount: localDelete.changes,
+      localFileCount,
+    };
+  }
+
+  fs.writeFileSync(markerPath, JSON.stringify({
+    version,
+    completedAt: new Date().toISOString(),
+    todayKst,
+    localRowCount: localDelete.changes,
+    localFileCount,
+    driveFileCount,
+  }, null, 2), 'utf8');
+
+  return {
+    success: true,
+    version,
+    localRowCount: localDelete.changes,
+    localFileCount,
+    driveFileCount,
+  };
 }
 
 function dailyLogPath(appDataPath, siteName) {
@@ -220,6 +331,7 @@ async function uploadPendingDiagnostics(db, appDataPath, { limit = 200 } = {}) {
 }
 
 module.exports = {
+  cleanupOldDiagnosticsOnVersionStart,
   recordDiagnostic,
   uploadPendingDiagnostics,
   sanitize,

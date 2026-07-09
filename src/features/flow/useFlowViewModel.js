@@ -145,7 +145,9 @@ export const useFlowViewModel = (currentUser, { showAlert, flowTypes: flowTypesP
 
             if (!historyData.success) return;
 
-            const hist = Array.isArray(historyData.history) ? [...historyData.history] : [];
+            const hist = Array.isArray(historyData.history)
+                ? historyData.history.filter((row) => String(row?.date || '') <= todayStr)
+                : [];
             hist.sort((a, b) => a.date.localeCompare(b.date));
 
             if (hist.length > 0) {

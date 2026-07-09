@@ -1,6 +1,4 @@
 const express = require('express');
-const { restoreOperationalData } = require('../services/bigQueryRestoreService.cjs');
-
 const router = express.Router();
 
 function normalizeDate(value) {
@@ -260,26 +258,11 @@ function getInventoryRows(db, date, category, tableName, nameColumn, scope) {
   });
 }
 
-async function restoreForDate(db, date, scope) {
-  try {
-    await restoreOperationalData(db, {
-      startDate: yearStart(date),
-      endDate: date,
-      tables: ['flow_readings', 'medicine_logs', 'kit_logs'],
-      siteId: scope.siteId,
-      siteName: scope.siteName,
-    });
-  } catch (err) {
-    console.warn('[roadwork-helper restore]', err.message);
-  }
-}
-
 module.exports = function (db) {
   router.get('/api/roadwork-helper/all', async (req, res) => {
     try {
       const date = normalizeDate(req.query.date);
       const scope = buildScope(db);
-      await restoreForDate(db, date, scope);
       return res.json({
         success: true,
         date,

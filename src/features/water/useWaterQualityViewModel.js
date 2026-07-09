@@ -129,7 +129,9 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
             const historyData = await WaterQualityModel.fetchHistory({ force: options.force });
             if (!historyData.success) return;
 
-            const histRaw = Array.isArray(historyData.history) ? historyData.history : [];
+            const histRaw = Array.isArray(historyData.history)
+                ? historyData.history.filter((record) => String(record?.date || '') <= todayStr)
+                : [];
             const histMap = new Map();
 
             histRaw.forEach((record) => {

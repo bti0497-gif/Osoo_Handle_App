@@ -1,3 +1,9 @@
+/**
+ * Disaster-recovery service only.
+ *
+ * Normal field workflows are local-DB-first and must never call this service.
+ * Keep it dormant until an admin-only restore command is added under Settings.
+ */
 const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
 
 function getDefaultScope(db) {
@@ -58,6 +64,7 @@ function restoreFlowRows(db, rows) {
       author = excluded.author,
       last_modified = excluded.last_modified,
       is_synced = 1
+    WHERE flow_readings.is_synced = 1
   `);
   db.transaction(() => {
     rows.forEach((row) => {
@@ -99,6 +106,7 @@ function restoreMedicineRows(db, tableName, nameColumn, rows) {
       author = excluded.author,
       last_modified = excluded.last_modified,
       is_synced = 1
+    WHERE ${localTable}.is_synced = 1
   `);
   db.transaction(() => {
     rows.forEach((row) => {
@@ -142,6 +150,7 @@ function restoreQntechWaterRows(db, rows) {
       author = excluded.author,
       last_modified = excluded.last_modified,
       is_synced = 1
+    WHERE qntech_water_quality.is_synced = 1
   `);
   db.transaction(() => {
     rows.forEach((row) => {

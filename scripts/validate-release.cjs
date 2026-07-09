@@ -290,6 +290,7 @@ function validateRegressionContracts() {
   const waterQualityViewModelPath = path.join(BASE_DIR, 'src', 'features', 'water', 'useWaterQualityViewModel.js');
   const inventoryCascadeServicePath = path.join(BASE_DIR, 'server', 'services', 'inventoryCascadeService.cjs');
   const flowModelPath = path.join(BASE_DIR, 'src', 'features', 'flow', 'FlowModel.js');
+  const flowViewModelPath = path.join(BASE_DIR, 'src', 'features', 'flow', 'useFlowViewModel.js');
   const medicineModelPath = path.join(BASE_DIR, 'src', 'features', 'medicine', 'MedicineModel.js');
   const kitModelPath = path.join(BASE_DIR, 'src', 'features', 'kit', 'KitModel.js');
   const waterQualityModelPath = path.join(BASE_DIR, 'src', 'features', 'water', 'WaterQualityModel.js');
@@ -300,6 +301,13 @@ function validateRegressionContracts() {
   const dashboardViewModelPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'useDashboardViewModel.js');
   const inventoryLevelWidgetPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'widgets', 'InventoryLevelWidget.jsx');
   const medicineInRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineInRoutes.cjs');
+  const excelRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'excelRoutes.cjs');
+  const roadworkHelperRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'roadworkHelperRoutes.cjs');
+  const bigQueryRestoreServicePath = path.join(BASE_DIR, 'server', 'services', 'bigQueryRestoreService.cjs');
+  const diagnosticLogServicePath = path.join(BASE_DIR, 'server', 'services', 'diagnosticLogService.cjs');
+  const serverIndexPath = path.join(BASE_DIR, 'server', 'index.cjs');
+  const sludgePhotoRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'sludgePhotoRoutes.cjs');
+  const localDataBackupContractPath = path.join(BASE_DIR, 'LOCAL_DATA_BACKUP_CONTRACT.md');
 
   const readText = (filePath) => (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '');
   const viewModelText = readText(unifiedViewModelPath);
@@ -336,6 +344,7 @@ function validateRegressionContracts() {
   const waterQualityViewModelText = readText(waterQualityViewModelPath);
   const inventoryCascadeServiceText = readText(inventoryCascadeServicePath);
   const flowModelText = readText(flowModelPath);
+  const flowViewModelText = readText(flowViewModelPath);
   const medicineModelText = readText(medicineModelPath);
   const kitModelText = readText(kitModelPath);
   const waterQualityModelText = readText(waterQualityModelPath);
@@ -346,6 +355,13 @@ function validateRegressionContracts() {
   const dashboardViewModelText = readText(dashboardViewModelPath);
   const inventoryLevelWidgetText = readText(inventoryLevelWidgetPath);
   const medicineInRoutesText = readText(medicineInRoutesPath);
+  const excelRoutesText = readText(excelRoutesPath);
+  const roadworkHelperRoutesText = readText(roadworkHelperRoutesPath);
+  const bigQueryRestoreServiceText = readText(bigQueryRestoreServicePath);
+  const diagnosticLogServiceText = readText(diagnosticLogServicePath);
+  const serverIndexText = readText(serverIndexPath);
+  const sludgePhotoRoutesText = readText(sludgePhotoRoutesPath);
+  const localDataBackupContractText = readText(localDataBackupContractPath);
   const parentSaveRefreshText = [
     flowManagementViewPath,
     medicineManagementViewPath,
@@ -378,11 +394,11 @@ function validateRegressionContracts() {
 
   checkSource(
     modalText.includes('hasDraftForItem') &&
-      modalText.includes('hasPersistedInventoryValues') &&
-      modalText.includes('if (!isDrafted && !hasPersistedInventoryValues(item))') &&
+      modalText.includes('const purchase = item.values?.purchase ?? 0;') &&
+      modalText.includes('const usage = item.values?.usage ?? 0;') &&
       modalText.includes('inventory_is_manual'),
     '약품/키트 저장 대상 및 재고 기준점 계약 유지',
-    '약품/키트 빈 행 제외 또는 직접 재고 수정 기준점 계약이 깨졌습니다'
+    '약품/키트 미사용일 저장 또는 직접 재고 수정 기준점 계약이 깨졌습니다'
   );
 
   const handleCloseMatch = modalText.match(/const handleClose = async \(\) => \{[\s\S]*?\n    const renderWaterSidebar/);
@@ -476,6 +492,16 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    modalText.includes("reading: item.values?.reading ?? (isSludge ? 0 : '')") &&
+      modalText.includes('const purchase = item.values?.purchase ?? 0;') &&
+      modalText.includes('const usage = item.values?.usage ?? 0;') &&
+      unifiedRecordModalContractText.includes('Empty medicine and kit purchase/usage inputs default to zero') &&
+      unifiedRecordModalContractText.includes('Empty sludge export defaults to zero'),
+    '슬러지·약품·키트 미사용일 0 기본값 계약 유지',
+    '미사용일의 0 저장 또는 전일 누계/재고 유지 규칙이 깨졌습니다'
+  );
+
+  checkSource(
     flowModelText.includes('clearHistoryCache();') &&
       flowModelText.includes("return apiClient.post('/api/flows/bulk', { date, items });") &&
       medicineModelText.includes('clearHistoryCache();') &&
@@ -546,6 +572,48 @@ function validateRegressionContracts() {
       dailyWorkLogText.includes("userMessage: 'PDF 출력에는 한글 프로그램 설치가 필요합니다.'"),
     '한글 미설치 PDF 사용자 안내 계약 유지',
     '한글 미설치 현장에서 복잡한 COM 오류가 사용자에게 노출될 수 있습니다'
+  );
+
+  checkSource(
+    !dailyWorkLogText.includes('restoreOperationalData') &&
+      !excelRoutesText.includes('restoreOperationalData') &&
+      !roadworkHelperRoutesText.includes('restoreOperationalData') &&
+      bigQueryRestoreServiceText.includes('Disaster-recovery service only') &&
+      bigQueryRestoreServiceText.includes('WHERE flow_readings.is_synced = 1') &&
+      bigQueryRestoreServiceText.includes('WHERE qntech_water_quality.is_synced = 1') &&
+      localDataBackupContractText.includes('local SQLite database is the operational source of truth') &&
+      localDataBackupContractText.includes('future admin-only disaster-recovery command'),
+    '로컬 DB 원본 및 BigQuery 재해복구 전용 계약 유지',
+    '일반 업무 경로가 BigQuery 복원으로 로컬 데이터를 덮어쓸 수 있습니다'
+  );
+
+  checkSource(
+    mappingServiceText.includes("date >= '2000-01-01'") &&
+      mappingServiceText.includes('date <= getTodayKst()') &&
+      mappingServiceText.includes("DELETE FROM flow_readings WHERE input_status = 'imported'") &&
+      mappingServiceText.includes("DELETE FROM ${options.tableName} WHERE input_status = 'imported'") &&
+      flowViewModelText.includes("historyData.history.filter((row) => String(row?.date || '') <= todayStr)") &&
+      waterQualityViewModelText.includes("historyData.history.filter((record) => String(record?.date || '') <= todayStr)"),
+    '엑셀 비정상·미래 날짜 차단 및 화면 미래 실데이터 숨김 계약 유지',
+    '1901년 또는 오늘 이후의 실제 데이터가 유량·수질 화면에 다시 노출될 수 있습니다'
+  );
+
+  checkSource(
+    sludgePhotoRoutesText.includes("SELECT site_id, site_name FROM app_settings WHERE id = 1") &&
+      sludgePhotoRoutesText.includes('amount <= 0') &&
+      sludgePhotoRoutesText.includes('hasPositiveAmount || hasAttachedRecord'),
+    '슬러지사진대지 현장 범위 및 실제 반출행 계약 유지',
+    '슬러지사진대지에 다른 현장 또는 0 반출 기본행이 표시될 수 있습니다'
+  );
+
+  checkSource(
+    diagnosticLogServiceText.includes('async function cleanupOldDiagnosticsOnVersionStart') &&
+      diagnosticLogServiceText.includes("findFolderPath(getDriveRootFolderId(), ['앱진단로그'])") &&
+      diagnosticLogServiceText.includes("entry.name.slice(0, 10) >= todayKst") &&
+      serverIndexText.includes('cleanupOldDiagnosticsOnVersionStart(db, appDataPath)') &&
+      localDataBackupContractText.includes('Logs created on the current KST date must remain'),
+    '버전 첫 실행 오늘 이전 진단로그 정리 계약 유지',
+    '업데이트 후 과거 진단로그 정리 또는 오늘 로그 보존 규칙이 깨졌습니다'
   );
 
   checkSource(

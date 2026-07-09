@@ -172,7 +172,12 @@ function registerLazyApplication() {
   const { warmUpExcelPdfConverter } = require('./services/excelPdfService.cjs');
   const { triggerSync: triggerBigQuerySync } = require('./services/bigQueryTriggerService.cjs');
   const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
-  const { recordDiagnostic, uploadPendingDiagnostics, sanitize } = require('./services/diagnosticLogService.cjs');
+  const {
+    cleanupOldDiagnosticsOnVersionStart,
+    recordDiagnostic,
+    uploadPendingDiagnostics,
+    sanitize,
+  } = require('./services/diagnosticLogService.cjs');
   const ctx = { db, appDataPath, BASE_DIR };
   const DIAGNOSTIC_VERBOSE_INITIAL = process.env.DIAGNOSTIC_VERBOSE_INITIAL !== 'false';
   recordDiagnostic(db, appDataPath, {
@@ -182,6 +187,22 @@ function registerLazyApplication() {
     result: 'ok',
     message: 'local server initialized',
   });
+  cleanupOldDiagnosticsOnVersionStart(db, appDataPath)
+    .then((result) => {
+      if (!result?.skipped) {
+        recordDiagnostic(db, appDataPath, {
+          level: 'info',
+          area: 'diagnostic',
+          action: 'cleanup-on-version-start',
+          result: 'ok',
+          message: 'old diagnostic logs cleaned',
+          details: result,
+        });
+      }
+    })
+    .catch((error) => {
+      console.warn('[diagnostic] version-start cleanup failed:', error.message);
+    });
   let diagnosticUploadTimer = null;
   const scheduleDiagnosticUpload = () => {
     if (diagnosticUploadTimer) return;

@@ -177,15 +177,19 @@ function buildInitialDraft(tabId, item, roundValue) {
     if (!item) return {};
 
     if (tabId === 'flow') {
+        const isSludge = isSludgeFlowItem(item);
+        const previousMonthlyExport = toNumberOrNull(item?.previous?.monthlyExport)
+            ?? toNumberOrNull(item?.previous?.monthly_export)
+            ?? 0;
         return {
-            reading: item.values?.reading ?? '',
-            calculatedFlow: item.values?.flow ?? '',
+            reading: item.values?.reading ?? (isSludge ? 0 : ''),
+            calculatedFlow: item.values?.flow ?? (isSludge ? round1(previousMonthlyExport) : ''),
         };
     }
 
     if (tabId === 'medicine' || tabId === 'kit') {
-        const purchase = item.values?.purchase ?? '';
-        const usage = item.values?.usage ?? '';
+        const purchase = item.values?.purchase ?? 0;
+        const usage = item.values?.usage ?? 0;
         const previousInventory = toNumberOrNull(item.previous?.inventory) || 0;
         const savedInventory = toNumberOrNull(item.values?.inventory);
         const numericUsage = toNumberOrNull(usage) ?? 0;
@@ -600,11 +604,6 @@ export default function UnifiedRecordModal({
         Object.prototype.hasOwnProperty.call(draft, getDraftKeyForItem(tabId, item))
     );
 
-    const hasPersistedInventoryValues = (item) => {
-        const values = item?.values || {};
-        return hasValue(values.purchase) || hasValue(values.usage) || hasValue(values.inventory);
-    };
-
     const buildSavePlan = ({
         tabIds = ['flow', 'medicine', 'water', 'kit'],
         validateFlow = true,
@@ -628,8 +627,21 @@ export default function UnifiedRecordModal({
                 const calculatedFlow = toNumberOrNull(values.calculatedFlow);
                 const isSludge = isSludgeFlowItem(item);
 
-                // 슬러지 반출이 없는 날은 빈칸이 정상이다.
-                if (reading === null && isSludge) return;
+                if (reading === null && isSludge) {
+                    const previousMonthlyExport = toNumberOrNull(item?.previous?.monthlyExport)
+                        ?? toNumberOrNull(item?.previous?.monthly_export)
+                        ?? 0;
+                    flowItemsToSave.push({
+                        type: item.key || item.name || item.label,
+                        raw_value: 0,
+                        calculated_flow: round1(previousMonthlyExport),
+                        sludge_export: 0,
+                        is_manual: false,
+                        is_reset: false,
+                        input_status: 'defaulted',
+                    });
+                    return;
+                }
                 if (reading === null) {
                     const previousReading = toNumberOrNull(item?.previous?.reading);
                     if (allowFlowDefaults && previousReading !== null) {
@@ -670,9 +682,6 @@ export default function UnifiedRecordModal({
         const collectInventoryItems = (tab, nameField, target) => {
             (resolvedContexts[tab]?.items || []).forEach((item) => {
                 const isDrafted = hasDraftForItem(tab, item);
-                if (!isDrafted && !hasPersistedInventoryValues(item)) {
-                    return;
-                }
 
                 const values = getDraftForItem(tab, item);
                 const purchase = toNumberOrNull(values.purchase);

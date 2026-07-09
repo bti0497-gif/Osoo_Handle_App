@@ -15,7 +15,6 @@ const {
 } = require('../services/dailyLogPreviewService.cjs');
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
 const { getHtmlTemplatePath } = require('../services/excelTemplateHtmlService.cjs');
-const { restoreOperationalData } = require('../services/bigQueryRestoreService.cjs');
 const router = express.Router();
 
 function buildMissingTemplateResponse(templateName) {
@@ -28,15 +27,6 @@ function buildMissingTemplateResponse(templateName) {
 }
 
 module.exports = function(db, baseDir, appDataPath) {
-  async function restoreWaterQualityRange(range, siteName) {
-    await restoreOperationalData(db, {
-      startDate: range.startDate,
-      endDate: range.endDate,
-      tables: ['qntech_water_quality'],
-      siteName,
-    });
-  }
-
   router.get('/api/logs/preview-template-html', async (req, res) => {
     const { templateName } = req.query;
     const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, templateName, { excelOnly: true });
@@ -76,7 +66,6 @@ module.exports = function(db, baseDir, appDataPath) {
 
       const range = normalizeDateRange(startDate, endDate);
       const { siteName } = req.query;
-      await restoreWaterQualityRange(range, siteName);
       const activeDates = getActiveDates(db, range.startDate, range.endDate, siteName);
       console.log(`[Active Dates API] Range: ${range.startDate} ~ ${range.endDate}, Site: ${siteName || 'ALL'}, Found: ${activeDates.length}`);
       if (activeDates.length > 0) {
@@ -99,7 +88,6 @@ module.exports = function(db, baseDir, appDataPath) {
     try {
       const { siteName } = req.query;
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await restoreWaterQualityRange(range, siteName);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
 
       return res.json({ success: true, ...manifest });
@@ -119,7 +107,6 @@ module.exports = function(db, baseDir, appDataPath) {
     try {
       const { siteName } = req.query;
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await restoreWaterQualityRange(range, siteName);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       const targetPage = findPageInManifest(manifest, pageKey);
 
@@ -162,7 +149,6 @@ module.exports = function(db, baseDir, appDataPath) {
     try {
       const { siteName } = req.query;
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await restoreWaterQualityRange(range, siteName);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       const targetPage = findPageInManifest(manifest, pageKey);
 
@@ -209,7 +195,6 @@ module.exports = function(db, baseDir, appDataPath) {
     try {
       const { siteName } = req.query;
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await restoreWaterQualityRange(range, siteName);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       const parsedPageKey = pageKey ? parsePageKey(pageKey) : null;
       const targetPage = findPageInManifest(manifest, pageKey || (parsedPageKey ? pageKey : ''));
@@ -243,7 +228,6 @@ module.exports = function(db, baseDir, appDataPath) {
     try {
       const { siteName } = req.query;
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await restoreWaterQualityRange(range, siteName);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       const pdfPath = await buildBatchPreviewPdf({
         db,
@@ -281,7 +265,6 @@ module.exports = function(db, baseDir, appDataPath) {
       const { siteName } = req.query;
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
       console.log(`[Excel Export] Request Range: ${range.startDate} ~ ${range.endDate}, Site: ${siteName || 'ALL'}`);
-      await restoreWaterQualityRange(range, siteName);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       console.log(`[Excel Export] Manifest generated. Total Sheets: ${manifest.pages.length}`);
       if (manifest.pages.length > 0) {

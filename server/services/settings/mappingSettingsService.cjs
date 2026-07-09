@@ -55,11 +55,22 @@ function formatRowDate(value) {
   return formatDate(value) || String(value || '').trim();
 }
 
+function getTodayKst() {
+  return new Date(Date.now() + (9 * 60 * 60 * 1000)).toISOString().slice(0, 10);
+}
+
+function isImportableDate(value) {
+  const date = String(value || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(date)
+    && date >= '2000-01-01'
+    && date <= getTodayKst();
+}
+
 function findFirstDateRow(rows, startRow, endRow, dateCol, scanRange = 30) {
   const from = Math.max(1, Number(startRow) - scanRange);
   const to = Math.max(Number(endRow) + scanRange, Number(startRow) + scanRange);
   for (let r = from; r <= to; r += 1) {
-    if (formatRowDate(getRangeCell(rows, r, dateCol))) return r;
+    if (isImportableDate(formatRowDate(getRangeCell(rows, r, dateCol)))) return r;
   }
   return null;
 }
@@ -69,7 +80,7 @@ function collectMappedDates(rows, startRow, endRow, dateCol, label) {
   const seen = new Set();
   for (let r = startRow; r <= endRow; r += 1) {
     const formatted = formatRowDate(getRangeCell(rows, r, dateCol));
-    if (!formatted || seen.has(formatted)) continue;
+    if (!isImportableDate(formatted) || seen.has(formatted)) continue;
     dates.push(formatted);
     seen.add(formatted);
   }
@@ -166,6 +177,7 @@ async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
 
   db.transaction(() => {
     const flowNames = Object.keys(flows).filter(Boolean);
+    db.prepare("DELETE FROM flow_readings WHERE input_status = 'imported'").run();
     if (flowNames.length > 0 && mappedDates.length > 0) {
       const placeholders = flowNames.map(() => '?').join(',');
       const datePlaceholders = mappedDates.map(() => '?').join(',');
@@ -175,7 +187,7 @@ async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
 
     for (let r = startRow; r <= endRow; r += 1) {
       const formatted = formatRowDate(getRangeCell(rows, r, dateCol));
-      if (!formatted) { progress.current += 1; continue; }
+      if (!isImportableDate(formatted)) { progress.current += 1; continue; }
       const rowResults = { date: formatted };
       Object.entries(flows).forEach(([itemName, cols]) => {
         const rawValue = toRoundedNumber(getRangeCell(rows, r, cols.raw || ''), null);
@@ -230,6 +242,9 @@ async function saveInventoryMapping(db, appDataPath, config, mapping, progress, 
 
   db.transaction(() => {
     const itemNames = Object.keys(grouped).filter(Boolean);
+    if (options.tableName) {
+      db.prepare(`DELETE FROM ${options.tableName} WHERE input_status = 'imported'`).run();
+    }
     if (itemNames.length > 0 && mappedDates.length > 0 && options.deleteSqlPrefix) {
       const placeholders = itemNames.map(() => '?').join(',');
       const datePlaceholders = mappedDates.map(() => '?').join(',');
@@ -239,7 +254,7 @@ async function saveInventoryMapping(db, appDataPath, config, mapping, progress, 
 
     for (let r = startRow; r <= endRow; r += 1) {
       const formatted = formatRowDate(getRangeCell(rows, r, dateCol));
-      if (!formatted) { progress.current += 1; continue; }
+      if (!isImportableDate(formatted)) { progress.current += 1; continue; }
       const rowResults = { date: formatted };
       Object.entries(grouped).forEach(([itemName, cols]) => {
         const purchase = toRoundedNumber(getRangeCell(rows, r, cols.purchase || ''), null);
@@ -277,6 +292,7 @@ async function saveInventoryMapping(db, appDataPath, config, mapping, progress, 
 function saveKitMapping(db, appDataPath, config, mapping, progress) {
   return saveInventoryMapping(db, appDataPath, config, mapping, progress, {
     category: 'kit',
+    tableName: 'kit_logs',
     label: '키트 데이터',
     nameColumn: 'kit_name',
     deleteSqlPrefix: 'DELETE FROM kit_logs WHERE',
@@ -304,6 +320,7 @@ function saveKitMapping(db, appDataPath, config, mapping, progress) {
 function saveMedicineMapping(db, appDataPath, config, mapping, progress) {
   return saveInventoryMapping(db, appDataPath, config, mapping, progress, {
     category: 'medicine',
+    tableName: 'medicine_logs',
     label: '약품 데이터',
     nameColumn: 'medicine_name',
     deleteSqlPrefix: 'DELETE FROM medicine_logs WHERE',
@@ -420,6 +437,7 @@ async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
 
   db.transaction(() => {
     const metadata = getCurrentRecordMetadata(db, config || {});
+    db.prepare("DELETE FROM qntech_water_quality WHERE source_type = 'excel' OR measurement_group LIKE 'excel:%' OR measurement_group = ''").run();
     if (mappedDates.length > 0) {
       const datePlaceholders = mappedDates.map(() => '?').join(',');
       db.prepare(`DELETE FROM qntech_water_quality WHERE date IN (${datePlaceholders}) AND (source_type = 'excel' OR measurement_group LIKE 'excel:%' OR measurement_group = '')`)
@@ -430,7 +448,7 @@ async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
 
     for (let r = startRow; r <= endRow; r += 1) {
       const formatted = formatRowDate(getRangeCell(rows, r, dateCol));
-      if (!formatted) { progress.current += 1; continue; }
+      if (!isImportableDate(formatted)) { progress.current += 1; continue; }
 
       if (!cleanedDates.has(formatted)) cleanedDates.add(formatted);
 

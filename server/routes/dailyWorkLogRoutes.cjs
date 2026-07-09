@@ -15,7 +15,6 @@ const {
   buildBatchDailyWorkLogHwpx,
   buildBatchDailyWorkLogPdf,
 } = require('../services/dailyWorkLogHwpxService.cjs');
-const { restoreOperationalData } = require('../services/bigQueryRestoreService.cjs');
 const { syncCertificateCacheForSiteMonth } = require('../services/certificateCacheSyncService.cjs');
 
 const TEMPLATE_NAME = '일일업무일지';
@@ -100,12 +99,6 @@ module.exports = function (db, baseDir, appDataPath) {
       }
 
       const range = normalizeDateRange(startDate, endDate);
-      await restoreOperationalData(db, {
-        startDate: range.startDate,
-        endDate: range.endDate,
-        tables: ['flow_readings', 'medicine_logs', 'kit_logs'],
-        ...getRequestContext(req),
-      });
       await syncCertificateCacheForRange(range, getRequestContext(req));
       const activeDates = getActiveDates(db, range.startDate, range.endDate, getRequestContext(req));
 
@@ -127,12 +120,6 @@ module.exports = function (db, baseDir, appDataPath) {
 
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await restoreOperationalData(db, {
-        startDate: range.startDate,
-        endDate: range.endDate,
-        tables: ['flow_readings', 'medicine_logs', 'kit_logs'],
-        ...getRequestContext(req),
-      });
       await syncCertificateCacheForRange(range, getRequestContext(req));
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
 
@@ -158,12 +145,6 @@ module.exports = function (db, baseDir, appDataPath) {
       const range = requestedDate
         ? normalizeDateRange(requestedDate, requestedDate)
         : normalizeDateRange(startDate, endDate);
-      await restoreOperationalData(db, {
-        startDate: range.startDate,
-        endDate: range.endDate,
-        tables: ['flow_readings', 'medicine_logs', 'kit_logs'],
-        ...getRequestContext(req),
-      });
       await syncCertificateCacheForRange(range, getRequestContext(req));
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
       const targetPage = findPageInManifest(manifest, pageKey)
@@ -200,12 +181,6 @@ module.exports = function (db, baseDir, appDataPath) {
 
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await restoreOperationalData(db, {
-        startDate: range.startDate,
-        endDate: range.endDate,
-        tables: ['flow_readings', 'medicine_logs', 'kit_logs'],
-        ...getRequestContext(req),
-      });
       await syncCertificateCacheForRange(range, getRequestContext(req));
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
       
@@ -253,12 +228,6 @@ module.exports = function (db, baseDir, appDataPath) {
 
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await restoreOperationalData(db, {
-        startDate: range.startDate,
-        endDate: range.endDate,
-        tables: ['flow_readings', 'medicine_logs', 'kit_logs', 'qntech_water_quality'],
-        ...context,
-      });
       await syncCertificateCacheForRange(range, context);
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
       const result = await buildBatchDailyWorkLogPdf({
@@ -306,12 +275,6 @@ module.exports = function (db, baseDir, appDataPath) {
 
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await restoreOperationalData(db, {
-        startDate: range.startDate,
-        endDate: range.endDate,
-        tables: ['flow_readings', 'medicine_logs', 'kit_logs', 'qntech_water_quality'],
-        ...context,
-      });
       await syncCertificateCacheForRange(range, context);
 
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
