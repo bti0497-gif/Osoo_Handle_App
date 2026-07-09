@@ -494,7 +494,7 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
         waterTypes,
         updateReading,
         submitBatch,
-        refresh: () => loadReadings({ force: true }),
+        refresh: ({ force = true } = {}) => loadReadings({ force }),
         pendingChanges,
         isImportingFromQntech,
         lastImportSummary,

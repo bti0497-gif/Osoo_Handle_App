@@ -42,7 +42,9 @@ This document protects the integrated input modal used by flow, water, medicine,
 - Kit save must call `KitModel.bulkSave(kitItems)` and post to `/api/kits/bulk`.
 - Water save must call `WaterQualityModel.bulkSave(waterItems)` and post to `/api/water-quality/bulk`.
 - Each model must clear its history cache before save.
-- After a successful save, the modal must force reload contexts so the visible values match the DB.
+- After a successful save, the modal must force reload only the saved tabs so visible values match the DB.
+- The parent grid must reuse the refreshed model cache and must not issue a duplicate forced request.
+- Saving one tab must not reload unrelated flow, medicine, kit, or water histories.
 - Flow server save must upsert by `(date, type)`.
 - Medicine server save must upsert by `(medicine_name, date)`.
 - Kit server save must upsert by `(kit_name, date)`.

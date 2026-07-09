@@ -21,6 +21,12 @@ export const DashboardModel = {
     },
     async fetchKitHistory(params = {}) {
         return apiClient.get('/api/kits/history', params);
-    }
+    },
+    async fetchMedicineDefaults() {
+        return apiClient.get('/api/settings/medicine-defaults');
+    },
+    async fetchKitDefaults() {
+        return apiClient.get('/api/settings/kit-defaults');
+    },
 };
 

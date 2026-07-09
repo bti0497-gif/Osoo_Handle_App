@@ -48,6 +48,8 @@ export function useDashboardViewModel(currentUser) {
     const [waterRows, setWaterRows] = useState([]);
     const [medicineRows, setMedicineRows] = useState([]);
     const [kitRows, setKitRows] = useState([]);
+    const [medicineDefaults, setMedicineDefaults] = useState([]);
+    const [kitDefaults, setKitDefaults] = useState([]);
     const [weekOffset, setWeekOffset] = useState(0);
     const [visibleSeries, setVisibleSeries] = useState({
         inflow: true,
@@ -71,11 +73,20 @@ export function useDashboardViewModel(currentUser) {
             }
             const params = siteId ? { site_id: siteId } : {};
 
-            const [flowResponse, waterResponse, medicineResponse, kitResponse] = await Promise.all([
+            const [
+                flowResponse,
+                waterResponse,
+                medicineResponse,
+                kitResponse,
+                medicineDefaultsResponse,
+                kitDefaultsResponse,
+            ] = await Promise.all([
                 DashboardModel.fetchFlowHistory(params),
                 DashboardModel.fetchWaterHistory(params),
                 DashboardModel.fetchMedicineHistory(params),
                 DashboardModel.fetchKitHistory(params),
+                DashboardModel.fetchMedicineDefaults(),
+                DashboardModel.fetchKitDefaults(),
             ]);
 
             if (!flowResponse?.success || !Array.isArray(flowResponse.history)) {
@@ -126,12 +137,24 @@ export function useDashboardViewModel(currentUser) {
             } else {
                 setKitRows(kitResponse.history);
             }
+            setMedicineDefaults(
+                medicineDefaultsResponse?.success && Array.isArray(medicineDefaultsResponse.items)
+                    ? medicineDefaultsResponse.items
+                    : []
+            );
+            setKitDefaults(
+                kitDefaultsResponse?.success && Array.isArray(kitDefaultsResponse.items)
+                    ? kitDefaultsResponse.items
+                    : []
+            );
         } catch (error) {
             console.error('[Dashboard] 데이터 조회 실패:', error);
             setHistoryRows([]);
             setWaterRows([]);
             setMedicineRows([]);
             setKitRows([]);
+            setMedicineDefaults([]);
+            setKitDefaults([]);
         } finally {
             setLoading(false);
         }
@@ -228,6 +251,8 @@ export function useDashboardViewModel(currentUser) {
         waterSummary,
         medicineRows,
         kitRows,
+        medicineDefaults,
+        kitDefaults,
         refresh: loadHistory,
     };
 }

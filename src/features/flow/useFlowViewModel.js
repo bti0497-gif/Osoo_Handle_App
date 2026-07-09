@@ -381,7 +381,7 @@ export const useFlowViewModel = (currentUser, { showAlert, flowTypes: flowTypesP
         updateManualReading,
         submitBatch,
         saveModalDraft,
-        refresh: () => loadReadings({ force: true }),
+        refresh: ({ force = true } = {}) => loadReadings({ force }),
         pendingChanges,
     };
 };

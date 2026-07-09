@@ -4,6 +4,9 @@ This document protects the field setup workflow after an Excel file has been acc
 
 ## Excel Mapping
 
+- The Excel file accepted in Basic Settings must be copied into `AppData/templates/excel-originals` and become the sole import source.
+- A successful Excel upload must leave only the active original file in that folder; development samples and older originals must not remain.
+- Selecting the same Excel file again must trigger a fresh upload so its latest contents replace the AppData copy.
 - Saved column letters are the source of truth. Import code must read each saved column 1:1.
 - Inventory mappings use exactly these suffixes: `purchase`, `usage`, `inventory`.
 - Medicine and kit imports must read:

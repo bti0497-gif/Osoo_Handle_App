@@ -260,15 +260,30 @@ module.exports = function (db, baseDir, appDataPath) {
       const siteName = scope.siteName || '';
       const siteFilter = siteWhere(scope);
 
-      // 추가 약품 (기본 3종 제외)
-      const placeholders = BASE_MEDICINES.map(() => '?').join(',');
-      const extraMedicines = db.prepare(
+      const activeMedicineRows = db.prepare(
         `SELECT item_name FROM config_items
          WHERE category = 'medicine' AND is_active = 1
-           AND item_name NOT IN (${placeholders})
+           AND item_name NOT LIKE '%\\_purchase' ESCAPE '\\'
+           AND item_name NOT LIKE '%\\_usage' ESCAPE '\\'
+           AND item_name NOT LIKE '%\\_inventory' ESCAPE '\\'
          ORDER BY display_order ASC
-         LIMIT 3`
-      ).all(...BASE_MEDICINES).map(r => r.item_name);
+        `
+      ).all();
+      const activeKitRows = db.prepare(
+        `SELECT item_name FROM config_items
+         WHERE category = 'kit' AND is_active = 1
+           AND item_name NOT LIKE '%\\_purchase' ESCAPE '\\'
+           AND item_name NOT LIKE '%\\_usage' ESCAPE '\\'
+           AND item_name NOT LIKE '%\\_inventory' ESCAPE '\\'
+         ORDER BY display_order ASC`
+      ).all();
+      const medicineNames = activeMedicineRows.length > 0
+        ? activeMedicineRows.map((row) => row.item_name)
+        : BASE_MEDICINES;
+      const kitNames = activeKitRows.length > 0
+        ? activeKitRows.map((row) => row.item_name)
+        : BASE_KITS;
+      const extraMedicines = medicineNames.filter((name) => !BASE_MEDICINES.includes(name));
 
       const getPurchaseSum = (table, nameCol, name, start, end) =>
         db.prepare(
@@ -303,14 +318,14 @@ module.exports = function (db, baseDir, appDataPath) {
       ).all();
       const kitDefaultAmountMap = Object.fromEntries(kitDefaultAmountRows.map(r => [r.item_name, r.default_amount]));
 
-      const allMedicines = [...BASE_MEDICINES, ...extraMedicines].map(name => ({
+      const allMedicines = medicineNames.map(name => ({
         name,
         currPurchase: getCurrentPurchase('medicine_logs', 'medicine_name', name, medicinePurchaseDate),
         prevPurchase: getPurchaseSum('medicine_logs', 'medicine_name', name, prevStart, prevEnd),
         defaultAmount: defaultAmountMap[name] ?? 0,
       }));
 
-      const kits = BASE_KITS.map(name => ({
+      const kits = kitNames.map(name => ({
         name,
         currPurchase: getCurrentPurchase('kit_logs', 'kit_name', name, kitPurchaseDate),
         prevPurchase: getPurchaseSum('kit_logs', 'kit_name', name, prevStart, prevEnd),

@@ -397,8 +397,10 @@ const WaterQualityView = ({ currentUser }) => {
         }
     };
 
-    const handleSaveComplete = async ({ date }) => {
-        await refresh();
+    const handleSaveComplete = async ({ date, savedTabs = [] }) => {
+        if (savedTabs.includes('water')) {
+            await refresh({ force: false });
+        }
         setModalState((prev) => ({ ...prev, date }));
     };
 

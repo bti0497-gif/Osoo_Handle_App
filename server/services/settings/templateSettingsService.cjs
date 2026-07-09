@@ -24,6 +24,18 @@ function cleanupDisallowedReportTemplates(reportsDir) {
   }
 }
 
+function cleanupInactiveExcelOriginals(excelOriginalsDir, activeFileName) {
+  const normalizedActiveName = String(activeFileName || '').normalize('NFC');
+  const entries = fs.readdirSync(excelOriginalsDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isFile() || entry.name.normalize('NFC') === normalizedActiveName) {
+      continue;
+    }
+    fs.unlinkSync(path.join(excelOriginalsDir, entry.name));
+  }
+}
+
 async function handleSettingsUpload(db, files, {
   baseDir,
   appDataPath,
@@ -35,11 +47,11 @@ async function handleSettingsUpload(db, files, {
 
   if (uploadFiles.excel_original) {
     const original = uploadFiles.excel_original[0];
-    const originalPath = `appdata/templates/excel-originals/${original.filename}`;
-    db.prepare('UPDATE app_settings SET excel_template_path = ? WHERE id = 1').run(originalPath);
-
     const filePath = path.join(excelOriginalsDir, original.filename);
     const sheets = await parseAndStoreExcel(db, filePath);
+    const originalPath = `appdata/templates/excel-originals/${original.filename}`;
+    db.prepare('UPDATE app_settings SET excel_template_path = ? WHERE id = 1').run(originalPath);
+    cleanupInactiveExcelOriginals(excelOriginalsDir, original.filename);
     result.originalPath = originalPath;
     result.sheets = sheets;
   }
@@ -108,5 +120,6 @@ async function handleSettingsUpload(db, files, {
 
 module.exports = {
   cleanupDisallowedReportTemplates,
+  cleanupInactiveExcelOriginals,
   handleSettingsUpload,
 };

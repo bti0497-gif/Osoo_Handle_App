@@ -276,7 +276,9 @@ function validateRegressionContracts() {
   const inventoryMappingPanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'InventoryMappingPanel.jsx');
   const flowMappingPanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'FlowMappingPanel.jsx');
   const excelCellMapperPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'widgets', 'ExcelCellMapper.jsx');
+  const templateUploadCardPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'widgets', 'TemplateUploadCard.jsx');
   const useMappingSettingsPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'hooks', 'useMappingSettings.js');
+  const templateSettingsServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'templateSettingsService.cjs');
   const appSettingsServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'appSettingsService.cjs');
   const electronBuilderConfigPath = path.join(BASE_DIR, 'electron-builder.config.cjs');
   const excelMappingTemplateContractPath = path.join(BASE_DIR, 'EXCEL_MAPPING_TEMPLATE_CONTRACT.md');
@@ -294,6 +296,10 @@ function validateRegressionContracts() {
   const waterQualityRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'waterQualityRoutes.cjs');
   const sitesSheetsServicePath = path.join(BASE_DIR, 'server', 'services', 'sitesSheetsService.cjs');
   const siteSettingsServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'siteSettingsService.cjs');
+  const dashboardModelPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'DashboardModel.js');
+  const dashboardViewModelPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'useDashboardViewModel.js');
+  const inventoryLevelWidgetPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'widgets', 'InventoryLevelWidget.jsx');
+  const medicineInRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineInRoutes.cjs');
 
   const readText = (filePath) => (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '');
   const viewModelText = readText(unifiedViewModelPath);
@@ -314,7 +320,9 @@ function validateRegressionContracts() {
   const inventoryMappingPanelText = readText(inventoryMappingPanelPath);
   const flowMappingPanelText = readText(flowMappingPanelPath);
   const excelCellMapperText = readText(excelCellMapperPath);
+  const templateUploadCardText = readText(templateUploadCardPath);
   const useMappingSettingsText = readText(useMappingSettingsPath);
+  const templateSettingsServiceText = readText(templateSettingsServicePath);
   const settingsRoutesText = readText(settingsRoutesPath);
   const appSettingsServiceText = readText(appSettingsServicePath);
   const basicSitePanelText = readText(basicSitePanelPath);
@@ -334,6 +342,16 @@ function validateRegressionContracts() {
   const waterQualityRoutesText = readText(waterQualityRoutesPath);
   const sitesSheetsServiceText = readText(sitesSheetsServicePath);
   const siteSettingsServiceText = readText(siteSettingsServicePath);
+  const dashboardModelText = readText(dashboardModelPath);
+  const dashboardViewModelText = readText(dashboardViewModelPath);
+  const inventoryLevelWidgetText = readText(inventoryLevelWidgetPath);
+  const medicineInRoutesText = readText(medicineInRoutesPath);
+  const parentSaveRefreshText = [
+    flowManagementViewPath,
+    medicineManagementViewPath,
+    kitManagementViewPath,
+    waterQualityViewPath,
+  ].map(readText).join('\n');
 
   const checkSource = (condition, passMessage, failMessage) => {
     if (condition) success(passMessage);
@@ -384,7 +402,8 @@ function validateRegressionContracts() {
       unifiedRecordModalContractText.includes('The modal body must not use a blanket `pointer-events: none`') &&
       unifiedRecordModalContractText.includes('Editing inventory marks that date as a manual inventory baseline') &&
       unifiedRecordModalContractText.includes('Flow server save must upsert by `(date, type)`') &&
-      unifiedRecordModalContractText.includes('After a successful save, the modal must force reload contexts'),
+      unifiedRecordModalContractText.includes('After a successful save, the modal must force reload only the saved tabs') &&
+      unifiedRecordModalContractText.includes('must not issue a duplicate forced request'),
     '통합 입력 모달 날짜/입력/계산 계약 문서 확인',
     'UNIFIED_RECORD_MODAL_CONTRACT.md가 누락되었거나 핵심 계약 문구가 빠졌습니다'
   );
@@ -446,9 +465,14 @@ function validateRegressionContracts() {
       viewModelText.includes('const result = await WaterQualityModel.bulkSave(waterItems);') &&
       viewModelText.includes('const result = await KitModel.bulkSave(kitItems);') &&
       viewModelText.includes('if (!result?.success) throw new Error') &&
-      viewModelText.includes('await reloadContexts({ force: true });'),
-    '통합 모달 저장 버튼 및 저장 후 강제 재조회 계약 유지',
-    '통합 모달 저장 버튼이 현재 탭만 저장하지 않거나 저장 실패/재조회 처리가 깨졌습니다'
+      viewModelText.includes('await reloadContexts({ force: true, tabs: savedTabs });') &&
+      viewModelText.includes("targetTabs.has('flow') ? FlowModel.fetchHistory({ force }) : null") &&
+      viewModelText.includes("targetTabs.has('medicine') ? MedicineModel.fetchHistory({ force }) : null") &&
+      viewModelText.includes("targetTabs.has('kit') ? KitModel.fetchHistory({ force }) : null") &&
+      viewModelText.includes("targetTabs.has('water') ? WaterQualityModel.fetchHistory({ force }) : null") &&
+      parentSaveRefreshText.includes('await refresh({ force: false });'),
+    '통합 모달 저장 탭 단일 갱신 및 부모 캐시 재사용 계약 유지',
+    '통합 모달이 저장 후 관계없는 탭을 조회하거나 부모 화면이 중복 강제조회할 수 있습니다'
   );
 
   checkSource(
@@ -494,6 +518,37 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    dashboardModelText.includes("apiClient.get('/api/settings/medicine-defaults')") &&
+      dashboardModelText.includes("apiClient.get('/api/settings/kit-defaults')") &&
+      dashboardViewModelText.includes('medicineDefaultsResponse') &&
+      dashboardViewModelText.includes('kitDefaultsResponse') &&
+      inventoryLevelWidgetText.includes('item.inventory / item.defaultAmount') &&
+      !inventoryLevelWidgetText.includes('Math.max(1, ...items.map((i) => i.inventory))'),
+    '대시보드 품목별 기본구매량 재고율 계약 유지',
+    '대시보드 재고율이 설정 기본구매량이 아닌 품목 간 최대 재고를 기준으로 계산될 수 있습니다'
+  );
+
+  checkSource(
+    medicineInRoutesText.includes("category = 'medicine' AND is_active = 1") &&
+      medicineInRoutesText.includes("category = 'kit' AND is_active = 1") &&
+      medicineInRoutesText.includes("item_name NOT LIKE '%\\\\_purchase' ESCAPE '\\\\'") &&
+      medicineInRoutesText.includes("item_name NOT LIKE '%\\\\_usage' ESCAPE '\\\\'") &&
+      medicineInRoutesText.includes("item_name NOT LIKE '%\\\\_inventory' ESCAPE '\\\\'") &&
+      medicineInRoutesText.includes('activeMedicineRows.length > 0') &&
+      medicineInRoutesText.includes('activeKitRows.length > 0'),
+    '약품 입고 화면 활성 품목 및 내부 매핑키 제외 계약 유지',
+    '약품 입고 화면에 비활성 품목 또는 _purchase/_usage/_inventory 내부 키가 노출될 수 있습니다'
+  );
+
+  checkSource(
+    dailyWorkLogText.includes('function isHwpAutomationUnavailable') &&
+      dailyWorkLogText.includes("code: 'HWP_AUTOMATION_UNAVAILABLE'") &&
+      dailyWorkLogText.includes("userMessage: 'PDF 출력에는 한글 프로그램 설치가 필요합니다.'"),
+    '한글 미설치 PDF 사용자 안내 계약 유지',
+    '한글 미설치 현장에서 복잡한 COM 오류가 사용자에게 노출될 수 있습니다'
+  );
+
+  checkSource(
     !settingsBigQueryClearText.includes('clear-operational-data') &&
       !settingsBigQueryClearText.includes('clearBigQueryOperationalData') &&
       !settingsBigQueryClearText.includes('handleClearBigQueryOperationalData') &&
@@ -505,10 +560,21 @@ function validateRegressionContracts() {
 
   checkSource(
     excelMappingTemplateContractText.includes('Saved column letters are the source of truth') &&
+      excelMappingTemplateContractText.includes('become the sole import source') &&
       excelMappingTemplateContractText.includes('purchase from `cols.purchase`') &&
       excelMappingTemplateContractText.includes('Report templates under `templates/reports` are release assets'),
     '엑셀 매핑/기본설정/양식 패키징 계약 문서 확인',
     'EXCEL_MAPPING_TEMPLATE_CONTRACT.md가 누락되었거나 핵심 계약 문구가 빠졌습니다'
+  );
+
+  checkSource(
+    templateUploadCardText.includes("e.target.value = '';") &&
+      templateSettingsServiceText.includes('function cleanupInactiveExcelOriginals') &&
+      templateSettingsServiceText.includes('cleanupInactiveExcelOriginals(excelOriginalsDir, original.filename)') &&
+      templateSettingsServiceText.indexOf('const sheets = await parseAndStoreExcel(db, filePath);') <
+        templateSettingsServiceText.indexOf("db.prepare('UPDATE app_settings SET excel_template_path = ? WHERE id = 1')"),
+    '현장 엑셀 AppData 단일 원본 및 동일 파일 재업로드 계약 유지',
+    '현장 엑셀 재업로드 또는 AppData 단일 원본 정리 계약이 깨졌습니다'
   );
 
   checkSource(

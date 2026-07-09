@@ -149,9 +149,11 @@ const KitManagementView = ({ currentUser }) => {
         openModal(hasSelectedRowData() ? 'edit' : 'add');
     };
 
-    const handleSaveComplete = async ({ date }) => {
+    const handleSaveComplete = async ({ date, savedTabs = [] }) => {
         setSelectedDate(date);
-        await refresh();
+        if (savedTabs.includes('kit')) {
+            await refresh({ force: false });
+        }
     };
 
     const renderCell = (row, col) => {

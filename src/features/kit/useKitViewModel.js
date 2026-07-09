@@ -413,7 +413,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
         submitBatch,
         saveModalDraft,
         syncAnalysisKits,
-        refresh: () => loadLogs({ force: true }),
+        refresh: ({ force = true } = {}) => loadLogs({ force }),
         pendingChanges
     };
 };

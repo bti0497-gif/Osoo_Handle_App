@@ -178,9 +178,10 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
-    const reloadContexts = useCallback(async ({ force = false } = {}) => {
+    const reloadContexts = useCallback(async ({ force = false, tabs = ['flow', 'medicine', 'kit', 'water'] } = {}) => {
         if (!date) return;
         const baseContexts = contextsRef.current;
+        const targetTabs = new Set(tabs);
         setIsLoading(true);
 
         try {
@@ -192,21 +193,34 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                 medicineDefaults,
                 kitDefaults,
             ] = await Promise.all([
-                FlowModel.fetchHistory({ force }),
-                MedicineModel.fetchHistory({ force }),
-                KitModel.fetchHistory({ force }),
-                WaterQualityModel.fetchHistory({ force }),
-                SettingsModel.getMedicineDefaults().catch(() => ({ success: false, items: [] })),
-                SettingsModel.getKitDefaults().catch(() => ({ success: false, items: [] })),
+                targetTabs.has('flow') ? FlowModel.fetchHistory({ force }) : null,
+                targetTabs.has('medicine') ? MedicineModel.fetchHistory({ force }) : null,
+                targetTabs.has('kit') ? KitModel.fetchHistory({ force }) : null,
+                targetTabs.has('water') ? WaterQualityModel.fetchHistory({ force }) : null,
+                targetTabs.has('medicine')
+                    ? SettingsModel.getMedicineDefaults().catch(() => ({ success: false, items: [] }))
+                    : null,
+                targetTabs.has('kit')
+                    ? SettingsModel.getKitDefaults().catch(() => ({ success: false, items: [] }))
+                    : null,
             ]);
             const medicineDefaultMap = buildDefaultAmountMap(medicineDefaults);
             const kitDefaultMap = buildDefaultAmountMap(kitDefaults);
-            setResolvedContexts({
-                flow: mergeFlowContext(baseContexts.flow, unwrapHistory(flowResult), date),
-                medicine: mergeInventoryContext(baseContexts.medicine, unwrapHistory(medicineResult), date, 'medicine_name', medicineDefaultMap),
-                kit: mergeInventoryContext(baseContexts.kit, unwrapHistory(kitResult), date, 'kit_name', kitDefaultMap),
-                water: mergeWaterContext(baseContexts.water, unwrapHistory(waterResult), date),
-            });
+            setResolvedContexts((previous) => ({
+                ...previous,
+                ...(targetTabs.has('flow') && {
+                    flow: mergeFlowContext(baseContexts.flow, unwrapHistory(flowResult), date),
+                }),
+                ...(targetTabs.has('medicine') && {
+                    medicine: mergeInventoryContext(baseContexts.medicine, unwrapHistory(medicineResult), date, 'medicine_name', medicineDefaultMap),
+                }),
+                ...(targetTabs.has('kit') && {
+                    kit: mergeInventoryContext(baseContexts.kit, unwrapHistory(kitResult), date, 'kit_name', kitDefaultMap),
+                }),
+                ...(targetTabs.has('water') && {
+                    water: mergeWaterContext(baseContexts.water, unwrapHistory(waterResult), date),
+                }),
+            }));
         } catch (error) {
             console.error('[unified-record] failed to load contexts:', error);
             setResolvedContexts(baseContexts);
@@ -255,7 +269,7 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                 savedTabs.push('kit');
             }
             if (savedTabs.length > 0) {
-                await reloadContexts({ force: true });
+                await reloadContexts({ force: true, tabs: savedTabs });
             }
             return { success: true, savedTabs };
         } catch (error) {

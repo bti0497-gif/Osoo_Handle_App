@@ -332,7 +332,7 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
         updateAmount,
         submitBatch,
         saveModalDraft,
-        refresh: () => loadLogs({ force: true }),
+        refresh: ({ force = true } = {}) => loadLogs({ force }),
         pendingChanges,
     };
 };

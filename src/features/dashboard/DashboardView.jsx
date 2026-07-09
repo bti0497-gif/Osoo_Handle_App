@@ -25,6 +25,8 @@ const DashboardView = ({ currentUser }) => {
         waterSummary,
         medicineRows,
         kitRows,
+        medicineDefaults,
+        kitDefaults,
     } = useDashboardViewModel(currentUser);
 
     useEffect(() => {
@@ -88,7 +90,12 @@ const DashboardView = ({ currentUser }) => {
                     <WaterQualityWidget rows={waterWidgetRows} summary={waterSummary} />
                 </div>
                 <div className="dashboard-view__widget-wrap">
-                    <InventoryLevelWidget medicineRows={medicineRows} kitRows={kitRows} />
+                    <InventoryLevelWidget
+                        medicineRows={medicineRows}
+                        kitRows={kitRows}
+                        medicineDefaults={medicineDefaults}
+                        kitDefaults={kitDefaults}
+                    />
                 </div>
             </div>
 

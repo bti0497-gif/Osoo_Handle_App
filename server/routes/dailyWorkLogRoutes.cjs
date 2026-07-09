@@ -38,6 +38,14 @@ function buildMissingHwpxTemplateResponse() {
   };
 }
 
+function isHwpAutomationUnavailable(error) {
+  const message = String(error?.message || error || '');
+  return message.includes('REGDB_E_CLASSNOTREG')
+    || message.includes('0x80040154')
+    || message.includes('HWPFrame.HwpObject')
+    || message.includes('NoCOMClassIdentified');
+}
+
 function getMonthKeys(startDate, endDate) {
   const months = [];
   const cursor = new Date(`${startDate.slice(0, 7)}-01T00:00:00`);
@@ -272,6 +280,14 @@ module.exports = function (db, baseDir, appDataPath) {
       });
     } catch (err) {
       console.error('[Daily Work Log PDF Export Error]', err.message);
+      if (isHwpAutomationUnavailable(err)) {
+        return res.status(503).json({
+          success: false,
+          code: 'HWP_AUTOMATION_UNAVAILABLE',
+          error: '한글 PDF 변환 기능을 사용할 수 없습니다.',
+          userMessage: 'PDF 출력에는 한글 프로그램 설치가 필요합니다.',
+        });
+      }
       return res.status(500).json({ success: false, error: `PDF 생성에 실패했습니다: ${err.message}` });
     }
   });

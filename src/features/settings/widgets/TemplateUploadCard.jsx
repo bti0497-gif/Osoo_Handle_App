@@ -116,8 +116,9 @@ export default function TemplateUploadCard({
                         accept={accept}
                         style={{ display: 'none' }}
                         onChange={(e) => {
-                            onFileChange?.(multiple ? Array.from(e.target.files) : e.target.files[0]);
-                            if (multiple) e.target.value = '';
+                            const selectedFiles = multiple ? Array.from(e.target.files) : e.target.files[0];
+                            e.target.value = '';
+                            onFileChange?.(selectedFiles);
                         }}
                     />
                 </label>

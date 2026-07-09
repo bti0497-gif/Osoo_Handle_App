@@ -1,6 +1,13 @@
 import React from 'react';
 
-function normalizeLatestInventory(historyRows, nameKey) {
+function buildDefaultAmountMap(rows) {
+    return new Map((rows || []).map((row) => [
+        String(row?.item_name || row?.itemName || row?.name || '').trim(),
+        Number(row?.default_amount ?? row?.defaultAmount ?? 0),
+    ]));
+}
+
+function normalizeLatestInventory(historyRows, nameKey, defaultAmounts) {
     const byName = new Map();
     historyRows.forEach((row) => {
         const name = String(row?.[nameKey] || '').trim();
@@ -11,6 +18,7 @@ function normalizeLatestInventory(historyRows, nameKey) {
             name,
             date,
             inventory: Number.isFinite(inv) ? inv : 0,
+            defaultAmount: Number(defaultAmounts.get(name)) || 0,
         };
         const prev = byName.get(name);
         if (!prev || date >= prev.date) {
@@ -26,10 +34,13 @@ function levelColor(percent) {
     return '#22c55e';
 }
 
-function InventoryBottle({ item, max }) {
-    const percent = Math.max(0, Math.min(100, (item.inventory / Math.max(1, max)) * 100));
+function InventoryBottle({ item }) {
+    const hasDefaultAmount = item.defaultAmount > 0;
+    const percent = hasDefaultAmount
+        ? Math.max(0, Math.min(100, (item.inventory / item.defaultAmount) * 100))
+        : 0;
     const fillColor = levelColor(percent);
-    const lowStock = percent <= 25;
+    const lowStock = hasDefaultAmount && percent <= 25;
 
     return (
         <div
@@ -84,7 +95,7 @@ function InventoryBottle({ item, max }) {
                         {Math.round(item.inventory * 10) / 10}
                     </span>
                     <span style={{ fontSize: '0.72rem', color: lowStock ? '#b91c1c' : '#64748b', fontWeight: 800 }}>
-                        {Math.round(percent)}%
+                        {hasDefaultAmount ? `${Math.round(percent)}%` : '기준 미설정'}
                     </span>
                     {lowStock && (
                         <span style={{ fontSize: '0.68rem', color: '#b91c1c', backgroundColor: '#fee2e2', border: '1px solid #fecaca', borderRadius: 999, padding: '0 0.35rem', fontWeight: 900 }}>
@@ -98,7 +109,6 @@ function InventoryBottle({ item, max }) {
 }
 
 function InventoryColumn({ title, items }) {
-    const max = Math.max(1, ...items.map((i) => i.inventory));
     return (
         <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: '0.65rem', backgroundColor: '#fff' }}>
             <h4 style={{ margin: '0 0 0.55rem', fontSize: '0.9rem', color: '#0f172a', fontWeight: 900 }}>{title}</h4>
@@ -107,16 +117,24 @@ function InventoryColumn({ title, items }) {
                     <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 700, padding: '0.35rem 0.25rem', gridColumn: '1 / -1' }}>데이터 없음</div>
                 )}
                 {items.map((item) => {
-                    return <InventoryBottle key={`${title}-${item.name}`} item={item} max={max} />;
+                    return <InventoryBottle key={`${title}-${item.name}`} item={item} />;
                 })}
             </div>
         </div>
     );
 }
 
-export default function InventoryLevelWidget({ medicineRows, kitRows }) {
-    const latestMedicines = normalizeLatestInventory(medicineRows || [], 'medicine_name').slice(0, 8);
-    const latestKits = normalizeLatestInventory(kitRows || [], 'kit_name').slice(0, 8);
+export default function InventoryLevelWidget({ medicineRows, kitRows, medicineDefaults, kitDefaults }) {
+    const latestMedicines = normalizeLatestInventory(
+        medicineRows || [],
+        'medicine_name',
+        buildDefaultAmountMap(medicineDefaults)
+    ).slice(0, 8);
+    const latestKits = normalizeLatestInventory(
+        kitRows || [],
+        'kit_name',
+        buildDefaultAmountMap(kitDefaults)
+    ).slice(0, 8);
 
     return (
         <section style={{ border: '1px solid #e2e8f0', borderRadius: '12px', backgroundColor: '#ffffff', padding: '0.85rem' }}>

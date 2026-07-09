@@ -143,9 +143,11 @@ const MedicineManagementView = ({ currentUser }) => {
         openModal(hasSelectedRowData() ? 'edit' : 'add');
     };
 
-    const handleSaveComplete = async ({ date }) => {
+    const handleSaveComplete = async ({ date, savedTabs = [] }) => {
         setSelectedDate(date);
-        await refresh();
+        if (savedTabs.includes('medicine')) {
+            await refresh({ force: false });
+        }
     };
 
     const renderCell = (row, col) => {
