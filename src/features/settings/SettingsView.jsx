@@ -31,7 +31,7 @@ const SettingsView = ({ currentUser }) => {
         importProgress, setImportProgress, importedData, showDataModal, setShowDataModal,
     } = shellState;
     const {
-        siteInfo, availableSites, selectedSiteId, isSiteListLoading, handleSiteSelection, handleCaptureSiteLocation,
+        siteInfo, availableSites, selectedSiteId, isSiteListLoading, handleSiteSelection,
         handleApply,
     } = basicSiteState;
     const {
@@ -232,7 +232,6 @@ const SettingsView = ({ currentUser }) => {
             handleSiteSelection={handleSiteSelection}
             siteInfo={siteInfo}
             isSiteSelected={isSiteSelected}
-            handleCaptureSiteLocation={handleCaptureSiteLocation}
             flowItems={flowItems}
             medicineItems={medicineItems}
             locationItems={locationItems}

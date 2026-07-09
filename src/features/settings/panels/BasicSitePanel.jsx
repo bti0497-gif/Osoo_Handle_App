@@ -11,7 +11,6 @@ export default function BasicSitePanel({
   handleSiteSelection,
   siteInfo,
   isSiteSelected,
-  handleCaptureSiteLocation,
   flowItems,
   medicineItems,
   locationItems,
@@ -44,7 +43,6 @@ export default function BasicSitePanel({
                 handleSiteSelection={handleSiteSelection}
                 siteInfo={siteInfo}
                 isSiteSelected={isSiteSelected}
-                handleCaptureSiteLocation={handleCaptureSiteLocation}
             />
 
             {/* 중간 섹션: 항목 관리 위젯 */}

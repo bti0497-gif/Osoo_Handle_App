@@ -5,8 +5,6 @@ const TEXT = {
     managerName: '\uAD00\uB9AC\uC790\uBA85',
     method: '\uACF5\uBC95',
     series: '\uACC4\uC5F4\uC218',
-    location: '\uC704\uCE58\uCD94\uC801',
-    locationButton: '\uC704\uCE58\uD655\uC778',
     loadingSites: '\uD604\uC7A5 \uBAA9\uB85D \uBD88\uB7EC\uC624\uB294 \uC911...',
     selectSite: '\uD604\uC7A5\uC744 \uC120\uD0DD\uD558\uC138\uC694',
     autoFill: '\uD604\uC7A5 \uC120\uD0DD \uC2DC \uC790\uB3D9 \uC785\uB825',
@@ -18,8 +16,6 @@ export default function BasicSiteHeaderPanel({
     isSiteListLoading,
     handleSiteSelection,
     siteInfo,
-    isSiteSelected,
-    handleCaptureSiteLocation,
 }) {
     const labelStyle = {
         display: 'block',
@@ -52,7 +48,7 @@ export default function BasicSiteHeaderPanel({
         <div
             style={{
                 display: 'grid',
-                gridTemplateColumns: 'minmax(260px, 360px) 140px 110px 110px 120px',
+                gridTemplateColumns: 'minmax(260px, 360px) 140px 110px 110px',
                 gap: '0.75rem',
                 alignItems: 'end',
                 justifyContent: 'start',
@@ -98,34 +94,6 @@ export default function BasicSiteHeaderPanel({
                     />
                 </div>
             ))}
-
-            <div>
-                <label style={labelStyle}>{TEXT.location}</label>
-                <button
-                    type="button"
-                    onClick={handleCaptureSiteLocation}
-                    disabled={!isSiteSelected}
-                    style={{
-                        width: '100%',
-                        height: '34px',
-                        border: '1.5px solid #0ea5e9',
-                        borderRadius: '7px',
-                        backgroundColor: isSiteSelected ? '#e0f2fe' : '#f1f5f9',
-                        color: isSiteSelected ? '#0c4a6e' : '#94a3b8',
-                        fontSize: '0.72rem',
-                        fontWeight: 800,
-                        cursor: isSiteSelected ? 'pointer' : 'not-allowed',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '5px',
-                        whiteSpace: 'nowrap',
-                    }}
-                >
-                    <span className="material-icons" style={{ fontSize: '15px' }}>my_location</span>
-                    {TEXT.locationButton}
-                </button>
-            </div>
         </div>
     );
 }

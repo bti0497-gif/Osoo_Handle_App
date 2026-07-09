@@ -44,32 +44,6 @@ export const useBasicSiteSettings = ({
         }
     };
 
-    const handleCaptureSiteLocation = async () => {
-        if (!selectedSiteId || !siteInfo?.siteName) {
-            showAlert?.('먼저 현장을 선택해주세요.');
-            return;
-        }
-        try {
-            const data = await SettingsModel.getCurrentLocation();
-            if (!data?.success || data?.latitude == null || data?.longitude == null) {
-                throw new Error('현재 위치를 확인할 수 없습니다.');
-            }
-            const response = await SettingsModel.saveSiteLocation(data.latitude, data.longitude);
-            if (!response?.success) {
-                throw new Error(response?.message || '위치 저장에 실패했습니다.');
-            }
-            setSiteInfo?.((prev) => ({
-                ...prev,
-                targetLat: response.targetLat,
-                targetLng: response.targetLng,
-                radiusM: response.radiusM ?? prev.radiusM ?? 500
-            }));
-            showAlert?.('현장 기준 위치가 저장되었습니다.');
-        } catch (err) {
-            showAlert?.('위치 저장 중 오류가 발생했습니다: ' + err.message);
-        }
-    };
-
     const handleSiteSelection = async (siteId) => {
         const nextSiteId = String(siteId || '');
         const currentSiteId = String(selectedSiteId || '');
@@ -130,7 +104,6 @@ export const useBasicSiteSettings = ({
 
     return {
         applySiteSelection,
-        handleCaptureSiteLocation,
         handleSiteSelection,
     };
 };

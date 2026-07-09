@@ -2,7 +2,7 @@ import { AuthModel } from './AuthModel';
 import { getCurrentCoords, checkLocationMatched } from './authGeo';
 import { isFieldWorker, shouldForceEodLogoutForOpenSession } from './authSessionUtils';
 
-const LOGIN_GEO_CHECK_ENABLED = String(import.meta.env?.VITE_LOGIN_GEO_CHECK_ENABLED || 'false') === 'true';
+const LOGIN_GEO_CHECK_ENABLED = true;
 
 /**
  * 버전 변경 후 첫 실행인지 확인

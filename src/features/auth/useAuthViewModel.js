@@ -3,7 +3,7 @@ import { AuthModel } from './AuthModel';
 import { apiClient } from '../../core/api';
 import { ADMIN_ROLES, FIELD_WORKER_AUTO_LOGOUT_HOUR_KST } from '../../core/constants';
 
-const LOGIN_GEO_CHECK_ENABLED = String(import.meta.env?.VITE_LOGIN_GEO_CHECK_ENABLED || 'false') === 'true';
+const LOGIN_GEO_CHECK_ENABLED = true;
 
 function isFieldWorker(member) {
     return !ADMIN_ROLES.includes(String(member?.role || 'user'));

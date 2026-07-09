@@ -188,7 +188,6 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
 
     const {
         applySiteSelection,
-        handleCaptureSiteLocation,
         handleSiteSelection,
     } = useBasicSiteSettings({
         siteInfo,
@@ -540,7 +539,6 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         selectedSiteId,
         isSiteListLoading,
         handleSiteSelection,
-        handleCaptureSiteLocation,
         handleApply,
     };
 

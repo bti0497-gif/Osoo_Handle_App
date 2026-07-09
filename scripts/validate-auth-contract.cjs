@@ -49,6 +49,9 @@ check(
   containsAll(contractText, [
     'must authenticate through remote discovery only',
     'Field workers try local login first, then remote discovery fallback',
+    'must always compare the current coordinates',
+    'must not overwrite them from the current PC location',
+    'must not block a successful field worker login',
     'Attendance write failure must not block a successful field worker login',
     'Attendance BigQuery sync may mark local rows synced only after BigQuery succeeds',
   ]),
@@ -66,6 +69,21 @@ check(
   ]),
   'remote login keeps Sheets primary with Drive JSON fallback',
   'remote login fallback chain was changed or removed'
+);
+
+check(
+  containsAll(authVmText, [
+    'const LOGIN_GEO_CHECK_ENABLED = true',
+    'const currentCoords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null',
+    'const locationMatched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(userData, currentCoords) : true',
+    'await AuthModel.recordAttendance(userData, loginLat, loginLng, locationMatched)',
+  ]) && containsAll(sessionRestoreText, [
+    'const LOGIN_GEO_CHECK_ENABLED = true',
+    'const coords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null',
+    'const matched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(freshData, coords) : true',
+  ]),
+  'field attendance always compares current coordinates with the synced site location',
+  'field attendance geofence enforcement was disabled or bypassed'
 );
 
 check(

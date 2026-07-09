@@ -19,6 +19,9 @@ This file protects login, session restore, and attendance behavior. Do not chang
 ## Attendance Rules
 
 - Field worker login creates or reuses one open attendance row for the same member and date.
+- Field worker login and session restore must always compare the current coordinates with the site's locally cached `target_lat`, `target_lng`, and `radius_m`.
+- Site coordinates are sourced from `Wastewater_Site_Locations` during site list/selection sync; the settings UI must not overwrite them from the current PC location.
+- Missing or mismatched coordinates must be recorded as an abnormal location, but must not block a successful field worker login.
 - Attendance write failure must not block a successful field worker login.
 - Logout closes only the current open attendance row and marks it unsynced.
 - End-of-day auto logout closes stale field worker sessions and marks them unsynced.
