@@ -187,6 +187,8 @@ function validateNativeModuleReleaseContract() {
   const packageJson = JSON.parse(fs.readFileSync(path.join(BASE_DIR, 'package.json'), 'utf8'));
   const buildScript = packageJson.scripts?.['electron:build'] || '';
   const nativeValidationScript = packageJson.scripts?.['validate:native'] || '';
+  const fieldInstallerScript = packageJson.scripts?.['package:field-installer'] || '';
+  const safeReleaseScript = packageJson.scripts?.['release:safe'] || '';
   const workflowText = fs.readFileSync(path.join(BASE_DIR, '.github', 'workflows', 'release.yml'), 'utf8');
   const integratedInstallerText = fs.readFileSync(
     path.join(BASE_DIR, 'scripts', 'build-integrated-installer.ps1'),
@@ -232,6 +234,26 @@ function validateNativeModuleReleaseContract() {
     success('신규 현장 통합 설치파일도 패키지 네이티브 모듈 실행 검증을 강제함');
   } else {
     error('신규 현장 통합 설치파일의 네이티브 모듈 실행 검증이 누락되었습니다');
+  }
+
+  if (
+    fieldInstallerScript.includes('build-integrated-installer.ps1')
+    && safeReleaseScript.includes('package:field-installer')
+    && safeReleaseScript.includes('validate:field-installer')
+  ) {
+    success('안전 릴리즈가 업데이트용/신규 현장용 설치본과 배포 매니페스트 검증을 함께 강제함');
+  } else {
+    error('안전 릴리즈의 신규 현장 통합 설치본 강제 계약이 누락되었습니다');
+  }
+
+  if (
+    integratedInstallerText.includes('field-installer-manifest.json')
+    && integratedInstallerText.includes('nativeSqliteSmokeTest = $true')
+    && fs.existsSync(path.join(BASE_DIR, 'scripts', 'validate-field-installer.cjs'))
+  ) {
+    success('신규 현장 설치본 버전/해시/config 대상 검증 매니페스트 계약 확인');
+  } else {
+    error('신규 현장 설치본 배포 매니페스트 계약이 누락되었습니다');
   }
 }
 

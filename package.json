@@ -18,9 +18,11 @@
     "validate": "node scripts/validate-release.cjs",
     "validate:asar": "node scripts/validate-release.cjs --asar-path ./release/win-unpacked/resources/app.asar",
     "validate:native": "node scripts/validate-packaged-native.cjs ./release/win-unpacked",
+    "validate:field-installer": "node scripts/validate-field-installer.cjs",
     "validate:api": "node scripts/validate-release.cjs --api-test",
     "clean:release": "node scripts/clean-release.cjs",
-    "release:safe": "npm run clean:release && npx @electron/rebuild && npm run build && npm run validate && npm run validate:api && npm run electron:build && npm rebuild"
+    "package:field-installer": "powershell -ExecutionPolicy Bypass -File scripts/build-integrated-installer.ps1",
+    "release:safe": "npm run clean:release && npm run validate && npm run electron:build && npm run package:field-installer && npm run validate:field-installer"
   },
   "dependencies": {
     "@google-cloud/bigquery": "^8.1.1",

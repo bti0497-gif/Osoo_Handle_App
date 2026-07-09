@@ -25,7 +25,8 @@ npm run validate:native
 공통 자격증명을 포함한 단일 통합 설치파일:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-integrated-installer.ps1
+npm run package:field-installer
+npm run validate:field-installer
 ```
 
 생성 위치:
@@ -35,6 +36,16 @@ release\integrated-deployment\Osoo Handle App Integrated Setup 1.0.6.exe
 ```
 
 이 파일은 자격증명을 포함하므로 GitHub Release에 업로드하지 않고 직접 현장 배포에만 사용합니다.
+신규 현장에서는 반드시 `Integrated Setup` 파일을 사용합니다. GitHub의 일반 `Setup` 파일은
+기존 AppData 설정을 유지하는 업데이트 전용이며, 빈 PC의 최초 설치용으로 사용하지 않습니다.
+
+업데이트용 설치본과 신규 현장용 통합 설치본을 한 번에 만들 때는 다음 명령만 사용합니다.
+
+```powershell
+npm run release:safe
+```
+
+이 명령은 두 설치본의 패키지 검증이 모두 끝나기 전에는 성공하지 않습니다.
 
 비상용 다중 파일 패키지:
 

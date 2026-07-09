@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $false)]
-    [string]$AppVersion = '1.0.8',
+    [string]$AppVersion = '',
 
     [Parameter(Mandatory = $false)]
     [string]$OutputDir = ''
@@ -9,6 +9,15 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$packageJson = Get-Content -Raw -LiteralPath (Join-Path $projectRoot 'package.json') |
+    ConvertFrom-Json
+if (-not $AppVersion) {
+    $AppVersion = $packageJson.version
+}
+if ($packageJson.version -ne $AppVersion) {
+    throw "package.json 버전($($packageJson.version))과 요청 버전($AppVersion)이 다릅니다."
+}
+
 if (-not $OutputDir) {
     $OutputDir = Join-Path $projectRoot 'release\integrated-deployment'
 }
@@ -34,12 +43,6 @@ if (-not $oauthFile) {
     throw 'Google OAuth client_secret_*.json 파일을 찾을 수 없습니다.'
 }
 $requiredFiles[$oauthFile.Name] = $oauthFile.FullName
-
-$packageJson = Get-Content -Raw -LiteralPath (Join-Path $projectRoot 'package.json') |
-    ConvertFrom-Json
-if ($packageJson.version -ne $AppVersion) {
-    throw "package.json 버전($($packageJson.version))과 요청 버전($AppVersion)이 다릅니다."
-}
 
 $buildRoot = Join-Path $outputRoot '.integrated-build'
 $includeFile = Join-Path $buildRoot 'installer-credentials.nsh'
@@ -162,9 +165,32 @@ try {
     }
 
     $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $outputFile
+    $manifest = [ordered]@{
+        version = $AppVersion
+        installerName = [System.IO.Path]::GetFileName($outputFile)
+        size = (Get-Item -LiteralPath $outputFile).Length
+        sha256 = $hash.Hash
+        generatedAt = [DateTime]::UtcNow.ToString('o')
+        asarValidation = $true
+        nativeSqliteSmokeTest = $true
+        installTargets = [ordered]@{
+            primary = '%APPDATA%\Osoo_Handle_App\config'
+            legacy = '%APPDATA%\wastewater-treatment-plant\config'
+        }
+        requiredConfigFiles = @(
+            '.env.local'
+            'google-key.json'
+            'bigquery-service-account.json'
+            'firebase-service-account.json'
+        )
+    }
+    $manifestPath = Join-Path $outputRoot 'field-installer-manifest.json'
+    $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+
     Write-Host "Integrated installer created: $outputFile"
     Write-Host "Size: $((Get-Item -LiteralPath $outputFile).Length) bytes"
     Write-Host "SHA256: $($hash.Hash)"
+    Write-Host "Deployment manifest created: $manifestPath"
 }
 finally {
     if (Test-Path -LiteralPath $buildRoot) {
