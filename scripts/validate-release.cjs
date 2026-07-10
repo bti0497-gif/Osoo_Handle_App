@@ -215,6 +215,11 @@ function validateRegressionContracts() {
   const kitModelPath = path.join(BASE_DIR, 'src', 'features', 'kit', 'KitModel.js');
   const waterQualityModelPath = path.join(BASE_DIR, 'src', 'features', 'water', 'WaterQualityModel.js');
   const waterQualityRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'waterQualityRoutes.cjs');
+  const roadworkHelperContractPath = path.join(BASE_DIR, 'ROADWORK_HELPER_CONTRACT.md');
+  const roadworkHelperModelPath = path.join(BASE_DIR, 'src', 'features', 'roadwork-helper', 'RoadworkHelperModel.js');
+  const roadworkHelperViewModelPath = path.join(BASE_DIR, 'src', 'features', 'roadwork-helper', 'useRoadworkHelperViewModel.js');
+  const roadworkHelperViewPath = path.join(BASE_DIR, 'src', 'features', 'roadwork-helper', 'RoadworkHelperView.jsx');
+  const roadworkHelperRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'roadworkHelperRoutes.cjs');
 
   const readText = (filePath) => (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '');
   const viewModelText = readText(unifiedViewModelPath);
@@ -252,6 +257,11 @@ function validateRegressionContracts() {
   const kitModelText = readText(kitModelPath);
   const waterQualityModelText = readText(waterQualityModelPath);
   const waterQualityRoutesText = readText(waterQualityRoutesPath);
+  const roadworkHelperContractText = readText(roadworkHelperContractPath);
+  const roadworkHelperModelText = readText(roadworkHelperModelPath);
+  const roadworkHelperViewModelText = readText(roadworkHelperViewModelPath);
+  const roadworkHelperViewText = readText(roadworkHelperViewPath);
+  const roadworkHelperRoutesText = readText(roadworkHelperRoutesPath);
 
   const checkSource = (condition, passMessage, failMessage) => {
     if (condition) success(passMessage);
@@ -507,6 +517,50 @@ function validateRegressionContracts() {
       reportTemplateText.includes('shouldReplacePlaceholder'),
     '일지 양식 패키징 및 AppData 동기화 계약 유지',
     '일지 양식이 패키지 리소스에 포함되거나 AppData로 동기화되는 계약이 깨졌습니다'
+  );
+
+  checkSource(
+    roadworkHelperContractText.includes('Auto-fill may populate only a newly editable daily-log screen') &&
+      roadworkHelperContractText.includes('must never invoke the roadwork site\'s save action') &&
+      roadworkHelperContractText.includes('A date mismatch must disable auto-fill') &&
+      roadworkHelperContractText.includes('GET /api/roadwork-helper/all?date=YYYY-MM-DD'),
+    '공사 입력 도우미 안전 동작 계약 문서 확인',
+    'ROADWORK_HELPER_CONTRACT.md가 누락되었거나 핵심 안전 계약 문구가 빠졌습니다'
+  );
+
+  checkSource(
+    roadworkHelperModelText.includes("apiClient.get('/api/roadwork-helper/all', { date })") &&
+      roadworkHelperViewModelText.includes("const [data, setData] = useState({ flow: [], electricity: [], medicine: [], kit: [] })") &&
+      roadworkHelperViewModelText.includes("id: 'flow'") &&
+      roadworkHelperViewModelText.includes("id: 'electricity'") &&
+      roadworkHelperViewModelText.includes("id: 'inventory'") &&
+      roadworkHelperViewModelText.includes('navigator.clipboard.writeText'),
+    '공사 입력 도우미 데이터 조회·안전 기본값·복사 계약 유지',
+    '공사 입력 도우미의 전체 데이터 조회, 안전 기본값, 또는 복사 기능 계약이 깨졌습니다'
+  );
+
+  checkSource(
+    roadworkHelperViewText.includes("nodeintegration=\"false\"") &&
+      roadworkHelperViewText.includes("enableremotemodule=\"false\"") &&
+      roadworkHelperViewText.includes("roadworkStatus.date !== vm.date") &&
+      roadworkHelperViewText.includes('!roadworkStatus.canAutoFill || roadworkStatus.date !== vm.date || vm.loading || isFilling || !vm.hasFillData') &&
+      roadworkHelperViewText.includes('RoadworkHelperModel.fetchAll(roadworkStatus.date)') &&
+      roadworkHelperViewText.includes('buildRoadworkAutoFillScript({') &&
+      !roadworkHelperViewText.includes("getElementById('btn_Save').click()"),
+    '공사 입력 도우미 자동 채우기 날짜·권한·직접저장 안전 계약 유지',
+    '공사 입력 도우미 자동 채우기의 날짜/입력 가능 조건, 최신 조회, 또는 직접저장 금지 계약이 깨졌습니다'
+  );
+
+  checkSource(
+    roadworkHelperRoutesText.includes("router.get('/api/roadwork-helper/all'") &&
+      roadworkHelperRoutesText.includes("tables: ['flow_readings', 'medicine_logs', 'kit_logs']") &&
+      roadworkHelperRoutesText.includes("flow: getFlowRows(db, date, scope)") &&
+      roadworkHelperRoutesText.includes("electricity: getElectricityRows(db, date, scope)") &&
+      roadworkHelperRoutesText.includes("medicine: getInventoryRows(db, date, 'medicine'") &&
+      roadworkHelperRoutesText.includes("kit: getInventoryRows(db, date, 'kit'") &&
+      roadworkHelperRoutesText.includes("const roadworkMedicineNames = new Set(['포도당', '중탄산나트륨', '팩(PAC)', '응집제'])"),
+    '공사 입력 도우미 현장범위 복원·유량/전력/약품/키트 데이터 계약 유지',
+    '공사 입력 도우미의 현장 데이터 복원 또는 핵심 데이터 구성 계약이 깨졌습니다'
   );
 }
 

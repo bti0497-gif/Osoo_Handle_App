@@ -17,6 +17,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkVersionChanged: () => ipcRenderer.invoke('app:checkVersionChanged'),
   clearVersionMarker: () => ipcRenderer.invoke('app:clearVersionMarker'),
   hideToTray: () => ipcRenderer.invoke('app:hideToTray'),
+  onSessionReset: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('app:session-reset', listener);
+    return () => ipcRenderer.removeListener('app:session-reset', listener);
+  },
   invokeRoadwork: (channel, ...args) => {
     const allowed = [
       'roadwork:getPreloadPath',

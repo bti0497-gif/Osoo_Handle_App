@@ -1,10 +1,13 @@
 import React, { useState, useRef, useMemo } from 'react';
 import ReactQuill from 'react-quill-new';
+import Quill from 'quill';
+import QuillResize from 'quill-resize-module';
 import 'react-quill-new/dist/quill.snow.css';
 import { useBoardViewModel } from './useBoardViewModel';
 import { useDialog } from '../../components/common/DialogContext';
 
 const PRIVILEGED_BOARD_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
+Quill.register('modules/resize', QuillResize);
 
 // ── 성능 최적화를 위한 댓글 입력 컴포넌트 분리 ──
 const CommentInput = ({ onSubmit, placeholder, initialValue = '', onCancel, buttonText = '등록' }) => {
@@ -65,6 +68,8 @@ const BoardView = ({ currentUser }) => {
 
     const [replyTo, setReplyTo] = useState(null);
     const fileInputRef = useRef(null);
+    const inlineImageInputRef = useRef(null);
+    const quillRef = useRef(null);
 
     const isAdmin = PRIVILEGED_BOARD_ROLES.has(currentUser?.role);
     const isAuthor = (authorName) => currentUser?.name === authorName;
@@ -72,14 +77,34 @@ const BoardView = ({ currentUser }) => {
         const rawUrl = String(attachment?.url || '').trim();
         const fileName = String(attachment?.name || 'download').trim() || 'download';
         if (!rawUrl) return '#';
-        // 로컬 저장 URL은 다운로드 API를 거치며 원본 파일명으로 내려받는다.
-        if (rawUrl.startsWith('/uploads/')) {
-            return `/api/download?url=${encodeURIComponent(rawUrl)}&name=${encodeURIComponent(fileName)}`;
-        }
-        return rawUrl;
+        // 로컬/Drive 첨부 모두 다운로드 API를 거쳐 원본 파일명으로 바로 내려받는다.
+        return `/api/download?url=${encodeURIComponent(rawUrl)}&name=${encodeURIComponent(fileName)}`;
     };
 
-    // Quill modules
+    const insertInlineImage = async (file) => {
+        if (!file?.type?.startsWith('image/')) {
+            await showAlert('이미지 파일만 본문에 넣을 수 있습니다.');
+            return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+            await showAlert('본문 이미지는 10MB 이하만 넣을 수 있습니다.');
+            return;
+        }
+        const result = await uploadFile(file, { boardId: form.id || 'draft', date: new Date().toISOString() });
+        const imageUrl = String(result?.inlineUrl || result?.localUrl || '').trim();
+        if (!imageUrl) return;
+        const editor = quillRef.current?.getEditor();
+        if (!editor) return;
+        const index = editor.getSelection(true)?.index ?? editor.getLength();
+        editor.insertEmbed(index, 'image', imageUrl, 'user');
+        const insertedImage = Array.from(editor.root.querySelectorAll('img')).at(-1);
+        if (insertedImage) {
+            insertedImage.style.width = '50%';
+            insertedImage.style.height = 'auto';
+        }
+        editor.setSelection(index + 1, 0, 'silent');
+    };
+
     const quillModules = useMemo(() => ({
         toolbar: {
             container: [
@@ -91,9 +116,29 @@ const BoardView = ({ currentUser }) => {
                 ['blockquote'],
                 ['link', 'image'],
                 ['clean']
-            ]
-        }
+            ],
+            handlers: { image: () => inlineImageInputRef.current?.click() },
+        },
+        table: true,
+        resize: {
+            modules: ['Resize', 'DisplaySize', 'Toolbar'],
+            parchment: { image: { attribute: ['width'], limit: { minWidth: 120, maxWidth: 960 } } },
+        },
     }), []);
+
+    const handleEditorPaste = (event) => {
+        const images = Array.from(event.clipboardData?.files || []).filter((file) => file.type?.startsWith('image/'));
+        if (images.length === 0) return;
+        event.preventDefault();
+        images.reduce((chain, file) => chain.then(() => insertInlineImage(file)), Promise.resolve());
+    };
+
+    const handleEditorDrop = (event) => {
+        const images = Array.from(event.dataTransfer?.files || []).filter((file) => file.type?.startsWith('image/'));
+        if (images.length === 0) return;
+        event.preventDefault();
+        images.reduce((chain, file) => chain.then(() => insertInlineImage(file)), Promise.resolve());
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -207,8 +252,11 @@ const BoardView = ({ currentUser }) => {
     const getReplies = (parentId) => comments.filter(c => c.parent_id === parentId);
 
     return (
-        <div className="panel-container justify-center">
-            <div className="dynamic-panel w-[850px] shadow-2xl border-slate-200">
+        <div className="panel-container">
+            <div
+                className="dynamic-panel"
+                style={{ width: 'min(100%, 1000px)', flex: '0 1 1000px' }}
+            >
 
                 {/* ════════════════════════════════════════════ */}
                 {/* ════════════════════════════════════════════ */}
@@ -383,7 +431,7 @@ const BoardView = ({ currentUser }) => {
                                 <div style={{ marginTop: '1.25rem', borderTop: '1px solid #e2e8f0', paddingTop: '0.75rem' }}>
                                     <div style={{ fontSize: '0.6875rem', fontWeight: 800, color: '#94a3b8', marginBottom: '6px', textTransform: 'uppercase' }}>첨부파일</div>
                                     {getAttachments(selectedPost.attachments).map((att, i) => (
-                                        <a key={i} href={resolveAttachmentHref(att)} target="_blank" rel="noopener noreferrer"
+                                        <a key={i} href={resolveAttachmentHref(att)}
                                             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 8px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', marginBottom: '4px', textDecoration: 'none', fontSize: '0.75rem', color: '#475569', fontWeight: 600 }}>
                                             <span className="material-icons" style={{ fontSize: '14px', color: '#94a3b8' }}>attach_file</span>
                                             {att.name} <span style={{ color: '#94a3b8' }}>({formatFileSize(att.size)})</span>
@@ -564,12 +612,26 @@ const BoardView = ({ currentUser }) => {
                                 <div style={{ flex: 1, marginBottom: '0.75rem', minHeight: '200px' }}>
                                     <label style={{ display: 'block', fontSize: '0.6875rem', fontWeight: 800, color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>내용</label>
                                     <ReactQuill
+                                        ref={quillRef}
                                         theme="snow"
                                         value={form.content}
                                         onChange={val => updateForm({ content: val })}
                                         modules={quillModules}
+                                        onPaste={handleEditorPaste}
+                                        onDrop={handleEditorDrop}
                                         style={{ height: '220px', marginBottom: '42px' }}
                                         placeholder="내용을 입력하세요..."
+                                    />
+                                    <input
+                                        ref={inlineImageInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        style={{ display: 'none' }}
+                                        onChange={(e) => {
+                                            const [file] = e.target.files;
+                                            if (file) insertInlineImage(file);
+                                            e.target.value = '';
+                                        }}
                                     />
                                 </div>
 

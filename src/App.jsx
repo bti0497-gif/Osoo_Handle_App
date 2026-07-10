@@ -83,6 +83,27 @@ function App() {
     const [forcedUpdateNotice, setForcedUpdateNotice] = useState(null);
     const updateCheckKeyRef = useRef(null);
     const forcedUpdateActiveRef = useRef(false);
+    const recordGridSessionsRef = useRef({ flow: {}, medicine: {}, kit: {}, water: {} });
+
+    const resetRecordGridSessions = () => {
+        recordGridSessionsRef.current = { flow: {}, medicine: {}, kit: {}, water: {} };
+    };
+
+    const updateRecordGridSession = (tab, patch) => {
+        recordGridSessionsRef.current[tab] = {
+            ...(recordGridSessionsRef.current[tab] || {}),
+            ...patch,
+        };
+    };
+
+    useEffect(() => {
+        const unsubscribe = window.electronAPI?.onSessionReset?.(() => {
+            resetRecordGridSessions();
+            setIsRoadworkMounted(false);
+            setActiveTab(DEFAULT_TAB);
+        });
+        return typeof unsubscribe === 'function' ? unsubscribe : undefined;
+    }, []);
 
     useEffect(() => {
         // 로딩 완료 시 1회 시도
@@ -278,6 +299,7 @@ function App() {
 
     const handleLogout = () => {
         clearRecordGridHistoryCache();
+        resetRecordGridSessions();
         setPreloadedUserId(null);
         setIsRoadworkMounted(false);
         logout();
@@ -292,10 +314,10 @@ function App() {
 
     const renderContent = () => {
         switch (activeTab) {
-            case 'flow': return <FlowManagementView currentUser={user} />;
-            case 'medicine': return <MedicineManagementView currentUser={user} />;
-            case 'water': return <WaterQualityView currentUser={user} />;
-            case 'kit': return <KitManagementView currentUser={user} />;
+            case 'flow': return <FlowManagementView currentUser={user} workspaceSession={recordGridSessionsRef.current.flow} onWorkspaceSessionChange={(patch) => updateRecordGridSession('flow', patch)} />;
+            case 'medicine': return <MedicineManagementView currentUser={user} workspaceSession={recordGridSessionsRef.current.medicine} onWorkspaceSessionChange={(patch) => updateRecordGridSession('medicine', patch)} />;
+            case 'water': return <WaterQualityView currentUser={user} workspaceSession={recordGridSessionsRef.current.water} onWorkspaceSessionChange={(patch) => updateRecordGridSession('water', patch)} />;
+            case 'kit': return <KitManagementView currentUser={user} workspaceSession={recordGridSessionsRef.current.kit} onWorkspaceSessionChange={(patch) => updateRecordGridSession('kit', patch)} />;
             case 'operation_status': return <OperationStatusView currentUser={user} />;
             case 'certificate': return <CertificateView currentUser={user} />;
             case 'facility': return <FacilityManagementView currentUser={user} />;

@@ -99,6 +99,7 @@ export const useMembersViewModel = (currentUser, { showAlert } = {}) => {
     setCurrentPassword,
     setNewPassword,
     setConfirmPassword,
+    setErrorMsg,
     handleSubmit,
     handleReset,
   };

@@ -9,7 +9,7 @@ export function MyInfoView({ currentUser }) {
         currentPassword, setCurrentPassword,
         newPassword, setNewPassword,
         confirmPassword, setConfirmPassword,
-        isSubmitting, isSuccess, errorMsg,
+        isSubmitting, isSuccess, errorMsg, setErrorMsg,
         isLengthValid, isSameAsCurrent, isMatching, isFormValid,
         handleSubmit, handleReset,
     } = vm;

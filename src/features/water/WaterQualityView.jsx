@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useWaterQualityViewModel } from './useWaterQualityViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogContext';
@@ -130,7 +130,7 @@ const ManagementFooter = ({ count, loading, onOpen }) => (
     </div>
 );
 
-const WaterQualityView = ({ currentUser }) => {
+const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessionChange }) => {
     const { showToast, showAlert, showConfirm } = useDialog();
     const { itemState = {}, basicSiteState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
@@ -144,10 +144,8 @@ const WaterQualityView = ({ currentUser }) => {
     } = useWaterQualityViewModel(currentUser, { showToast });
 
     const batchProcess = useBatchProcess();
-    const [selectedRowKey, setSelectedRowKey] = useState(null);
+    const [selectedRowKey, setSelectedRowKey] = useState(() => workspaceSession.selectedKey || null);
     const [modalState, setModalState] = useState({ open: false, tab: 'water', mode: 'add', date: null });
-    const didInitTodaySelectRef = useRef(false);
-    const didInitTodayScrollRef = useRef(false);
     const todayStr = getTodayKST();
 
     const activeLocations = useMemo(() => {
@@ -162,23 +160,10 @@ const WaterQualityView = ({ currentUser }) => {
             : ['유량조정조', '침전조', '방류조']
     ), [isMbr]);
 
-    useEffect(() => {
-        if (didInitTodaySelectRef.current) return;
-        const todayRow = history.find((row) => row.date === todayStr);
-        if (!todayRow?.rowKey) return;
-        setSelectedRowKey(todayRow.rowKey);
-        didInitTodaySelectRef.current = true;
-    }, [history, todayStr]);
-
-    useEffect(() => {
-        if (!didInitTodayScrollRef.current && history.length > 0) {
-            didInitTodayScrollRef.current = true;
-        }
-    }, [history.length]);
-
     const selectedRow = history.find((row) => row.rowKey === selectedRowKey) || null;
     const modalDate = modalState.date || (modalState.mode === 'add' ? todayStr : (selectedRow?.date || todayStr));
     const scrollKey = history.find((row) => row.date === todayStr)?.rowKey || null;
+    const defaultSelectedRowKey = history.some((row) => row.rowKey === selectedRowKey) ? selectedRowKey : scrollKey;
 
     const gridCols = WATER_PARAMS.map((param) => {
         const subCols = activeLocations
@@ -291,6 +276,7 @@ const WaterQualityView = ({ currentUser }) => {
     const handleRowSelect = (row) => {
         if (row.isFuture) return;
         setSelectedRowKey(row.rowKey);
+        onWorkspaceSessionChange?.({ selectedKey: row.rowKey });
     };
 
     const openModal = (mode = 'add') => {
@@ -479,7 +465,10 @@ const WaterQualityView = ({ currentUser }) => {
                     columns={gridCols}
                     data={history}
                     keyField="rowKey"
-                    scrollToKey={didInitTodayScrollRef.current ? null : scrollKey}
+                    defaultSelectedRowKey={defaultSelectedRowKey}
+                    scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : scrollKey}
+                    initialScrollTop={workspaceSession.scrollTop}
+                    onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}
                     width="100%"
                     height={400}
                     showBottomBar={false}
