@@ -114,6 +114,8 @@ const AdvancedDataGrid = ({
 
     // ---- Navigation ----
     scrollToKey = null,
+    initialScrollTop = null,
+    onScrollPositionChange,
     /** 데이터가 처음 채워질 때 이 행(row[keyField])을 행 선택 + onRowSelect(1회) */
     defaultSelectedRowKey = null,
 
@@ -139,11 +141,17 @@ const AdvancedDataGrid = ({
     const editInputRef = useRef(null);
     const gridContainerRef = useRef(null);
     const onRowSelectRef = useRef(onRowSelect);
+    const onScrollPositionChangeRef = useRef(onScrollPositionChange);
     const defaultRowSelectDoneRef = useRef(false);
+    const initialScrollRestoredRef = useRef(false);
 
     useEffect(() => {
         onRowSelectRef.current = onRowSelect;
     }, [onRowSelect]);
+
+    useEffect(() => {
+        onScrollPositionChangeRef.current = onScrollPositionChange;
+    }, [onScrollPositionChange]);
 
     useEffect(() => {
         defaultRowSelectDoneRef.current = false;
@@ -156,6 +164,7 @@ const AdvancedDataGrid = ({
         if (headerScrollRef.current) {
             headerScrollRef.current.scrollLeft = e.target.scrollLeft;
         }
+        onScrollPositionChangeRef.current?.(e.target.scrollTop);
     }, []);
 
     // ---- Flatten columns to leaf columns & handle frozen ----
@@ -257,6 +266,15 @@ const AdvancedDataGrid = ({
             }
         }
     }, [scrollToKey, safeData, keyField, rowHeight, viewportHeight]);
+
+    useEffect(() => {
+        if (initialScrollRestoredRef.current || !Number.isFinite(initialScrollTop) || !bodyScrollRef.current) return;
+        const maxScrollTop = Math.max(0, totalDataHeight - viewportHeight);
+        const restoredScrollTop = Math.min(Math.max(0, initialScrollTop), maxScrollTop);
+        initialScrollRestoredRef.current = true;
+        bodyScrollRef.current.scrollTop = restoredScrollTop;
+        setScrollTop(restoredScrollTop);
+    }, [initialScrollTop, totalDataHeight, viewportHeight]);
 
     // ---- 초기 행 선택(유량 등: 오늘 날짜 행 자동 선택) ----
     useEffect(() => {

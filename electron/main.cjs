@@ -207,6 +207,7 @@ function createWindow() {
   mainWindow.on('close', (event) => {
     if (!isQuitting) {
       event.preventDefault();
+      mainWindow.webContents.send('app:session-reset');
       mainWindow.hide();
       return false;
     }
@@ -408,6 +409,7 @@ ipcMain.handle('app:getUpdateStatus', () => {
 
 ipcMain.handle('app:hideToTray', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('app:session-reset');
     mainWindow.hide();
   }
   return { ok: true };

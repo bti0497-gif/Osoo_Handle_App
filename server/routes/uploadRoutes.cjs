@@ -38,6 +38,16 @@ module.exports = function(appDataPath) {
     }
     return candidate;
   };
+  const getGoogleDriveFileId = (url) => {
+    try {
+      const parsed = new URL(url);
+      if (!/(^|\.)google\.com$/i.test(parsed.hostname)) return '';
+      const pathMatch = parsed.pathname.match(/\/d\/([A-Za-z0-9_-]+)/);
+      return pathMatch?.[1] || String(parsed.searchParams.get('id') || '').trim();
+    } catch {
+      return '';
+    }
+  };
 
   router.post('/api/upload', boardUpload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ success: false, message: '파일이 없습니다.' });
@@ -72,6 +82,7 @@ module.exports = function(appDataPath) {
         success: true,
         url: driveRes.data.webViewLink,
         driveUrl: driveRes.data.webViewLink,
+        inlineUrl: driveRes.data.webContentLink || driveRes.data.webViewLink,
         localUrl,
         uploadedToDrive: true,
         originalName,
@@ -85,6 +96,7 @@ module.exports = function(appDataPath) {
         success: true,
         url: localUrl,
         localUrl,
+        inlineUrl: localUrl,
         uploadedToDrive: false,
         originalName,
         storedName: path.basename(filePath),
@@ -97,11 +109,38 @@ module.exports = function(appDataPath) {
   router.get('/api/download', (req, res) => {
     const { url, name } = req.query;
     if (!url || !name) return res.status(400).send('잘못된 요청입니다.');
-    const fileName = path.basename(url);
-    const filePath = path.join(uploadDir, fileName);
-    if (!fs.existsSync(filePath)) return res.status(404).send('파일을 찾을 수 없습니다.');
-    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`);
-    res.sendFile(filePath);
+    const safeName = String(name).replace(/["\r\n]/g, '_') || 'download';
+    const rawUrl = String(url);
+
+    if (rawUrl.startsWith('/uploads/')) {
+      const fileName = path.basename(rawUrl);
+      const filePath = path.join(uploadDir, fileName);
+      if (!fs.existsSync(filePath)) return res.status(404).send('파일을 찾을 수 없습니다.');
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeName)}`);
+      return res.sendFile(filePath);
+    }
+
+    const driveFileId = getGoogleDriveFileId(rawUrl);
+    if (!driveFileId) return res.status(400).send('지원하지 않는 첨부파일 주소입니다.');
+
+    return drive.files.get({
+      fileId: driveFileId,
+      fields: 'mimeType',
+      supportsAllDrives: true,
+    }).then((meta) => drive.files.get(
+      { fileId: driveFileId, alt: 'media', supportsAllDrives: true },
+      { responseType: 'stream' }
+    ).then((media) => {
+      res.setHeader('Content-Type', meta.data.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeName)}`);
+      media.data.on('error', () => {
+        if (!res.headersSent) res.status(500).end();
+      });
+      media.data.pipe(res);
+    })).catch((error) => {
+      console.error('Board attachment download error:', error.message);
+      if (!res.headersSent) res.status(500).send('첨부파일을 다운로드하지 못했습니다.');
+    });
   });
 
   router.post('/api/photo/upload', imageUpload.single('image'), async (req, res) => {
