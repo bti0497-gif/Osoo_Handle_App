@@ -48,6 +48,7 @@ const MedicineManagementView = ({ currentUser }) => {
 
     const [selectedDate, setSelectedDate] = useState(null);
     const [modalState, setModalState] = useState({ open: false, tab: 'medicine', mode: 'add' });
+    const pendingParentRefreshRef = useRef(false);
     const didInitTodaySelectRef = useRef(false);
     const didInitTodayScrollRef = useRef(false);
     const todayStr = todayText();
@@ -146,7 +147,15 @@ const MedicineManagementView = ({ currentUser }) => {
     const handleSaveComplete = async ({ date, savedTabs = [] }) => {
         setSelectedDate(date);
         if (savedTabs.includes('medicine')) {
-            await refresh({ force: false });
+            pendingParentRefreshRef.current = true;
+        }
+    };
+
+    const handleModalClose = () => {
+        setModalState((prev) => ({ ...prev, open: false }));
+        if (pendingParentRefreshRef.current) {
+            pendingParentRefreshRef.current = false;
+            refresh({ force: false });
         }
     };
 
@@ -242,7 +251,7 @@ const MedicineManagementView = ({ currentUser }) => {
                 initialTab={modalState.tab}
                 initialDate={selectedDate || todayStr}
                 contexts={buildModalContexts()}
-                onClose={() => setModalState((prev) => ({ ...prev, open: false }))}
+                onClose={handleModalClose}
                 onSaveComplete={handleSaveComplete}
             />
         </div>

@@ -7,6 +7,10 @@ function roundInventory(value) {
   return Math.round(Number(value || 0) * 10) / 10;
 }
 
+function clampInventory(value) {
+  return Math.max(0, roundInventory(value));
+}
+
 function recalculateInventoryCascade(db, {
   tableName,
   nameColumn,
@@ -55,9 +59,9 @@ function recalculateInventoryCascade(db, {
   let runningInventory = Number(previous?.current_inventory || 0);
   for (const row of rows) {
     if (normalizedExplicitDates.has(row.date) && row.current_inventory != null) {
-      runningInventory = Number(row.current_inventory);
+      runningInventory = clampInventory(row.current_inventory);
     } else {
-      runningInventory = roundInventory(
+      runningInventory = clampInventory(
         runningInventory + Number(row.purchase_amount || 0) - Number(row.usage_amount || 0)
       );
     }

@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { runUnifiedRecordModalRegressionTests } = require('./validate-unified-record-modal.cjs');
 
 const BASE_DIR = path.join(__dirname, '..');
 const colors = {
@@ -362,12 +363,12 @@ function validateRegressionContracts() {
   const serverIndexText = readText(serverIndexPath);
   const sludgePhotoRoutesText = readText(sludgePhotoRoutesPath);
   const localDataBackupContractText = readText(localDataBackupContractPath);
-  const parentSaveRefreshText = [
-    flowManagementViewPath,
-    medicineManagementViewPath,
-    kitManagementViewPath,
-    waterQualityViewPath,
-  ].map(readText).join('\n');
+  const parentManagementViews = [
+    ['유량', flowManagementViewText],
+    ['약품', medicineManagementViewText],
+    ['키트', kitManagementViewText],
+    ['수질', waterQualityViewText],
+  ];
 
   const checkSource = (condition, passMessage, failMessage) => {
     if (condition) success(passMessage);
@@ -417,9 +418,11 @@ function validateRegressionContracts() {
     unifiedRecordModalContractText.includes('If a user selects a date and clicks the open-input button') &&
       unifiedRecordModalContractText.includes('The modal body must not use a blanket `pointer-events: none`') &&
       unifiedRecordModalContractText.includes('Editing inventory marks that date as a manual inventory baseline') &&
+      unifiedRecordModalContractText.includes('inventory must be clamped at zero') &&
       unifiedRecordModalContractText.includes('Flow server save must upsert by `(date, type)`') &&
       unifiedRecordModalContractText.includes('After a successful save, the modal must force reload only the saved tabs') &&
-      unifiedRecordModalContractText.includes('must not issue a duplicate forced request'),
+      unifiedRecordModalContractText.includes('parent grid must not refresh after each save') &&
+      unifiedRecordModalContractText.includes('only when the modal closes'),
     '통합 입력 모달 날짜/입력/계산 계약 문서 확인',
     'UNIFIED_RECORD_MODAL_CONTRACT.md가 누락되었거나 핵심 계약 문구가 빠졌습니다'
   );
@@ -449,12 +452,16 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    modalText.includes("if (field === 'purchase' || field === 'usage')") &&
+      modalText.includes("if (field === 'purchase' || field === 'usage')") &&
       modalText.includes('Object.assign(nextDraft, recalculateInventoryDraft(item, nextDraft));') &&
+      modalText.includes('const handleAdjustKitUsage = (delta) =>') &&
+      /const handleAdjustKitUsage = \(delta\) => \{[\s\S]*?currentItems\.forEach\(\(item\) => \{[\s\S]*?usage: nextUsage,[\s\S]*?recalculateInventoryDraft\(item, updated\)/.test(modalText) &&
+      modalText.includes('const clampInventory = (value) => Math.max(0, round1(Number(value || 0)));') &&
       modalText.includes('inventory_is_manual: Boolean(values.__dirty?.inventory)') &&
       medicineRoutesText.includes('item.inventory_is_manual || item.inventoryIsManual') &&
       kitRoutesText.includes('item.inventory_is_manual || item.inventoryIsManual') &&
       inventoryCascadeServiceText.includes('normalizedExplicitDates.has(row.date)') &&
+      inventoryCascadeServiceText.includes('function clampInventory(value)') &&
       inventoryCascadeServiceText.includes('runningInventory + Number(row.purchase_amount || 0) - Number(row.usage_amount || 0)'),
     '약품/키트 구매·사용·재고 자동계산 및 이후 재계산 계약 유지',
     '약품/키트 구매/사용/재고 자동계산 또는 이후 재고 재계산 계약이 깨졌습니다'
@@ -486,10 +493,34 @@ function validateRegressionContracts() {
       viewModelText.includes("targetTabs.has('medicine') ? MedicineModel.fetchHistory({ force }) : null") &&
       viewModelText.includes("targetTabs.has('kit') ? KitModel.fetchHistory({ force }) : null") &&
       viewModelText.includes("targetTabs.has('water') ? WaterQualityModel.fetchHistory({ force }) : null") &&
-      parentSaveRefreshText.includes('await refresh({ force: false });'),
-    '통합 모달 저장 탭 단일 갱신 및 부모 캐시 재사용 계약 유지',
-    '통합 모달이 저장 후 관계없는 탭을 조회하거나 부모 화면이 중복 강제조회할 수 있습니다'
+      parentManagementViews.every(([, source]) => (
+        source.includes('pendingParentRefreshRef.current = true;') &&
+        source.includes('const handleModalClose = () =>') &&
+        source.includes('refresh({ force: false });') &&
+        source.includes('onClose={handleModalClose}') &&
+        !source.includes('await refresh({ force: false });')
+      )),
+    '통합 모달 저장 탭 단일 갱신 및 부모 닫기 시점 갱신 계약 유지',
+    '통합 모달 저장 중 부모 화면이 즉시 재조회되거나 닫기 시점 갱신 계약이 깨졌습니다'
   );
+
+  for (const [label, source] of parentManagementViews) {
+    checkSource(
+      source.includes('pendingParentRefreshRef.current = true;') &&
+        source.includes('const handleModalClose = () =>') &&
+        source.includes('onClose={handleModalClose}') &&
+        !source.includes('await refresh({ force: false });'),
+      `통합 모달 ${label} 부모 화면 닫기 시점 갱신 계약 유지`,
+      `통합 모달 ${label} 부모 화면이 저장 중 재조회하거나 닫기 갱신 연결이 깨졌습니다`
+    );
+  }
+
+  try {
+    const regressionResult = runUnifiedRecordModalRegressionTests();
+    success(`통합 모달 약품/키트 재고 실제 DB 회귀검증 (${regressionResult.scenarios}개 시나리오)`);
+  } catch (regressionError) {
+    error(`통합 모달 약품/키트 실제 DB 회귀검증 실패: ${regressionError.message}`);
+  }
 
   checkSource(
     modalText.includes("reading: item.values?.reading ?? (isSludge ? 0 : '')") &&

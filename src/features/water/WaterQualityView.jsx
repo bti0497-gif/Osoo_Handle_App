@@ -140,6 +140,7 @@ const WaterQualityView = ({ currentUser }) => {
     const batchProcess = useBatchProcess();
     const [selectedRowKey, setSelectedRowKey] = useState(null);
     const [modalState, setModalState] = useState({ open: false, tab: 'water', mode: 'add', date: null });
+    const pendingParentRefreshRef = useRef(false);
     const didInitTodaySelectRef = useRef(false);
     const didInitTodayScrollRef = useRef(false);
     const todayStr = getTodayKST();
@@ -399,9 +400,17 @@ const WaterQualityView = ({ currentUser }) => {
 
     const handleSaveComplete = async ({ date, savedTabs = [] }) => {
         if (savedTabs.includes('water')) {
-            await refresh({ force: false });
+            pendingParentRefreshRef.current = true;
         }
         setModalState((prev) => ({ ...prev, date }));
+    };
+
+    const handleModalClose = () => {
+        setModalState((prev) => ({ ...prev, open: false }));
+        if (pendingParentRefreshRef.current) {
+            pendingParentRefreshRef.current = false;
+            refresh({ force: false });
+        }
     };
 
     const getRowStyle = (row, _selected, isHovered) => {
@@ -499,7 +508,7 @@ const WaterQualityView = ({ currentUser }) => {
                 isImportingQntech={isImportingFromQntech || batchProcess.isProcessing}
                 onImportQntech={handleQntechImportClick}
                 onImportQntechRange={handleQntechImportRangeClick}
-                onClose={() => setModalState((prev) => ({ ...prev, open: false }))}
+                onClose={handleModalClose}
                 onDateChange={(nextDate) => setModalState((prev) => ({
                     ...prev,
                     date: nextDate,

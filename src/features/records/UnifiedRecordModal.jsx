@@ -34,6 +34,7 @@ const toNumberOrNull = (value) => {
 const hasValue = (value) => value !== '' && value !== null && value !== undefined;
 
 const round1 = (value) => Math.round(value * 10) / 10;
+const clampInventory = (value) => Math.max(0, round1(Number(value || 0)));
 
 const formatValue = (value) => {
     if (value === null || value === undefined || value === '') return '-';
@@ -196,8 +197,9 @@ function buildInitialDraft(tabId, item, roundValue) {
         return {
             purchase,
             usage,
-            inventory: savedInventory
-                ?? round1(previousInventory + (toNumberOrNull(purchase) || 0) - numericUsage),
+            inventory: savedInventory !== null
+                ? clampInventory(savedInventory)
+                : clampInventory(previousInventory + (toNumberOrNull(purchase) || 0) - numericUsage),
         };
     }
 
@@ -357,7 +359,7 @@ export default function UnifiedRecordModal({
         const usage = toNumberOrNull(values.usage) || 0;
         return {
             ...values,
-            inventory: round1(previousInventory + purchase - usage),
+            inventory: clampInventory(previousInventory + purchase - usage),
         };
     };
 
@@ -487,13 +489,7 @@ export default function UnifiedRecordModal({
                 const key = getDraftKeyForItem('kit', item);
                 const current = next[key] || buildInitialDraft('kit', item);
                 const currentUsage = toNumberOrNull(current.usage) || 0;
-                const previousInventory = toNumberOrNull(item?.previous?.inventory) || 0;
-                const purchase = toNumberOrNull(current.purchase) || 0;
                 const nextUsage = round1(Math.max(0, currentUsage + delta));
-                const nextInventory = round1(previousInventory + purchase - nextUsage);
-                if (delta > 0 && nextInventory < 0) {
-                    return;
-                }
                 const updated = {
                     ...current,
                     usage: nextUsage,
@@ -688,7 +684,7 @@ export default function UnifiedRecordModal({
                 const usage = toNumberOrNull(values.usage) ?? 0;
                 const previousInventory = toNumberOrNull(item?.previous?.inventory) || 0;
                 const inventory = toNumberOrNull(values.inventory)
-                    ?? round1(previousInventory + (purchase || 0) - usage);
+                    ?? clampInventory(previousInventory + (purchase || 0) - usage);
                 if (tab === 'medicine' && isDrafted && usage === 0) {
                     zeroUsageMedicines.push(item.label || item.key);
                 }
@@ -790,7 +786,7 @@ export default function UnifiedRecordModal({
                         kit_name: kitName,
                         purchase_amount: purchase,
                         usage_amount: usage,
-                        current_inventory: round1(previousInventory + purchase - usage),
+                        current_inventory: clampInventory(previousInventory + purchase - usage),
                         input_status: 'imported',
                     };
                     kitItemsToSave.push(kitRow);
@@ -802,7 +798,7 @@ export default function UnifiedRecordModal({
                     );
                     const previousInventory = toNumberOrNull(kitContext?.previous?.inventory) || 0;
                     kitRow.usage_amount = count;
-                    kitRow.current_inventory = round1(
+                    kitRow.current_inventory = clampInventory(
                         previousInventory + kitRow.purchase_amount - kitRow.usage_amount
                     );
                 }

@@ -55,6 +55,7 @@ const KitManagementView = ({ currentUser }) => {
 
     const [selectedDate, setSelectedDate] = useState(null);
     const [modalState, setModalState] = useState({ open: false, tab: 'kit', mode: 'add' });
+    const pendingParentRefreshRef = useRef(false);
     const didInitTodaySelectRef = useRef(false);
     const didInitTodayScrollRef = useRef(false);
     const todayStr = todayText();
@@ -152,7 +153,15 @@ const KitManagementView = ({ currentUser }) => {
     const handleSaveComplete = async ({ date, savedTabs = [] }) => {
         setSelectedDate(date);
         if (savedTabs.includes('kit')) {
-            await refresh({ force: false });
+            pendingParentRefreshRef.current = true;
+        }
+    };
+
+    const handleModalClose = () => {
+        setModalState((prev) => ({ ...prev, open: false }));
+        if (pendingParentRefreshRef.current) {
+            pendingParentRefreshRef.current = false;
+            refresh({ force: false });
         }
     };
 
@@ -249,7 +258,7 @@ const KitManagementView = ({ currentUser }) => {
                 initialDate={selectedDate || todayStr}
                 contexts={buildModalContexts()}
                 isSyncingAnalysisKits={isSyncingAnalysisKits}
-                onClose={() => setModalState((prev) => ({ ...prev, open: false }))}
+                onClose={handleModalClose}
                 onSaveComplete={handleSaveComplete}
                 onSyncAnalysisKits={syncAnalysisKits}
             />

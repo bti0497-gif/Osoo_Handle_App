@@ -86,6 +86,7 @@ const FlowManagementView = ({ currentUser }) => {
 
     const [selectedDate, setSelectedDate] = useState(null);
     const [modalState, setModalState] = useState({ open: false, tab: 'flow', mode: 'add' });
+    const pendingParentRefreshRef = useRef(false);
     const didInitTodaySelectRef = useRef(false);
     const didInitTodayScrollRef = useRef(false);
     const todayStr = getTodayKST();
@@ -232,7 +233,15 @@ const FlowManagementView = ({ currentUser }) => {
     const handleSaveComplete = async ({ date, savedTabs = [] }) => {
         setSelectedDate(date);
         if (savedTabs.includes('flow')) {
-            await refresh({ force: false });
+            pendingParentRefreshRef.current = true;
+        }
+    };
+
+    const handleModalClose = () => {
+        setModalState((prev) => ({ ...prev, open: false }));
+        if (pendingParentRefreshRef.current) {
+            pendingParentRefreshRef.current = false;
+            refresh({ force: false });
         }
     };
 
@@ -337,7 +346,7 @@ const FlowManagementView = ({ currentUser }) => {
                 initialTab={modalState.tab}
                 initialDate={modalDate}
                 contexts={buildModalContexts()}
-                onClose={() => setModalState((prev) => ({ ...prev, open: false }))}
+                onClose={handleModalClose}
                 onSaveComplete={handleSaveComplete}
                 onValidationError={(message) => showAlert?.(message)}
             />
