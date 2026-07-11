@@ -3,7 +3,10 @@ param(
     [string]$AppVersion = '',
 
     [Parameter(Mandatory = $false)]
-    [string]$OutputDir = ''
+    [string]$OutputDir = '',
+
+    [Parameter(Mandatory = $false)]
+    [switch]$LowMemoryMode = $true
 )
 
 $ErrorActionPreference = 'Stop'
@@ -93,6 +96,24 @@ Set-Content -LiteralPath $includeFile -Value $includeLines -Encoding utf8
 $baseConfigPath = ConvertTo-JsSingleQuotedString (Join-Path $projectRoot 'electron-builder.config.cjs')
 $includeConfigPath = ConvertTo-JsSingleQuotedString $includeFile
 $outputConfigPath = ConvertTo-JsSingleQuotedString $outputRoot
+$asarUnpackSection = @"
+    asarUnpack: [
+        'server.cjs',
+        'public/**/*',
+        'server/**/*',
+        'node_modules/better-sqlite3/**/*',
+        'node_modules/bindings/**/*',
+        'node_modules/file-uri-to-path/**/*',
+        'node_modules/@img/**/*',
+        'node_modules/@napi-rs/**/*',
+        '**/*.node',
+    ],
+"@
+
+if (-not $LowMemoryMode) {
+        $asarUnpackSection = '  asarUnpack: base.asarUnpack,'
+}
+
 $configText = @"
 const base = require('$baseConfigPath');
 
@@ -103,6 +124,7 @@ module.exports = {
     ...base.directories,
     output: '$outputConfigPath',
   },
+$asarUnpackSection
   artifactName: 'Osoo Handle App Integrated Setup `${version}.`${ext}',
   nsis: {
     ...base.nsis,
