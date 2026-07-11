@@ -98,6 +98,7 @@ const base = require('$baseConfigPath');
 
 module.exports = {
   ...base,
+  concurrency: { jobs: 1 },
   directories: {
     ...base.directories,
     output: '$outputConfigPath',
@@ -143,6 +144,11 @@ try {
     }
 
     $unpackedAsar = Join-Path $outputRoot 'win-unpacked\resources\app.asar'
+    Write-Host 'Restoring native modules for Node.js validation...'
+    & npm.cmd rebuild better-sqlite3
+    if ($LASTEXITCODE -ne 0) {
+        throw "Node.js 검증용 네이티브 모듈 복원에 실패했습니다. 종료 코드: $LASTEXITCODE"
+    }
     Write-Host 'Validating packaged application...'
     & node.exe scripts\validate-release.cjs --asar-path $unpackedAsar
     if ($LASTEXITCODE -ne 0) {
