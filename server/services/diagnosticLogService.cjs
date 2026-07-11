@@ -297,6 +297,8 @@ async function uploadPendingDiagnostics(db, appDataPath, { limit = 200 } = {}) {
     site_id: row.site_id,
     site_name: row.site_name,
     app_version: row.app_version,
+    machine: os.hostname(),
+    runtime: process.versions?.electron ? 'electron' : 'node',
   })).join('\n') + '\n', 'utf8');
 
   try {

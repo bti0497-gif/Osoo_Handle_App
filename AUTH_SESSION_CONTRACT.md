@@ -37,3 +37,12 @@ This file protects login, session restore, and attendance behavior. Do not chang
 
 - Any change to `server/routes/authRoutes.cjs`, `src/features/auth/*`, `activeUserSessionService.cjs`, or attendance sync must be intentional and tested with `npm run validate`.
 - Do not mix auth/session/attendance changes with unrelated UI, mapping, report, or updater fixes.
+
+## Login Server Startup Rules
+
+- Development startup must rebuild native modules for the exact Electron version before launching Electron.
+- `/api/ping` alone must never be treated as proof that login is ready.
+- Startup is ready only after `/api/auth/login-hint` responds successfully.
+- If database or auth route initialization fails, the server must exit instead of remaining as a ping-only partial server.
+- Electron packaging must rebuild and smoke-test `better-sqlite3` before an installer or release is accepted.
+- Uploaded diagnostics must include `machine` and `runtime` so development PCs cannot be mistaken for field installations.

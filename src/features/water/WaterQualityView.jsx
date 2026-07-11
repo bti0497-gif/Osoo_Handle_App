@@ -123,7 +123,7 @@ const ManagementFooter = ({ count, loading, onOpen }) => (
     </div>
 );
 
-const WaterQualityView = ({ currentUser }) => {
+const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessionChange }) => {
     const { showToast, showAlert, showConfirm } = useDialog();
     const { itemState = {}, basicSiteState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
@@ -138,11 +138,9 @@ const WaterQualityView = ({ currentUser }) => {
     } = useWaterQualityViewModel(currentUser, { showToast });
 
     const batchProcess = useBatchProcess();
-    const [selectedRowKey, setSelectedRowKey] = useState(null);
+    const [selectedRowKey, setSelectedRowKey] = useState(workspaceSession.selectedKey || null);
     const [modalState, setModalState] = useState({ open: false, tab: 'water', mode: 'add', date: null });
     const pendingParentRefreshRef = useRef(false);
-    const didInitTodaySelectRef = useRef(false);
-    const didInitTodayScrollRef = useRef(false);
     const todayStr = getTodayKST();
 
     const activeLocations = useMemo(() => {
@@ -158,18 +156,12 @@ const WaterQualityView = ({ currentUser }) => {
     ), [isMbr]);
 
     useEffect(() => {
-        if (didInitTodaySelectRef.current) return;
-        const todayRow = history.find((row) => row.date === todayStr);
-        if (!todayRow?.rowKey) return;
-        setSelectedRowKey(todayRow.rowKey);
-        didInitTodaySelectRef.current = true;
-    }, [history, todayStr]);
-
-    useEffect(() => {
-        if (!didInitTodayScrollRef.current && history.length > 0) {
-            didInitTodayScrollRef.current = true;
-        }
-    }, [history.length]);
+        if (selectedRowKey) return;
+        const todayRowKey = history.find((row) => row.date === todayStr)?.rowKey;
+        if (!todayRowKey) return;
+        setSelectedRowKey(todayRowKey);
+        onWorkspaceSessionChange?.({ selectedKey: todayRowKey });
+    }, [history, onWorkspaceSessionChange, selectedRowKey, todayStr]);
 
     const selectedRow = history.find((row) => row.rowKey === selectedRowKey) || null;
     const modalDate = modalState.date || (modalState.mode === 'add' ? todayStr : (selectedRow?.date || todayStr));
@@ -286,6 +278,7 @@ const WaterQualityView = ({ currentUser }) => {
     const handleRowSelect = (row) => {
         if (row.isFuture) return;
         setSelectedRowKey(row.rowKey);
+        onWorkspaceSessionChange?.({ selectedKey: row.rowKey });
     };
 
     const openModal = (mode = 'add') => {
@@ -403,6 +396,11 @@ const WaterQualityView = ({ currentUser }) => {
             pendingParentRefreshRef.current = true;
         }
         setModalState((prev) => ({ ...prev, date }));
+        const savedRowKey = history.find((row) => row.date === date)?.rowKey;
+        if (savedRowKey) {
+            setSelectedRowKey(savedRowKey);
+            onWorkspaceSessionChange?.({ selectedKey: savedRowKey });
+        }
     };
 
     const handleModalClose = () => {
@@ -475,7 +473,10 @@ const WaterQualityView = ({ currentUser }) => {
                     columns={gridCols}
                     data={history}
                     keyField="rowKey"
-                    scrollToKey={didInitTodayScrollRef.current ? null : scrollKey}
+                    defaultSelectedRowKey={workspaceSession.selectedKey || scrollKey}
+                    scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : scrollKey}
+                    initialScrollTop={workspaceSession.scrollTop}
+                    onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}
                     width="100%"
                     height={400}
                     showBottomBar={false}

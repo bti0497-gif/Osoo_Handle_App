@@ -387,6 +387,9 @@ function runDeferredFullStack() {
     }
   } catch (e) {
     console.error('[Server] full-stack-init 실패:', e);
+    // ping만 살아 있는 반쪽 서버를 정상 서버로 오인하지 않도록 즉시 실패시킨다.
+    process.exitCode = 1;
+    setTimeout(() => process.exit(1), 100);
   }
 }
 

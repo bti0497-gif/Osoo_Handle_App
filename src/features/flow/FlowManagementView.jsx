@@ -66,7 +66,7 @@ const ManagementFooter = ({ count, loading, onOpen }) => (
     </div>
 );
 
-const FlowManagementView = ({ currentUser }) => {
+const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSessionChange }) => {
     const { showAlert } = useDialog();
     const { itemState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
@@ -84,25 +84,16 @@ const FlowManagementView = ({ currentUser }) => {
         refresh,
     } = useFlowViewModel(currentUser, { showAlert, flowTypes: flowMeterTypes });
 
-    const [selectedDate, setSelectedDate] = useState(null);
+    const [selectedDate, setSelectedDate] = useState(workspaceSession.selectedKey || null);
     const [modalState, setModalState] = useState({ open: false, tab: 'flow', mode: 'add' });
     const pendingParentRefreshRef = useRef(false);
-    const didInitTodaySelectRef = useRef(false);
-    const didInitTodayScrollRef = useRef(false);
     const todayStr = getTodayKST();
 
     useEffect(() => {
-        if (didInitTodaySelectRef.current) return;
-        if (!history.some((row) => row.date === todayStr)) return;
+        if (selectedDate || !history.some((row) => row.date === todayStr)) return;
         setSelectedDate(todayStr);
-        didInitTodaySelectRef.current = true;
-    }, [history, todayStr]);
-
-    useEffect(() => {
-        if (!didInitTodayScrollRef.current && history.length > 0) {
-            didInitTodayScrollRef.current = true;
-        }
-    }, [history.length]);
+        onWorkspaceSessionChange?.({ selectedKey: todayStr });
+    }, [history, onWorkspaceSessionChange, selectedDate, todayStr]);
 
     const modalDate = selectedDate || todayStr;
     const selectedRow = history.find((row) => row.date === selectedDate) || null;
@@ -211,6 +202,7 @@ const FlowManagementView = ({ currentUser }) => {
     const handleRowSelect = (row) => {
         if (row.isFuture || row.date > todayStr) return;
         setSelectedDate(row.date);
+        onWorkspaceSessionChange?.({ selectedKey: row.date });
     };
 
     const openModal = (mode = 'add') => {
@@ -232,6 +224,7 @@ const FlowManagementView = ({ currentUser }) => {
 
     const handleSaveComplete = async ({ date, savedTabs = [] }) => {
         setSelectedDate(date);
+        onWorkspaceSessionChange?.({ selectedKey: date });
         if (savedTabs.includes('flow')) {
             pendingParentRefreshRef.current = true;
         }
@@ -316,7 +309,10 @@ const FlowManagementView = ({ currentUser }) => {
                     columns={gridCols}
                     data={history}
                     keyField="date"
-                    scrollToKey={didInitTodayScrollRef.current ? null : todayStr}
+                    defaultSelectedRowKey={workspaceSession.selectedKey || todayStr}
+                    scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : todayStr}
+                    initialScrollTop={workspaceSession.scrollTop}
+                    onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}
                     width="100%"
                     height={400}
                     rowHeaderWidth={84}

@@ -40,31 +40,22 @@ const ManagementFooter = ({ count, loading, onOpen }) => (
     </div>
 );
 
-const MedicineManagementView = ({ currentUser }) => {
+const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSessionChange }) => {
     const { showAlert } = useDialog();
     const { itemState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
     const { history = [], loading, medicineTypes = [], refresh } = useMedicineViewModel(currentUser, { showAlert });
 
-    const [selectedDate, setSelectedDate] = useState(null);
+    const [selectedDate, setSelectedDate] = useState(workspaceSession.selectedKey || null);
     const [modalState, setModalState] = useState({ open: false, tab: 'medicine', mode: 'add' });
     const pendingParentRefreshRef = useRef(false);
-    const didInitTodaySelectRef = useRef(false);
-    const didInitTodayScrollRef = useRef(false);
     const todayStr = todayText();
 
     useEffect(() => {
-        if (didInitTodaySelectRef.current) return;
-        if (!history.some((row) => row.date === todayStr)) return;
+        if (selectedDate || !history.some((row) => row.date === todayStr)) return;
         setSelectedDate(todayStr);
-        didInitTodaySelectRef.current = true;
-    }, [history, todayStr]);
-
-    useEffect(() => {
-        if (!didInitTodayScrollRef.current && history.length > 0) {
-            didInitTodayScrollRef.current = true;
-        }
-    }, [history.length]);
+        onWorkspaceSessionChange?.({ selectedKey: todayStr });
+    }, [history, onWorkspaceSessionChange, selectedDate, todayStr]);
 
     const selectedRow = history.find((row) => row.date === selectedDate) || null;
 
@@ -124,6 +115,7 @@ const MedicineManagementView = ({ currentUser }) => {
     const handleRowSelect = (row) => {
         if (row.isFuture || row.date > todayStr) return;
         setSelectedDate(row.date);
+        onWorkspaceSessionChange?.({ selectedKey: row.date });
     };
 
     const openModal = (mode = 'add') => {
@@ -146,6 +138,7 @@ const MedicineManagementView = ({ currentUser }) => {
 
     const handleSaveComplete = async ({ date, savedTabs = [] }) => {
         setSelectedDate(date);
+        onWorkspaceSessionChange?.({ selectedKey: date });
         if (savedTabs.includes('medicine')) {
             pendingParentRefreshRef.current = true;
         }
@@ -221,7 +214,10 @@ const MedicineManagementView = ({ currentUser }) => {
                     columns={gridCols}
                     data={history}
                     keyField="date"
-                    scrollToKey={didInitTodayScrollRef.current ? null : todayStr}
+                    defaultSelectedRowKey={workspaceSession.selectedKey || todayStr}
+                    scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : todayStr}
+                    initialScrollTop={workspaceSession.scrollTop}
+                    onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}
                     width="100%"
                     height={400}
                     showBottomBar={false}

@@ -190,6 +190,8 @@ function validateNativeModuleReleaseContract() {
   const nativeValidationScript = packageJson.scripts?.['validate:native'] || '';
   const fieldInstallerScript = packageJson.scripts?.['package:field-installer'] || '';
   const safeReleaseScript = packageJson.scripts?.['release:safe'] || '';
+  const devRunnerText = fs.readFileSync(path.join(BASE_DIR, 'run-all.cjs'), 'utf8');
+  const serverIndexText = fs.readFileSync(path.join(BASE_DIR, 'server', 'index.cjs'), 'utf8');
   const workflowText = fs.readFileSync(path.join(BASE_DIR, '.github', 'workflows', 'release.yml'), 'utf8');
   const integratedInstallerText = fs.readFileSync(
     path.join(BASE_DIR, 'scripts', 'build-integrated-installer.ps1'),
@@ -247,6 +249,15 @@ function validateNativeModuleReleaseContract() {
     error('안전 릴리즈의 신규 현장 통합 설치본 강제 계약이 누락되었습니다');
   }
 
+  const nodeRebuildIndex = safeReleaseScript.indexOf('npm rebuild better-sqlite3');
+  const validateIndex = safeReleaseScript.indexOf('npm run validate');
+  const electronBuildIndex = safeReleaseScript.indexOf('npm run electron:build');
+  if (nodeRebuildIndex >= 0 && validateIndex > nodeRebuildIndex && electronBuildIndex > validateIndex) {
+    success('안전 릴리즈가 Node DB 검증 후 Electron ABI 패키징 순서를 강제함');
+  } else {
+    error('release:safe의 Node 검증 → Electron 패키징 ABI 전환 순서가 잘못되었습니다');
+  }
+
   if (
     integratedInstallerText.includes('field-installer-manifest.json')
     && integratedInstallerText.includes('nativeSqliteSmokeTest = $true')
@@ -255,6 +266,25 @@ function validateNativeModuleReleaseContract() {
     success('신규 현장 설치본 버전/해시/config 대상 검증 매니페스트 계약 확인');
   } else {
     error('신규 현장 설치본 배포 매니페스트 계약이 누락되었습니다');
+  }
+
+  if (
+    devRunnerText.includes("['@electron/rebuild', '--force', '--arch=x64', '--electron-version=40.6.0']")
+    && devRunnerText.includes('/api/auth/login-hint')
+    && !devRunnerText.includes('const url = `http://127.0.0.1:${port}/api/ping`')
+  ) {
+    success('개발 실행이 Electron 네이티브 재빌드 후 로그인 API 준비 상태를 강제함');
+  } else {
+    error('dev:all이 Electron ABI 재빌드 또는 로그인 API 준비 확인을 강제하지 않습니다');
+  }
+
+  if (
+    serverIndexText.includes("console.error('[Server] full-stack-init 실패:', e);")
+    && serverIndexText.includes('setTimeout(() => process.exit(1), 100);')
+  ) {
+    success('DB/인증 초기화 실패 시 ping-only 반쪽 서버 종료 계약 확인');
+  } else {
+    error('서버 초기화 실패 후 ping만 응답하는 반쪽 서버가 남을 수 있습니다');
   }
 }
 
@@ -648,6 +678,13 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    diagnosticLogServiceText.includes('machine: os.hostname()') &&
+      diagnosticLogServiceText.includes("runtime: process.versions?.electron ? 'electron' : 'node'"),
+    'Drive 진단로그 PC/실행환경 식별 계약 유지',
+    '현장과 개발 PC를 구분할 machine/runtime 진단 필드가 누락되었습니다'
+  );
+
+  checkSource(
     !settingsBigQueryClearText.includes('clear-operational-data') &&
       !settingsBigQueryClearText.includes('clearBigQueryOperationalData') &&
       !settingsBigQueryClearText.includes('handleClearBigQueryOperationalData') &&
@@ -781,6 +818,51 @@ function validateRegressionContracts() {
       !waterQualityViewText.includes('datesToImport'),
     'QnTECH 기간 가져오기가 창 상태와 무관한 서버 백그라운드 작업으로 유지됨',
     'QnTECH 기간 가져오기가 다시 렌더러 날짜 반복에 의존하거나 서버 작업 상태 계약이 깨졌습니다'
+  );
+
+  const roadworkContractText = readText(path.join(BASE_DIR, 'ROADWORK_HELPER_CONTRACT.md'));
+  const roadworkModelText = readText(path.join(BASE_DIR, 'src', 'features', 'roadwork-helper', 'RoadworkHelperModel.js'));
+  const roadworkViewModelText = readText(path.join(BASE_DIR, 'src', 'features', 'roadwork-helper', 'useRoadworkHelperViewModel.js'));
+  const roadworkViewText = readText(path.join(BASE_DIR, 'src', 'features', 'roadwork-helper', 'RoadworkHelperView.jsx'));
+
+  checkSource(
+    roadworkContractText.includes('Auto-fill may populate only a newly editable daily-log screen') &&
+      roadworkContractText.includes("must never invoke the roadwork site's save action") &&
+      roadworkContractText.includes('A date mismatch must disable auto-fill') &&
+      roadworkContractText.includes('GET /api/roadwork-helper/all?date=YYYY-MM-DD'),
+    '공사입력 도우미 보호 계약 문서 유지',
+    'ROADWORK_HELPER_CONTRACT.md의 핵심 보호 문구가 누락되었습니다'
+  );
+
+  checkSource(
+    roadworkModelText.includes("apiClient.get('/api/roadwork-helper/all', { date })") &&
+      roadworkViewModelText.includes('flow: res.flow || []') &&
+      roadworkViewModelText.includes('electricity: res.electricity || []') &&
+      roadworkViewModelText.includes('medicine: res.medicine || []') &&
+      roadworkViewModelText.includes('navigator.clipboard.writeText'),
+    '공사입력 도우미 Model/ViewModel 데이터 계약 유지',
+    '공사입력 도우미의 일괄 조회 또는 안전한 데이터 정규화 계약이 깨졌습니다'
+  );
+
+  checkSource(
+    roadworkViewText.includes('nodeintegration="false"') &&
+      roadworkViewText.includes('enableremotemodule="false"') &&
+      roadworkViewText.includes('roadworkStatus.date !== vm.date') &&
+      roadworkViewText.includes('RoadworkHelperModel.fetchAll(roadworkStatus.date)') &&
+      roadworkViewText.includes("document.getElementById('btn_Save')") &&
+      !roadworkViewText.includes('saveButton.click'),
+    '공사입력 도우미 웹뷰·날짜·비저장 보호 계약 유지',
+    '공사입력 도우미가 웹뷰 보안, 날짜 불일치 차단 또는 비저장 원칙을 위반할 수 있습니다'
+  );
+
+  checkSource(
+    roadworkHelperRoutesText.includes("router.get('/api/roadwork-helper/all'") &&
+      roadworkHelperRoutesText.includes('flow') &&
+      roadworkHelperRoutesText.includes('electricity') &&
+      roadworkHelperRoutesText.includes('inventory') &&
+      roadworkHelperRoutesText.includes('medicine'),
+    '공사입력 도우미 서버 일괄 조회 계약 유지',
+    '공사입력 도우미 서버의 /all 구성 데이터 계약이 깨졌습니다'
   );
 }
 

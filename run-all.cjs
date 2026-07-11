@@ -78,6 +78,17 @@ function spawnCommand(command, args, options = {}) {
     });
 }
 
+function runCommandAndWait(command, args, label) {
+    return new Promise((resolve, reject) => {
+        const child = spawnCommand(command, args);
+        child.on('error', reject);
+        child.on('exit', (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`${label} failed with exit code ${code}`));
+        });
+    });
+}
+
 function buildElectronEnv() {
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
@@ -134,7 +145,8 @@ async function waitForBackendReady() {
     while (Date.now() - startedAt < 30000) {
         for (let port = BACKEND_PORT_MIN; port <= BACKEND_PORT_MAX; port += 1) {
             try {
-                const url = `http://127.0.0.1:${port}/api/ping`;
+                // ping은 DB/인증 라우트 초기화 전에 응답할 수 있으므로 로그인 API로 준비 상태를 판정한다.
+                const url = `http://127.0.0.1:${port}/api/auth/login-hint`;
                 const res = await fetch(url, { method: 'GET' });
                 if (res.ok) {
                     console.log(`[Backend] ready: ${url}`);
@@ -206,6 +218,12 @@ function bindChildExit(childProcess, label) {
 
 async function startAll() {
     await cleanupExistingDevProcesses();
+    console.log('[Native] Rebuilding better-sqlite3 for Electron 40.6.0...');
+    await runCommandAndWait(
+        process.platform === 'win32' ? 'npx.cmd' : 'npx',
+        ['@electron/rebuild', '--force', '--arch=x64', '--electron-version=40.6.0'],
+        'Electron native rebuild'
+    );
     // Start the Vite frontend HMR server.
     frontend = spawnCommand(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'dev'], {
         env: { ...process.env },

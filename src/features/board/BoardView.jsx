@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import ReactQuill from 'react-quill-new';
 import Quill from 'quill';
 import QuillResize from 'quill-resize-module';
@@ -101,6 +101,8 @@ const BoardView = ({ currentUser }) => {
         if (insertedImage) {
             insertedImage.style.width = '50%';
             insertedImage.style.height = 'auto';
+            insertedImage.setAttribute('width', '50%');
+            editor.update('user');
         }
         editor.setSelection(index + 1, 0, 'silent');
     };
@@ -139,6 +141,18 @@ const BoardView = ({ currentUser }) => {
         event.preventDefault();
         images.reduce((chain, file) => chain.then(() => insertInlineImage(file)), Promise.resolve());
     };
+
+    useEffect(() => {
+        const editorRoot = quillRef.current?.getEditor()?.root;
+        if (!editorRoot) return undefined;
+
+        editorRoot.addEventListener('paste', handleEditorPaste);
+        editorRoot.addEventListener('drop', handleEditorDrop);
+        return () => {
+            editorRoot.removeEventListener('paste', handleEditorPaste);
+            editorRoot.removeEventListener('drop', handleEditorDrop);
+        };
+    });
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -617,8 +631,6 @@ const BoardView = ({ currentUser }) => {
                                         value={form.content}
                                         onChange={val => updateForm({ content: val })}
                                         modules={quillModules}
-                                        onPaste={handleEditorPaste}
-                                        onDrop={handleEditorDrop}
                                         style={{ height: '220px', marginBottom: '42px' }}
                                         placeholder="내용을 입력하세요..."
                                     />
