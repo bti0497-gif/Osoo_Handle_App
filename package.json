@@ -19,7 +19,7 @@
     "validate:asar": "node scripts/validate-release.cjs --asar-path ./release/win-unpacked/resources/app.asar",
     "validate:api": "node scripts/validate-release.cjs --api-test",
     "validate:native": "node scripts/validate-packaged-native.cjs ./release/win-unpacked",
-    "package:field-installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-integrated-installer.ps1 -AppVersion 1.0.22",
+    "package:field-installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-integrated-installer.ps1 -AppVersion 1.0.23",
     "validate:field-installer": "node scripts/validate-field-installer.cjs",
     "clean:release": "node scripts/clean-release.cjs",
     "release:safe": "npm run clean:release && npm rebuild better-sqlite3 && npm run build && npm run validate && npm run validate:api && npm run electron:build && npm run package:field-installer && npm run validate:field-installer && npm rebuild better-sqlite3"
