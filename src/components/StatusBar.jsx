@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-const StatusBar = ({ title, helpText }) => {
+const StatusBar = ({ title, helpText, locationStatus = { status: 'idle', message: '' } }) => {
     const [time, setTime] = useState(new Date().toLocaleTimeString());
     const [updateState, setUpdateState] = useState({
         status: 'idle',
@@ -72,6 +72,19 @@ const StatusBar = ({ title, helpText }) => {
             ? 'error'
             : 'system_update';
 
+    const locationIcon = locationStatus.status === 'checking'
+        ? 'my_location'
+        : locationStatus.status === 'success'
+            ? 'location_on'
+            : locationStatus.status === 'error'
+                ? 'location_off'
+                : 'location_searching';
+    const locationColor = locationStatus.status === 'success'
+        ? '#4ade80'
+        : locationStatus.status === 'checking'
+            ? '#60a5fa'
+            : '#fbbf24';
+
     return (
         <footer className="status-bar">
             <div className="status-left">
@@ -86,6 +99,12 @@ const StatusBar = ({ title, helpText }) => {
             </div>
 
             <div className="status-right">
+                {locationStatus.status !== 'idle' ? (
+                    <div className="status-item" title={locationStatus.message}>
+                        <span className="material-icons" style={{ fontSize: '14px', color: locationColor }}>{locationIcon}</span>
+                        <span style={{ color: locationColor }}>{locationStatus.message}</span>
+                    </div>
+                ) : null}
                 <div
                     className={`status-update-button status-update-${updateState.status}`}
                     title={updateState.detail || updateState.label}

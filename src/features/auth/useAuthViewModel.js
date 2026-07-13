@@ -91,10 +91,13 @@ export const useAuthViewModel = () => {
     const [user, setUser] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [loginHintName, setLoginHintName] = useState('');
+    const [locationStatus, setLocationStatus] = useState({ status: 'idle', message: '' });
     const autoLogoutTimerRef = useRef(null);
     const restoringRef = useRef(false);
     const userRef = useRef(null);
     const autoLogoutInProgressRef = useRef(false);
+    const backgroundAttendancePromiseRef = useRef(null);
+    const backgroundAttendanceRunRef = useRef(0);
 
     const clearAutoLogoutTimer = useCallback(() => {
         if (autoLogoutTimerRef.current) {
@@ -127,7 +130,9 @@ export const useAuthViewModel = () => {
                 console.error('Auto logout failed:', err);
             }
             AuthModel.clearSession();
+            userRef.current = null;
             setUser(null);
+            setLocationStatus({ status: 'idle', message: '' });
             hideAppToTray();
             try {
                 const result = await AuthModel.syncAttendanceBQ();
@@ -159,6 +164,54 @@ export const useAuthViewModel = () => {
         },
         [clearAutoLogoutTimer, performAutoLogout]
     );
+
+    const startBackgroundAttendance = useCallback((userData) => {
+        if (!userData || !isFieldWorker(userData)) return;
+
+        const runId = backgroundAttendanceRunRef.current + 1;
+        backgroundAttendanceRunRef.current = runId;
+        setLocationStatus({ status: 'checking', message: '위치 확인 중...' });
+        const task = (async () => {
+            try {
+                const coords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null;
+                const lat = coords?.latitude || null;
+                const lng = coords?.longitude || null;
+                const matched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(userData, coords) : true;
+
+                await AuthModel.recordAttendance(userData, lat, lng, matched);
+
+                const enrichedUser = {
+                    ...userData,
+                    isRemote: LOGIN_GEO_CHECK_ENABLED ? !matched : false,
+                };
+                if (backgroundAttendanceRunRef.current === runId && userRef.current?.id === userData.id) {
+                    userRef.current = enrichedUser;
+                    AuthModel.saveSession(enrichedUser);
+                    setUser(enrichedUser);
+                }
+
+                if (backgroundAttendanceRunRef.current !== runId) return;
+                if (!coords && LOGIN_GEO_CHECK_ENABLED) {
+                    setLocationStatus({ status: 'warning', message: '위치 확인 실패 · 출근 기록 저장됨' });
+                } else if (!matched && LOGIN_GEO_CHECK_ENABLED) {
+                    setLocationStatus({ status: 'warning', message: '현장 외 위치 · 출근 기록 저장됨' });
+                } else {
+                    setLocationStatus({ status: 'success', message: '위치 확인 완료' });
+                }
+            } catch (error) {
+                console.warn('백그라운드 위치/출근 기록 실패:', error.message);
+                if (backgroundAttendanceRunRef.current === runId) {
+                    setLocationStatus({ status: 'error', message: '위치·출근 기록 저장 실패' });
+                }
+            }
+        })();
+        backgroundAttendancePromiseRef.current = task;
+        void task.finally(() => {
+            if (backgroundAttendancePromiseRef.current === task) {
+                backgroundAttendancePromiseRef.current = null;
+            }
+        });
+    }, []);
 
     useEffect(() => {
         const restoreSession = async () => {
@@ -200,23 +253,14 @@ export const useAuthViewModel = () => {
                     isRemote: savedUser.isRemote ?? false,
                 };
 
-                if (field && !activeSession) {
-                    try {
-                        const coords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null;
-                        const lat = coords?.latitude || null;
-                        const lng = coords?.longitude || null;
-                        const matched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(freshData, coords) : true;
-                        await AuthModel.recordAttendance(freshData, lat, lng, matched);
-                        restoredUser.isRemote = LOGIN_GEO_CHECK_ENABLED ? !matched : false;
-                    } catch (attErr) {
-                        console.warn('세션 복원 중 출석 기록 실패:', attErr.message);
-                    }
-                }
-
                 AuthModel.saveSession(restoredUser);
+                userRef.current = restoredUser;
                 setUser(restoredUser);
                 if (field) {
                     setupAutoLogoutTimer(restoredUser);
+                    if (!activeSession) {
+                        startBackgroundAttendance(restoredUser);
+                    }
                 }
             } catch (err) {
                 console.error('세션 복원 실패:', err);
@@ -232,7 +276,7 @@ export const useAuthViewModel = () => {
 
         restoreSession();
         return () => clearAutoLogoutTimer();
-    }, [setupAutoLogoutTimer, clearAutoLogoutTimer, refreshLoginHint]);
+    }, [setupAutoLogoutTimer, startBackgroundAttendance, clearAutoLogoutTimer, refreshLoginHint]);
 
     /** 절전 등으로 20시 타이머를 놓친 경우 — 당일 20시 이전 출근·미퇴근만 보정 */
     useEffect(() => {
@@ -260,8 +304,6 @@ export const useAuthViewModel = () => {
     const login = async (name, password) => {
         setIsLoading(true);
         try {
-            const currentCoords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null;
-
             const normalizedName = String(name || '').trim();
             const isPrimaryAdminLogin = normalizedName.toLowerCase() === 'admin';
             let userData = isPrimaryAdminLogin
@@ -275,28 +317,22 @@ export const useAuthViewModel = () => {
                 const field = isFieldWorker(userData);
 
                 if (field) {
-                    const loginLat = currentCoords?.latitude || null;
-                    const loginLng = currentCoords?.longitude || null;
-                    const locationMatched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(userData, currentCoords) : true;
-
-                    try {
-                        await AuthModel.recordAttendance(userData, loginLat, loginLng, locationMatched);
-                    } catch (attErr) {
-                        console.warn('출석 기록 실패 (로그인은 계속 진행):', attErr.message);
-                    }
-
-                    const enrichedUser = { ...userData, isRemote: LOGIN_GEO_CHECK_ENABLED ? !locationMatched : false };
+                    const enrichedUser = { ...userData, isRemote: false };
 
                     AuthModel.saveSession(enrichedUser);
+                    userRef.current = enrichedUser;
                     setUser(enrichedUser);
                     setupAutoLogoutTimer(enrichedUser);
+                    startBackgroundAttendance(enrichedUser);
 
                     setIsLoading(false);
-                    return { success: true, user: enrichedUser, locationMatched };
+                    return { success: true, user: enrichedUser, locationMatched: null };
                 }
 
                 AuthModel.clearSession();
+                userRef.current = userData;
                 setUser(userData);
+                setLocationStatus({ status: 'idle', message: '' });
 
                 setIsLoading(false);
                 return { success: true, user: userData, locationMatched: true };
@@ -316,6 +352,8 @@ export const useAuthViewModel = () => {
         if (u) {
             try {
                 clearAutoLogoutTimer();
+                backgroundAttendanceRunRef.current += 1;
+                await backgroundAttendancePromiseRef.current?.catch(() => {});
                 if (isFieldWorker(u)) {
                     await AuthModel.recordLogout(u, false);
                 } else {
@@ -326,7 +364,9 @@ export const useAuthViewModel = () => {
             }
         }
         AuthModel.clearSession();
+        userRef.current = null;
         setUser(null);
+        setLocationStatus({ status: 'idle', message: '' });
         await refreshLoginHint();
 
         if (u && isFieldWorker(u)) {
@@ -371,6 +411,7 @@ export const useAuthViewModel = () => {
         loginHintName,
         isAuthenticated: !!user,
         isLoading,
+        locationStatus,
         login,
         logout,
         switchActiveSite,

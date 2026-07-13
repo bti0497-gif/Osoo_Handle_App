@@ -53,6 +53,8 @@ check(
     'must not overwrite them from the current PC location',
     'must not block a successful field worker login',
     'Attendance write failure must not block a successful field worker login',
+    'must enter the workspace without waiting for location lookup or attendance recording',
+    'run in the background after workspace entry',
     'Attendance BigQuery sync may mark local rows synced only after BigQuery succeeds',
   ]),
   'contract document covers login/session/attendance invariants',
@@ -74,9 +76,10 @@ check(
 check(
   containsAll(authVmText, [
     'const LOGIN_GEO_CHECK_ENABLED = true',
-    'const currentCoords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null',
-    'const locationMatched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(userData, currentCoords) : true',
-    'await AuthModel.recordAttendance(userData, loginLat, loginLng, locationMatched)',
+    'const startBackgroundAttendance = useCallback',
+    'const coords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null',
+    'const matched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(userData, coords) : true',
+    'await AuthModel.recordAttendance(userData, lat, lng, matched)',
   ]) && containsAll(sessionRestoreText, [
     'const LOGIN_GEO_CHECK_ENABLED = true',
     'const coords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null',
@@ -182,14 +185,27 @@ check(
 
 check(
   containsAll(authVmText, [
-    'try {',
-    'await AuthModel.recordAttendance',
-    'catch (attErr)',
+    'startBackgroundAttendance(enrichedUser)',
     'setUser(enrichedUser)',
     'return { success: true, user: enrichedUser',
+  ]) && !authVmText.includes('const currentCoords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null;\n\n            const normalizedName'),
+  'field login enters immediately and continues attendance in background',
+  'location or attendance work may block field login again'
+);
+
+check(
+  containsAll(authVmText, [
+    "setLocationStatus({ status: 'checking', message: '위치 확인 중...' })",
+    "setLocationStatus({ status: 'warning', message: '위치 확인 실패 · 출근 기록 저장됨' })",
+    "setLocationStatus({ status: 'error', message: '위치·출근 기록 저장 실패' })",
+  ]) && containsAll(appText, [
+    'locationStatus={locationStatus}',
+  ]) && containsAll(read('src/components/StatusBar.jsx'), [
+    "locationStatus.status !== 'idle'",
+    'locationStatus.message',
   ]),
-  'field login continues even if attendance write fails',
-  'attendance write may now block field login'
+  'background location and attendance state is exposed in the existing status bar',
+  'background location status UI wiring was removed'
 );
 
 check(

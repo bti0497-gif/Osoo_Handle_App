@@ -15,6 +15,7 @@ This file protects login, session restore, and attendance behavior. Do not chang
 - Admin sessions must not be persisted in `localStorage`.
 - Saved field worker sessions must be revalidated through local login before restore.
 - If the app version changed, stored sessions must be cleared before automatic restore.
+- Local authentication and session revalidation must enter the workspace without waiting for location lookup or attendance recording.
 
 ## Attendance Rules
 
@@ -23,6 +24,7 @@ This file protects login, session restore, and attendance behavior. Do not chang
 - Site coordinates are sourced from `Wastewater_Site_Locations` during site list/selection sync; the settings UI must not overwrite them from the current PC location.
 - Missing or mismatched coordinates must be recorded as an abnormal location, but must not block a successful field worker login.
 - Attendance write failure must not block a successful field worker login.
+- Location lookup and attendance recording run in the background after workspace entry, and their state must be shown in the existing status bar.
 - Logout closes only the current open attendance row and marks it unsynced.
 - End-of-day auto logout closes stale field worker sessions and marks them unsynced.
 - Attendance BigQuery sync may mark local rows synced only after BigQuery succeeds.

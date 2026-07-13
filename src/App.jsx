@@ -71,7 +71,7 @@ const PlaceholderView = ({ title }) => (
 );
 
 function App() {
-    const { user, loginHintName, isAuthenticated, isLoading, login, logout } = useAuthViewModel();
+    const { user, loginHintName, isAuthenticated, isLoading, locationStatus, login, logout } = useAuthViewModel();
     const [activeTab, setActiveTab] = useState(DEFAULT_TAB);
     const [isRoadworkMounted, setIsRoadworkMounted] = useState(false);
     const [preloadedUserId, setPreloadedUserId] = useState(null);
@@ -406,6 +406,7 @@ function App() {
             <StatusBar
                 title={TAB_LABELS[activeTab] || TAB_LABELS[DEFAULT_TAB]}
                 helpText={getHelpText()}
+                locationStatus={locationStatus}
             />
 
             {forcedUpdateNotice && (
