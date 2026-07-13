@@ -19,12 +19,12 @@ function Resolve-InstallerPath {
         return (Resolve-Path -LiteralPath $RequestedPath).Path
     }
 
-    $installer = Get-ChildItem -LiteralPath $PSScriptRoot -File -Filter 'Osoo Handle App Setup *.exe' |
+    $installer = Get-ChildItem -LiteralPath $PSScriptRoot -File -Filter 'Osoo.Handle.App.Setup.*.exe' |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
 
     if (-not $installer) {
-        throw "Installer not found. Place 'Osoo Handle App Setup *.exe' beside this script or specify -InstallerPath."
+        throw "Installer not found. Place 'Osoo.Handle.App.Setup.*.exe' beside this script or specify -InstallerPath."
     }
 
     return $installer.FullName

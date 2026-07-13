@@ -124,6 +124,22 @@ function validateRuntimeConfigPackagingContract() {
     error('레거시 런타임 설정 fallback 누락: 기존 현장 설정을 읽을 수 없습니다');
   }
 
+  if (!runtimeConfigText.includes('process.env.OSOO_APP_DATA_PATH')) {
+    success('런타임 기본 경로의 외부 환경변수 덮어쓰기 차단 확인');
+  } else {
+    error('OSOO_APP_DATA_PATH가 런타임 기본 경로를 덮어쓸 수 있습니다');
+  }
+
+  const electronMainText = fs.readFileSync(path.join(BASE_DIR, 'electron', 'main.cjs'), 'utf8');
+  const canonicalElectronPath = /const osooAppDataPath = path\.join\([\s\S]*?'Osoo_Handle_App'[\s\S]*?\);/.test(electronMainText);
+  const passesCanonicalPath = electronMainText.includes('OSOO_APP_DATA_PATH: osooAppDataPath');
+  const passesElectronUserData = /OSOO_APP_DATA_PATH:\s*app\.getPath\(['"]userData['"]\)/.test(electronMainText);
+  if (canonicalElectronPath && passesCanonicalPath && !passesElectronUserData) {
+    success('Electron 내장 서버가 고정 AppData 경로 계약을 전달함');
+  } else {
+    error('Electron 내장 서버의 AppData 경로가 Osoo_Handle_App 계약과 다릅니다');
+  }
+
   const pathChecks = [
     ['scripts/provision-runtime-config.cjs', ['Osoo_Handle_App', 'wastewater-treatment-plant']],
     ['scripts/provision-runtime-config.ps1', ['Osoo_Handle_App', 'wastewater-treatment-plant']],
@@ -197,6 +213,21 @@ function validateNativeModuleReleaseContract() {
     path.join(BASE_DIR, 'scripts', 'build-integrated-installer.ps1'),
     'utf8'
   );
+
+  if (
+    integratedInstallerText.includes("$asarUnpackSection = '  asarUnpack: base.asarUnpack,'")
+    && !integratedInstallerText.includes("'node_modules/better-sqlite3/**/*',")
+  ) {
+    success('통합 설치판이 서버 전체 node_modules 압축 해제 계약을 유지함');
+  } else {
+    error('통합 설치판이 일부 네이티브 모듈만 압축 해제하여 express 등 서버 의존성을 누락할 수 있습니다');
+  }
+
+  if (nativeValidationScript && fs.readFileSync(path.join(BASE_DIR, 'scripts', 'validate-packaged-native.cjs'), 'utf8').includes("'express'")) {
+    success('패키지 검증기가 express 서버 의존성 누락을 차단함');
+  } else {
+    error('패키지 검증기에 express 서버 의존성 검사가 없습니다');
+  }
   const validatorPath = path.join(BASE_DIR, 'scripts', 'validate-packaged-native.cjs');
   const smokePath = path.join(BASE_DIR, 'scripts', 'smoke-packaged-sqlite.cjs');
 
@@ -285,6 +316,59 @@ function validateNativeModuleReleaseContract() {
     success('DB/인증 초기화 실패 시 ping-only 반쪽 서버 종료 계약 확인');
   } else {
     error('서버 초기화 실패 후 ping만 응답하는 반쪽 서버가 남을 수 있습니다');
+  }
+}
+
+function validateInstallerNamingPolicy() {
+  console.log(`\n${colors.blue}▶ 설치파일 네이밍 정책 검증${colors.reset}`);
+
+  const builderConfigPath = path.join(BASE_DIR, 'electron-builder.config.cjs');
+  const integratedBuilderScriptPath = path.join(BASE_DIR, 'scripts', 'build-integrated-installer.ps1');
+  const installWithProvisioningPath = path.join(BASE_DIR, 'scripts', 'install-with-provisioning.ps1');
+  const deploymentPackageScriptPath = path.join(BASE_DIR, 'scripts', 'prepare-deployment-package.ps1');
+  const latestYmlPath = path.join(BASE_DIR, 'release', 'latest.yml');
+
+  const builderConfigText = fs.readFileSync(builderConfigPath, 'utf8');
+  const integratedBuilderScriptText = fs.readFileSync(integratedBuilderScriptPath, 'utf8');
+  const installWithProvisioningText = fs.readFileSync(installWithProvisioningPath, 'utf8');
+  const deploymentPackageScriptText = fs.readFileSync(deploymentPackageScriptPath, 'utf8');
+
+  if (builderConfigText.includes("artifactName: 'Osoo.Handle.App.Setup.${version}.${ext}'")) {
+    success('electron-builder 기본 설치파일명 정책 확인: Osoo.Handle.App.Setup.{version}.{ext}');
+  } else {
+    error('electron-builder 기본 설치파일명 정책이 점(.) 규칙이 아닙니다');
+  }
+
+  if (integratedBuilderScriptText.includes("artifactName: 'Osoo.Handle.App.Integrated.Setup.`${version}.`${ext}'")) {
+    success('통합 설치파일명 정책 확인: Osoo.Handle.App.Integrated.Setup.{version}.{ext}');
+  } else {
+    error('통합 설치파일명 정책이 점(.) 규칙이 아닙니다');
+  }
+
+  if (installWithProvisioningText.includes("-Filter 'Osoo.Handle.App.Setup.*.exe'")) {
+    success('프로비저닝 설치 스크립트가 점(.) 설치파일 패턴을 사용함');
+  } else {
+    error('프로비저닝 설치 스크립트가 점(.) 설치파일 패턴을 사용하지 않습니다');
+  }
+
+  if (deploymentPackageScriptText.includes("-Filter 'Osoo.Handle.App.Setup.*.exe'")) {
+    success('배포 패키지 준비 스크립트가 점(.) 설치파일 패턴을 사용함');
+  } else {
+    error('배포 패키지 준비 스크립트가 점(.) 설치파일 패턴을 사용하지 않습니다');
+  }
+
+  if (fs.existsSync(latestYmlPath)) {
+    const latestYmlText = fs.readFileSync(latestYmlPath, 'utf8');
+    if (
+      latestYmlText.includes('url: Osoo.Handle.App.Setup.')
+      && latestYmlText.includes('path: Osoo.Handle.App.Setup.')
+    ) {
+      success('release/latest.yml 자동업데이트 파일명이 점(.) 정책과 일치함');
+    } else {
+      error('release/latest.yml의 url/path 파일명이 점(.) 정책과 일치하지 않습니다');
+    }
+  } else {
+    warn('release/latest.yml이 없어 자동업데이트 파일명 정책 검증을 건너뜁니다');
   }
 }
 
@@ -1214,6 +1298,7 @@ function printSummary() {
   validateRequiredFiles();
   validateRuntimeConfigPackagingContract();
   validateNativeModuleReleaseContract();
+  validateInstallerNamingPolicy();
   validateRegressionContracts();
   validateAuthSessionContract();
   validateRouteRegistry();

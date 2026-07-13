@@ -95,6 +95,12 @@ function startServer() {
   const serverWorkingDirectory = isDev
     ? path.join(__dirname, '..')
     : path.join(process.resourcesPath, 'app.asar.unpacked');
+  // Keep server credentials and the SQLite database on the same release-contract
+  // root. app.getPath('userData') may resolve from the package name instead.
+  const osooAppDataPath = path.join(
+    process.env.APPDATA || process.env.LOCALAPPDATA || app.getPath('appData'),
+    'Osoo_Handle_App'
+  );
 
   serverProcess = fork(serverScriptPath, [], {
     cwd: serverWorkingDirectory,
@@ -103,7 +109,7 @@ function startServer() {
       ...process.env,
       ELECTRON: '1',
       OSOO_PACKAGED: app.isPackaged ? '1' : '0',
-      OSOO_APP_DATA_PATH: app.getPath('userData'),
+      OSOO_APP_DATA_PATH: osooAppDataPath,
       // 진단 로그가 asar 패키징 환경에서도 정확한 버전을 기록하도록 main 프로세스에서 주입.
       OSOO_APP_VERSION: app.getVersion(),
     }

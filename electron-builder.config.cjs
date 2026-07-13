@@ -5,6 +5,7 @@
 module.exports = {
   appId: 'com.osoo.handle-app',
   productName: 'Osoo Handle App',
+  artifactName: 'Osoo.Handle.App.Setup.${version}.${ext}',
   npmRebuild: false,
   nodeGypRebuild: false,
   directories: {

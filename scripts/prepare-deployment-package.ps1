@@ -17,14 +17,14 @@ if (-not $OutputDir) {
 $releaseRoot = (Resolve-Path -LiteralPath $ReleaseDir).Path
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDir)
 
-$installer = Get-ChildItem -LiteralPath $releaseRoot -File -Filter 'Osoo Handle App Setup *.exe' |
+$installer = Get-ChildItem -LiteralPath $releaseRoot -File -Filter 'Osoo.Handle.App.Setup.*.exe' |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 
 if (-not $installer) {
     $existingPackageRoot = Join-Path $releaseRoot 'deployment-package'
     if (Test-Path -LiteralPath $existingPackageRoot -PathType Container) {
-        $installer = Get-ChildItem -LiteralPath $existingPackageRoot -File -Filter 'Osoo Handle App Setup *.exe' |
+        $installer = Get-ChildItem -LiteralPath $existingPackageRoot -File -Filter 'Osoo.Handle.App.Setup.*.exe' |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
     }

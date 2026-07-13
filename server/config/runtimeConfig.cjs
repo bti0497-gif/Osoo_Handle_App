@@ -5,8 +5,13 @@ const path = require('path');
 const dotenv = require('dotenv');
 
 const PROJECT_ROOT = path.join(__dirname, '..', '..');
-const APP_DATA_ROOT = process.env.OSOO_APP_DATA_PATH
-  || path.join(process.env.APPDATA || process.env.LOCALAPPDATA || PROJECT_ROOT, 'Osoo_Handle_App');
+// Release contract: runtime credentials always live under this canonical AppData
+// directory. Do not derive this from Electron's userData path because that path
+// follows the package/product name and can change between releases.
+const APP_DATA_ROOT = path.join(
+  process.env.APPDATA || process.env.LOCALAPPDATA || PROJECT_ROOT,
+  'Osoo_Handle_App'
+);
 const RUNTIME_CONFIG_DIR = path.join(APP_DATA_ROOT, 'config');
 const LEGACY_RUNTIME_CONFIG_DIR = path.join(
   process.env.APPDATA || process.env.LOCALAPPDATA || PROJECT_ROOT,

@@ -14,9 +14,23 @@ const sqlitePackage = path.join(
   'node_modules',
   'better-sqlite3'
 );
+const expressPackage = path.join(
+  unpackedRoot,
+  'resources',
+  'app.asar.unpacked',
+  'node_modules',
+  'express',
+  'package.json'
+);
+const unpackedServer = path.join(
+  unpackedRoot,
+  'resources',
+  'app.asar.unpacked',
+  'server.cjs'
+);
 const smokeScript = path.join(__dirname, 'smoke-packaged-sqlite.cjs');
 
-for (const requiredPath of [electronExe, sqlitePackage, smokeScript]) {
+for (const requiredPath of [electronExe, unpackedServer, expressPackage, sqlitePackage, smokeScript]) {
   if (!fs.existsSync(requiredPath)) {
     console.error(`[Packaged Native FAIL] Required path is missing: ${requiredPath}`);
     process.exit(1);
@@ -24,6 +38,8 @@ for (const requiredPath of [electronExe, sqlitePackage, smokeScript]) {
 }
 
 console.log(`[Packaged Native] Electron: ${electronExe}`);
+console.log(`[Packaged Server] server.cjs: ${unpackedServer}`);
+console.log(`[Packaged Server] express: ${expressPackage}`);
 console.log(`[Packaged Native] better-sqlite3: ${sqlitePackage}`);
 
 const result = spawnSync(electronExe, [smokeScript, sqlitePackage], {

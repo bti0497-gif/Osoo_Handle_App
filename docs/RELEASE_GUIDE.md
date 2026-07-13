@@ -59,19 +59,26 @@ powershell -ExecutionPolicy Bypass -File scripts\prepare-deployment-package.ps1
 
 동일한 빌드에서 생성된 다음 세 파일이 필요합니다.
 
-- `Osoo-Handle-App-Setup-{version}.exe`
-- `Osoo-Handle-App-Setup-{version}.exe.blockmap`
+- `Osoo.Handle.App.Setup.{version}.exe`
+- `Osoo.Handle.App.Setup.{version}.exe.blockmap`
 - `latest.yml`
 
 `latest.yml`의 파일명, 크기와 SHA-512가 실제 업로드 파일과 일치해야 합니다.
+
+설치파일 네이밍 정책은 아래 규칙으로 고정합니다.
+
+- 업데이트용 설치파일: `Osoo.Handle.App.Setup.{version}.exe`
+- 통합 설치파일: `Osoo.Handle.App.Integrated.Setup.{version}.exe`
+- 자동업데이트 메타데이터: `latest.yml`의 `files[].url`과 `path`는 반드시 업데이트용 설치파일명과 동일
+- 허용하지 않는 변형: 공백(`Osoo Handle ...`), 하이픈(`Osoo-Handle-...`), 언더스코어(`Osoo_Handle_...`)
 
 ## GitHub CLI 배포
 
 ```powershell
 gh auth status
 gh release create 1.0.6 `
-  "release/auto-update-v1.0.6/Osoo-Handle-App-Setup-1.0.6.exe" `
-  "release/auto-update-v1.0.6/Osoo-Handle-App-Setup-1.0.6.exe.blockmap" `
+  "release/auto-update-v1.0.6/Osoo.Handle.App.Setup.1.0.6.exe" `
+  "release/auto-update-v1.0.6/Osoo.Handle.App.Setup.1.0.6.exe.blockmap" `
   "release/auto-update-v1.0.6/latest.yml" `
   --repo bti0497-gif/Osoo_Handle_App `
   --title "Osoo Handle App 1.0.6" `

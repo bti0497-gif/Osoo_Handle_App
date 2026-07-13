@@ -50,7 +50,7 @@ $requiredFiles[$oauthFile.Name] = $oauthFile.FullName
 $buildRoot = Join-Path $outputRoot '.integrated-build'
 $includeFile = Join-Path $buildRoot 'installer-credentials.nsh'
 $configFile = Join-Path $buildRoot 'electron-builder.integrated.cjs'
-$outputFile = Join-Path $outputRoot "Osoo Handle App Integrated Setup $AppVersion.exe"
+$outputFile = Join-Path $outputRoot "Osoo.Handle.App.Integrated.Setup.$AppVersion.exe"
 
 function ConvertTo-JsSingleQuotedString([string]$Value) {
     return $Value.Replace('\', '\\').Replace("'", "\'")
@@ -96,23 +96,10 @@ Set-Content -LiteralPath $includeFile -Value $includeLines -Encoding utf8
 $baseConfigPath = ConvertTo-JsSingleQuotedString (Join-Path $projectRoot 'electron-builder.config.cjs')
 $includeConfigPath = ConvertTo-JsSingleQuotedString $includeFile
 $outputConfigPath = ConvertTo-JsSingleQuotedString $outputRoot
-$asarUnpackSection = @"
-    asarUnpack: [
-        'server.cjs',
-        'public/**/*',
-        'server/**/*',
-        'node_modules/better-sqlite3/**/*',
-        'node_modules/bindings/**/*',
-        'node_modules/file-uri-to-path/**/*',
-        'node_modules/@img/**/*',
-        'node_modules/@napi-rs/**/*',
-        '**/*.node',
-    ],
-"@
-
-if (-not $LowMemoryMode) {
-        $asarUnpackSection = '  asarUnpack: base.asarUnpack,'
-}
+# The embedded server is launched from app.asar.unpacked/server.cjs. Every
+# runtime dependency must therefore be unpacked beside it; unpacking only
+# native modules makes Node fail at startup with MODULE_NOT_FOUND (express).
+$asarUnpackSection = '  asarUnpack: base.asarUnpack,'
 
 $configText = @"
 const base = require('$baseConfigPath');
@@ -125,7 +112,7 @@ module.exports = {
     output: '$outputConfigPath',
   },
 $asarUnpackSection
-  artifactName: 'Osoo Handle App Integrated Setup `${version}.`${ext}',
+    artifactName: 'Osoo.Handle.App.Integrated.Setup.`${version}.`${ext}',
   nsis: {
     ...base.nsis,
     include: '$includeConfigPath',
