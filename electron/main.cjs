@@ -225,6 +225,62 @@ function createWindow() {
   });
 }
 
+function setupRoadworkSafeUsePopupGuard() {
+  app.on('web-contents-created', (_event, contents) => {
+    if (contents.getType() !== 'webview') return;
+
+    contents.on('did-create-window', (popupWindow) => {
+      let inspectionStarted = false;
+      let exactTitleSeen = popupWindow.getTitle() === '도로통합플랫폼 안내';
+      const inspectExactNotice = async () => {
+        if (inspectionStarted || popupWindow.isDestroyed()) return;
+        if (!exactTitleSeen && popupWindow.getTitle() !== '도로통합플랫폼 안내') return;
+        inspectionStarted = true;
+        popupWindow.hide();
+
+        try {
+          const matched = await popupWindow.webContents.executeJavaScript(`
+            (() => {
+              const text = String(document.body?.innerText || '').replace(/\\s+/g, ' ').trim();
+              const isExactNotice = text.includes('[안전한 PC 사용을 위한 공지]')
+                && text.includes('사용자 계정 공유사용 금지')
+                && text.includes('오늘 하루 그만보기')
+                && !text.includes('확인번호')
+                && !text.includes('인증번호');
+              if (!isExactNotice) return false;
+
+              const checkbox = document.querySelector('input[type="checkbox"]');
+              if (checkbox && !checkbox.checked) checkbox.click();
+              const controls = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], a'));
+              const confirm = controls.find((control) => {
+                const label = String(control.innerText || control.value || '').replace(/\\s+/g, ' ').trim();
+                return label === '확인';
+              });
+              if (confirm) confirm.click();
+              return true;
+            })()
+          `);
+          if (matched) {
+            if (!popupWindow.isDestroyed()) popupWindow.close();
+          } else if (!popupWindow.isDestroyed()) {
+            popupWindow.show();
+          }
+        } catch (error) {
+          console.warn('[Roadwork] Safe-use notice inspection failed:', error.message);
+          if (!popupWindow.isDestroyed()) popupWindow.show();
+        }
+      };
+
+      popupWindow.webContents.on('page-title-updated', (_titleEvent, title) => {
+        if (title !== '도로통합플랫폼 안내') return;
+        exactTitleSeen = true;
+        if (!popupWindow.isDestroyed()) popupWindow.hide();
+      });
+      popupWindow.webContents.once('did-finish-load', inspectExactNotice);
+    });
+  });
+}
+
 function createHiddenPdfWindow() {
   return new BrowserWindow({
     show: false,
@@ -332,6 +388,7 @@ if (!gotTheLock) {
 }
 
 app.whenReady().then(() => {
+  setupRoadworkSafeUsePopupGuard();
   try {
     require('./roadworkDumpHelper.cjs')(ipcMain, app, { isDev });
     console.log('[Roadwork] IPC handlers loaded.');

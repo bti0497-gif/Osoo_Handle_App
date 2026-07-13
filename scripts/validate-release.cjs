@@ -994,10 +994,11 @@ function validateRegressionContracts() {
   checkSource(
     roadworkContractText.includes('오늘 하루 그만보기') &&
       roadworkContractText.includes('verification dialogs') &&
-      roadworkPreloadText.includes("text.includes('안전한 사용')") &&
-      roadworkPreloadText.includes("text.includes('그만보기')") &&
-      roadworkPreloadText.includes("['확인번호', '인증번호', '이중 검증'") &&
-      roadworkPreloadText.includes('SAFE_USE_NOTICE_TTL_MS = 24 * 60 * 60 * 1000'),
+      electronMainTextForWindow.includes("popupWindow.getTitle() !== '도로통합플랫폼 안내'") &&
+      electronMainTextForWindow.includes("text.includes('[안전한 PC 사용을 위한 공지]')") &&
+      electronMainTextForWindow.includes("text.includes('오늘 하루 그만보기')") &&
+      electronMainTextForWindow.includes("!text.includes('확인번호')") &&
+      !roadworkPreloadText.includes('setupSafeUseNoticeDismissal'),
     '공사입력 도우미 일반 공지 자동닫기·이중검증 보존 계약 유지',
     '공사입력 도우미 공지 처리에서 이중검증 보호 또는 24시간 규칙이 깨졌습니다'
   );

@@ -108,93 +108,6 @@ function setupAutofill() {
   });
 }
 
-const SAFE_USE_NOTICE_DISMISS_KEY = 'osoo-roadwork-safe-use-notice-dismissed-at';
-const SAFE_USE_NOTICE_TTL_MS = 24 * 60 * 60 * 1000;
-const VERIFICATION_NOTICE_TERMS = ['확인번호', '인증번호', '이중 검증', '2단계 인증', 'OTP', '문자 인증', '휴대폰 인증'];
-
-function normalizeNoticeText(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-function isSafeUseNotice(container) {
-  const text = normalizeNoticeText(container?.innerText || container?.textContent);
-  if (!text.includes('안전한 사용')) return false;
-  if (!text.includes('오늘') || !text.includes('그만보기')) return false;
-  return !VERIFICATION_NOTICE_TERMS.some((term) => text.includes(term));
-}
-
-function findSafeUseNotice() {
-  const likelyContainers = Array.from(document.querySelectorAll([
-    '[role="dialog"]',
-    '[aria-modal="true"]',
-    '.modal',
-    '[class*="pop" i]',
-    '[id*="pop" i]',
-    '[class*="popup" i]',
-    '[id*="popup" i]',
-    '[class*="notice" i]',
-    '[id*="notice" i]',
-  ].join(',')));
-  return likelyContainers.find(isSafeUseNotice) || null;
-}
-
-function dismissSafeUseNotice() {
-  const notice = findSafeUseNotice();
-  if (!notice) return false;
-
-  const checkbox = notice.querySelector('input[type="checkbox"]');
-  if (checkbox && !checkbox.checked) {
-    checkbox.click();
-    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-
-  const controls = Array.from(notice.querySelectorAll('button, input[type="button"], input[type="submit"], a'));
-  const closeControl = controls.find((control) => {
-    const text = normalizeNoticeText(control.innerText || control.value || control.getAttribute('aria-label') || control.title);
-    return text === '닫기' || text === '확인' || text === '×' || text.toLowerCase() === 'close';
-  }) || notice.querySelector('[class*="close" i], [id*="close" i]');
-
-  if (!closeControl) return false;
-  try {
-    localStorage.setItem(SAFE_USE_NOTICE_DISMISS_KEY, String(Date.now()));
-  } catch (_) {
-    // Some roadwork pages can deny storage access; the exact notice is still closed safely.
-  }
-  closeControl.click();
-  return true;
-}
-
-function setupSafeUseNoticeDismissal() {
-  let scheduled = false;
-  const check = () => {
-    scheduled = false;
-    let dismissedAt = 0;
-    try {
-      dismissedAt = Number(localStorage.getItem(SAFE_USE_NOTICE_DISMISS_KEY) || 0);
-    } catch (_) {
-      dismissedAt = 0;
-    }
-    const withinDismissPeriod = Date.now() - dismissedAt < SAFE_USE_NOTICE_TTL_MS;
-    if (withinDismissPeriod || findSafeUseNotice()) {
-      dismissSafeUseNotice();
-    }
-  };
-  const scheduleCheck = () => {
-    if (scheduled) return;
-    scheduled = true;
-    window.setTimeout(check, 30);
-  };
-
-  scheduleCheck();
-  const observer = new MutationObserver(scheduleCheck);
-  observer.observe(document.body, { childList: true, subtree: true });
-}
-
-function setupRoadworkPage() {
-  setupAutofill();
-  setupSafeUseNoticeDismissal();
-}
-
 window.addEventListener('keydown', (event) => {
   if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 's') {
     const html = document.documentElement.outerHTML;
@@ -209,7 +122,7 @@ window.addEventListener('keydown', (event) => {
 });
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', setupRoadworkPage);
+  document.addEventListener('DOMContentLoaded', setupAutofill);
 } else {
-  setupRoadworkPage();
+  setupAutofill();
 }
