@@ -198,6 +198,46 @@ function validateRuntimeConfigPackagingContract() {
   }
 }
 
+function validateInstallerProcessGuardContract() {
+  console.log(`\n${colors.blue}▶ 설치 프로세스 종료 보호 계약 검증${colors.reset}`);
+
+  const guardPath = path.join(BASE_DIR, 'scripts', 'installer-process-guard.nsh');
+  if (!fs.existsSync(guardPath)) {
+    error('설치 프로세스 종료 보호 스크립트가 없습니다');
+    return;
+  }
+
+  const guardText = fs.readFileSync(guardPath, 'utf8');
+  const builderText = fs.readFileSync(path.join(BASE_DIR, 'electron-builder.config.cjs'), 'utf8');
+  const integratedText = fs.readFileSync(path.join(BASE_DIR, 'scripts', 'build-integrated-installer.ps1'), 'utf8');
+
+  if (
+    guardText.includes('!macro customInit')
+    && guardText.includes('taskkill /F /T /IM "Osoo Handle App.exe"')
+    && guardText.includes('Sleep 1500')
+  ) {
+    success('설치 시작 전 기존 앱·수동 서버 종료 및 대기 계약 확인');
+  } else {
+    error('설치 프로세스 종료 보호 스크립트가 필수 종료/대기 계약을 충족하지 않습니다');
+  }
+
+  if (builderText.includes("include: 'scripts/installer-process-guard.nsh'")) {
+    success('일반 자동업데이트 설치판에 프로세스 종료 보호 적용');
+  } else {
+    error('일반 자동업데이트 설치판에 프로세스 종료 보호가 적용되지 않았습니다');
+  }
+
+  if (
+    integratedText.includes("$processGuardFile = Join-Path $projectRoot 'scripts\\installer-process-guard.nsh'")
+    && integratedText.includes('$processGuardSourcePath = ConvertTo-NsisSourcePath $processGuardFile')
+    && integratedText.includes('!include')
+  ) {
+    success('통합 현장 설치판에 프로세스 종료 보호 적용');
+  } else {
+    error('통합 현장 설치판에 프로세스 종료 보호가 적용되지 않았습니다');
+  }
+}
+
 function validateNativeModuleReleaseContract() {
   console.log(`\n${colors.blue}▶ Electron 네이티브 모듈 릴리즈 계약 검증${colors.reset}`);
 
@@ -1297,6 +1337,7 @@ function printSummary() {
   
   validateRequiredFiles();
   validateRuntimeConfigPackagingContract();
+  validateInstallerProcessGuardContract();
   validateNativeModuleReleaseContract();
   validateInstallerNamingPolicy();
   validateRegressionContracts();

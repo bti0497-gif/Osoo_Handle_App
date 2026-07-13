@@ -49,6 +49,7 @@ $requiredFiles[$oauthFile.Name] = $oauthFile.FullName
 
 $buildRoot = Join-Path $outputRoot '.integrated-build'
 $includeFile = Join-Path $buildRoot 'installer-credentials.nsh'
+$processGuardFile = Join-Path $projectRoot 'scripts\installer-process-guard.nsh'
 $configFile = Join-Path $buildRoot 'electron-builder.integrated.cjs'
 $outputFile = Join-Path $outputRoot "Osoo.Handle.App.Integrated.Setup.$AppVersion.exe"
 
@@ -65,7 +66,14 @@ if (Test-Path -LiteralPath $buildRoot) {
 }
 New-Item -ItemType Directory -Path $buildRoot -Force | Out-Null
 
+if (-not (Test-Path -LiteralPath $processGuardFile -PathType Leaf)) {
+    throw "설치 프로세스 종료 보호 스크립트가 없습니다: $processGuardFile"
+}
+
+$processGuardSourcePath = ConvertTo-NsisSourcePath $processGuardFile
+
 $includeLines = @(
+    "!include `"$processGuardSourcePath`""
     '!macro customInstall'
     '  SetShellVarContext current'
     '  DetailPrint "Installing shared service configuration."'
