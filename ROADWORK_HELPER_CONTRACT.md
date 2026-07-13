@@ -21,6 +21,8 @@ This file protects the working roadwork input helper. Do not change these rules 
 - Auto-fill is enabled only when the roadwork daily-log screen is visible, its date is editable, the page date equals the helper date, and there is local data to fill.
 - Immediately before auto-fill, the helper must reload the latest payload through `RoadworkHelperModel.fetchAll(roadworkStatus.date)`.
 - The user must review the populated roadwork form and save it directly in the roadwork site.
+- Only the general `안전한 사용` notice containing `오늘 하루 그만보기` may be dismissed automatically for 24 hours.
+- Login forms and verification dialogs for SMS confirmation codes, OTP, or two-step verification must never be dismissed automatically.
 
 ## Change Discipline
 

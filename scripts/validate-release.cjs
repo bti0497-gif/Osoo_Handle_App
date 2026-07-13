@@ -958,6 +958,8 @@ function validateRegressionContracts() {
   const roadworkModelText = readText(path.join(BASE_DIR, 'src', 'features', 'roadwork-helper', 'RoadworkHelperModel.js'));
   const roadworkViewModelText = readText(path.join(BASE_DIR, 'src', 'features', 'roadwork-helper', 'useRoadworkHelperViewModel.js'));
   const roadworkViewText = readText(path.join(BASE_DIR, 'src', 'features', 'roadwork-helper', 'RoadworkHelperView.jsx'));
+  const roadworkPreloadText = readText(path.join(BASE_DIR, 'electron', 'preload-roadwork.cjs'));
+  const electronMainTextForWindow = readText(path.join(BASE_DIR, 'electron', 'main.cjs'));
 
   checkSource(
     roadworkContractText.includes('Auto-fill may populate only a newly editable daily-log screen') &&
@@ -987,6 +989,25 @@ function validateRegressionContracts() {
       !roadworkViewText.includes('saveButton.click'),
     '공사입력 도우미 웹뷰·날짜·비저장 보호 계약 유지',
     '공사입력 도우미가 웹뷰 보안, 날짜 불일치 차단 또는 비저장 원칙을 위반할 수 있습니다'
+  );
+
+  checkSource(
+    roadworkContractText.includes('오늘 하루 그만보기') &&
+      roadworkContractText.includes('verification dialogs') &&
+      roadworkPreloadText.includes("text.includes('안전한 사용')") &&
+      roadworkPreloadText.includes("text.includes('그만보기')") &&
+      roadworkPreloadText.includes("['확인번호', '인증번호', '이중 검증'") &&
+      roadworkPreloadText.includes('SAFE_USE_NOTICE_TTL_MS = 24 * 60 * 60 * 1000'),
+    '공사입력 도우미 일반 공지 자동닫기·이중검증 보존 계약 유지',
+    '공사입력 도우미 공지 처리에서 이중검증 보호 또는 24시간 규칙이 깨졌습니다'
+  );
+
+  checkSource(
+    electronMainTextForWindow.includes("mainWindow.once('ready-to-show'") &&
+      electronMainTextForWindow.includes('mainWindow.maximize();') &&
+      electronMainTextForWindow.includes('mainWindow.show();'),
+    '앱 시작 시 최대화 창 표시 계약 유지',
+    '앱이 시작할 때 최대화되지 않거나 표시 순서가 깨졌습니다'
   );
 
   checkSource(
