@@ -342,11 +342,14 @@ function validateNativeModuleReleaseContract() {
   if (
     devRunnerText.includes("['@electron/rebuild', '--force', '--arch=x64', '--electron-version=40.6.0']")
     && devRunnerText.includes('/api/auth/login-hint')
+    && devRunnerText.includes('Get-NetTCPConnection -State Listen')
+    && devRunnerText.includes('BACKEND_PORT_MIN + 1')
+    && devRunnerText.includes('Stop-Process -Id $_ -Force')
     && !devRunnerText.includes('const url = `http://127.0.0.1:${port}/api/ping`')
   ) {
-    success('개발 실행이 Electron 네이티브 재빌드 후 로그인 API 준비 상태를 강제함');
+    success('개발 실행이 기존 포트 정리·Electron 재빌드·로그인 API 준비 상태를 강제함');
   } else {
-    error('dev:all이 Electron ABI 재빌드 또는 로그인 API 준비 확인을 강제하지 않습니다');
+    error('dev:all이 기존 포트 정리, Electron ABI 재빌드 또는 로그인 API 준비 확인을 강제하지 않습니다');
   }
 
   if (
@@ -1009,6 +1012,15 @@ function validateRegressionContracts() {
       electronMainTextForWindow.includes('mainWindow.show();'),
     '앱 시작 시 최대화 창 표시 계약 유지',
     '앱이 시작할 때 최대화되지 않거나 표시 순서가 깨졌습니다'
+  );
+
+  checkSource(
+    electronMainTextForWindow.includes('function cleanupStalePackagedServerPorts()') &&
+      electronMainTextForWindow.includes('$ports = 18731..18734') &&
+      electronMainTextForWindow.includes("$name -eq 'Osoo Handle App.exe'") &&
+      electronMainTextForWindow.includes('handleVersionMigration();\n  cleanupStalePackagedServerPorts();\n  startServer();'),
+    '배포 앱 시작 전 잔존 로컬 서버 포트 정리 계약 유지',
+    '배포 앱이 낡은 18731~18734 서버에 연결될 수 있습니다'
   );
 
   checkSource(

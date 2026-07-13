@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { fork } = require('child_process');
+const { fork, spawnSync } = require('child_process');
 const { setupAutoUpdater, checkForUpdates, installDownloadedUpdateAndQuit, hasDownloadedUpdate } = require('./updater.cjs');
 
 function isBrokenPipeError(error) {
@@ -43,6 +43,45 @@ let isQuitting = false;
 
 const isDev = !app.isPackaged;
 const useExternalServer = isDev && process.env.OSOO_EXTERNAL_SERVER === '1';
+
+function cleanupStalePackagedServerPorts() {
+  if (isDev || process.platform !== 'win32') return;
+
+  const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+$currentPid = ${process.pid}
+$ports = 18731..18734
+$owners = Get-NetTCPConnection -State Listen |
+  Where-Object { $ports -contains $_.LocalPort -and $_.OwningProcess -ne $currentPid } |
+  Select-Object -ExpandProperty OwningProcess -Unique
+
+foreach ($ownerPid in $owners) {
+  $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid"
+  if (-not $proc) { continue }
+  $name = [string]$proc.Name
+  $command = [string]$proc.CommandLine
+  $path = [string]$proc.ExecutablePath
+  $isOsooProcess =
+    $name -eq 'Osoo Handle App.exe' -or
+    $path -like '*\\Osoo Handle App\\Osoo Handle App.exe' -or
+    (($name -eq 'node.exe' -or $name -eq 'electron.exe') -and
+      ($command -match 'Osoo Handle App' -or $command -match 'server\\.cjs'))
+  if ($isOsooProcess) {
+    Stop-Process -Id $ownerPid -Force
+  }
+}
+Start-Sleep -Milliseconds 500
+`.trim();
+
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    windowsHide: true,
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  if (result.error) {
+    console.warn('[Electron] Stale server port cleanup failed:', result.error.message);
+  }
+}
 
 function handleVersionMigration() {
   const userDataPath = app.getPath('userData');
@@ -397,6 +436,7 @@ app.whenReady().then(() => {
   }
 
   handleVersionMigration();
+  cleanupStalePackagedServerPorts();
   startServer();
   createWindow();
   createTray();
