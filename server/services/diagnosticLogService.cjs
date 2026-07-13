@@ -1,4 +1,5 @@
 const fs = require('fs');
+const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const {
@@ -13,6 +14,15 @@ const {
 const SECRET_KEY_PATTERN = /(password|passwd|pwd|token|secret|key|credential|authorization|cookie|client_secret|refresh_token)/i;
 const MAX_STRING_LENGTH = 2000;
 const MAX_DETAIL_LENGTH = 15000;
+const DIAGNOSTIC_COUNT_TABLES = [
+  'flow_readings',
+  'medicine_logs',
+  'water_quality',
+  'qntech_water_quality',
+  'kit_logs',
+  'operation_status_logs',
+  'attendance',
+];
 
 function safeString(value) {
   if (value === null || value === undefined) return '';
@@ -84,6 +94,56 @@ function ensureDiagnosticDir(appDataPath) {
   const dir = path.join(appDataPath, 'logs', 'diagnostics');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function createDatabaseFingerprint(dbPath, fileSize) {
+  const sampleSize = Math.min(64 * 1024, fileSize);
+  const first = Buffer.alloc(sampleSize);
+  const last = Buffer.alloc(sampleSize);
+  const fd = fs.openSync(dbPath, 'r');
+  try {
+    fs.readSync(fd, first, 0, sampleSize, 0);
+    fs.readSync(fd, last, 0, sampleSize, Math.max(0, fileSize - sampleSize));
+  } finally {
+    fs.closeSync(fd);
+  }
+  return crypto.createHash('sha256')
+    .update(String(fileSize))
+    .update(first)
+    .update(last)
+    .digest('hex')
+    .slice(0, 16);
+}
+
+function buildDatabaseDiagnosticDetails(db, appDataPath) {
+  const dbPath = path.join(appDataPath, 'osoo.db');
+  const details = {
+    dbPath,
+    exists: fs.existsSync(dbPath),
+    fileSize: null,
+    modifiedAt: null,
+    fingerprint: null,
+    tableCounts: {},
+  };
+
+  try {
+    const stat = fs.statSync(dbPath);
+    details.fileSize = stat.size;
+    details.modifiedAt = stat.mtime.toISOString();
+    details.fingerprint = createDatabaseFingerprint(dbPath, stat.size);
+  } catch (error) {
+    details.fileError = safeString(error.message);
+  }
+
+  for (const tableName of DIAGNOSTIC_COUNT_TABLES) {
+    try {
+      details.tableCounts[tableName] = db.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).get()?.count ?? null;
+    } catch (error) {
+      details.tableCounts[tableName] = `error:${safeString(error.message)}`;
+    }
+  }
+
+  return details;
 }
 
 function getTodayKst() {
@@ -333,6 +393,7 @@ async function uploadPendingDiagnostics(db, appDataPath, { limit = 200 } = {}) {
 }
 
 module.exports = {
+  buildDatabaseDiagnosticDetails,
   cleanupOldDiagnosticsOnVersionStart,
   recordDiagnostic,
   uploadPendingDiagnostics,

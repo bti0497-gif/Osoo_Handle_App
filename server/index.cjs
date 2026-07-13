@@ -173,6 +173,7 @@ function registerLazyApplication() {
   const { triggerSync: triggerBigQuerySync } = require('./services/bigQueryTriggerService.cjs');
   const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
   const {
+    buildDatabaseDiagnosticDetails,
     cleanupOldDiagnosticsOnVersionStart,
     recordDiagnostic,
     uploadPendingDiagnostics,
@@ -186,6 +187,7 @@ function registerLazyApplication() {
     action: 'startup',
     result: 'ok',
     message: 'local server initialized',
+    details: buildDatabaseDiagnosticDetails(db, appDataPath),
   });
   cleanupOldDiagnosticsOnVersionStart(db, appDataPath)
     .then((result) => {
@@ -247,7 +249,23 @@ function registerLazyApplication() {
 
       if (shouldLog) {
         try {
-          const responseText = args?.[0] ? String(args[0]).slice(0, 2000) : '';
+          const rawResponseText = args?.[0] ? String(args[0]) : '';
+          const responseText = rawResponseText.slice(0, 2000);
+          let responseCount;
+          try {
+            const parsedResponse = rawResponseText ? JSON.parse(rawResponseText) : null;
+            if (Array.isArray(parsedResponse)) {
+              responseCount = parsedResponse.length;
+            } else if (Array.isArray(parsedResponse?.history)) {
+              responseCount = parsedResponse.history.length;
+            } else if (Array.isArray(parsedResponse?.data)) {
+              responseCount = parsedResponse.data.length;
+            } else if (Array.isArray(parsedResponse?.items)) {
+              responseCount = parsedResponse.items.length;
+            }
+          } catch (_) {
+            responseCount = undefined;
+          }
           recordDiagnostic(db, appDataPath, {
             level: res.statusCode >= 400 ? 'error' : 'info',
             area: 'api',
@@ -257,6 +275,7 @@ function registerLazyApplication() {
             details: {
               statusCode: res.statusCode,
               durationMs: Date.now() - startedAt,
+              responseCount,
               query: sanitize(req.query || {}),
               body: requestBody,
               response: DIAGNOSTIC_VERBOSE_INITIAL || res.statusCode >= 400 ? responseText : undefined,

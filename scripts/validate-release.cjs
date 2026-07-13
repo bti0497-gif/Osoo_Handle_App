@@ -809,6 +809,16 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    diagnosticLogServiceText.includes('function buildDatabaseDiagnosticDetails') &&
+      diagnosticLogServiceText.includes("path.join(appDataPath, 'osoo.db')") &&
+      diagnosticLogServiceText.includes('tableCounts') &&
+      serverIndexText.includes('details: buildDatabaseDiagnosticDetails(db, appDataPath)') &&
+      serverIndexText.includes('responseCount = parsedResponse.history.length'),
+    'Drive 진단로그 DB 경로·식별정보·테이블/API 행 개수 계약 유지',
+    'Drive 진단로그 DB 식별 및 데이터 행 개수 계약이 누락되었습니다'
+  );
+
+  checkSource(
     !settingsBigQueryClearText.includes('clear-operational-data') &&
       !settingsBigQueryClearText.includes('clearBigQueryOperationalData') &&
       !settingsBigQueryClearText.includes('handleClearBigQueryOperationalData') &&
