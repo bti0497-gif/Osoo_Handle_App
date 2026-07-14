@@ -4,7 +4,7 @@ const StatusBar = ({ title, helpText, locationStatus = { status: 'idle', message
     const [time, setTime] = useState(new Date().toLocaleTimeString());
     const [updateState, setUpdateState] = useState({
         status: 'idle',
-        label: '로그인 시 업데이트 확인',
+        label: '새 버전 확인',
         detail: '',
         percent: 0,
     });
@@ -32,7 +32,7 @@ const StatusBar = ({ title, helpText, locationStatus = { status: 'idle', message
             });
         });
         api.onUpdateNotAvailable?.(() => {
-            setUpdateState({ status: 'idle', label: '최신 버전', detail: '', percent: 0 });
+            setUpdateState({ status: 'idle', label: '새 버전 확인', detail: '현재 최신 버전입니다.', percent: 0 });
         });
         api.onUpdateProgress?.((progress) => {
             const percent = Math.max(0, Math.min(100, Math.round(Number(progress?.percent) || 0)));
@@ -46,8 +46,8 @@ const StatusBar = ({ title, helpText, locationStatus = { status: 'idle', message
         api.onUpdateDownloaded?.((info) => {
             setUpdateState({
                 status: 'downloaded',
-                label: '업데이트 설치',
-                detail: info?.version ? `v${info.version}` : '',
+                label: '새 버전 확인됨',
+                detail: info?.version ? `v${info.version} · 업데이트가 준비되었습니다.` : '업데이트가 준비되었습니다.',
                 percent: 100,
             });
         });
@@ -65,6 +65,28 @@ const StatusBar = ({ title, helpText, locationStatus = { status: 'idle', message
 
         return undefined;
     }, []);
+
+    const handleUpdateClick = async () => {
+        const api = window.electronAPI;
+        if (!api) return;
+        if (updateState.status === 'downloaded') {
+            await api.installUpdate?.();
+            return;
+        }
+        if (['checking', 'available', 'downloading', 'installing'].includes(updateState.status)) return;
+
+        setUpdateState({ status: 'checking', label: '새 버전 확인 중', detail: '', percent: 0 });
+        try {
+            await api.checkForUpdates?.('status-bar');
+        } catch (error) {
+            setUpdateState({
+                status: 'error',
+                label: '업데이트 확인 실패',
+                detail: String(error?.message || error || '').slice(0, 80),
+                percent: 0,
+            });
+        }
+    };
 
     const updateIcon = updateState.status === 'downloaded'
         ? 'system_update_alt'
@@ -105,15 +127,18 @@ const StatusBar = ({ title, helpText, locationStatus = { status: 'idle', message
                         <span style={{ color: locationColor }}>{locationStatus.message}</span>
                     </div>
                 ) : null}
-                <div
+                <button
+                    type="button"
                     className={`status-update-button status-update-${updateState.status}`}
                     title={updateState.detail || updateState.label}
                     aria-label={updateState.detail || updateState.label}
+                    onClick={handleUpdateClick}
+                    disabled={['checking', 'available', 'downloading', 'installing'].includes(updateState.status)}
                 >
                     <span className="material-icons" style={{ fontSize: '14px' }}>{updateIcon}</span>
                     <span>{updateState.label}</span>
                     {updateState.detail ? <span className="status-update-detail">{updateState.detail}</span> : null}
-                </div>
+                </button>
                 <div className="status-item">
                     <span className="material-icons" style={{ fontSize: '14px', color: '#94a3b8' }}>login</span>
                     <span>현재 시간: <span style={{ color: 'white' }}>{time}</span></span>

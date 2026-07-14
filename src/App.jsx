@@ -196,6 +196,16 @@ function App() {
         if (updateCheckKeyRef.current === checkKey) return undefined;
         updateCheckKeyRef.current = checkKey;
 
+        let retryTimer = null;
+        const requestLoginUpdateCheck = (attempt = 0) => {
+            api.checkForUpdates('login').catch((err) => {
+                console.warn(`[Update] login update check failed (attempt ${attempt + 1}):`, err);
+                if (attempt < 1) {
+                    retryTimer = window.setTimeout(() => requestLoginUpdateCheck(attempt + 1), 15000);
+                }
+            });
+        };
+
         api.getUpdateStatus?.().then((status) => {
             if (status?.hasDownloadedUpdate) {
                 forcedUpdateActiveRef.current = true;
@@ -217,16 +227,14 @@ function App() {
                 }, 1200);
                 return;
             }
-            api.checkForUpdates('login').catch((err) => {
-                console.warn('[Update] login update check failed:', err);
-            });
+            requestLoginUpdateCheck();
         }).catch(() => {
-            api.checkForUpdates('login').catch((err) => {
-                console.warn('[Update] login update check failed:', err);
-            });
+            requestLoginUpdateCheck();
         });
 
-        return undefined;
+        return () => {
+            if (retryTimer) window.clearTimeout(retryTimer);
+        };
     }, [isAuthenticated, user?.id, user?.site_id]);
 
     useEffect(() => {

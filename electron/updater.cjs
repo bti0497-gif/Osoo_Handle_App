@@ -3,6 +3,25 @@ let updateDownloaded = false;
 let checkingForUpdate = false;
 let installingUpdate = false;
 let downloadedVersion = null;
+let updateLogPath = null;
+
+function writeUpdateLog(event, details = {}) {
+  const entry = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    event,
+    ...details,
+  });
+  console.log(`[Updater] ${entry}`);
+  if (!updateLogPath) return;
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    fs.mkdirSync(path.dirname(updateLogPath), { recursive: true });
+    fs.appendFileSync(updateLogPath, `${entry}\n`, 'utf8');
+  } catch (error) {
+    console.warn('[Updater] Failed to write update log:', error.message);
+  }
+}
 
 try {
   ({ autoUpdater } = require('electron-updater'));
@@ -25,11 +44,22 @@ function checkForUpdates(reason = 'manual') {
     return Promise.resolve({ skipped: true, reason: 'already-checking' });
   }
   checkingForUpdate = true;
-  console.log(`[Updater] Check requested: ${reason}`);
+  writeUpdateLog('check-requested', { reason });
   if (autoUpdater.__mainWindow) {
     sendUpdateEvent(autoUpdater.__mainWindow, 'update:checking', { reason });
   }
   return autoUpdater.checkForUpdatesAndNotify()
+    .then((result) => {
+      writeUpdateLog('check-completed', {
+        reason,
+        version: result?.updateInfo?.version || null,
+      });
+      return result;
+    })
+    .catch((error) => {
+      writeUpdateLog('check-failed', { reason, message: error.message });
+      throw error;
+    })
     .finally(() => {
       checkingForUpdate = false;
     });
@@ -44,13 +74,15 @@ function setupAutoUpdater(mainWindow, options = {}) {
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.__mainWindow = mainWindow;
   autoUpdater.__installOptions = options;
+  updateLogPath = options.logFilePath || null;
+  writeUpdateLog('updater-initialized', { currentVersion: autoUpdater.currentVersion?.version || null });
 
   autoUpdater.on('checking-for-update', () => {
     console.log('[Updater] Checking for updates...');
   });
 
   autoUpdater.on('update-available', (info) => {
-    console.log('[Updater] Update available:', info.version);
+    writeUpdateLog('update-available', { version: info.version });
     sendUpdateEvent(mainWindow, 'update:available', {
       version: info.version,
       releaseDate: info.releaseDate,
@@ -58,7 +90,7 @@ function setupAutoUpdater(mainWindow, options = {}) {
   });
 
   autoUpdater.on('update-not-available', () => {
-    console.log('[Updater] App is up to date.');
+    writeUpdateLog('update-not-available');
     sendUpdateEvent(mainWindow, 'update:not-available', {});
   });
 
@@ -75,7 +107,7 @@ function setupAutoUpdater(mainWindow, options = {}) {
   autoUpdater.on('update-downloaded', (info) => {
     updateDownloaded = true;
     downloadedVersion = info.version || null;
-    console.log('[Updater] Update downloaded:', info.version);
+    writeUpdateLog('update-downloaded', { version: info.version });
     sendUpdateEvent(mainWindow, 'update:downloaded', {
       version: info.version,
       releaseDate: info.releaseDate,
@@ -83,7 +115,7 @@ function setupAutoUpdater(mainWindow, options = {}) {
   });
 
   autoUpdater.on('error', (err) => {
-    console.error('[Updater] Error:', err);
+    writeUpdateLog('updater-error', { message: err.message });
     sendUpdateEvent(mainWindow, 'update:error', err.message);
   });
 
@@ -97,7 +129,7 @@ async function installDownloadedUpdateAndQuit() {
   if (!updateDownloaded) {
     return false;
   }
-  console.log('[Updater] Installing downloaded update and quitting...');
+  writeUpdateLog('install-started', { version: downloadedVersion });
   installingUpdate = true;
   sendUpdateEvent(autoUpdater.__mainWindow, 'update:installing', {
     version: downloadedVersion,

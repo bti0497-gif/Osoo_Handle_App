@@ -121,15 +121,12 @@ async function getPosts(role, siteName, userName = '') {
     });
   });
 
-  const visiblePosts = ADMIN_ROLES.has(String(role || '').trim())
-    ? posts
-    : posts.filter((post) => {
-      const authorName = String(post.author || '').trim();
-      const authorRole = String(post.author_role || '').trim();
-      const targetSite = String(post.target_site || '').trim();
-      return authorName === String(userName || '').trim()
-        || (ADMIN_ROLES.has(authorRole) && (!targetSite || targetSite === String(siteName || '').trim()));
-    });
+  // 현장 사용자의 가시성은 위 Firestore 쿼리의 visible_sites를 최종
+  // 기준으로 삼는다. 중앙관리자 앱의 구버전 글 중 author_role이 user로
+  // 저장된 항목이 있어 작성자 역할로 다시 필터링하면 ALL/현장 대상 글이
+  // 사라진다. visible_sites는 게시글 생성 시 계산되는 권한 필드이므로
+  // 동일 조건을 역할/target_site로 중복 판정하지 않는다.
+  const visiblePosts = posts;
 
   // JS 메모리상에서 정렬 (is_notice 내림차순, created_at 내림차순)
   visiblePosts.sort((a, b) => {

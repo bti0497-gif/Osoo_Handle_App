@@ -46,6 +46,9 @@ const attendanceBqText = read('server/services/attendanceBigQueryService.cjs');
 const remoteSessionDetectText = read('server/services/remoteSessionDetectService.cjs');
 const appText = read('src/App.jsx');
 const mainText = read('src/main.jsx');
+const statusBarText = read('src/components/StatusBar.jsx');
+const electronMainText = read('electron/main.cjs');
+const updaterText = read('electron/updater.cjs');
 
 check(
   containsAll(contractText, [
@@ -291,6 +294,36 @@ check(
     !appText.includes('if (recordPreloadState.active)'),
   'startup animation covers session restore and record preloading no longer blocks dashboard entry',
   'startup/session animation ordering or immediate dashboard entry contract was changed'
+);
+
+check(
+  containsAll(statusBarText, [
+    "label: '새 버전 확인'",
+    "label: '새 버전 확인됨'",
+    '업데이트가 준비되었습니다.',
+    'onClick={handleUpdateClick}',
+    "api.checkForUpdates?.('status-bar')",
+  ]),
+  'status bar keeps manual new-version check and ready message',
+  'status bar update button or required Korean status messages were removed'
+);
+
+check(
+  containsAll(appText, [
+    'const requestLoginUpdateCheck = (attempt = 0)',
+    'requestLoginUpdateCheck(attempt + 1)',
+    '15000',
+  ]) && containsAll(electronMainText, [
+    "'Osoo_Handle_App', 'logs', 'electron-updater.log'",
+  ]) && containsAll(updaterText, [
+    "writeUpdateLog('check-requested'",
+    "writeUpdateLog('check-completed'",
+    "writeUpdateLog('check-failed'",
+    "writeUpdateLog('update-downloaded'",
+    "writeUpdateLog('install-started'",
+  ]),
+  'login update check retries once and writes a dedicated updater log',
+  'login update retry or updater diagnostic logging contract was removed'
 );
 
 console.log(`[AUTH SUMMARY] pass=${passed} fail=${failed}`);

@@ -443,6 +443,7 @@ app.whenReady().then(() => {
 
   if (!isDev) {
     setupAutoUpdater(mainWindow, {
+      logFilePath: path.join(app.getPath('appData'), 'Osoo_Handle_App', 'logs', 'electron-updater.log'),
       onBeforeInstall: async () => {
         isQuitting = true;
         await stopServerGracefully();

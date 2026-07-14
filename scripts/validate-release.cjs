@@ -467,6 +467,8 @@ function validateRegressionContracts() {
   const sludgePhotoRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'sludgePhotoRoutes.cjs');
   const localDataBackupContractPath = path.join(BASE_DIR, 'LOCAL_DATA_BACKUP_CONTRACT.md');
   const useTemplateSettingsPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'hooks', 'useTemplateSettings.js');
+  const boardServicePath = path.join(BASE_DIR, 'server', 'services', 'boardService.cjs');
+  const boardFirebaseServicePath = path.join(BASE_DIR, 'server', 'services', 'boardFirebaseService.cjs');
 
   const readText = (filePath) => (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '');
   const viewModelText = readText(unifiedViewModelPath);
@@ -523,6 +525,8 @@ function validateRegressionContracts() {
   const serverIndexText = readText(serverIndexPath);
   const sludgePhotoRoutesText = readText(sludgePhotoRoutesPath);
   const localDataBackupContractText = readText(localDataBackupContractPath);
+  const boardServiceText = readText(boardServicePath);
+  const boardFirebaseServiceText = readText(boardFirebaseServicePath);
   const parentManagementViews = [
     ['유량', flowManagementViewText],
     ['약품', medicineManagementViewText],
@@ -534,6 +538,19 @@ function validateRegressionContracts() {
     if (condition) success(passMessage);
     else error(failMessage);
   };
+
+  checkSource(
+    boardServiceText.includes("process.env.BOARD_BACKEND || 'firebase'"),
+    '소통게시판 Firebase 운영 원본 기본값 계약 유지',
+    '소통게시판 기본 백엔드가 Firebase가 아니어서 중앙관리자/현장 목록이 분리될 수 있습니다'
+  );
+
+  checkSource(
+    boardFirebaseServiceText.includes("query.where('visible_sites', 'array-contains-any', ['ALL', siteName || ''])") &&
+      boardFirebaseServiceText.includes('const visiblePosts = posts;'),
+    '소통게시판 visible_sites 단일 가시성 판정 계약 유지',
+    'Firebase visible_sites 조회 후 작성자 역할 중복 필터로 대상 글이 사라질 수 있습니다'
+  );
 
   checkSource(
     viewModelText.includes('SettingsModel.getMedicineDefaults()') &&
