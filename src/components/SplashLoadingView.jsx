@@ -1,7 +1,7 @@
 import React from 'react';
 import './SplashLoadingView.css';
 
-const SplashLoadingView = ({ percent = 0, label = '데이터 로딩 중...' }) => {
+const SplashLoadingView = ({ percent = 0, label = '데이터 로딩 중...', showProgress = true }) => {
     const radius = 64;
     const strokeWidth = 4;
     const normalizedRadius = radius - strokeWidth * 2;
@@ -74,11 +74,13 @@ const SplashLoadingView = ({ percent = 0, label = '데이터 로딩 중...' }) =
             {/* 로딩 텍스트 정보 */}
             <div className="splash-text-section">
                 <h2 className="splash-title">더죤환경기술(주)</h2>
-                <p className="splash-label">{label || '업무 데이터를 준비하고 있습니다.'}</p>
-                <div className="splash-progress-info">
-                    <span className="splash-percent-num">{percent}</span>
-                    <span className="splash-percent-sign">%</span>
-                </div>
+                {label ? <p className="splash-label">{label}</p> : null}
+                {showProgress ? (
+                    <div className="splash-progress-info">
+                        <span className="splash-percent-num">{percent}</span>
+                        <span className="splash-percent-sign">%</span>
+                    </div>
+                ) : null}
             </div>
         </div>
     );

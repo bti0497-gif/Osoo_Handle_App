@@ -55,6 +55,8 @@ check(
     'Attendance write failure must not block a successful field worker login',
     'must enter the workspace without waiting for location lookup or attendance recording',
     'run in the background after workspace entry',
+    'startup shows the existing branded animation while server discovery and session restore run',
+    'Record-grid preloading continues in the background and must not block the dashboard',
     'Attendance BigQuery sync may mark local rows synced only after BigQuery succeeds',
   ]),
   'contract document covers login/session/attendance invariants',
@@ -251,6 +253,18 @@ check(
   ]),
   'App remains wired through auth ViewModel and LoginView',
   'App auth wiring was changed'
+);
+
+check(
+  containsAll(appText, [
+    'if (isLoading)',
+    '<SplashLoadingView percent={0} label="" showProgress={false} />',
+    'preloadRecordGridData().finally',
+  ]) &&
+    !appText.includes('세션 복원 중...') &&
+    !appText.includes('if (recordPreloadState.active)'),
+  'startup animation covers session restore and record preloading no longer blocks dashboard entry',
+  'startup/session animation ordering or immediate dashboard entry contract was changed'
 );
 
 console.log(`[AUTH SUMMARY] pass=${passed} fail=${failed}`);

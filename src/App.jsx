@@ -75,11 +75,6 @@ function App() {
     const [activeTab, setActiveTab] = useState(DEFAULT_TAB);
     const [isRoadworkMounted, setIsRoadworkMounted] = useState(false);
     const [preloadedUserId, setPreloadedUserId] = useState(null);
-    const [recordPreloadState, setRecordPreloadState] = useState({
-        active: false,
-        percent: 0,
-        label: '',
-    });
     const [forcedUpdateNotice, setForcedUpdateNotice] = useState(null);
     const updateCheckKeyRef = useRef(null);
     const forcedUpdateActiveRef = useRef(false);
@@ -242,7 +237,6 @@ function App() {
     useEffect(() => {
         if (!isAuthenticated || !user?.id) {
             setPreloadedUserId(null);
-            setRecordPreloadState({ active: false, percent: 0, label: '' });
             return undefined;
         }
 
@@ -251,17 +245,10 @@ function App() {
 
         let cancelled = false;
         clearRecordGridHistoryCache();
-        setRecordPreloadState({ active: true, percent: 0, label: '업무 데이터 로드 준비 중...' });
 
-        preloadRecordGridData({
-            onProgress: ({ percent, label }) => {
-                if (cancelled) return;
-                setRecordPreloadState({ active: true, percent, label });
-            },
-        }).finally(() => {
+        preloadRecordGridData().finally(() => {
             if (cancelled) return;
             setPreloadedUserId(preloadKey);
-            setRecordPreloadState({ active: false, percent: 100, label: '' });
         });
 
         return () => {
@@ -270,27 +257,11 @@ function App() {
     }, [isAuthenticated, preloadedUserId, user?.id, user?.site_id]);
 
     if (isLoading) {
-        return (
-            <div className="login-screen">
-                <div style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
-                    <div className="spinner" style={{ margin: '0 auto 1rem' }} />
-                    <p>세션 복원 중...</p>
-                </div>
-            </div>
-        );
+        return <SplashLoadingView percent={0} label="" showProgress={false} />;
     }
 
     if (!isAuthenticated) {
         return <LoginView onLogin={login} loginHintName={loginHintName} />;
-    }
-
-    if (recordPreloadState.active) {
-        return (
-            <SplashLoadingView
-                percent={recordPreloadState.percent}
-                label={recordPreloadState.label}
-            />
-        );
     }
 
     const handleUpdatePassword = () => {

@@ -11,6 +11,8 @@ This file protects login, session restore, and attendance behavior. Do not chang
 
 ## Session Rules
 
+- App startup shows the existing branded animation while server discovery and session restore run; intermediate connection/session messages stay hidden.
+- After manual login, the workspace opens immediately. Record-grid preloading continues in the background and must not block the dashboard.
 - Field worker sessions may be saved to `localStorage` only for the same local calendar day.
 - Admin sessions must not be persisted in `localStorage`.
 - Saved field worker sessions must be revalidated through local login before restore.
