@@ -1015,10 +1015,10 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    electronMainTextForWindow.includes('function cleanupStalePackagedServerPorts()') &&
+      electronMainTextForWindow.includes('function cleanupStalePackagedServerPorts()') &&
       electronMainTextForWindow.includes('$ports = 18731..18734') &&
       electronMainTextForWindow.includes("$name -eq 'Osoo Handle App.exe'") &&
-      electronMainTextForWindow.includes('handleVersionMigration();\n  cleanupStalePackagedServerPorts();\n  startServer();'),
+      /handleVersionMigration\(\);\s*cleanupStalePackagedServerPorts\(\);\s*startServer\(\);/.test(electronMainTextForWindow),
     '배포 앱 시작 전 잔존 로컬 서버 포트 정리 계약 유지',
     '배포 앱이 낡은 18731~18734 서버에 연결될 수 있습니다'
   );
