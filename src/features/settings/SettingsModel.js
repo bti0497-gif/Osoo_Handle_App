@@ -71,8 +71,8 @@ export const SettingsModel = {
         return mutateSettings(() => apiClient.upload('/api/settings/upload', formData));
     },
 
-    async openLocalFolder(target) {
-        return apiClient.post('/api/settings/open-local-folder', { target });
+    async openLocalFolder(target, { openInServer = true } = {}) {
+        return apiClient.post('/api/settings/open-local-folder', { target, openInServer });
     },
 
     async getExcelPreview(sheet, row) {

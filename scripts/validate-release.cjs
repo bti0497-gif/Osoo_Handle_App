@@ -466,6 +466,7 @@ function validateRegressionContracts() {
   const serverIndexPath = path.join(BASE_DIR, 'server', 'index.cjs');
   const sludgePhotoRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'sludgePhotoRoutes.cjs');
   const localDataBackupContractPath = path.join(BASE_DIR, 'LOCAL_DATA_BACKUP_CONTRACT.md');
+  const useTemplateSettingsPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'hooks', 'useTemplateSettings.js');
 
   const readText = (filePath) => (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '');
   const viewModelText = readText(unifiedViewModelPath);
@@ -490,6 +491,8 @@ function validateRegressionContracts() {
   const useMappingSettingsText = readText(useMappingSettingsPath);
   const templateSettingsServiceText = readText(templateSettingsServicePath);
   const settingsRoutesText = readText(settingsRoutesPath);
+  const settingsModelText = readText(settingsModelPath);
+  const useTemplateSettingsText = readText(useTemplateSettingsPath);
   const appSettingsServiceText = readText(appSettingsServicePath);
   const basicSitePanelText = readText(basicSitePanelPath);
   const electronBuilderConfigText = readText(electronBuilderConfigPath);
@@ -829,6 +832,17 @@ function validateRegressionContracts() {
       !settingsBigQueryClearText.includes('BigQuery 운영 데이터 초기화'),
     '설정 메뉴 BigQuery 운영데이터 초기화 제거 계약 유지',
     '설정 메뉴 BigQuery 운영데이터 초기화 UI/API 호출이 다시 추가되었습니다'
+  );
+
+  checkSource(
+    settingsModelText.includes("{ target, openInServer }") &&
+      settingsRoutesText.includes('const openInServer = req.body?.openInServer !== false;') &&
+      settingsRoutesText.includes('if (openInServer)') &&
+      useTemplateSettingsText.includes("openInServer: typeof electronOpenFile !== 'function'") &&
+      useTemplateSettingsText.includes('const openResult = await electronOpenFile(result.path);') &&
+      !useTemplateSettingsText.includes('electronOpenFile(result.path).catch(() => undefined)'),
+    '설정 템플릿 폴더 Electron 단일 열기·실패 표시 계약 유지',
+    '폴더 열기가 중복 실행되거나 Electron 실패가 숨겨질 수 있습니다'
   );
 
   checkSource(

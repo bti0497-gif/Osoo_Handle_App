@@ -32,6 +32,7 @@ export default function TemplateFilePanel({
                     onFileChange={handleExcelFileUpload}
                     onOpenFolder={() => handleOpenLocalFolder?.('excel-originals')}
                     openFolderTitle="기존 운영 엑셀 원본 저장 폴더 열기"
+                    showExportPlaceholder
                 />
 
                 <TemplateUploadCard

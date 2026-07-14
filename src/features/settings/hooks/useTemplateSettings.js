@@ -113,12 +113,21 @@ export const useTemplateSettings = ({ showAlert, reloadSettings } = {}) => {
 
     const handleOpenLocalFolder = async (target) => {
         try {
-            const result = await SettingsModel.openLocalFolder(target);
+            const electronOpenFile = window.electronAPI?.openFile;
+            const result = await SettingsModel.openLocalFolder(target, {
+                openInServer: typeof electronOpenFile !== 'function',
+            });
             const label = target === 'reports'
                 ? '일지 양식 저장 폴더'
                 : '기존 운영 엑셀 원본 저장 폴더';
-            if (result?.path && window.electronAPI?.openFile) {
-                await window.electronAPI.openFile(result.path).catch(() => undefined);
+            if (!result?.success || !result?.path) {
+                throw new Error(result?.message || '폴더 경로를 확인할 수 없습니다.');
+            }
+            if (typeof electronOpenFile === 'function') {
+                const openResult = await electronOpenFile(result.path);
+                if (!openResult?.ok) {
+                    throw new Error(openResult?.error || 'Windows 탐색기를 실행하지 못했습니다.');
+                }
             }
             showAlert?.(`${label}를 열었습니다.\n창이 보이지 않으면 작업 표시줄 또는 앱 뒤쪽 창을 확인해주세요.\n${result?.path || ''}`);
         } catch (err) {

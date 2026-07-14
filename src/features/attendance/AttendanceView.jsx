@@ -68,7 +68,7 @@ const AttendanceView = ({ currentUser }) => {
                                                 className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-[10px] font-black border-2 border-blue-200"
                                                 title={log.remote_session_evidence || log.remote_session_type || ''}
                                             >
-                                                원격 의심
+                                                {log.remote_session_type || '원격 접속'}
                                             </span>
                                         ) : (
                                             <span className="bg-emerald-50 text-emerald-600 px-2 py-1 rounded text-[10px] font-black border-2 border-emerald-200">현장 출석</span>
@@ -88,8 +88,8 @@ const AttendanceView = ({ currentUser }) => {
                         <div className="flex gap-3 text-slate-400">
                             <span className="material-icons text-lg">info</span>
                             <p className="text-[10px] leading-relaxed font-bold">
-                                * 원격 프로그램 또는 RDP 세션이 감지되면 '원격 의심'으로 기록됩니다. <br />
-                                * 위치 확인은 현재 기본 비활성화되어 있으며, 필요 시 설정으로 다시 활성화할 수 있습니다.
+                                * Windows가 확인한 RDP 등의 원격 세션은 접속 방식과 함께 기록됩니다. <br />
+                                * 트레이에 실행 중인 원격 도구만으로는 실제 원격 접속으로 판정하지 않습니다.
                             </p>
                         </div>
                     </div>

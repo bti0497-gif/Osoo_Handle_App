@@ -32,6 +32,24 @@ const KNOWN_REMOTE_PROCESS_KEYWORDS = [
   'awesun'
 ];
 
+const REMOTE_TOOL_LABELS = [
+  ['rustdesk', 'RustDesk'],
+  ['teamviewer', 'TeamViewer'],
+  ['anydesk', 'AnyDesk'],
+  ['chrome_remote_desktop', 'Chrome Remote Desktop'],
+  ['remoting_host', 'Chrome Remote Desktop'],
+  ['parsec', 'Parsec'],
+  ['todesk', 'ToDesk'],
+  ['sunlogin', 'Sunlogin'],
+  ['awesun', 'AweSun'],
+  ['anypc', 'AnyPC']
+];
+
+function getRemoteToolLabel(processName) {
+  const normalized = String(processName || '').toLowerCase();
+  return REMOTE_TOOL_LABELS.find(([keyword]) => normalized.includes(keyword))?.[1] || processName;
+}
+
 function tryReadTasklistProcessNames() {
   try {
     const output = execSync('tasklist /fo csv /nh', {
@@ -54,19 +72,20 @@ function tryReadTasklistProcessNames() {
 }
 
 function detectRemoteSession() {
-  const indicators = [];
+  const confirmedIndicators = [];
+  const observedIndicators = [];
   const sessionName = String(process.env.SESSIONNAME || '').trim();
   const clientName = String(process.env.CLIENTNAME || '').trim();
   const sshConnection = String(process.env.SSH_CONNECTION || '').trim();
 
   if (sessionName.toUpperCase().startsWith('RDP-')) {
-    indicators.push(`session:${sessionName}`);
+    confirmedIndicators.push(`session:${sessionName}`);
   }
   if (clientName && clientName.toUpperCase() !== 'CONSOLE') {
-    indicators.push(`client:${clientName}`);
+    confirmedIndicators.push(`client:${clientName}`);
   }
   if (sshConnection) {
-    indicators.push('ssh_connection');
+    confirmedIndicators.push('ssh_connection');
   }
 
   const runningProcessNames = tryReadTasklistProcessNames();
@@ -76,23 +95,26 @@ function detectRemoteSession() {
     .filter((proc) => KNOWN_REMOTE_PROCESS_KEYWORDS.some((keyword) => proc.includes(keyword)))
     .filter((proc) => !matchedRemoteProcesses.includes(proc));
 
-  matchedRemoteProcesses.forEach((proc) => indicators.push(`proc:${proc}`));
-  matchedByKeyword.forEach((proc) => indicators.push(`proc:${proc}`));
+  const observedTools = [...new Set(
+    [...matchedRemoteProcesses, ...matchedByKeyword].map(getRemoteToolLabel)
+  )];
+  observedTools.forEach((tool) => observedIndicators.push(`tool_running:${tool}`));
 
-  const detected = indicators.length > 0;
+  // A tray/service process only means that remote access is available. It is
+  // not proof that a remote operator is currently controlling this PC.
+  const detected = confirmedIndicators.length > 0;
   let sessionType = 'local';
-  if (sessionName.toUpperCase().startsWith('RDP-') || clientName) {
-    sessionType = 'rdp';
-  } else if (matchedRemoteProcesses.length > 0 || matchedByKeyword.length > 0) {
-    sessionType = 'remote_app';
+  if (sessionName.toUpperCase().startsWith('RDP-') || (clientName && clientName.toUpperCase() !== 'CONSOLE')) {
+    sessionType = 'Windows RDP';
   } else if (sshConnection) {
-    sessionType = 'ssh';
+    sessionType = 'SSH';
   }
 
   return {
     detected,
     sessionType,
-    evidence: indicators.join('; ')
+    evidence: [...confirmedIndicators, ...observedIndicators].join('; '),
+    observedTools
   };
 }
 

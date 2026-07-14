@@ -349,6 +349,7 @@ module.exports = function (db, baseDir, appDataPath) {
   router.post('/api/settings/open-local-folder', (req, res) => {
     try {
       const target = String(req.body?.target || '').trim();
+      const openInServer = req.body?.openInServer !== false;
       const folderMap = {
         'excel-originals': excelOriginalsDir,
         reports: reportsDir,
@@ -357,7 +358,12 @@ module.exports = function (db, baseDir, appDataPath) {
       if (!folderPath) {
         return res.status(400).json({ success: false, message: '열 수 없는 폴더입니다.' });
       }
-      openLocalFolder(folderPath);
+      if (!fs.existsSync(folderPath)) {
+        fs.mkdirSync(folderPath, { recursive: true });
+      }
+      if (openInServer) {
+        openLocalFolder(folderPath);
+      }
       res.json({ success: true, path: folderPath });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message });

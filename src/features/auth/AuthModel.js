@@ -57,14 +57,11 @@ export const AuthModel = {
         }
     },
 
-    async recordAttendance(member, lat, lng, locationMatched) {
+    async recordAttendance(member) {
         try {
             const data = await apiClient.post('/api/auth/attendance', {
                 memberId: member.id,
-                memberName: member.name,
-                lat,
-                lng,
-                locationMatched
+                memberName: member.name
             });
             if (!data.success) throw new Error(data.error);
             return data.session;

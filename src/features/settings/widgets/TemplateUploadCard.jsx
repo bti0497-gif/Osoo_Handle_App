@@ -13,6 +13,7 @@ export default function TemplateUploadCard({
     onFileChange,
     onOpenFolder,
     openFolderTitle = '저장 폴더 열기',
+    showExportPlaceholder = false,
 }) {
     const borderColor = status?.status === 'ready'
         ? '#86efac'
@@ -42,7 +43,9 @@ export default function TemplateUploadCard({
                             height: '50px',
                             border: `1.5px dashed ${borderColor}`,
                             borderRadius: '12px',
-                            padding: onOpenFolder ? '0 48px 0 12px' : '0 12px',
+                            padding: onOpenFolder
+                                ? `0 ${showExportPlaceholder ? 88 : 48}px 0 12px`
+                                : '0 12px',
                             fontSize: '0.8125rem',
                             fontWeight: 700,
                             backgroundColor,
@@ -53,39 +56,59 @@ export default function TemplateUploadCard({
                         }}
                     />
                     {onOpenFolder && (
-                        <button
-                            type="button"
-                            title={openFolderTitle}
-                            aria-label={openFolderTitle}
-                            onClick={onOpenFolder}
-                            style={{
-                                position: 'absolute',
-                                right: '8px',
-                                top: '50%',
-                                transform: 'translateY(-50%)',
-                                width: '34px',
-                                height: '34px',
-                                border: '1px solid #cbd5e1',
-                                borderRadius: '8px',
-                                backgroundColor: '#f8fafc',
-                                color: '#475569',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                transition: 'all 0.1s',
-                            }}
-                            onMouseEnter={(e) => {
-                                e.currentTarget.style.backgroundColor = '#e2e8f0';
-                                e.currentTarget.style.color = '#1e293b';
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.backgroundColor = '#f8fafc';
-                                e.currentTarget.style.color = '#475569';
-                            }}
-                        >
-                            <span className="material-icons" style={{ fontSize: '18px' }}>folder_open</span>
-                        </button>
+                        <div style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', display: 'flex', gap: '5px' }}>
+                            {showExportPlaceholder && (
+                                /* Reserved for the future local DB -> preserved Excel original export procedure. */
+                                <button
+                                    type="button"
+                                    title="로컬 DB 데이터를 엑셀 원본 형식으로 내보내기 (준비 중)"
+                                    aria-label="엑셀 원본 내보내기 준비 중"
+                                    style={{
+                                        width: '34px',
+                                        height: '34px',
+                                        border: '1px solid #dbe3ec',
+                                        borderRadius: '8px',
+                                        backgroundColor: '#f8fafc',
+                                        color: '#94a3b8',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'help',
+                                    }}
+                                >
+                                    <span className="material-icons" style={{ fontSize: '18px' }}>file_upload</span>
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                title={openFolderTitle}
+                                aria-label={openFolderTitle}
+                                onClick={onOpenFolder}
+                                style={{
+                                    width: '34px',
+                                    height: '34px',
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: '8px',
+                                    backgroundColor: '#f8fafc',
+                                    color: '#475569',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.1s',
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#e2e8f0';
+                                    e.currentTarget.style.color = '#1e293b';
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#f8fafc';
+                                    e.currentTarget.style.color = '#475569';
+                                }}
+                            >
+                                <span className="material-icons" style={{ fontSize: '18px' }}>folder_open</span>
+                            </button>
+                        </div>
                     )}
                 </div>
                 <label

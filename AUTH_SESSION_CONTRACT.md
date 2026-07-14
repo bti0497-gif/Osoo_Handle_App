@@ -16,15 +16,17 @@ This file protects login, session restore, and attendance behavior. Do not chang
 - Field worker sessions may be saved to `localStorage` only for the same local calendar day.
 - Admin sessions must not be persisted in `localStorage`.
 - Saved field worker sessions must be revalidated through local login before restore.
-- If the app version changed, stored sessions must be cleared before automatic restore.
+- An app update must preserve a same-day field worker session. After restart, the branded intro remains visible while the local server starts and the saved credentials are revalidated, then the workspace opens directly without showing the login screen.
+- A version-change marker is diagnostic state only. It must be acknowledged and cleared without deleting the saved field worker session.
 - Local authentication and session revalidation must enter the workspace without waiting for location lookup or attendance recording.
 
 ## Attendance Rules
 
 - Field worker login creates or reuses one open attendance row for the same member and date.
-- Field worker login and session restore must always compare the current coordinates with the site's locally cached `target_lat`, `target_lng`, and `radius_m`.
-- Site coordinates are sourced from `Wastewater_Site_Locations` during site list/selection sync; the settings UI must not overwrite them from the current PC location.
-- Missing or mismatched coordinates must be recorded as an abnormal location, but must not block a successful field worker login.
+- Field worker attendance must not request or compare PC coordinates. Site identity already comes from the locally selected site.
+- Remote attendance classification must depend only on confirmed remote-session evidence, never on missing or mismatched coordinates.
+- A running tray/service process is recorded as supporting evidence only and must not by itself classify the login as remote.
+- Confirmed remote sessions store the connection method or program name in `remote_session_type`.
 - Attendance write failure must not block a successful field worker login.
 - Location lookup and attendance recording run in the background after workspace entry, and their state must be shown in the existing status bar.
 - Logout closes only the current open attendance row and marks it unsynced.

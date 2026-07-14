@@ -60,25 +60,6 @@ module.exports = (db) => {
         return '20:00:00';
     };
 
-    const isWithinSiteRadius = (site, lat, lng) => {
-        const targetLat = Number(site?.target_lat);
-        const targetLng = Number(site?.target_lng);
-        const currentLat = Number(lat);
-        const currentLng = Number(lng);
-        if (![targetLat, targetLng, currentLat, currentLng].every(Number.isFinite)) return false;
-
-        const radiusM = Number.isFinite(Number(site?.radius_m)) ? Number(site.radius_m) : 500;
-        const earthRadiusM = 6371e3;
-        const phi1 = (currentLat * Math.PI) / 180;
-        const phi2 = (targetLat * Math.PI) / 180;
-        const deltaPhi = ((targetLat - currentLat) * Math.PI) / 180;
-        const deltaLambda = ((targetLng - currentLng) * Math.PI) / 180;
-        const a = Math.sin(deltaPhi / 2) ** 2
-            + Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) ** 2;
-        const distanceM = earthRadiusM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return distanceM <= radiusM;
-    };
-
     const closeStaleOpenSessions = (member) => {
         if (!member?.id || String(member.role || 'user') !== 'user') return;
         const today = getTodayLocal();
@@ -545,29 +526,16 @@ module.exports = (db) => {
 
     // 4. Check-in.
     router.post('/attendance', (req, res) => {
-        const { memberId, memberName, lat, lng, locationMatched } = req.body;
+        const { memberId, memberName } = req.body;
         const dateKST = getTodayLocal();
         const loginTime = getLocalTime();
 
         try {
-            const site = db.prepare(`
-                SELECT app_settings.site_id, app_settings.site_name, sites.target_lat, sites.target_lng, sites.radius_m
-                FROM app_settings
-                LEFT JOIN sites ON sites.id = app_settings.site_id
-                WHERE app_settings.id = 1
-            `).get() || {};
+            const site = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get() || {};
             const remote = detectRemoteSession();
-            const siteHasLocation = Number.isFinite(Number(site.target_lat)) && Number.isFinite(Number(site.target_lng));
-            const requestHasLocation = Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
-            const matchedBySite = isWithinSiteRadius(site, lat, lng);
-            const effectiveLocationMatched = siteHasLocation && requestHasLocation ? matchedBySite : Boolean(locationMatched);
-            const effectiveRemoteDetected = remote.detected || !effectiveLocationMatched;
-            const effectiveRemoteType = effectiveLocationMatched ? (remote.sessionType || 'local') : 'abnormal_location';
-            const effectiveEvidence = [
-                remote.evidence || '',
-                siteHasLocation && requestHasLocation && !effectiveLocationMatched ? 'site_location_mismatch' : '',
-                siteHasLocation && !requestHasLocation && !locationMatched ? 'site_location_unavailable' : ''
-            ].filter(Boolean).join('; ');
+            const effectiveRemoteDetected = Boolean(remote.detected);
+            const effectiveRemoteType = remote.sessionType || 'local';
+            const effectiveEvidence = remote.evidence || '';
             // Reuse an existing active session if one already exists.
             let activeSession = db.prepare('SELECT * FROM attendance WHERE member_id = ? AND date = ? AND logout_time IS NULL').get(memberId, dateKST);
 
@@ -583,7 +551,7 @@ module.exports = (db) => {
                     site.site_name || '',
                     dateKST,
                     loginTime,
-                    effectiveLocationMatched ? 1 : 0,
+                    1,
                     effectiveRemoteDetected ? 1 : 0,
                     effectiveRemoteType,
                     effectiveEvidence

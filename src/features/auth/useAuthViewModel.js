@@ -1,9 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AuthModel } from './AuthModel';
-import { apiClient } from '../../core/api';
 import { ADMIN_ROLES, FIELD_WORKER_AUTO_LOGOUT_HOUR_KST } from '../../core/constants';
-
-const LOGIN_GEO_CHECK_ENABLED = true;
 
 function isFieldWorker(member) {
     return !ADMIN_ROLES.includes(String(member?.role || 'user'));
@@ -170,19 +167,15 @@ export const useAuthViewModel = () => {
 
         const runId = backgroundAttendanceRunRef.current + 1;
         backgroundAttendanceRunRef.current = runId;
-        setLocationStatus({ status: 'checking', message: '위치 확인 중...' });
+        setLocationStatus({ status: 'checking', message: '접속 환경 확인 중...' });
         const task = (async () => {
             try {
-                const coords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null;
-                const lat = coords?.latitude || null;
-                const lng = coords?.longitude || null;
-                const matched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(userData, coords) : true;
-
-                await AuthModel.recordAttendance(userData, lat, lng, matched);
+                const attendance = await AuthModel.recordAttendance(userData);
+                const isRemote = Boolean(attendance?.remote_session_detected);
 
                 const enrichedUser = {
                     ...userData,
-                    isRemote: LOGIN_GEO_CHECK_ENABLED ? !matched : false,
+                    isRemote,
                 };
                 if (backgroundAttendanceRunRef.current === runId && userRef.current?.id === userData.id) {
                     userRef.current = enrichedUser;
@@ -191,17 +184,16 @@ export const useAuthViewModel = () => {
                 }
 
                 if (backgroundAttendanceRunRef.current !== runId) return;
-                if (!coords && LOGIN_GEO_CHECK_ENABLED) {
-                    setLocationStatus({ status: 'warning', message: '위치 확인 실패 · 출근 기록 저장됨' });
-                } else if (!matched && LOGIN_GEO_CHECK_ENABLED) {
-                    setLocationStatus({ status: 'warning', message: '현장 외 위치 · 출근 기록 저장됨' });
+                if (isRemote) {
+                    const remoteName = attendance?.remote_session_type || '원격 접속';
+                    setLocationStatus({ status: 'warning', message: `원격 접속: ${remoteName}` });
                 } else {
-                    setLocationStatus({ status: 'success', message: '위치 확인 완료' });
+                    setLocationStatus({ status: 'success', message: '현장 접속' });
                 }
             } catch (error) {
-                console.warn('백그라운드 위치/출근 기록 실패:', error.message);
+                console.warn('백그라운드 접속 환경/출근 기록 실패:', error.message);
                 if (backgroundAttendanceRunRef.current === runId) {
-                    setLocationStatus({ status: 'error', message: '위치·출근 기록 저장 실패' });
+                    setLocationStatus({ status: 'error', message: '접속 환경·출근 기록 저장 실패' });
                 }
             }
         })();
@@ -219,6 +211,20 @@ export const useAuthViewModel = () => {
             restoringRef.current = true;
 
             try {
+                // 업데이트 후에도 같은 날의 현장관리자 세션은 유지한다.
+                // 버전 마커는 진단 상태일 뿐이며 로컬 자격 재검증을 건너뛰지 않는다.
+                if (window.electronAPI?.checkVersionChanged) {
+                    try {
+                        const versionState = await window.electronAPI.checkVersionChanged();
+                        if (versionState?.versionChanged) {
+                            console.log(`[세션 복원] 업데이트 v${versionState.version || ''} 후 로컬 세션 재검증`);
+                            await window.electronAPI.clearVersionMarker?.();
+                        }
+                    } catch (versionError) {
+                        console.warn('[세션 복원] 버전 마커 확인 실패:', versionError);
+                    }
+                }
+
                 const savedUser = AuthModel.loadSession();
                 if (!savedUser || !savedUser.id) {
                     return;
@@ -417,27 +423,3 @@ export const useAuthViewModel = () => {
         switchActiveSite,
     };
 };
-
-async function getCurrentCoords() {
-    try {
-        const data = await apiClient.get('/api/location/current');
-        if (data.success) {
-            return { latitude: data.latitude, longitude: data.longitude };
-        }
-        return null;
-    } catch {
-        return null;
-    }
-}
-
-function checkLocationMatched(userData, currentCoords) {
-    if (!userData.target_lat || !userData.target_lng || !currentCoords) return false;
-    const R = 6371e3;
-    const φ1 = (currentCoords.latitude * Math.PI) / 180;
-    const φ2 = (userData.target_lat * Math.PI) / 180;
-    const Δφ = ((userData.target_lat - currentCoords.latitude) * Math.PI) / 180;
-    const Δλ = ((userData.target_lng - currentCoords.longitude) * Math.PI) / 180;
-    const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
-    const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return dist <= (userData.radius_m || 500);
-}

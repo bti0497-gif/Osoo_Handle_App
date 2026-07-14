@@ -1,12 +1,9 @@
 import { AuthModel } from './AuthModel';
-import { getCurrentCoords, checkLocationMatched } from './authGeo';
 import { isFieldWorker, shouldForceEodLogoutForOpenSession } from './authSessionUtils';
 
-const LOGIN_GEO_CHECK_ENABLED = true;
-
 /**
- * 버전 변경 후 첫 실행인지 확인
- * (Electron에서 업그레이드/재설치 후 이전 세션 복원 방지)
+ * 버전 변경 후 첫 실행 마커를 확인하고 소비한다.
+ * 업데이트는 같은 날의 현장관리자 세션을 끊지 않는다.
  */
 async function isVersionChanged() {
   if (!window.electronAPI) return false;
@@ -31,12 +28,10 @@ async function isVersionChanged() {
  * @returns {Promise<{ outcome: 'none' } | { outcome: 'cleared' } | { outcome: 'ok', user: object, field: boolean }>}
  */
 export async function runStoredSessionRestore() {
-    // 버전 변경 후 첫 실행 → 이전 세션 복원 금지
+    // 버전 변경 마커는 진단용으로만 소비하고 세션 복원은 계속한다.
     const versionChanged = await isVersionChanged();
     if (versionChanged) {
-        console.log('[세션 복원] 버전 변경 감지 → 새로운 로그인 필요');
-        AuthModel.clearSession();
-        return { outcome: 'none' };
+        console.log('[세션 복원] 버전 변경 감지 → 같은 날 현장관리자 세션 재검증');
     }
 
     const savedUser = AuthModel.loadSession();
@@ -75,12 +70,8 @@ export async function runStoredSessionRestore() {
 
     if (field && !activeSession) {
         try {
-            const coords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null;
-            const lat = coords?.latitude || null;
-            const lng = coords?.longitude || null;
-            const matched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(freshData, coords) : true;
-            await AuthModel.recordAttendance(freshData, lat, lng, matched);
-            restoredUser.isRemote = LOGIN_GEO_CHECK_ENABLED ? !matched : false;
+            const attendance = await AuthModel.recordAttendance(freshData);
+            restoredUser.isRemote = Boolean(attendance?.remote_session_detected);
         } catch (attErr) {
             console.warn('세션 복원 중 출석 기록 실패:', attErr.message);
         }

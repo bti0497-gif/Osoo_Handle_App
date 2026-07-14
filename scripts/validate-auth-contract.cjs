@@ -43,20 +43,25 @@ const authVmText = read('src/features/auth/useAuthViewModel.js');
 const sessionRestoreText = read('src/features/auth/sessionRestoreFlow.js');
 const activeUserText = read('server/services/activeUserSessionService.cjs');
 const attendanceBqText = read('server/services/attendanceBigQueryService.cjs');
+const remoteSessionDetectText = read('server/services/remoteSessionDetectService.cjs');
 const appText = read('src/App.jsx');
+const mainText = read('src/main.jsx');
 
 check(
   containsAll(contractText, [
     'must authenticate through remote discovery only',
     'Field workers try local login first, then remote discovery fallback',
-    'must always compare the current coordinates',
-    'must not overwrite them from the current PC location',
-    'must not block a successful field worker login',
+    'must not request or compare PC coordinates',
+    'must depend only on confirmed remote-session evidence',
+    'must not by itself classify the login as remote',
+    'store the connection method or program name in `remote_session_type`',
     'Attendance write failure must not block a successful field worker login',
     'must enter the workspace without waiting for location lookup or attendance recording',
     'run in the background after workspace entry',
     'startup shows the existing branded animation while server discovery and session restore run',
     'Record-grid preloading continues in the background and must not block the dashboard',
+    'An app update must preserve a same-day field worker session',
+    'must be acknowledged and cleared without deleting the saved field worker session',
     'Attendance BigQuery sync may mark local rows synced only after BigQuery succeeds',
   ]),
   'contract document covers login/session/attendance invariants',
@@ -77,18 +82,29 @@ check(
 
 check(
   containsAll(authVmText, [
-    'const LOGIN_GEO_CHECK_ENABLED = true',
     'const startBackgroundAttendance = useCallback',
-    'const coords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null',
-    'const matched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(userData, coords) : true',
-    'await AuthModel.recordAttendance(userData, lat, lng, matched)',
+    'const attendance = await AuthModel.recordAttendance(userData)',
+    'const isRemote = Boolean(attendance?.remote_session_detected)',
   ]) && containsAll(sessionRestoreText, [
-    'const LOGIN_GEO_CHECK_ENABLED = true',
-    'const coords = LOGIN_GEO_CHECK_ENABLED ? await getCurrentCoords() : null',
-    'const matched = LOGIN_GEO_CHECK_ENABLED ? checkLocationMatched(freshData, coords) : true',
-  ]),
-  'field attendance always compares current coordinates with the synced site location',
-  'field attendance geofence enforcement was disabled or bypassed'
+    'const attendance = await AuthModel.recordAttendance(freshData)',
+  ]) && !authVmText.includes("'/api/location/current'") && containsAll(authRoutesText, [
+    'const effectiveRemoteDetected = Boolean(remote.detected)',
+    "const effectiveRemoteType = remote.sessionType || 'local'",
+  ]) && !authRoutesText.includes('effectiveRemoteDetected = remote.detected || !effectiveLocationMatched'),
+  'field attendance uses confirmed remote-session evidence without geolocation',
+  'field attendance may request coordinates or infer remote access from location failure'
+);
+
+check(
+  containsAll(remoteSessionDetectText, [
+    "sessionType = 'Windows RDP'",
+    "sessionType = 'SSH'",
+    'const detected = confirmedIndicators.length > 0',
+    'tool_running:',
+    'observedTools',
+  ]) && !remoteSessionDetectText.includes('const detected = indicators.length > 0'),
+  'remote detector separates confirmed sessions from running tray tools',
+  'a running remote-control tray process may be misclassified as an active remote session'
 );
 
 check(
@@ -197,29 +213,32 @@ check(
 
 check(
   containsAll(authVmText, [
-    "setLocationStatus({ status: 'checking', message: '위치 확인 중...' })",
-    "setLocationStatus({ status: 'warning', message: '위치 확인 실패 · 출근 기록 저장됨' })",
-    "setLocationStatus({ status: 'error', message: '위치·출근 기록 저장 실패' })",
+    "setLocationStatus({ status: 'checking', message: '접속 환경 확인 중...' })",
+    "setLocationStatus({ status: 'warning', message: `원격 접속: ${remoteName}` })",
+    "setLocationStatus({ status: 'error', message: '접속 환경·출근 기록 저장 실패' })",
   ]) && containsAll(appText, [
     'locationStatus={locationStatus}',
   ]) && containsAll(read('src/components/StatusBar.jsx'), [
     "locationStatus.status !== 'idle'",
     'locationStatus.message',
   ]),
-  'background location and attendance state is exposed in the existing status bar',
-  'background location status UI wiring was removed'
+  'background connection environment and attendance state is exposed in the existing status bar',
+  'background connection environment status UI wiring was removed'
 );
 
 check(
-  containsAll(sessionRestoreText, [
+  containsAll(authVmText, [
     'checkVersionChanged',
-    'AuthModel.clearSession()',
+    'clearVersionMarker',
     'const freshData = await AuthModel.localLogin',
     'const activeSession = await AuthModel.findActiveSession',
     'AuthModel.saveSession(restoredUser)',
-  ]),
-  'stored session restore revalidates and clears on version change',
-  'stored session restore revalidation/version contract was changed'
+  ]) && containsAll(sessionRestoreText, [
+    '같은 날 현장관리자 세션 재검증',
+    'const savedUser = AuthModel.loadSession()',
+  ]) && !sessionRestoreText.includes('버전 변경 감지 → 새로운 로그인 필요'),
+  'app update preserves and locally revalidates same-day field sessions',
+  'an app update may clear the saved field session or bypass local revalidation'
 );
 
 check(
@@ -260,7 +279,14 @@ check(
     'if (isLoading)',
     '<SplashLoadingView percent={0} label="" showProgress={false} />',
     'preloadRecordGridData().finally',
+  ]) && containsAll(mainText, [
+    "import SplashLoadingView from './components/SplashLoadingView.jsx'",
+    '<SplashLoadingView percent={0} label="" showProgress={false} />',
+    'initServerConfig().then(() =>',
   ]) &&
+    mainText.indexOf('<SplashLoadingView percent={0} label="" showProgress={false} />') <
+      mainText.indexOf('initServerConfig().then(() =>') &&
+    !mainText.includes('서버 연결 중...') &&
     !appText.includes('세션 복원 중...') &&
     !appText.includes('if (recordPreloadState.active)'),
   'startup animation covers session restore and record preloading no longer blocks dashboard entry',
