@@ -496,6 +496,22 @@ ipcMain.handle('shell:openFile', async (_event, filePath) => {
   if (err) throw new Error(err);
   return { ok: true };
 });
+ipcMain.handle('shell:openFolder', async (_event, target) => {
+  const appDataRoot = path.join(
+    process.env.APPDATA || process.env.LOCALAPPDATA || app.getPath('appData'),
+    'Osoo_Handle_App'
+  );
+  const folderMap = {
+    'excel-originals': path.join(appDataRoot, 'templates', 'excel-originals'),
+    reports: path.join(appDataRoot, 'templates', 'reports'),
+  };
+  const folderPath = folderMap[String(target || '').trim()];
+  if (!folderPath) throw new Error('허용되지 않은 폴더입니다.');
+  fs.mkdirSync(folderPath, { recursive: true });
+  const err = await shell.openPath(folderPath);
+  if (err) throw new Error(err);
+  return { ok: true, path: folderPath };
+});
 ipcMain.handle('app:checkForUpdates', (_event, reason = 'manual') => {
   return checkForUpdates(reason);
 });

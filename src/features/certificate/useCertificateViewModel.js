@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CertificateModel } from './CertificateModel';
 
 const PRIVILEGED_ROLES = new Set(['admin', 'super_admin', 'central_admin', 'group_admin']);
+const VIEW_MODE_STORAGE_KEY = 'certificate_view_mode';
 
 function toDisplayDate(value) {
     if (!value) return '-';
@@ -42,11 +43,12 @@ function buildMergedCertificateFileName(year, month, count) {
 
 function normalizeRecord(item) {
     const fileName = item.fileName || item.file_name || '-';
+    const id = item.id;
     const lowerFileName = String(fileName || '').toLowerCase();
     const category = lowerFileName.includes('mlss') ? 'mlss' : 'certificate';
     const sortDate = String(item.issuedAt || item.issued_at || item.sampledAt || item.sampled_at || '');
     return {
-        id: item.id,
+        id,
         siteName: item.siteName || item.site_name || '-',
         fileName,
         category,
@@ -54,6 +56,7 @@ function normalizeRecord(item) {
         sampledAt: toDisplayDate(item.sampledAt || item.sampled_at),
         issuedAt: toDisplayDate(item.issuedAt || item.issued_at),
         downloadUrl: item.downloadUrl || item.download_url || '',
+        previewUrl: CertificateModel.getPreviewUrl(id, fileName),
     };
 }
 
@@ -69,6 +72,9 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
     const [selectedYear, setSelectedYear] = useState(currentYear);
     const [selectedMonth, setSelectedMonth] = useState(currentMonth);
     const [errorMessage, setErrorMessage] = useState('');
+    const [viewMode, setViewModeState] = useState(() => (
+        localStorage.getItem(VIEW_MODE_STORAGE_KEY) === 'card' ? 'card' : 'list'
+    ));
 
     const role = String(currentUser?.role || '').trim().toLowerCase();
     const isPrivileged = PRIVILEGED_ROLES.has(role);
@@ -161,10 +167,12 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
         [visibleRecords, selectedId]
     );
 
-    const selectedRecords = useMemo(
-        () => visibleRecords.filter((item) => selectedCertificateIds.has(item.id)),
-        [visibleRecords, selectedCertificateIds]
-    );
+    const selectedRecords = useMemo(() => {
+        const visibleById = new Map(visibleRecords.map((item) => [item.id, item]));
+        return Array.from(selectedCertificateIds)
+            .map((id) => visibleById.get(id))
+            .filter(Boolean);
+    }, [visibleRecords, selectedCertificateIds]);
 
     const allVisibleSelected = visibleRecords.length > 0
         && visibleRecords.every((item) => selectedCertificateIds.has(item.id));
@@ -194,6 +202,17 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
             return next;
         });
     }, [visibleRecords]);
+
+    const setViewMode = useCallback((mode) => {
+        const normalized = mode === 'card' ? 'card' : 'list';
+        localStorage.setItem(VIEW_MODE_STORAGE_KEY, normalized);
+        setViewModeState(normalized);
+    }, []);
+
+    const openPreview = useCallback((item) => {
+        if (!item?.id) return;
+        window.open(CertificateModel.getPreviewUrl(item.id, item.fileName), '_blank', 'noopener,noreferrer');
+    }, []);
 
     const yearOptions = useMemo(() => {
         const set = new Set([currentYear, currentYear - 1, selectedYear]);
@@ -276,6 +295,9 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
         moveMonth,
         siteOptions,
         handleDownload,
+        viewMode,
+        setViewMode,
+        openPreview,
         errorMessage,
     };
 };

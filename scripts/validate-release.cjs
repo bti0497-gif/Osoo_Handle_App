@@ -439,6 +439,8 @@ function validateRegressionContracts() {
   const templateSettingsServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'templateSettingsService.cjs');
   const appSettingsServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'appSettingsService.cjs');
   const electronBuilderConfigPath = path.join(BASE_DIR, 'electron-builder.config.cjs');
+  const electronMainPath = path.join(BASE_DIR, 'electron', 'main.cjs');
+  const electronPreloadPath = path.join(BASE_DIR, 'electron', 'preload.cjs');
   const excelMappingTemplateContractPath = path.join(BASE_DIR, 'EXCEL_MAPPING_TEMPLATE_CONTRACT.md');
   const unifiedRecordModalContractPath = path.join(BASE_DIR, 'UNIFIED_RECORD_MODAL_CONTRACT.md');
   const flowManagementViewPath = path.join(BASE_DIR, 'src', 'features', 'flow', 'FlowManagementView.jsx');
@@ -498,6 +500,8 @@ function validateRegressionContracts() {
   const appSettingsServiceText = readText(appSettingsServicePath);
   const basicSitePanelText = readText(basicSitePanelPath);
   const electronBuilderConfigText = readText(electronBuilderConfigPath);
+  const electronMainText = readText(electronMainPath);
+  const electronPreloadText = readText(electronPreloadPath);
   const excelMappingTemplateContractText = readText(excelMappingTemplateContractPath);
   const unifiedRecordModalContractText = readText(unifiedRecordModalContractPath);
   const flowManagementViewText = readText(flowManagementViewPath);
@@ -855,9 +859,12 @@ function validateRegressionContracts() {
     settingsModelText.includes("{ target, openInServer }") &&
       settingsRoutesText.includes('const openInServer = req.body?.openInServer !== false;') &&
       settingsRoutesText.includes('if (openInServer)') &&
-      useTemplateSettingsText.includes("openInServer: typeof electronOpenFile !== 'function'") &&
-      useTemplateSettingsText.includes('const openResult = await electronOpenFile(result.path);') &&
-      !useTemplateSettingsText.includes('electronOpenFile(result.path).catch(() => undefined)'),
+      electronPreloadText.includes("openFolder: (target) => ipcRenderer.invoke('shell:openFolder', target)") &&
+      electronMainText.includes("ipcMain.handle('shell:openFolder'") &&
+      electronMainText.includes("'excel-originals': path.join(appDataRoot, 'templates', 'excel-originals')") &&
+      electronMainText.includes("reports: path.join(appDataRoot, 'templates', 'reports')") &&
+      useTemplateSettingsText.includes('const electronOpenFolder = window.electronAPI?.openFolder;') &&
+      useTemplateSettingsText.includes('const result = await electronOpenFolder(target);'),
     '설정 템플릿 폴더 Electron 단일 열기·실패 표시 계약 유지',
     '폴더 열기가 중복 실행되거나 Electron 실패가 숨겨질 수 있습니다'
   );

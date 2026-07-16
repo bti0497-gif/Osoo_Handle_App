@@ -1245,7 +1245,8 @@ module.exports = function () {
       );
 
       res.setHeader('Content-Type', meta.data.mimeType || 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeFileName)}`);
+      const disposition = String(req.query.preview || '') === '1' ? 'inline' : 'attachment';
+      res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(safeFileName)}`);
       media.data.on('error', () => {
         if (!res.headersSent) res.status(500).end();
       });

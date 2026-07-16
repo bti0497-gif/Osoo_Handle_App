@@ -1,4 +1,4 @@
-import { apiClient } from '../../core/api';
+import { apiClient, getApiBase } from '../../core/api';
 
 const listCache = new Map();
 const listPromiseCache = new Map();
@@ -67,6 +67,12 @@ export const CertificateModel = {
 
     async getDownloadInfo(certificateId) {
         return apiClient.get(`/api/certificates/${certificateId}/download`);
+    },
+
+    getPreviewUrl(certificateId, fileName = '') {
+        const id = encodeURIComponent(String(certificateId || '').trim());
+        const name = encodeURIComponent(String(fileName || '').trim());
+        return `${getApiBase()}/api/certificates/files/${id}?name=${name}&preview=1`;
     },
 
     async downloadSelectedPdf(items, options = {}) {

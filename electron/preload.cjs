@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateInstalling: (callback) => ipcRenderer.on('update:installing', (_event, info) => callback(info)),
   savePdf: (options) => ipcRenderer.invoke('pdf:save', options),
   openFile: (filePath) => ipcRenderer.invoke('shell:openFile', filePath),
+  openFolder: (target) => ipcRenderer.invoke('shell:openFolder', target),
   checkVersionChanged: () => ipcRenderer.invoke('app:checkVersionChanged'),
   clearVersionMarker: () => ipcRenderer.invoke('app:clearVersionMarker'),
   hideToTray: () => ipcRenderer.invoke('app:hideToTray'),
