@@ -1,11 +1,41 @@
 ﻿const DEFAULT_LOCATION_ORDER = ['유량조정조', '무산소조', '폭기조', '침전조', '방류조'];
 
-const ITEM_NAME_TO_DEFINITION = new Map([
-  ['암모니아성 질소', { itemCode: 'nh3_n', itemName: '암모니아성질소(NH3-N)', unit: 'mg/L' }],
-  ['질산성 질소', { itemCode: 'no3_n', itemName: '질산성질소(NO3-N)', unit: 'mg/L' }],
-  ['오르토인산염', { itemCode: 'po4_p', itemName: '인산염인(PO4-P)', unit: 'mg/L' }],
-  ['알칼리도', { itemCode: 'alkalinity', itemName: '알칼리도(ALK)', unit: 'mg/L' }]
-]);
+const ITEM_DEFINITIONS = {
+  nh3_n: { itemCode: 'nh3_n', itemName: '암모니아성질소(NH3-N)', unit: 'mg/L' },
+  no3_n: { itemCode: 'no3_n', itemName: '질산성질소(NO3-N)', unit: 'mg/L' },
+  po4_p: { itemCode: 'po4_p', itemName: '인산염인(PO4-P)', unit: 'mg/L' },
+  alkalinity: { itemCode: 'alkalinity', itemName: '알칼리도(ALK)', unit: 'mg/L' }
+};
+
+function normalizeItemName(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toUpperCase()
+    .replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+function resolveMeasurementDefinition(itemName) {
+  const normalized = normalizeItemName(itemName);
+  if (!normalized) return null;
+
+  if ((normalized.includes('암모니아') && normalized.includes('질소')) || normalized.includes('NH3N')) {
+    return ITEM_DEFINITIONS.nh3_n;
+  }
+  if ((normalized.includes('질산') && normalized.includes('질소')) || normalized.includes('NO3N')) {
+    return ITEM_DEFINITIONS.no3_n;
+  }
+
+  // 성적서 항목인 총인은 통합 수질분석 가져오기 대상이 아니다.
+  const isTotalPhosphorus = normalized.includes('총인') || normalized === 'TP' || normalized.includes('TOTALPHOSPHORUS');
+  if (!isTotalPhosphorus && (normalized.includes('인') || normalized.includes('PO4'))) {
+    return ITEM_DEFINITIONS.po4_p;
+  }
+
+  if (normalized.includes('알칼리도') || normalized === 'ALK' || normalized.includes('ALKALINITY')) {
+    return ITEM_DEFINITIONS.alkalinity;
+  }
+  return null;
+}
 
 const PROJECTS_QUERY = `query Projects($data: SelectProjectInput!) {
   selectProjectListByRegDt(data: $data) {
@@ -187,6 +217,7 @@ function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappi
   const { fallbackDate = '' } = options;
   const rowMap = new Map();
   const unmatchedSamples = [];
+  const unmatchedItems = [];
   const projectsWithDate = (Array.isArray(projects) ? projects : []).map((project) => ({
     project,
     projectDate: normalizeProjectDate(project?.regDt, fallbackDate)
@@ -208,8 +239,12 @@ function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappi
     const resolver = buildSampleLocationResolver(project.measurements || [], activeLocations, configuredSampleMappings);
 
     (project.measurements || []).forEach((measurement) => {
-      const definition = ITEM_NAME_TO_DEFINITION.get(measurement?.item?.name || '');
-      if (!definition) return;
+      const rawItemName = String(measurement?.item?.name || '').trim();
+      const definition = resolveMeasurementDefinition(rawItemName);
+      if (!definition) {
+        if (rawItemName) unmatchedItems.push(rawItemName);
+        return;
+      }
 
       const targetLocation = resolver(measurement?.sample?.name || '');
       if (!targetLocation) {
@@ -239,7 +274,8 @@ function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappi
 
   return {
     importedRows: Array.from(rowMap.values()),
-    unmatchedSamples: Array.from(new Set(unmatchedSamples.filter(Boolean)))
+    unmatchedSamples: Array.from(new Set(unmatchedSamples.filter(Boolean))),
+    unmatchedItems: Array.from(new Set(unmatchedItems.filter(Boolean)))
   };
 }
 
@@ -247,5 +283,6 @@ module.exports = {
   PROJECTS_QUERY,
   getActiveLocations,
   getConfiguredSampleMappings,
+  resolveMeasurementDefinition,
   mapProjectsToWaterRows
 };

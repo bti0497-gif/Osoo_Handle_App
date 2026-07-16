@@ -233,7 +233,8 @@ async function importQntechWaterValues(db, date) {
     site: { id: context.site.id, name: context.site.name },
     projectCount: context.projects.length,
     importedRows: mapped.importedRows,
-    unmatchedSamples: mapped.unmatchedSamples
+    unmatchedSamples: mapped.unmatchedSamples,
+    unmatchedItems: mapped.unmatchedItems
   };
 }
 
@@ -286,6 +287,7 @@ async function importQntechWaterAll(db, baseDir, date) {
     projectCount: context.projects.length,
     importedRows: mapped.importedRows,
     unmatchedSamples: mapped.unmatchedSamples,
+    unmatchedItems: mapped.unmatchedItems,
     identifiedPhotos: photoResult.identifiedPhotos,
     savedPhotos: photoResult.savedPhotos,
     driveUploadedPhotos: photoResult.driveUploadedPhotos,
@@ -382,7 +384,8 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
       driveUploadErrors: photoResult.driveUploadErrors,
       photoDirectory: photoResult.photoDirectory,
       driveFolderUrl: photoResult.driveFolderUrl,
-      unmatchedSamples: mapped.unmatchedSamples
+      unmatchedSamples: mapped.unmatchedSamples,
+      unmatchedItems: mapped.unmatchedItems
     });
 
     onProgress?.({

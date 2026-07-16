@@ -10,6 +10,7 @@ const initialSyncService = require('../services/settings/initialSyncService.cjs'
 const mappingSettingsService = require('../services/settings/mappingSettingsService.cjs');
 const siteSettingsService = require('../services/settings/siteSettingsService.cjs');
 const templateSettingsService = require('../services/settings/templateSettingsService.cjs');
+const { reconcileConfiguredQntechSiteId } = require('../services/qntechAuthService.cjs');
 const {
   getCustomReportTemplatesDir,
   syncBundledTemplatesToAppData,
@@ -112,6 +113,15 @@ module.exports = function (db, baseDir, appDataPath) {
   });
   const reportUpload = multer({ storage: reportStorage });
 
+  const verifyQntechSettingsIntegrity = async (hints = {}) => {
+    try {
+      return await reconcileConfiguredQntechSiteId(db, hints);
+    } catch (error) {
+      console.warn('[Settings] QnTECH 설정 무결성 점검 실패:', error.message);
+      return { qntechSiteId: '', repaired: false, source: 'error', error: error.message };
+    }
+  };
+
   // 설정 조회 API
   router.get('/api/settings', async (req, res) => {
     try {
@@ -120,9 +130,10 @@ module.exports = function (db, baseDir, appDataPath) {
       } catch (sheetErr) {
         console.warn('[Settings] App settings sheets lookup failed, keeping local credentials:', sheetErr.message);
       }
+      const qntechIntegrity = await verifyQntechSettingsIntegrity();
       templateSettingsService.cleanupDisallowedReportTemplates(reportsDir);
       const result = appSettingsService.getSettingsOverview(db, baseDir, appDataPath);
-      res.json({ success: true, ...result });
+      res.json({ success: true, ...result, integrity: { qntech: qntechIntegrity } });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
@@ -130,10 +141,16 @@ module.exports = function (db, baseDir, appDataPath) {
   router.post('/api/settings', async (req, res) => {
     try {
       const storageResult = await appSettingsService.saveSettings(db, req.body || {}, siteStorageRoot);
+      const savedSettings = req.body?.settings || {};
+      const qntechIntegrity = await verifyQntechSettingsIntegrity({
+        siteId: savedSettings.siteId || savedSettings.site_id,
+        siteName: savedSettings.siteName || savedSettings.site_name,
+      });
       res.json({
         success: true,
         message: 'Settings saved successfully',
         ...storageResult,
+        integrity: { qntech: qntechIntegrity },
       });
     } catch (e) { res.status(e.statusCode || 500).json({ success: false, message: e.message }); }
   });
@@ -183,7 +200,8 @@ module.exports = function (db, baseDir, appDataPath) {
   router.post('/api/settings/select-site', async (req, res) => {
     try {
       const site = await siteSettingsService.selectSite(db, req.body?.siteId);
-      res.json({ success: true, site });
+      const qntechIntegrity = await verifyQntechSettingsIntegrity({ siteId: site.id, siteName: site.site_name });
+      res.json({ success: true, site, integrity: { qntech: qntechIntegrity } });
     } catch (e) {
       res.status(e.statusCode || 500).json({ success: false, message: e.message });
     }

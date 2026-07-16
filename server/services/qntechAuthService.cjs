@@ -195,6 +195,103 @@ function getConfiguredQntechSiteId(db) {
   return String(row?.qntech_site_id || '').trim();
 }
 
+async function reconcileConfiguredQntechSiteId(db, hints = {}) {
+  const settings = db.prepare(`
+    SELECT site_id, site_name, qntech_site_id
+    FROM app_settings
+    WHERE id = 1
+  `).get() || {};
+  const configuredSiteId = String(settings.qntech_site_id || '').trim();
+  const hintedSiteId = String(hints.siteId || settings.site_id || '').trim();
+  const hintedSiteName = String(hints.siteName || settings.site_name || '').trim();
+  const hintMatchesCurrentSite = (
+    (!hints.siteId || String(settings.site_id || '').trim() === String(hints.siteId).trim())
+    && (!hints.siteName || String(settings.site_name || '').trim() === String(hints.siteName).trim())
+  );
+  if (configuredSiteId && hintMatchesCurrentSite) {
+    return { qntechSiteId: configuredSiteId, repaired: false, source: 'app_settings' };
+  }
+
+  let localSite = null;
+  if (hintedSiteId) {
+    localSite = db.prepare(`
+      SELECT id, site_name, qntech_site_id
+      FROM sites
+      WHERE id = ? AND COALESCE(is_active, 1) = 1
+      LIMIT 1
+    `).get(hintedSiteId);
+  }
+  if (!localSite && hintedSiteName) {
+    localSite = db.prepare(`
+      SELECT id, site_name, qntech_site_id
+      FROM sites
+      WHERE site_name = ? AND COALESCE(is_active, 1) = 1
+      LIMIT 1
+    `).get(hintedSiteName);
+  }
+
+  let resolvedSiteId = String(localSite?.id || hintedSiteId || '').trim();
+  let resolvedSiteName = String(localSite?.site_name || hintedSiteName || '').trim();
+  let qntechSiteId = String(localSite?.qntech_site_id || '').trim();
+  let source = qntechSiteId ? 'sites' : '';
+
+  if (!qntechSiteId && (resolvedSiteId || resolvedSiteName)) {
+    const sitesSheetsService = require('./sitesSheetsService.cjs');
+    if (sitesSheetsService.isSheetsConfigured()) {
+      const sheetSites = await sitesSheetsService.getSites();
+      const sheetSite = sheetSites.find((site) => (
+        site?.is_active !== 0
+        && (
+          (resolvedSiteId && String(site.id) === resolvedSiteId)
+          || (resolvedSiteName && String(site.site_name || '').trim() === resolvedSiteName)
+        )
+      ));
+      qntechSiteId = String(sheetSite?.qntech_site_id || '').trim();
+      if (qntechSiteId) {
+        resolvedSiteId = String(sheetSite.id || resolvedSiteId).trim();
+        resolvedSiteName = String(sheetSite.site_name || resolvedSiteName).trim();
+        source = 'sheets';
+      }
+    }
+  }
+
+  if (!qntechSiteId) {
+    return { qntechSiteId: '', repaired: false, source: 'unresolved' };
+  }
+
+  db.transaction(() => {
+    if (resolvedSiteId) {
+      db.prepare(`
+        UPDATE sites
+        SET qntech_site_id = ?, updated_at = datetime('now', 'localtime')
+        WHERE id = ?
+      `).run(qntechSiteId, resolvedSiteId);
+    }
+    if (resolvedSiteName) {
+      db.prepare(`
+        UPDATE sites
+        SET qntech_site_id = ?, updated_at = datetime('now', 'localtime')
+        WHERE site_name = ?
+      `).run(qntechSiteId, resolvedSiteName);
+    }
+    db.prepare(`
+      UPDATE app_settings
+      SET site_id = COALESCE(NULLIF(?, ''), site_id),
+          site_name = COALESCE(NULLIF(?, ''), site_name),
+          qntech_site_id = ?
+      WHERE id = 1
+    `).run(resolvedSiteId, resolvedSiteName, qntechSiteId);
+  })();
+
+  const verifiedSiteId = getConfiguredQntechSiteId(db);
+  if (verifiedSiteId !== qntechSiteId) {
+    throw new Error('QnTECH 현장 설정을 저장한 뒤 검증하지 못했습니다.');
+  }
+
+  console.log(`[QnTECH] 현장 설정 자동 복구 완료: site=${resolvedSiteName || resolvedSiteId}, qntech_site_id=${qntechSiteId}, source=${source}`);
+  return { qntechSiteId, repaired: true, source };
+}
+
 async function authenticateWithCredential(credential, fingerprint) {
   const cookieJar = createCookieJar();
   await seedSession(credential.baseUrl, cookieJar);
@@ -286,12 +383,13 @@ function isAuthenticationError(error) {
 
 async function createAuthenticatedClient(db) {
   const { credential, session } = await ensureAuthenticatedSession(db);
+  const qntechConfig = await reconcileConfiguredQntechSiteId(db);
 
   return {
     baseUrl: credential.baseUrl,
     cookieJar: session.cookieJar,
     me: session.me,
-    qntechSiteId: getConfiguredQntechSiteId(db),
+    qntechSiteId: qntechConfig.qntechSiteId,
     graphqlRequest: async (query, variables, referer) => {
       const active = await ensureAuthenticatedSession(db);
       try {
@@ -314,6 +412,7 @@ async function createAuthenticatedClient(db) {
 
 module.exports = {
   createAuthenticatedClient,
+  reconcileConfiguredQntechSiteId,
   httpRequest,
   normalizeBaseUrl,
   invalidateQntechSessionCache

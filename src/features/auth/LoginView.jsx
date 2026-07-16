@@ -6,12 +6,44 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
     const [pass, setPass] = useState('');
     const [error, setError] = useState('');
 
+    const nameRef = useRef(null);
     const passRef = useRef(null);
+    const hasEditedNameRef = useRef(false);
+    const mountedAtRef = useRef(Date.now());
+    const recordedEventsRef = useRef(new Set());
+
+    const recordOnce = (event, details = {}) => {
+        if (recordedEventsRef.current.has(event)) return;
+        recordedEventsRef.current.add(event);
+        window.dispatchEvent(new CustomEvent('osoo:login-ui-diagnostic', {
+            detail: {
+                event,
+                details: {
+                    elapsedMs: Date.now() - mountedAtRef.current,
+                    ...details,
+                },
+            },
+        }));
+    };
+
+    useEffect(() => {
+        recordOnce('login-view-mounted', { hasPrefilledName: Boolean(name) });
+        window.focus();
+        const timer = window.setTimeout(() => {
+            (name ? passRef.current : nameRef.current)?.focus();
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, []);
 
     useEffect(() => {
         const nextName = String(loginHintName || '').trim();
         if (!nextName) return;
+        if (hasEditedNameRef.current) {
+            recordOnce('login-hint-skipped-after-edit');
+            return;
+        }
         setName(nextName);
+        recordOnce('login-hint-applied');
         setPass('');
         setError('');
         const timer = setTimeout(() => {
@@ -22,7 +54,9 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        recordOnce('login-submit', { hasName: Boolean(name), hasPassword: Boolean(pass) });
         const result = await onLogin(name, pass);
+        recordOnce(result.success ? 'login-result-success' : 'login-result-failed');
         if (result.success) {
             localStorage.setItem('lastLoginName', name);
         } else {
@@ -49,7 +83,13 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                             className="form-input-new"
                             placeholder="이름"
                             value={name}
-                            onChange={(e) => setName(e.target.value)}
+                            ref={nameRef}
+                            onFocus={() => recordOnce('login-name-focused')}
+                            onChange={(e) => {
+                                hasEditedNameRef.current = true;
+                                recordOnce('login-name-first-input');
+                                setName(e.target.value);
+                            }}
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && passRef.current) {
                                     e.preventDefault();
@@ -69,8 +109,12 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                             placeholder="비밀번호"
                             style={{ WebkitTextSecurity: 'disc' }}
                             value={pass}
-                            onChange={(e) => setPass(e.target.value)}
                             ref={passRef}
+                            onFocus={() => recordOnce('login-password-focused')}
+                            onChange={(e) => {
+                                recordOnce('login-password-first-input');
+                                setPass(e.target.value);
+                            }}
                             autoFocus
                             required
                         />

@@ -15,6 +15,49 @@
   border: none;
 }
 
+.roadwork-refresh-toast {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  padding: 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: rgba(248, 250, 252, 0.96);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.18);
+}
+
+.roadwork-refresh-button {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid #94a3b8;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #1e293b;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.roadwork-refresh-button .material-icons {
+  font-size: 16px;
+}
+
+.roadwork-refresh-button:hover:not(:disabled) {
+  border-color: #2563eb;
+  color: #1d4ed8;
+}
+
+.roadwork-refresh-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .roadwork-loading {
   flex: 1;
   display: flex;

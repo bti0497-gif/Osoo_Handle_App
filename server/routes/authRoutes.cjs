@@ -460,6 +460,15 @@ module.exports = (db) => {
         }
     });
 
+    // 로그인 UI 입력 상태 진단. 이름과 비밀번호 등 실제 입력값은 받지 않는다.
+    router.post('/ui-diagnostic', (req, res) => {
+        const event = String(req.body?.event || '').trim().slice(0, 80);
+        if (!event) {
+            return res.status(400).json({ success: false, message: '진단 이벤트가 필요합니다.' });
+        }
+        return res.json({ success: true });
+    });
+
     // 2. Sync member data downloaded by admin into the local DB.
     router.post('/sync-member', (req, res) => {
         const { id, name, password, role, site_name1, phone, notes } = req.body;

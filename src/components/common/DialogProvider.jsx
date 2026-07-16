@@ -48,7 +48,8 @@ export const DialogProvider = ({ children }) => {
                     backgroundColor: 'rgba(15, 23, 42, 0.4)',
                     backdropFilter: 'blur(4px)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    zIndex: 9999 + index
+                    // 통합 입력 모달(9999) 위에서 확인창이 항상 보이도록 계층을 분리한다.
+                    zIndex: 20000 + index
                 }}>
                     <div style={{
                         backgroundColor: 'white',

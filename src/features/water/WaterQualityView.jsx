@@ -353,7 +353,18 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
             return;
         }
 
-        const confirmed = await showConfirm?.('기간 불러오기는 즉시 저장됩니다. 기존 값이 있는 날짜는 값을 유지하고 사진을 함께 저장합니다. 계속할까요?');
+        if (typeof showConfirm !== 'function') {
+            showToast?.('확인창을 열 수 없어 기간 불러오기를 시작하지 못했습니다.', 'error');
+            return;
+        }
+
+        let confirmed = false;
+        try {
+            confirmed = await showConfirm('기간 불러오기는 즉시 저장됩니다. 기존 값이 있는 날짜는 값을 유지하고 사진을 함께 저장합니다. 계속할까요?');
+        } catch (error) {
+            showToast?.(`확인창 처리 중 오류가 발생했습니다: ${error.message}`, 'error');
+            return;
+        }
         if (!confirmed) return;
 
         let rangeResult = null;

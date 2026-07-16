@@ -242,21 +242,15 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         }));
         const isMbr = String(method || '').trim().toUpperCase() === 'MBR';
         const defaultLocations = createDefaultLocationItems(method);
-        const defaultNames = new Set(defaultLocations.map((item) => item.name));
-        const restoredByName = new Map(restored.map((item) => [item.name, item]));
+        const restoredNames = new Set(restored.map((item) => item.name));
+        const normalizedStored = restored.map((item) => (
+            isMbr && item.name === '침전조' ? { ...item, checked: false } : item
+        ));
+        const missingDefaults = defaultLocations.filter((item) => !restoredNames.has(item.name));
 
-        const normalizedDefaults = defaultLocations.map((item) => {
-            const saved = restoredByName.get(item.name);
-            if (isMbr && item.name === '침전조') return { ...item, checked: false };
-            return saved ? { ...item, checked: saved.checked } : item;
-        });
-
-        const customLocations = restored.filter((item) => {
-            if (defaultNames.has(item.name)) return false;
-            return true;
-        });
-
-        return [...normalizedDefaults, ...customLocations];
+        // 서버가 display_order 순서로 반환한 목록을 그대로 유지한다.
+        // 현장에서 추가한 장소를 기본 장소 뒤로 재배치하면 엑셀 매핑 순서가 달라질 수 있다.
+        return [...normalizedStored, ...missingDefaults];
     };
 
     const normalizeFlowItemsForSite = (storedFlows = [], series = '1계열', method = 'A2O') => {

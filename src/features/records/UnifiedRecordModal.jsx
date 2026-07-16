@@ -36,6 +36,16 @@ const hasValue = (value) => value !== '' && value !== null && value !== undefine
 const round1 = (value) => Math.round(value * 10) / 10;
 const clampInventory = (value) => Math.max(0, round1(Number(value || 0)));
 
+const getKitExperimentStep = (item, analysisLocationCount) => {
+    const kitName = String(item?.key || item?.name || item?.label || '')
+        .normalize('NFKC')
+        .toUpperCase()
+        .replace(/[^\p{L}\p{N}]/gu, '');
+    const isPhosphateKit = kitName.includes('인산염인') || kitName.includes('PO4P');
+    if (isPhosphateKit) return 3;
+    return Math.max(1, Number(analysisLocationCount) || 0);
+};
+
 const formatValue = (value) => {
     if (value === null || value === undefined || value === '') return '-';
     if (Number.isFinite(Number(value))) return Number(value).toLocaleString();
@@ -275,11 +285,14 @@ export default function UnifiedRecordModal({
     } = useUnifiedRecordViewModel({ isOpen, date, contexts });
 
     useEffect(() => {
-        const isOpening = isOpen && !wasOpenRef.current;
-        wasOpenRef.current = isOpen;
-        if (!isOpen) return;
+        if (!isOpen) {
+            wasOpenRef.current = false;
+            return undefined;
+        }
+        if (wasOpenRef.current) return undefined;
 
         const timer = setTimeout(() => {
+            wasOpenRef.current = true;
             const waterContext = JSON.parse(initialWaterSignature);
             const rounds = normalizeRoundOptions(waterContext.rounds, waterContext.measurementOrder || 1);
             setActiveTab(initialTab);
@@ -293,9 +306,7 @@ export default function UnifiedRecordModal({
             setSaveStatusMode('manual');
             setWaterRounds(rounds);
             setSelectedWaterRound(rounds[0]?.value || 1);
-            if (isOpening) {
-                setWaterInputMode('manual');
-            }
+            setWaterInputMode('manual');
         }, 0);
         return () => clearTimeout(timer);
     }, [isOpen, initialTab, initialDate, initialWaterSignature]);
@@ -482,6 +493,7 @@ export default function UnifiedRecordModal({
 
     const handleAdjustKitUsage = (delta) => {
         if (activeTab !== 'kit') return;
+        const analysisLocationCount = (resolvedContexts.water?.items || []).length;
 
         setDraft((prev) => {
             const next = { ...prev };
@@ -489,7 +501,8 @@ export default function UnifiedRecordModal({
                 const key = getDraftKeyForItem('kit', item);
                 const current = next[key] || buildInitialDraft('kit', item);
                 const currentUsage = toNumberOrNull(current.usage) || 0;
-                const nextUsage = round1(Math.max(0, currentUsage + delta));
+                const experimentStep = getKitExperimentStep(item, analysisLocationCount);
+                const nextUsage = round1(Math.max(0, currentUsage + (delta * experimentStep)));
                 const updated = {
                     ...current,
                     usage: nextUsage,
@@ -1001,7 +1014,7 @@ export default function UnifiedRecordModal({
                                     {isImportingQntech
                                         ? '불러오는 중...'
                                         : isRange
-                                            ? `${rangeStartDate} ~ ${rangeEndDate} 기간 불러오기`
+                                            ? '기간불러오기'
                                             : isSameDay
                                                 ? `${rangeStartDate} 불러오기`
                                                 : '불러오기'}
@@ -1242,8 +1255,9 @@ export default function UnifiedRecordModal({
         );
 
         return (
-            <div style={{
+            <div className="unified-record-scroll-area" style={{
                 overflowX: 'auto',
+                scrollbarGutter: 'stable',
                 borderRadius: 10,
                 background: '#fff',
                 boxShadow: 'inset 0 0 0 1px #e2e8f0',
@@ -1343,8 +1357,10 @@ export default function UnifiedRecordModal({
             padding: 24,
         }}>
             <div style={{
-                width: 'min(860px, 94vw)',
-                height: 'min(560px, 88vh)',
+                width: activeTab === 'water'
+                    ? `min(${Math.max(860, 380 + currentItems.length * 100)}px, calc(100vw - 32px))`
+                    : 'min(860px, calc(100vw - 32px))',
+                height: 'min(760px, calc(100vh - 32px))',
                 background: '#fff',
                 borderRadius: 12,
                 boxShadow: '0 24px 80px rgba(15, 23, 42, 0.24)',
@@ -1502,10 +1518,11 @@ export default function UnifiedRecordModal({
                             </div>
                         </div>
 
-                        <div style={{
+                        <div className="unified-record-scroll-area" style={{
                             padding: 18,
                             flex: 1,
                             overflowY: 'auto',
+                            scrollbarGutter: 'stable',
                             opacity: isLoadingUnifiedData ? 0.55 : 1,
                             pointerEvents: 'auto',
                         }}>

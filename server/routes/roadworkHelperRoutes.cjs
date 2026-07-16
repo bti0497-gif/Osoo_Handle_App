@@ -259,6 +259,17 @@ function getInventoryRows(db, date, category, tableName, nameColumn, scope) {
 }
 
 module.exports = function (db) {
+  router.post('/api/roadwork-helper/diagnostic', (req, res) => {
+    const event = String(req.body?.event || '').trim().slice(0, 80);
+    if (!event) {
+      return res.status(400).json({ success: false, message: '진단 이벤트가 필요합니다.' });
+    }
+
+    // 요청 본문은 공통 API 진단 미들웨어가 기록하고 Drive 업로드 대상으로 관리한다.
+    // 비밀번호와 사용자 입력값은 이 경로로 전달하지 않는다.
+    return res.json({ success: true });
+  });
+
   router.get('/api/roadwork-helper/all', async (req, res) => {
     try {
       const date = normalizeDate(req.query.date);

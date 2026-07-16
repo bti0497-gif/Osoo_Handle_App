@@ -8,6 +8,14 @@ function isAdminUser(userData) {
 }
 
 export const AuthModel = {
+    async recordLoginUiDiagnostic(event, details = {}) {
+        try {
+            await apiClient.post('/api/auth/ui-diagnostic', { event, details });
+        } catch (e) {
+            console.warn('로그인 UI 진단 기록 실패:', e);
+        }
+    },
+
     async getLoginHint() {
         try {
             const data = await apiClient.get('/api/auth/login-hint');

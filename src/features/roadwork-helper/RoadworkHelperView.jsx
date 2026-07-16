@@ -611,10 +611,15 @@ function buildRoadworkAutoFillScript(payload) {
 
 export default function RoadworkHelperView() {
   const vm = useRoadworkHelperViewModel();
+  const rootRef = useRef(null);
   const webviewRef = useRef(null);
+  const lastRefreshAtRef = useRef(0);
+  const wasLoginPageRef = useRef(true);
   const [loadError, setLoadError] = useState(null);
   const [preloadPath, setPreloadPath] = useState('');
   const [webviewUrl, setWebviewUrl] = useState('');
+  const [webviewGeneration, setWebviewGeneration] = useState(0);
+  const [showRefreshToast, setShowRefreshToast] = useState(true);
   const [roadworkStatus, setRoadworkStatus] = useState({ isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false });
   const [statusMessage, setStatusMessage] = useState('');
   const [isFilling, setIsFilling] = useState(false);
@@ -644,6 +649,49 @@ export default function RoadworkHelperView() {
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);
+
+  const recordRoadworkDiagnostic = React.useCallback((event, details = {}) => {
+    RoadworkHelperModel.recordDiagnostic(event, details).catch((error) => {
+      console.warn('[Roadwork Helper] Failed to record diagnostic:', error?.message || error);
+    });
+  }, []);
+
+  const handleRefresh = React.useCallback((source = 'button') => {
+    const now = Date.now();
+    if (now - lastRefreshAtRef.current < 500) return;
+    lastRefreshAtRef.current = now;
+
+    const currentUrl = webviewRef.current?.getURL?.() || webviewUrl;
+    setLoadError(null);
+    setShowRefreshToast(true);
+    wasLoginPageRef.current = true;
+    setStatusMessage('도로공사 페이지를 새로 불러오는 중입니다.');
+    setRoadworkStatus({ isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false });
+    setWebviewGeneration((value) => value + 1);
+    recordRoadworkDiagnostic('webview-refresh', {
+      source,
+      pageOrigin: (() => {
+        try {
+          return currentUrl ? new URL(currentUrl).origin : '';
+        } catch {
+          return '';
+        }
+      })(),
+    });
+    window.setTimeout(() => setStatusMessage(''), 3500);
+  }, [recordRoadworkDiagnostic, webviewUrl]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key !== 'F5' || event.repeat) return;
+      if (!rootRef.current || rootRef.current.getClientRects().length === 0) return;
+      event.preventDefault();
+      handleRefresh('keyboard');
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleRefresh]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -692,14 +740,65 @@ export default function RoadworkHelperView() {
       const nextError = `도로공사 페이지를 불러오지 못했습니다: ${event.errorDescription} (코드: ${event.errorCode})`;
       console.warn('[Roadwork Helper] Webview failed to load URL:', event.validatedURL, event.errorDescription);
       setLoadError((prev) => (prev === nextError ? prev : nextError));
+      recordRoadworkDiagnostic('webview-load-failed', {
+        errorCode: event.errorCode,
+        errorDescription: event.errorDescription,
+      });
+    };
+
+    const handleDidFinishLoad = () => {
+      const currentUrl = webview.getURL();
+      let pageOrigin = '';
+      try {
+        pageOrigin = new URL(currentUrl).origin;
+      } catch {
+        pageOrigin = '';
+      }
+      const isLoginPage = /\/security\/login\.do(?:[?#]|$)/i.test(currentUrl);
+      setShowRefreshToast(isLoginPage);
+      recordRoadworkDiagnostic('webview-load-finished', { pageOrigin });
+      if (wasLoginPageRef.current && !isLoginPage) {
+        recordRoadworkDiagnostic('webview-login-transition', { result: 'login-page-exited', pageOrigin });
+      }
+      wasLoginPageRef.current = isLoginPage;
+    };
+
+    const handleNavigate = (event) => {
+      const currentUrl = String(event.url || '');
+      const isLoginPage = /\/security\/login\.do(?:[?#]|$)/i.test(currentUrl);
+      setShowRefreshToast(isLoginPage);
+      if (wasLoginPageRef.current && !isLoginPage) {
+        let pageOrigin = '';
+        try {
+          pageOrigin = new URL(currentUrl).origin;
+        } catch {
+          pageOrigin = '';
+        }
+        recordRoadworkDiagnostic('webview-login-transition', { result: 'login-page-exited', pageOrigin });
+      }
+      wasLoginPageRef.current = isLoginPage;
+    };
+
+    const handleBeforeInput = (event) => {
+      if (event.input?.key !== 'F5' || event.input?.type === 'keyUp') return;
+      event.preventDefault();
+      handleRefresh('keyboard');
     };
 
     webview.addEventListener('did-fail-load', handleFailLoad);
+    webview.addEventListener('did-finish-load', handleDidFinishLoad);
+    webview.addEventListener('did-navigate', handleNavigate);
+    webview.addEventListener('did-navigate-in-page', handleNavigate);
+    webview.addEventListener('before-input-event', handleBeforeInput);
 
     return () => {
       webview.removeEventListener('did-fail-load', handleFailLoad);
+      webview.removeEventListener('did-finish-load', handleDidFinishLoad);
+      webview.removeEventListener('did-navigate', handleNavigate);
+      webview.removeEventListener('did-navigate-in-page', handleNavigate);
+      webview.removeEventListener('before-input-event', handleBeforeInput);
     };
-  }, []);
+  }, [handleRefresh, recordRoadworkDiagnostic, webviewGeneration]);
 
   const handleAutoFill = React.useCallback(async () => {
     const webview = webviewRef.current;
@@ -739,7 +838,7 @@ export default function RoadworkHelperView() {
         : '데이터 없음';
 
   return (
-    <div className="roadwork-page">
+    <div className="roadwork-page" ref={rootRef}>
       {loadError && (
         <div className="roadwork-load-error">
           <span className="material-icons">error_outline</span>
@@ -748,8 +847,7 @@ export default function RoadworkHelperView() {
           <button
             type="button"
             onClick={() => {
-              setLoadError(null);
-              webviewRef.current?.reload();
+              handleRefresh('load-error');
             }}
           >
             다시 시도
@@ -759,7 +857,7 @@ export default function RoadworkHelperView() {
 
       {webviewUrl ? (
         <webview
-          key={`${webviewUrl}-${preloadPath}`}
+          key={`${webviewUrl}-${preloadPath}-${webviewGeneration}`}
           ref={webviewRef}
           src={webviewUrl}
           className="roadwork-webview"
@@ -788,6 +886,21 @@ export default function RoadworkHelperView() {
       {statusMessage ? (
         <div className="roadwork-autofill-status">
           {statusMessage}
+        </div>
+      ) : null}
+
+      {showRefreshToast && webviewUrl ? (
+        <div className="roadwork-refresh-toast" role="status">
+        <button
+          type="button"
+          className="roadwork-refresh-button"
+          onClick={() => handleRefresh('button')}
+          disabled={!webviewUrl}
+          title="도로공사 페이지를 초기 상태로 다시 불러옵니다."
+        >
+          <span className="material-icons" aria-hidden="true">refresh</span>
+          새로고침 (F5)
+        </button>
         </div>
       ) : null}
     </div>

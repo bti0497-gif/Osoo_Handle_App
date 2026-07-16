@@ -303,6 +303,7 @@
   transform: translateY(-50%);
   color: #94a3b8;
   font-size: 20px !important;
+  pointer-events: none;
 }
 
 .form-input-new {
@@ -487,4 +488,22 @@
   font-size: 12px;
   background-color: #8db4e2 !important;
   color: #000;
+}
+.unified-record-scroll-area::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.unified-record-scroll-area::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.unified-record-scroll-area::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border: 2px solid #f1f5f9;
+  border-radius: 999px;
+}
+
+.unified-record-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
 }

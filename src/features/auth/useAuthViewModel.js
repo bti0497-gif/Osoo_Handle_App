@@ -142,6 +142,15 @@ export const useAuthViewModel = () => {
         }
     }, []);
 
+    useEffect(() => {
+        const handleLoginUiDiagnostic = (event) => {
+            const payload = event?.detail || {};
+            AuthModel.recordLoginUiDiagnostic(payload.event, payload.details || {});
+        };
+        window.addEventListener('osoo:login-ui-diagnostic', handleLoginUiDiagnostic);
+        return () => window.removeEventListener('osoo:login-ui-diagnostic', handleLoginUiDiagnostic);
+    }, []);
+
     const setupAutoLogoutTimer = useCallback(
         (userData) => {
             clearAutoLogoutTimer();
