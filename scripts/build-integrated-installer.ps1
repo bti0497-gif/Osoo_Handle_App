@@ -115,6 +115,14 @@ const base = require('$baseConfigPath');
 module.exports = {
   ...base,
   concurrency: { jobs: 1 },
+  files: [
+    ...base.files,
+    'templates/**/*',
+  ],
+  extraResources: [
+    ...base.extraResources,
+    { from: 'templates', to: 'templates' },
+  ],
   directories: {
     ...base.directories,
     output: '$outputConfigPath',

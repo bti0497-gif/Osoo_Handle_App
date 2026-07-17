@@ -20,7 +20,6 @@ module.exports = {
     'start.cjs',
     'electron/**/*',
     'scripts/**/*',
-    'templates/**/*',
     'node_modules/**/*',
     'package.json',
     '!server/config/google-key.json',
@@ -35,7 +34,6 @@ module.exports = {
     'node_modules/**/*',
   ],
   extraResources: [
-    { from: 'templates', to: 'templates' },
     { from: 'scripts', to: 'scripts' },
   ],
   win: {

@@ -198,6 +198,18 @@ function validateRuntimeConfigPackagingContract() {
   }
 }
 
+function validateReportTemplatesExcluded(rootDir, description) {
+  const reportsDir = path.join(rootDir, 'templates', 'reports');
+  const packagedFiles = fs.existsSync(reportsDir)
+    ? fs.readdirSync(reportsDir).filter((name) => !name.startsWith('.'))
+    : [];
+  if (packagedFiles.length === 0) {
+    success(`${description} 일지 양식 미포함 확인`);
+  } else {
+    error(`${description}에 현장 양식을 덮어쓸 수 있는 파일이 포함됨: ${packagedFiles.join(', ')}`);
+  }
+}
+
 function validateInstallerProcessGuardContract() {
   console.log(`\n${colors.blue}▶ 설치 프로세스 종료 보호 계약 검증${colors.reset}`);
 
@@ -439,6 +451,7 @@ function validateRegressionContracts() {
   const templateSettingsServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'templateSettingsService.cjs');
   const appSettingsServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'appSettingsService.cjs');
   const electronBuilderConfigPath = path.join(BASE_DIR, 'electron-builder.config.cjs');
+  const integratedInstallerScriptPath = path.join(BASE_DIR, 'scripts', 'build-integrated-installer.ps1');
   const electronMainPath = path.join(BASE_DIR, 'electron', 'main.cjs');
   const electronPreloadPath = path.join(BASE_DIR, 'electron', 'preload.cjs');
   const excelMappingTemplateContractPath = path.join(BASE_DIR, 'EXCEL_MAPPING_TEMPLATE_CONTRACT.md');
@@ -500,6 +513,7 @@ function validateRegressionContracts() {
   const appSettingsServiceText = readText(appSettingsServicePath);
   const basicSitePanelText = readText(basicSitePanelPath);
   const electronBuilderConfigText = readText(electronBuilderConfigPath);
+  const integratedInstallerScriptText = readText(integratedInstallerScriptPath);
   const electronMainText = readText(electronMainPath);
   const electronPreloadText = readText(electronPreloadPath);
   const excelMappingTemplateContractText = readText(excelMappingTemplateContractPath);
@@ -873,7 +887,8 @@ function validateRegressionContracts() {
     excelMappingTemplateContractText.includes('Saved column letters are the source of truth') &&
       excelMappingTemplateContractText.includes('become the sole import source') &&
       excelMappingTemplateContractText.includes('purchase from `cols.purchase`') &&
-      excelMappingTemplateContractText.includes('Report templates under `templates/reports` are release assets'),
+      excelMappingTemplateContractText.includes('Automatic-update packages must exclude report templates') &&
+      excelMappingTemplateContractText.includes('Integrated Setup packages must include `templates/**/*`'),
     '엑셀 매핑/기본설정/양식 패키징 계약 문서 확인',
     'EXCEL_MAPPING_TEMPLATE_CONTRACT.md가 누락되었거나 핵심 계약 문구가 빠졌습니다'
   );
@@ -957,15 +972,17 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    electronBuilderConfigText.includes("'templates/**/*'") &&
-      electronBuilderConfigText.includes("{ from: 'templates', to: 'templates' }") &&
+    !electronBuilderConfigText.includes("'templates/**/*'") &&
+      !electronBuilderConfigText.includes("{ from: 'templates', to: 'templates' }") &&
+      integratedInstallerScriptText.includes("'templates/**/*'") &&
+      integratedInstallerScriptText.includes("{ from: 'templates', to: 'templates' }") &&
       reportTemplateText.includes("'일일업무일지(A2O)'") &&
       reportTemplateText.includes("'일일업무일지(MBR)'") &&
       reportTemplateText.includes('process.resourcesPath') &&
       reportTemplateText.includes('syncBundledTemplatesToAppData') &&
       reportTemplateText.includes('shouldReplacePlaceholder'),
-    '일지 양식 패키징 및 AppData 동기화 계약 유지',
-    '일지 양식이 패키지 리소스에 포함되거나 AppData로 동기화되는 계약이 깨졌습니다'
+    '업데이트 양식 제외·통합 설치 양식 포함 계약 유지',
+    '자동업데이트와 통합 설치본의 일지 양식 분리 계약이 깨졌습니다'
   );
 
   checkSource(
@@ -1235,7 +1252,12 @@ function validateAsarPackage(asarPath) {
     if (leakedBigQueryKeys.length) error(`패키지에 BigQuery 키 포함됨: ${leakedBigQueryKeys.join(', ')}`);
     else success('패키지 BigQuery 키 미포함');
 
-    validateReportTemplateFiles(resourcesPath, '패키지 리소스');
+    const isIntegratedPackage = /integrated-deployment/i.test(path.resolve(asarPath));
+    if (isIntegratedPackage) {
+      validateReportTemplateFiles(resourcesPath, '통합 설치 패키지 리소스');
+    } else {
+      validateReportTemplatesExcluded(resourcesPath, '자동업데이트 패키지 리소스');
+    }
   } else {
     warn(`asar.unpacked 디렉토리 없음: ${unpackPath}`);
   }

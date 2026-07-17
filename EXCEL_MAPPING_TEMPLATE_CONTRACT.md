@@ -33,10 +33,11 @@ This document protects the field setup workflow after an Excel file has been acc
 
 ## Report Templates And Packaging
 
-- Report templates under `templates/reports` are release assets.
-- Electron packaging must include `templates/**/*` and copy `templates` as `extraResources`.
+- Report templates under `templates/reports` are source assets for new field installations.
+- Automatic-update packages must exclude report templates so site-customized AppData templates are never replaced by an update.
+- Integrated Setup packages must include `templates/**/*` and copy `templates` as `extraResources` for new installations.
 - Daily work log HWPX binding must select method-specific templates:
   - `일일업무일지(A2O).hwpx`
   - `일일업무일지(MBR).hwpx`
-- Bundled templates must sync to AppData and replace placeholder-sized files when a real bundled template is available.
-- Release validation must fail if required report templates are missing from source or packaged resources.
+- Bundled templates in Integrated Setup must sync to AppData and replace placeholder-sized files when a real bundled template is available.
+- Release validation must fail when templates exist in an automatic-update package or are missing from an Integrated Setup package.
