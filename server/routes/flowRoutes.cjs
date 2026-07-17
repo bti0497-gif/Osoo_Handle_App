@@ -6,7 +6,7 @@ module.exports = function (db) {
   function recalculateFlowTypeCascade(dbConn, type, metadata, startDate, explicitDates = new Set()) {
     const previousRaw = startDate
       ? dbConn.prepare(`
-          SELECT date, raw_value
+          SELECT date, raw_value, reading_unit
           FROM flow_readings
           WHERE type = ? AND date < ? AND raw_value IS NOT NULL
           ORDER BY date DESC, id DESC
@@ -27,7 +27,7 @@ module.exports = function (db) {
         `).get(type, startDate, `${startYear}-01-01`)
       : null;
     const rows = dbConn.prepare(`
-      SELECT id, date, raw_value, sludge_export, calculated_flow,
+      SELECT id, date, raw_value, reading_unit, sludge_export, calculated_flow,
              is_reset, is_manual, is_synced, last_modified, input_status
       FROM flow_readings
       WHERE type = ? AND (? IS NULL OR date >= ?)
@@ -46,6 +46,7 @@ module.exports = function (db) {
     `);
 
     let prevRaw = previousRaw?.raw_value == null ? null : Number(previousRaw.raw_value);
+    let prevReadingUnit = previousRaw?.reading_unit || null;
     let prevSludgeYear = previousSludge
       ? String(previousSludge.date || '').slice(0, 4)
       : startYear || null;
@@ -92,7 +93,11 @@ module.exports = function (db) {
         } else if (prevRaw != null && Number.isFinite(prevRaw)) {
           // 검침값은 누적이므로 어제보다 작을 수 없다. 작아지면(마이너스) 0으로
           // 클램프한다. 필요하면 전날 검침값을 먼저 수정하거나 '초기화'로 처리한다.
-          const diff = rawNum - prevRaw;
+          const readingUnit = String(row.reading_unit || prevReadingUnit || 'KWH').toUpperCase();
+          const effectivePreviousUnit = String(prevReadingUnit || readingUnit).toUpperCase();
+          const currentMultiplier = readingUnit === 'MWH' ? 1000 : 1;
+          const previousMultiplier = effectivePreviousUnit === 'MWH' ? 1000 : 1;
+          const diff = (rawNum * currentMultiplier) - (prevRaw * previousMultiplier);
           flow = Math.round(diff * 10) / 10;
           if (flow < 0) flow = 0;
         } else if (storedFlow != null && Number.isFinite(storedFlow)) {
@@ -101,6 +106,7 @@ module.exports = function (db) {
           flow = rawNum;
         }
         prevRaw = rawNum;
+        prevReadingUnit = row.reading_unit || prevReadingUnit;
       }
 
       const prevFlow = row.calculated_flow == null ? null : Number(row.calculated_flow);
@@ -147,6 +153,7 @@ module.exports = function (db) {
           row[r.type] = {
             raw: r.raw_value,
             diff: r.calculated_flow,
+            reading_unit: r.reading_unit || null,
             input_status: r.input_status || 'manual'
           };
         });
@@ -165,12 +172,13 @@ module.exports = function (db) {
       const results = [];
       const stmt = db.prepare(`
         INSERT INTO flow_readings (
-          date, type, raw_value, calculated_flow, is_reset, is_manual, sludge_export,
+          date, type, raw_value, calculated_flow, reading_unit, is_reset, is_manual, sludge_export,
           input_status, site_id, site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(date, type) DO UPDATE SET
           raw_value = excluded.raw_value,
           calculated_flow = excluded.calculated_flow,
+          reading_unit = excluded.reading_unit,
           is_reset = excluded.is_reset,
           is_manual = 0,
           sludge_export = excluded.sludge_export,
@@ -185,7 +193,7 @@ module.exports = function (db) {
       const metadata = getCurrentRecordMetadata(db, req.body);
       const insertMany = db.transaction((rows) => {
         for (const item of rows) {
-          const { type, raw_value, calculated_flow, sludge_export, is_reset, is_manual } = item;
+          const { type, raw_value, calculated_flow, reading_unit, sludge_export, is_reset, is_manual } = item;
           const sludgeAmount = type === '슬러지' ? (sludge_export ?? raw_value ?? null) : null;
           // 프론트엔드에서 이미 계산된 flow와 raw를 넘겨주므로 그대로 저장 (수동이든 자동이든)
           stmt.run(
@@ -193,6 +201,7 @@ module.exports = function (db) {
             type,
             raw_value,
             calculated_flow,
+            String(reading_unit || '').trim().toUpperCase() || null,
             is_reset ? 1 : 0,
             0,
             sludgeAmount,
@@ -229,17 +238,22 @@ module.exports = function (db) {
   });
 
   router.post('/api/flows', (req, res) => {
-    const { date, type, raw_value, is_reset, is_manual, manual_flow, sludge_export } = req.body;
+    const { date, type, raw_value, reading_unit, is_reset, is_manual, manual_flow, sludge_export } = req.body;
     try {
       const metadata = getCurrentRecordMetadata(db, req.body);
-      const prevReading = db.prepare('SELECT raw_value, calculated_flow, date FROM flow_readings WHERE type = ? AND date < ? ORDER BY date DESC LIMIT 1').get(type, date);
+      const prevReading = db.prepare('SELECT raw_value, reading_unit, calculated_flow, date FROM flow_readings WHERE type = ? AND date < ? ORDER BY date DESC LIMIT 1').get(type, date);
 
       // 보정 로직 동일 적용
       const effectivePrevRaw = (prevReading?.raw_value === null && prevReading?.calculated_flow > 10000)
         ? prevReading.calculated_flow
         : prevReading?.raw_value;
 
-      if (!is_manual && !is_reset && effectivePrevRaw !== undefined && raw_value < effectivePrevRaw) {
+      const normalizedUnit = String(reading_unit || '').trim().toUpperCase() || null;
+      const effectiveCurrentUnit = String(normalizedUnit || prevReading?.reading_unit || 'KWH').toUpperCase();
+      const currentMultiplier = effectiveCurrentUnit === 'MWH' ? 1000 : 1;
+      const previousUnit = String(prevReading?.reading_unit || effectiveCurrentUnit).toUpperCase();
+      const previousMultiplier = previousUnit === 'MWH' ? 1000 : 1;
+      if (!is_manual && !is_reset && effectivePrevRaw !== undefined && (raw_value * currentMultiplier) < (effectivePrevRaw * previousMultiplier)) {
         return res.status(400).json({ success: false, message: '검침값이 어제보다 작을 수 없습니다. 초기화가 필요한 경우 체크해주세요.' });
       }
 
@@ -252,16 +266,19 @@ module.exports = function (db) {
           : 0;
         calculated_flow = Math.round((prevSameYearCalculated + Number(sludgeAmount || 0)) * 10) / 10;
       } else if (is_manual) { calculated_flow = manual_flow; }
-      else if (!is_reset && effectivePrevRaw !== undefined) { calculated_flow = raw_value - effectivePrevRaw; }
+      else if (!is_reset && effectivePrevRaw !== undefined) {
+        calculated_flow = Math.round(((raw_value * currentMultiplier) - (effectivePrevRaw * previousMultiplier)) * 10) / 10;
+      }
 
       const info = db.prepare(`
         INSERT INTO flow_readings (
-          date, type, raw_value, calculated_flow, is_reset, is_manual, sludge_export,
+          date, type, raw_value, calculated_flow, reading_unit, is_reset, is_manual, sludge_export,
           input_status, site_id, site_name, author, created_at, last_modified, is_synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(date, type) DO UPDATE SET
           raw_value = excluded.raw_value,
           calculated_flow = excluded.calculated_flow,
+          reading_unit = excluded.reading_unit,
           is_reset = excluded.is_reset,
           is_manual = 0,
           sludge_export = excluded.sludge_export,
@@ -276,6 +293,7 @@ module.exports = function (db) {
         type,
         raw_value,
         calculated_flow,
+        normalizedUnit,
         is_reset ? 1 : 0,
         0,
         sludgeAmount,

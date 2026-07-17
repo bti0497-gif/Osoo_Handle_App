@@ -34,6 +34,24 @@ const toNumberOrNull = (value) => {
 
 const round1 = (value) => Math.round(value * 10) / 10;
 const clampInventory = (value) => Math.max(0, round1(Number(value || 0)));
+const POWER_UNIT_STORAGE_KEY = 'osoo:power-reading-unit';
+
+const getStoredPowerReadingUnit = () => {
+    try {
+        const unit = String(window.localStorage.getItem(POWER_UNIT_STORAGE_KEY) || '').toUpperCase();
+        return unit === 'MWH' || unit === 'KWH' ? unit : '';
+    } catch {
+        return '';
+    }
+};
+
+const storePowerReadingUnit = (unit) => {
+    try {
+        window.localStorage.setItem(POWER_UNIT_STORAGE_KEY, unit);
+    } catch {
+        // 저장소를 사용할 수 없는 환경에서도 현재 입력은 계속 처리한다.
+    }
+};
 
 const getKitExperimentStep = (item, analysisLocationCount) => {
     const kitName = String(item?.key || item?.name || item?.label || '')
@@ -194,6 +212,7 @@ function buildInitialDraft(tabId, item, roundValue) {
         return {
             reading: item.values?.reading ?? (isSludge ? 0 : ''),
             calculatedFlow: item.values?.flow ?? (isSludge ? round1(previousMonthlyExport) : ''),
+            readingUnit: item.values?.readingUnit || getStoredPowerReadingUnit() || item.previous?.readingUnit || 'KWH',
         };
     }
 
@@ -426,13 +445,17 @@ export default function UnifiedRecordModal({
                 }
             }
 
-            if (!isSludge && field === 'reading') {
+            const isPower = String(item?.key || item?.name || item?.label || '').includes('전력');
+            const readingMultiplier = isPower && String(nextDraft.readingUnit || '').toUpperCase() === 'MWH' ? 1000 : 1;
+
+            if (!isSludge && (field === 'reading' || field === 'readingUnit')) {
                 const reading = toNumberOrNull(value);
+                const effectiveReading = field === 'readingUnit' ? toNumberOrNull(nextDraft.reading) : reading;
                 const previousReading = toNumberOrNull(item?.previous?.reading);
-                if (reading !== null && previousReading !== null) {
-                    nextDraft.calculatedFlow = round1(Math.max(0, reading - previousReading));
-                } else if (reading !== null) {
-                    nextDraft.calculatedFlow = reading;
+                if (effectiveReading !== null && previousReading !== null) {
+                    nextDraft.calculatedFlow = round1(Math.max(0, (effectiveReading - previousReading) * readingMultiplier));
+                } else if (effectiveReading !== null) {
+                    nextDraft.calculatedFlow = round1(effectiveReading * readingMultiplier);
                 }
             }
 
@@ -440,7 +463,9 @@ export default function UnifiedRecordModal({
                 const calculatedFlow = toNumberOrNull(value);
                 const previousReading = toNumberOrNull(item?.previous?.reading) ?? 0;
                 if (calculatedFlow !== null) {
-                    nextDraft.reading = round1(previousReading + calculatedFlow);
+                    nextDraft.reading = isPower && readingMultiplier === 1000
+                        ? Math.round((previousReading + (calculatedFlow / 1000)) * 1000) / 1000
+                        : round1(previousReading + calculatedFlow);
                 }
             }
 
@@ -650,6 +675,7 @@ export default function UnifiedRecordModal({
                     type: item.key || item.name || item.label,
                     raw_value: reading,
                     calculated_flow: calculatedFlow,
+                    reading_unit: String(values.readingUnit || '').trim().toUpperCase() || null,
                     sludge_export: isSludge ? reading : null,
                     is_manual: false,
                     is_reset: false,
@@ -1051,12 +1077,26 @@ export default function UnifiedRecordModal({
                             ]
                             : [
                                 ['reading', '검침값'],
-                                ['calculatedFlow', '유량 계산값'],
+                                ['calculatedFlow', String(item.key || item.label || '').includes('전력') ? '사용량(kWh)' : '유량 계산값'],
                             ];
                         return (
                             <React.Fragment key={item.key}>
                                 <div style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', fontSize: 15, fontWeight: 900, color: '#0f172a' }}>
-                                    {item.label}
+                                    <div>{item.label}</div>
+                                    {String(item.key || item.label || '').includes('전력') ? (
+                                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 5, fontSize: 12, color: '#475569', cursor: 'pointer' }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={String(values.readingUnit || '').toUpperCase() === 'MWH'}
+                                                onChange={(event) => {
+                                                    const unit = event.target.checked ? 'MWH' : 'KWH';
+                                                    storePowerReadingUnit(unit);
+                                                    setFlowDraftFieldForItem(item, 'readingUnit', unit);
+                                                }}
+                                            />
+                                            메가와트시(MWh) 입력
+                                        </label>
+                                    ) : null}
                                 </div>
                                 {fieldLabels.map(([field, label]) => (
                                     <div key={`${item.key}-${field}`} style={{ padding: '7px 8px', borderBottom: '1px solid #f1f5f9' }}>

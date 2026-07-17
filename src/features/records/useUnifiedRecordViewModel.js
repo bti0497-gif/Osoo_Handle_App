@@ -53,11 +53,13 @@ const mergeFlowContext = (baseContext = {}, history = [], date) => {
                 values: {
                     reading: hasCurrent ? (isDefaulted(current) ? '' : (current.raw ?? '')) : (baseValues.reading ?? ''),
                     flow: hasCurrent ? (isDefaulted(current) ? '' : (current.diff ?? '')) : (baseValues.flow ?? ''),
+                    readingUnit: hasCurrent ? (current.reading_unit || '') : (baseValues.readingUnit || ''),
                 },
                 previous: {
                     ...basePrevious,
                     reading: hasValue(basePrevious.reading) ? basePrevious.reading : (previous.raw ?? ''),
                     flow: hasValue(basePrevious.flow) ? basePrevious.flow : (previous.diff ?? ''),
+                    readingUnit: basePrevious.readingUnit || previous.reading_unit || '',
                 },
             };
         }),

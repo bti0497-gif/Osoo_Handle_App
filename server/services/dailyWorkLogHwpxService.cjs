@@ -122,6 +122,11 @@ function formatBookmarkValues(values) {
     if (value === '') continue;
     if (waterSuffixes.some((suffix) => bookmark.endsWith(suffix))) {
       formatted[bookmark] = formatNumber(value, 1);
+    } else if (
+      (bookmark === '전날지침' && String(values.전일전력입력단위 || '').toUpperCase() === 'MWH')
+      || (bookmark === '오늘지침' && String(values.금일전력입력단위 || '').toUpperCase() === 'MWH')
+    ) {
+      formatted[bookmark] = formatNumber(value, 3).replace(/0+$/, '').replace(/\.$/, '');
     } else if (integerBookmarks.has(bookmark)) {
       formatted[bookmark] = formatNumber(value, 0);
     }
@@ -320,6 +325,8 @@ async function buildHwpxBookmarkValues(db, appDataPath, date, context = {}) {
   for (const [bookmark, keys] of Object.entries(BOOKMARK_BINDING_KEYS)) {
     values[bookmark] = pickBinding(bindings, keys);
   }
+  values.전일전력입력단위 = bindings.전일전력입력단위 || '';
+  values.금일전력입력단위 = bindings.금일전력입력단위 || '';
 
   Object.assign(values, getQntechBindings(db, date, context));
   Object.assign(values, getProcessFlowBindings(db, date, context));

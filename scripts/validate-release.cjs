@@ -433,6 +433,8 @@ function validateRegressionContracts() {
   const unifiedViewModelPath = path.join(BASE_DIR, 'src', 'features', 'records', 'useUnifiedRecordViewModel.js');
   const unifiedModalPath = path.join(BASE_DIR, 'src', 'features', 'records', 'UnifiedRecordModal.jsx');
   const dailyWorkLogRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'dailyWorkLogRoutes.cjs');
+  const dailyWorkLogServicePath = path.join(BASE_DIR, 'server', 'services', 'dailyWorkLogService.cjs');
+  const dailyWorkLogHwpxServicePath = path.join(BASE_DIR, 'server', 'services', 'dailyWorkLogHwpxService.cjs');
   const reportTemplateServicePath = path.join(BASE_DIR, 'server', 'services', 'reportTemplateService.cjs');
   const flowRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'flowRoutes.cjs');
   const medicineRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineRoutes.cjs');
@@ -518,6 +520,8 @@ function validateRegressionContracts() {
   const appSettingsServiceText = readText(appSettingsServicePath);
   const basicSitePanelText = readText(basicSitePanelPath);
   const databaseText = readText(databasePath);
+  const dailyWorkLogServiceText = readText(dailyWorkLogServicePath);
+  const dailyWorkLogHwpxServiceText = readText(dailyWorkLogHwpxServicePath);
   const facilityRoutesText = readText(facilityRoutesPath);
   const facilityModelText = readText(facilityModelPath);
   const facilityViewText = readText(facilityViewPath);
@@ -646,9 +650,9 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    modalText.includes("if (!isSludge && field === 'reading')") &&
+    modalText.includes("if (!isSludge && (field === 'reading' || field === 'readingUnit'))") &&
       modalText.includes("if (!isSludge && field === 'calculatedFlow')") &&
-      modalText.includes('nextDraft.reading = round1(previousReading + calculatedFlow)') &&
+      modalText.includes('round1(previousReading + calculatedFlow)') &&
       flowRoutesText.includes('일반/임포트/관리자 값은 raw 차이로 정규화') &&
       flowRoutesText.includes('recalculateFlowTypeCascade(db, type, metadata, [...dates].sort()[0], dates)') &&
       flowRoutesText.includes('recalculateFlowTypeCascade(db, type, metadata, date, new Set([date]))'),
@@ -857,6 +861,20 @@ function validateRegressionContracts() {
       diagnosticLogServiceText.includes("runtime: process.versions?.electron ? 'electron' : 'node'"),
     'Drive 진단로그 PC/실행환경 식별 계약 유지',
     '현장과 개발 PC를 구분할 machine/runtime 진단 필드가 누락되었습니다'
+  );
+
+  checkSource(
+    modalText.includes("POWER_UNIT_STORAGE_KEY = 'osoo:power-reading-unit'") &&
+      modalText.includes("event.target.checked ? 'MWH' : 'KWH'") &&
+      modalText.includes('(effectiveReading - previousReading) * readingMultiplier') &&
+      modalText.includes('(calculatedFlow / 1000)') &&
+      modalText.includes('reading_unit: String(values.readingUnit') &&
+      flowRoutesText.includes("currentMultiplier = readingUnit === 'MWH' ? 1000 : 1") &&
+      dailyWorkLogServiceText.includes("bindings['전일전력입력단위']") &&
+      dailyWorkLogHwpxServiceText.includes("bookmark === '오늘지침'") &&
+      dailyWorkLogHwpxServiceText.includes("toUpperCase() === 'MWH'"),
+    '전력 MWh 검침·kWh 사용량·체크 유지·일지 소수 바인딩 계약 유지',
+    '전력 단위 선택, 1,000배 사용량 계산 또는 일지 소수 표시 계약이 깨졌습니다'
   );
 
   checkSource(

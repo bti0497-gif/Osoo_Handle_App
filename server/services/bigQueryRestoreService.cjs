@@ -49,12 +49,13 @@ async function queryRows(tableName, startDate, endDate, scope) {
 function restoreFlowRows(db, rows) {
   const stmt = db.prepare(`
     INSERT INTO flow_readings (
-      date, type, raw_value, calculated_flow, is_reset, is_manual, sludge_export,
+      date, type, raw_value, calculated_flow, reading_unit, is_reset, is_manual, sludge_export,
       input_status, site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     ON CONFLICT(date, type) DO UPDATE SET
       raw_value = excluded.raw_value,
       calculated_flow = excluded.calculated_flow,
+      reading_unit = excluded.reading_unit,
       is_reset = excluded.is_reset,
       is_manual = excluded.is_manual,
       sludge_export = excluded.sludge_export,
@@ -73,6 +74,7 @@ function restoreFlowRows(db, rows) {
         row.type,
         row.raw_value ?? null,
         row.calculated_flow ?? null,
+        row.reading_unit || null,
         row.is_reset ? 1 : 0,
         row.is_manual ? 1 : 0,
         row.sludge_export ?? null,

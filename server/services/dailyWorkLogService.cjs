@@ -707,6 +707,9 @@ function buildBindingsForDate(db, date, context = {}) {
   const prevFlowPower = findFlowByKeyword(prevFlows, '전력');
   bindings['전일전력'] = prevFlowPower?.raw_value ?? '';
   bindings['금일전력'] = flowPower?.raw_value ?? '';
+  const powerReadingUnit = flowPower?.reading_unit || prevFlowPower?.reading_unit || '';
+  bindings['전일전력입력단위'] = prevFlowPower?.reading_unit || powerReadingUnit;
+  bindings['금일전력입력단위'] = flowPower?.reading_unit || powerReadingUnit;
   bindings['전력사용'] = flowPower?.calculated_flow ?? '';
   bindings['전력사용량'] = flowPower?.calculated_flow ?? '';
   
@@ -886,7 +889,7 @@ function buildContentSignature(db, date, context = {}) {
   return hashParts([
     PREVIEW_RENDER_VERSION,
     date,
-    flows.map((r) => [r.type, r.raw_value, r.calculated_flow, r.sludge_export, r.last_modified].join(':')).join('|'),
+    flows.map((r) => [r.type, r.raw_value, r.calculated_flow, r.reading_unit, r.sludge_export, r.last_modified].join(':')).join('|'),
     medicines.map((r) => [r.medicine_name, r.purchase_amount, r.usage_amount, r.current_inventory, r.last_modified].join(':')).join('|'),
     kits.map((r) => [r.kit_name, r.purchase_amount, r.usage_amount, r.current_inventory, r.last_modified].join(':')).join('|'),
     operationStatus ? [operationStatus.ph, operationStatus.do_value, operationStatus.svi, operationStatus.last_modified].join(':') : '',

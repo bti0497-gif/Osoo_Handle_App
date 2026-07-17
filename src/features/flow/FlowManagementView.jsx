@@ -130,7 +130,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
             items: visibleFlowItems.map((item) => {
                 const rawCell = modalRow?.[item.name];
                 const cell = rawCell?.isUserInput
-                    ? { reading: rawCell.raw, flow: rawCell.diff }
+                    ? { reading: rawCell.raw, flow: rawCell.diff, readingUnit: rawCell.reading_unit }
                     : correctData(rawCell);
                 const prev = getPreviousFlowCell(history, modalDate, item.name);
                 const isSludge = isSludgeItem(item.name);
@@ -148,10 +148,12 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                     values: {
                         reading: cell?.reading ?? '',
                         flow: isSludge ? currentYearlyExport : (cell?.flow ?? ''),
+                        readingUnit: rawCell?.reading_unit || '',
                     },
                     previous: {
                         reading: prev?.raw ?? '',
                         flow: prev?.diff ?? '',
+                        readingUnit: prev?.reading_unit || '',
                         yearlyExport: previousYearlyExport,
                     },
                     summary: isSludge

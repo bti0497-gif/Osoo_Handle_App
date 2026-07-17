@@ -50,7 +50,7 @@ function findPreviousReading(rows, currentIndex, type) {
     for (let i = currentIndex - 1; i >= 0; i -= 1) {
         const raw = rows[i]?.[type]?.raw;
         const parsed = toNumberOrNull(raw);
-        if (parsed !== null) return parsed;
+        if (parsed !== null) return { raw: parsed, readingUnit: rows[i]?.[type]?.reading_unit || null };
     }
     return null;
 }
@@ -86,8 +86,12 @@ function recalculateFromIndex(rows, startIndex, type, isManualAtStart) {
         } else if (raw !== null) {
             const previousReading = findPreviousReading(rows, i, type);
             if (previousReading !== null) {
-                diff = round1(raw - previousReading);
-                if (raw < previousReading) error = '전날 검침값보다 작습니다.';
+                const currentUnit = String(previousCell.reading_unit || '').toUpperCase();
+                const previousUnit = String(previousReading.readingUnit || currentUnit || 'KWH').toUpperCase();
+                const normalizedRaw = raw * (currentUnit === 'MWH' ? 1000 : 1);
+                const normalizedPrevious = previousReading.raw * (previousUnit === 'MWH' ? 1000 : 1);
+                diff = round1(normalizedRaw - normalizedPrevious);
+                if (normalizedRaw < normalizedPrevious) error = '전날 검침값보다 작습니다.';
                 if (diff > 5000000) error = '입력값이 비정상적으로 큽니다.';
             }
         }
@@ -109,6 +113,7 @@ function recalculateFromIndex(rows, startIndex, type, isManualAtStart) {
             diff,
             error,
             isManual: i === startIndex && isManualAtStart,
+            reading_unit: previousCell.reading_unit || null,
         });
     }
 
@@ -133,7 +138,7 @@ export const useFlowViewModel = (currentUser, { showAlert, flowTypes: flowTypesP
 
     const correctData = useCallback((data) => {
         if (!data) return { reading: null, flow: null, error: null };
-        return { reading: data.raw, flow: data.diff, error: data.error };
+        return { reading: data.raw, flow: data.diff, error: data.error, readingUnit: data.reading_unit || null };
     }, []);
 
     const loadReadings = useCallback(async (options = {}) => {
@@ -308,6 +313,7 @@ export const useFlowViewModel = (currentUser, { showAlert, flowTypes: flowTypesP
                         type,
                         raw_value: data.raw,
                         calculated_flow: data.diff,
+                        reading_unit: data.reading_unit || null,
                         sludge_export: type === '슬러지' ? data.raw : null,
                         is_manual: !!data.isManual,
                         is_reset: false,

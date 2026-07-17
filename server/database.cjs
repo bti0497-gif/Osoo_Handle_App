@@ -72,6 +72,7 @@ db.exec(`
     type TEXT NOT NULL,
     raw_value REAL,
     calculated_flow REAL,
+    reading_unit TEXT,
     is_reset BOOLEAN DEFAULT 0,
     is_manual BOOLEAN DEFAULT 0,
     input_status TEXT DEFAULT 'manual',
@@ -431,6 +432,8 @@ function createCertificateWaterQualityTable() {
 function normalizeLegacyQntechValueExpression(columnName) {
   return `CASE WHEN ${columnName} IN ('-1', '-1.0', '-1.00') THEN '초과' ELSE CAST(${columnName} AS TEXT) END`;
 }
+
+ensureColumn('flow_readings', 'reading_unit', 'TEXT');
 
 function selectExistingColumn(columnNames, candidates, fallback = 'NULL') {
   const found = candidates.find((columnName) => columnNames.includes(columnName));
