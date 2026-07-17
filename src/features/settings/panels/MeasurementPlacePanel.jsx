@@ -21,7 +21,7 @@ export default function MeasurementPlacePanel({
             onValueChange={onValueChange}
             placeholder="분석 장소 추가..."
             addTitle="분석 장소 추가"
-            renderItemGrid={(gridItems, type) => (
+            renderItemGrid={(gridItems) => (
                 <LocationOrderEditor
                     items={gridItems}
                     isSiteSelected={isSiteSelected}

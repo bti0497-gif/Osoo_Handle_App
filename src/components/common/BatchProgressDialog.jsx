@@ -66,8 +66,30 @@ export const BatchProgressDialog = ({
 }) => {
     if (!isOpen) return null;
 
-    const completedCount = tasks.filter(t => t.status === 'success').length;
-    const errorCount = tasks.filter(t => t.status === 'error').length;
+    const progressCounts = tasks.reduce((summary, task) => {
+        const detailedTotal = Number(task.totalUnits);
+        if (Number.isFinite(detailedTotal) && detailedTotal > 0) {
+            const completed = task.status === 'success'
+                ? detailedTotal
+                : Math.min(detailedTotal, Math.max(0, Number(task.completedUnits) || 0));
+            const errors = task.status === 'error'
+                ? Math.max(1, Number(task.errorUnits) || 0)
+                : Math.max(0, Number(task.errorUnits) || 0);
+            return {
+                completed: summary.completed + completed,
+                errors: summary.errors + errors,
+                total: summary.total + detailedTotal,
+            };
+        }
+        return {
+            completed: summary.completed + (task.status === 'success' ? 1 : 0),
+            errors: summary.errors + (task.status === 'error' ? 1 : 0),
+            total: summary.total + 1,
+        };
+    }, { completed: 0, errors: 0, total: 0 });
+    const completedCount = progressCounts.completed;
+    const errorCount = progressCounts.errors;
+    const totalCount = progressCounts.total;
 
     return (
         <div style={{
@@ -167,7 +189,7 @@ export const BatchProgressDialog = ({
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '14px', fontWeight: 600, color: '#323130' }}>
                             <span>전체 진행 상태</span>
                             <span>
-                                {completedCount} 완료 / {errorCount} 오류 / {tasks.length} 전체
+                                {completedCount} 완료 / {errorCount} 오류 / {totalCount} 전체
                                 {` (${progress}%)`}
                             </span>
                         </div>

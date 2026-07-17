@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DashboardModel } from './DashboardModel';
-import { buildWaterSummary } from './widgets/WaterQualityWidget';
+import { buildWaterSummary } from './waterSummary';
 
 const FLOW_KEYS = ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '전력량계'];
 

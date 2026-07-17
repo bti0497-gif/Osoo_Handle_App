@@ -201,6 +201,27 @@ db.exec(`
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
     is_synced INTEGER DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS work_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date DATE NOT NULL,
+    location TEXT,
+    title TEXT,
+    content TEXT,
+    notes TEXT,
+    site_name TEXT,
+    author TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_modified TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS work_record_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_record_id INTEGER NOT NULL,
+    original_name TEXT,
+    stored_name TEXT NOT NULL,
+    relative_path TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (work_record_id) REFERENCES work_records(id) ON DELETE CASCADE
+  );
   CREATE TABLE IF NOT EXISTS app_diagnostic_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -949,6 +970,8 @@ db.prepare('CREATE INDEX IF NOT EXISTS idx_water_quality_site_date ON water_qual
 db.prepare('CREATE INDEX IF NOT EXISTS idx_qntech_water_quality_site_date ON qntech_water_quality (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_kit_logs_site_date ON kit_logs (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_facility_logs_site_date ON facility_logs (site_id, date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_work_records_date ON work_records (date, id)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_work_record_photos_record ON work_record_photos (work_record_id)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_operation_status_logs_site_date ON operation_status_logs (site_id, date)').run();
 
 // site_id 백필: 기존 데이터가 있으면 app_settings.site_id로 채움

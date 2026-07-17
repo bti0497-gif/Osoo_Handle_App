@@ -7,7 +7,6 @@ const SUFFIX_LABELS = { purchase: '구매', usage: '사용', inventory: '재고'
 const SUFFIX_COLORS = { purchase: '#3b82f6', usage: '#f59e0b', inventory: '#8b5cf6' };
 
 export default function InventoryMappingPanel({
-  title,
   itemLabel,
   emptyIcon,
   emptyMessage,

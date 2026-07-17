@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { MemberModel } from './MemberModel';
 import { AuthModel } from '../auth/AuthModel';
 
-export const useMembersViewModel = (currentUser, { showAlert } = {}) => {
+export const useMembersViewModel = (currentUser) => {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');

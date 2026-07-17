@@ -9,8 +9,9 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
     const nameRef = useRef(null);
     const passRef = useRef(null);
     const hasEditedNameRef = useRef(false);
-    const mountedAtRef = useRef(Date.now());
+    const mountedAtRef = useRef(null);
     const recordedEventsRef = useRef(new Set());
+    const restoringFocusRef = useRef(false);
 
     const recordOnce = (event, details = {}) => {
         if (recordedEventsRef.current.has(event)) return;
@@ -19,7 +20,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
             detail: {
                 event,
                 details: {
-                    elapsedMs: Date.now() - mountedAtRef.current,
+                    elapsedMs: mountedAtRef.current ? Date.now() - mountedAtRef.current : 0,
                     ...details,
                 },
             },
@@ -27,26 +28,55 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
     };
 
     useEffect(() => {
-        recordOnce('login-view-mounted', { hasPrefilledName: Boolean(name) });
+        mountedAtRef.current = Date.now();
+        const hasPrefilledName = Boolean(nameRef.current?.value);
+        recordOnce('login-view-mounted', { hasPrefilledName });
         window.focus();
         const timer = window.setTimeout(() => {
-            (name ? passRef.current : nameRef.current)?.focus();
+            (hasPrefilledName ? passRef.current : nameRef.current)?.focus();
         }, 0);
         return () => window.clearTimeout(timer);
     }, []);
 
     useEffect(() => {
+        const restoreInputFocus = (info = {}) => {
+            if (restoringFocusRef.current) return;
+            restoringFocusRef.current = true;
+            window.focus();
+            window.requestAnimationFrame(() => {
+                const active = document.activeElement;
+                const activeIsLoginInput = active === nameRef.current || active === passRef.current;
+                const target = activeIsLoginInput
+                    ? active
+                    : (nameRef.current?.value ? passRef.current : nameRef.current);
+                target?.focus({ preventScroll: true });
+                recordOnce('login-focus-restored', { reason: info.reason || 'window-focus' });
+                restoringFocusRef.current = false;
+            });
+        };
+
+        const unsubscribe = window.electronAPI?.onWindowRestored?.(restoreInputFocus);
+        const handleWindowFocus = () => restoreInputFocus({ reason: 'window-focus' });
+        window.addEventListener('focus', handleWindowFocus);
+
+        return () => {
+            window.removeEventListener('focus', handleWindowFocus);
+            if (typeof unsubscribe === 'function') unsubscribe();
+        };
+    }, []);
+
+    useEffect(() => {
         const nextName = String(loginHintName || '').trim();
         if (!nextName) return;
-        if (hasEditedNameRef.current) {
-            recordOnce('login-hint-skipped-after-edit');
-            return;
-        }
-        setName(nextName);
-        recordOnce('login-hint-applied');
-        setPass('');
-        setError('');
         const timer = setTimeout(() => {
+            if (hasEditedNameRef.current) {
+                recordOnce('login-hint-skipped-after-edit');
+                return;
+            }
+            setName(nextName);
+            recordOnce('login-hint-applied');
+            setPass('');
+            setError('');
             passRef.current?.focus();
         }, 0);
         return () => clearTimeout(timer);
@@ -84,6 +114,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                             placeholder="이름"
                             value={name}
                             ref={nameRef}
+                            onPointerDown={() => window.focus()}
                             onFocus={() => recordOnce('login-name-focused')}
                             onChange={(e) => {
                                 hasEditedNameRef.current = true;
@@ -110,6 +141,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                             style={{ WebkitTextSecurity: 'disc' }}
                             value={pass}
                             ref={passRef}
+                            onPointerDown={() => window.focus()}
                             onFocus={() => recordOnce('login-password-focused')}
                             onChange={(e) => {
                                 recordOnce('login-password-first-input');

@@ -1,32 +1,30 @@
 import { apiClient } from '../../core/api';
 
-/**
- * FacilityModel — 고장·수리 이력 API
- *
- * [향후 추가 예정: 장비이력카드 연계 API]
- * - fetchEquipments()        : 현장 장비 목록 조회 (기기명, 사양, 사진 URL 등)
- * - createEquipment(data)    : 장비 등록
- * - updateEquipment(id, data): 장비 정보 수정
- * - removeEquipment(id)      : 장비 삭제
- * - fetchLogsByEquipment(facilityId): 특정 장비의 수리 이력만 필터 조회
- *
- * facility_logs 에 facility_id 컬럼 추가 후 위 API와 연동
- */
-
+/** 로컬 전용 업무 기록 API. BigQuery 동기화 경로를 사용하지 않는다. */
 export const FacilityModel = {
     async fetchAll(q) {
-        return apiClient.get('/api/facilities', q ? { q } : {});
+        return apiClient.get('/api/work-records', q ? { q } : {});
     },
 
     async create(data) {
-        return apiClient.post('/api/facilities', data);
+        return apiClient.post('/api/work-records', data);
     },
 
     async update(id, data) {
-        return apiClient.put(`/api/facilities/${id}`, data);
+        return apiClient.put(`/api/work-records/${id}`, data);
     },
 
     async remove(id) {
-        return apiClient.delete(`/api/facilities/${id}`);
-    }
+        return apiClient.delete(`/api/work-records/${id}`);
+    },
+
+    async uploadPhotos(id, files) {
+        const formData = new FormData();
+        Array.from(files || []).forEach((file) => formData.append('photos', file));
+        return apiClient.upload(`/api/work-records/${id}/photos`, formData);
+    },
+
+    async openPhotoFolder(id) {
+        return apiClient.post(`/api/work-records/${id}/open-photo-folder`, {});
+    },
 };

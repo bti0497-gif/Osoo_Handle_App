@@ -4,9 +4,9 @@ import MappingPreviewTable from '../widgets/MappingPreviewTable';
 
 export default function FlowMappingPanel({
   flowConfig, setFlowConfig,
-  medicineConfig, setMedicineConfig,
-  kitConfig, setKitConfig,
-  waterConfig, setWaterConfig,
+  setMedicineConfig,
+  setKitConfig,
+  setWaterConfig,
   flowMapping, setFlowMapping,
   excelSheets, sampleRowData, alphabet,
   isMetadataLoading, isPreviewLoading,

@@ -484,6 +484,11 @@ function validateRegressionContracts() {
   const useTemplateSettingsPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'hooks', 'useTemplateSettings.js');
   const boardServicePath = path.join(BASE_DIR, 'server', 'services', 'boardService.cjs');
   const boardFirebaseServicePath = path.join(BASE_DIR, 'server', 'services', 'boardFirebaseService.cjs');
+  const databasePath = path.join(BASE_DIR, 'server', 'database.cjs');
+  const facilityRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'facilityRoutes.cjs');
+  const facilityModelPath = path.join(BASE_DIR, 'src', 'features', 'facility', 'FacilityModel.js');
+  const facilityViewPath = path.join(BASE_DIR, 'src', 'features', 'facility', 'FacilityManagementView.jsx');
+  const bigQuerySyncServicePath = path.join(BASE_DIR, 'server', 'services', 'bigQuerySyncService.cjs');
 
   const readText = (filePath) => (fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '');
   const viewModelText = readText(unifiedViewModelPath);
@@ -512,6 +517,11 @@ function validateRegressionContracts() {
   const useTemplateSettingsText = readText(useTemplateSettingsPath);
   const appSettingsServiceText = readText(appSettingsServicePath);
   const basicSitePanelText = readText(basicSitePanelPath);
+  const databaseText = readText(databasePath);
+  const facilityRoutesText = readText(facilityRoutesPath);
+  const facilityModelText = readText(facilityModelPath);
+  const facilityViewText = readText(facilityViewPath);
+  const bigQuerySyncServiceText = readText(bigQuerySyncServicePath);
   const electronBuilderConfigText = readText(electronBuilderConfigPath);
   const integratedInstallerScriptText = readText(integratedInstallerScriptPath);
   const electronMainText = readText(electronMainPath);
@@ -1010,6 +1020,20 @@ function validateRegressionContracts() {
       !waterQualityViewText.includes('datesToImport'),
     'QnTECH 기간 가져오기가 창 상태와 무관한 서버 백그라운드 작업으로 유지됨',
     'QnTECH 기간 가져오기가 다시 렌더러 날짜 반복에 의존하거나 서버 작업 상태 계약이 깨졌습니다'
+  );
+
+  checkSource(
+    databaseText.includes('CREATE TABLE IF NOT EXISTS work_records') &&
+      databaseText.includes('CREATE TABLE IF NOT EXISTS work_record_photos') &&
+      facilityRoutesText.includes("router.get('/api/work-records'") &&
+      facilityRoutesText.includes("router.post('/api/work-records/:id/photos'") &&
+      facilityRoutesText.includes("path.resolve(appDataPath, '사진관리', '업무기록')") &&
+      facilityModelText.includes("'/api/work-records'") &&
+      facilityViewText.includes('업무사진관리') &&
+      !bigQuerySyncServiceText.includes('work_records') &&
+      !bigQuerySyncServiceText.includes('work_record_photos'),
+    '업무사진관리 로컬 DB·사진 폴더·BigQuery 제외 계약 유지',
+    '업무사진관리의 로컬 전용 저장 또는 사진/API 계약이 깨졌습니다'
   );
 
   const roadworkContractText = readText(path.join(BASE_DIR, 'ROADWORK_HELPER_CONTRACT.md'));

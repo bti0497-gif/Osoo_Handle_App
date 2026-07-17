@@ -377,7 +377,14 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
                     const count = progress.totalDates
                         ? ` (${progress.completedDates || 0}/${progress.totalDates})`
                         : '';
-                    updateMessage(`${progress.message || 'QnTECH 서버에서 수집 중...'}${count}`);
+                    updateMessage(
+                        `${progress.message || 'QnTECH 서버에서 수집 중...'}${count}`,
+                        {
+                            completedUnits: progress.completedDates || 0,
+                            errorUnits: 0,
+                            totalUnits: progress.totalDates || 0,
+                        }
+                    );
                 });
             },
             { stopOnError: true }
@@ -485,7 +492,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
                     data={history}
                     keyField="rowKey"
                     defaultSelectedRowKey={workspaceSession.selectedKey || scrollKey}
-                    scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : scrollKey}
+                    scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : (workspaceSession.selectedKey || scrollKey)}
                     initialScrollTop={workspaceSession.scrollTop}
                     onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}
                     width="100%"

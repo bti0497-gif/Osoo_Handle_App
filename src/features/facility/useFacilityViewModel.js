@@ -26,9 +26,10 @@ export const useFacilityViewModel = () => {
     };
 
     const createLog = async (data) => {
-        if (!data.facility_name && !data.location && !data.content) return;
-        await FacilityModel.create(data);
+        if (!data.title && !data.location && !data.content && !data.notes) return;
+        const result = await FacilityModel.create(data);
         await loadLogs(searchQuery);
+        return result;
     };
 
     const updateLog = async (id, data) => {
@@ -41,5 +42,23 @@ export const useFacilityViewModel = () => {
         await loadLogs(searchQuery);
     };
 
-    return { logs, loading, searchQuery, handleSearch, createLog, updateLog, deleteLog };
+    const uploadPhotos = async (id, files) => {
+        const result = await FacilityModel.uploadPhotos(id, files);
+        await loadLogs(searchQuery);
+        return result;
+    };
+
+    const openPhotoFolder = (id) => FacilityModel.openPhotoFolder(id);
+
+    return {
+        logs,
+        loading,
+        searchQuery,
+        handleSearch,
+        createLog,
+        updateLog,
+        deleteLog,
+        uploadPhotos,
+        openPhotoFolder,
+    };
 };

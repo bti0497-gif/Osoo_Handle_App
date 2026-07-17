@@ -23,7 +23,7 @@ export const MENUS = [
     label: '시설관리',
     icon: 'construction',
     children: [
-      { id: 'facility', label: '고장·수리이력' },
+      { id: 'facility', label: '업무사진관리' },
       // TODO: 장비이력카드 — 현장별 장비 목록(사진·사양 포함)을 관리하고
       //       고장·수리이력 테이블과 facility_id 외래키로 연계하여
       //       장비별 누적 수리 내역을 조회할 수 있도록 구현 예정
@@ -57,7 +57,7 @@ export const TAB_LABELS = {
   kit: '분석키트관리',
   operation_status: '운전상태',
   certificate: '성적서',
-  facility: '고장·수리이력',
+  facility: '업무사진관리',
   // TODO: 장비이력카드 탭 레이블 — 장비이력카드 기능 구현 시 활성화
   equipment_card: '장비이력카드',
   log: '일지작성',

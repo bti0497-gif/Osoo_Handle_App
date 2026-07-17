@@ -31,7 +31,6 @@ const toNumberOrNull = (value) => {
     return Number.isFinite(parsed) ? parsed : null;
 };
 
-const hasValue = (value) => value !== '' && value !== null && value !== undefined;
 
 const round1 = (value) => Math.round(value * 10) / 10;
 const clampInventory = (value) => Math.max(0, round1(Number(value || 0)));
@@ -579,34 +578,6 @@ export default function UnifiedRecordModal({
         }
     };
 
-    const hasPersistedTabData = (tabId) => {
-        if (tabId === 'flow') {
-            const requiredItems = (resolvedContexts.flow?.items || []).filter((item) => !isSludgeFlowItem(item));
-            return requiredItems.length > 0 && requiredItems.every((item) => {
-                const values = buildInitialDraft('flow', item);
-                return toNumberOrNull(values.reading) !== null;
-            });
-        }
-
-        if (tabId === 'medicine' || tabId === 'kit') {
-            return (resolvedContexts[tabId]?.items || []).some((item) => {
-                const values = item.values || {};
-                return hasValue(values.purchase) || hasValue(values.usage) || hasValue(values.inventory);
-            });
-        }
-
-        if (tabId === 'water') {
-            return (resolvedContexts.water?.items || []).some((item) => {
-                const valuesByRound = item.valuesByRound || {};
-                return Object.values(valuesByRound).some((values) => (
-                    WATER_FIELD_META.some((field) => toNumberOrNull(values?.[field.id]) !== null)
-                ));
-            });
-        }
-
-        return false;
-    };
-
     const hasDraftTabData = (tabId) => Object.keys(draft).some((key) => key.startsWith(`${tabId}:`));
 
     const hasDraftForItem = (tabId, item) => (
@@ -1073,7 +1044,6 @@ export default function UnifiedRecordModal({
 
                     {visibleFlowItems.map((item) => {
                         const values = getDraftForItem('flow', item);
-                        const isSludgeItem = isSludgeFlowItem(item);
                         const fieldLabels = isSludgeFlowItem(item)
                             ? [
                                 ['reading', '반출량'],

@@ -10,6 +10,26 @@ const waitForNextPaint = () => new Promise((resolve) => {
     });
 });
 
+const getTaskProgressUnits = (task) => {
+    const detailedTotal = Number(task.totalUnits);
+    if (Number.isFinite(detailedTotal) && detailedTotal > 0) {
+        const total = detailedTotal;
+        const completed = task.status === 'success'
+            ? total
+            : Math.min(total, Math.max(0, Number(task.completedUnits) || 0));
+        const errors = task.status === 'error'
+            ? Math.max(1, Number(task.errorUnits) || 0)
+            : Math.max(0, Number(task.errorUnits) || 0);
+        return { completed, errors, total };
+    }
+
+    return {
+        completed: task.status === 'success' ? 1 : 0,
+        errors: task.status === 'error' ? 1 : 0,
+        total: 1,
+    };
+};
+
 /**
  * 일괄 작업(Batch)의 진행 상태를 관리하는 커스텀 훅
  * 
@@ -27,9 +47,17 @@ export const useBatchProcess = () => {
     const [isFinished, setIsFinished] = useState(false);
 
     // 전체 진행률 계산 (완료 또는 에러인 항목 비율)
-    const progress = tasks.length === 0 
-        ? 0 
-        : Math.round((tasks.filter(t => t.status === 'success' || t.status === 'error').length / tasks.length) * 100);
+    const progressUnits = tasks.reduce((summary, task) => {
+        const units = getTaskProgressUnits(task);
+        return {
+            completed: summary.completed + units.completed,
+            errors: summary.errors + units.errors,
+            total: summary.total + units.total,
+        };
+    }, { completed: 0, errors: 0, total: 0 });
+    const progress = progressUnits.total === 0
+        ? 0
+        : Math.min(100, Math.round(((progressUnits.completed + progressUnits.errors) / progressUnits.total) * 100));
 
     const resetBatch = useCallback(() => {
         setTasks([]);
@@ -37,10 +65,10 @@ export const useBatchProcess = () => {
         setIsFinished(false);
     }, []);
 
-    const updateTaskStatus = useCallback((taskId, status, message = '') => {
+    const updateTaskStatus = useCallback((taskId, status, message = '', details = {}) => {
         setTasks(prev => prev.map(task => 
             task.id === taskId 
-                ? { ...task, status, message: message || task.message } 
+                ? { ...task, ...details, status, message: message || task.message }
                 : task
         ));
     }, []);
@@ -86,7 +114,7 @@ export const useBatchProcess = () => {
 
             try {
                 // 개별 항목 처리 대기
-                await processItemAsync(item, (msg) => updateTaskStatus(taskId, 'processing', msg));
+                await processItemAsync(item, (msg, details = {}) => updateTaskStatus(taskId, 'processing', msg, details));
                 // 성공
                 updateTaskStatus(taskId, 'success', '완료');
             } catch (error) {

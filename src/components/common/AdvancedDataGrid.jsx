@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-/* eslint-disable react-hooks/refs */
 // NOTE: 이 컴포넌트는 가상화/편집 ref를 광범위하게 사용하는 구조로,
 // react-hooks/refs 규칙이 렌더 구문에서 오탐(false positive)을 발생시킨다.
 // 향후 hooks 분리 리팩토링 시 이 disable을 제거하는 것을 목표로 한다.
@@ -268,13 +267,20 @@ const AdvancedDataGrid = ({
     }, [scrollToKey, safeData, keyField, rowHeight, viewportHeight]);
 
     useEffect(() => {
-        if (initialScrollRestoredRef.current || !Number.isFinite(initialScrollTop) || !bodyScrollRef.current) return;
+        // 비동기 데이터가 아직 비어 있을 때 복원하면 maxScrollTop이 0으로 계산되어
+        // 저장 위치가 첫 행으로 고정된다. 실제 행이 준비된 뒤 한 번만 복원한다.
+        if (
+            initialScrollRestoredRef.current
+            || !Number.isFinite(initialScrollTop)
+            || !bodyScrollRef.current
+            || safeData.length === 0
+        ) return;
         const maxScrollTop = Math.max(0, totalDataHeight - viewportHeight);
         const restoredScrollTop = Math.min(Math.max(0, initialScrollTop), maxScrollTop);
         initialScrollRestoredRef.current = true;
         bodyScrollRef.current.scrollTop = restoredScrollTop;
         setScrollTop(restoredScrollTop);
-    }, [initialScrollTop, totalDataHeight, viewportHeight]);
+    }, [initialScrollTop, safeData.length, totalDataHeight, viewportHeight]);
 
     // ---- 초기 행 선택(유량 등: 오늘 날짜 행 자동 선택) ----
     useEffect(() => {

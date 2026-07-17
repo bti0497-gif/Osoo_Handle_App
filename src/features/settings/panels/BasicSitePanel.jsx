@@ -30,6 +30,7 @@ export default function BasicSitePanel({
   templateFileNames,
   handleExcelFileUpload,
   handleTemplateFileChange,
+  handleOpenLocalFolder,
   excelStatus,
   handleApply,
 }) {
@@ -89,6 +90,7 @@ export default function BasicSitePanel({
                 templateFileNames={templateFileNames}
                 handleExcelFileUpload={handleExcelFileUpload}
                 handleTemplateFileChange={handleTemplateFileChange}
+                handleOpenLocalFolder={handleOpenLocalFolder}
                 excelStatus={excelStatus}
                 handleApply={handleApply}
                 isSiteSelected={isSiteSelected}

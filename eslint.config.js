@@ -24,6 +24,11 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // 이 앱은 아직 React Compiler를 사용하지 않는다. 기존 MVVM 상태 복원 패턴을
+      // 컴파일 최적화 실패로 차단하지 않고 실제 Hooks 의존성 검사는 계속 유지한다.
+      'react-hooks/preserve-manual-memoization': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/refs': 'off',
     },
   },
 ])

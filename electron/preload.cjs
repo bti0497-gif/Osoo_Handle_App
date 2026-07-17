@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('app:session-reset', listener);
     return () => ipcRenderer.removeListener('app:session-reset', listener);
   },
+  onWindowRestored: (callback) => {
+    const listener = (_event, info) => callback(info || {});
+    ipcRenderer.on('app:window-restored', listener);
+    return () => ipcRenderer.removeListener('app:window-restored', listener);
+  },
   invokeRoadwork: (channel, ...args) => {
     const allowed = [
       'roadwork:getPreloadPath',

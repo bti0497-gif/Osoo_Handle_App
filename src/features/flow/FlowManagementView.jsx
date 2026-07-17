@@ -310,7 +310,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                     data={history}
                     keyField="date"
                     defaultSelectedRowKey={workspaceSession.selectedKey || todayStr}
-                    scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : todayStr}
+                    scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : (workspaceSession.selectedKey || todayStr)}
                     initialScrollTop={workspaceSession.scrollTop}
                     onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}
                     width="100%"

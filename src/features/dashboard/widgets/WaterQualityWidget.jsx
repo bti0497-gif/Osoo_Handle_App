@@ -5,14 +5,6 @@ function toDisplay(value) {
     return String(value);
 }
 
-function avg(list, key) {
-    const nums = list
-        .map((row) => Number(row[key]))
-        .filter((v) => Number.isFinite(v));
-    if (nums.length === 0) return '-';
-    return (Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 10) / 10).toFixed(1);
-}
-
 export default function WaterQualityWidget({ rows, summary }) {
     return (
         <section style={{ border: '1px solid #e2e8f0', borderRadius: '12px', backgroundColor: '#ffffff', padding: '0.85rem' }}>
@@ -77,14 +69,3 @@ export default function WaterQualityWidget({ rows, summary }) {
         </section>
     );
 }
-
-export function buildWaterSummary(rows) {
-    const recent = rows.slice(0, 7);
-    return {
-        nh3_n: avg(recent, 'nh3_n'),
-        no3_n: avg(recent, 'no3_n'),
-        po4_p: avg(recent, 'po4_p'),
-        alkalinity: avg(recent, 'alkalinity'),
-    };
-}
-

@@ -35,7 +35,7 @@ const routeRegistry = [
   { tier: 1, path: '/',                   module: './routes/operationStatusRoutes.cjs', args: ['db'] },
   { tier: 1, path: '/',                   module: './routes/medicineRoutes.cjs',       args: ['db'],           watch: true },
   { tier: 1, path: '/',                   module: './routes/kitRoutes.cjs',            args: ['db'],           watch: true },
-  { tier: 1, path: '/',                   module: './routes/facilityRoutes.cjs',       args: ['db'],           watch: true },
+  { tier: 1, path: '/',                   module: './routes/facilityRoutes.cjs',       args: ['db', 'appDataPath'], watch: true },
 
   // ==================================================================
   // Tier 2: 첫 HTTP 요청이 들어올 때 로드 (makeLazy)

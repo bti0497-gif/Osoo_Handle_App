@@ -387,6 +387,13 @@ function createTray() {
         if (mainWindow) {
           mainWindow.show();
           mainWindow.focus();
+          mainWindow.webContents.focus();
+          setTimeout(() => {
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            mainWindow.focus();
+            mainWindow.webContents.focus();
+            mainWindow.webContents.send('app:window-restored', { reason: 'tray-menu' });
+          }, 50);
         }
       }
     },
@@ -407,6 +414,13 @@ function createTray() {
     if (mainWindow) {
       mainWindow.show();
       mainWindow.focus();
+      mainWindow.webContents.focus();
+      setTimeout(() => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        mainWindow.focus();
+        mainWindow.webContents.focus();
+        mainWindow.webContents.send('app:window-restored', { reason: 'tray-double-click' });
+      }, 50);
     }
   });
 }
@@ -422,6 +436,13 @@ if (!gotTheLock) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
       mainWindow.focus();
+      mainWindow.webContents.focus();
+      setTimeout(() => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        mainWindow.focus();
+        mainWindow.webContents.focus();
+        mainWindow.webContents.send('app:window-restored', { reason: 'second-instance' });
+      }, 50);
     }
   });
 }

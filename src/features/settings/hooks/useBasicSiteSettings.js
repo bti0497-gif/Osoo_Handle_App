@@ -2,7 +2,6 @@ import { SettingsModel } from '../SettingsModel';
 import { EMPTY_SITE_INFO, getDefaultFlowOptionBySeries } from '../settingsDefaults';
 
 export const useBasicSiteSettings = ({
-    siteInfo,
     setSiteInfo,
     availableSites,
     selectedSiteId,
