@@ -192,6 +192,15 @@ const apiSpec = {
   },
 
   // ===== 필수 시스템 API =====
+  monthlyOperationReport: {
+    tier: 2,
+    path: '/api/monthly-operation-report',
+    endpoints: [
+      { method: 'GET', path: '', description: '월운영보고서 월별 자료 요약' },
+      { method: 'POST', path: '/export', description: '기존 엑셀 양식 기반 월운영보고서 생성' },
+    ],
+  },
+
   system: {
     tier: 0,
     path: '/api',

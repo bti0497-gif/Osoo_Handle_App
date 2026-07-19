@@ -36,6 +36,7 @@ export const MENUS = [
     icon: 'edit_note',
     children: [
       { id: 'log_daily', label: '일일업무일지' },
+      { id: 'log_monthly_operation', label: '월운영보고서' },
       { id: 'log_water', label: '수질분석일지' },
       { id: 'log_med_mgmt', label: '약품관리대장' },
       { id: 'log_med_in', label: '약품입고일지' },
@@ -62,6 +63,7 @@ export const TAB_LABELS = {
   equipment_card: '장비이력카드',
   log: '일지작성',
   log_daily: '일일업무일지',
+  log_monthly_operation: '월운영보고서',
   log_water: '수질분석일지',
   log_med_mgmt: '약품관리대장',
   log_med_in: '약품입고일지',

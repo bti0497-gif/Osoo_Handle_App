@@ -1,0 +1,1 @@
+export { MonthlyOperationReportView } from './MonthlyOperationReportView';

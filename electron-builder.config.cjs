@@ -35,6 +35,7 @@ module.exports = {
   ],
   extraResources: [
     { from: 'scripts', to: 'scripts' },
+    { from: 'templates/reports/월운영보고서.xlsx', to: 'templates/reports/월운영보고서.xlsx' },
   ],
   win: {
     target: [

@@ -62,6 +62,7 @@ function validateReportTemplateFiles(rootDir, description) {
     '약품입고일지.xlsx',
     '슬러지반출관리대장.xlsx',
     '슬러지사진대지.xlsx',
+    '월운영보고서.xlsx',
   ];
 
   for (const fileName of requiredTemplates) {
@@ -203,10 +204,19 @@ function validateReportTemplatesExcluded(rootDir, description) {
   const packagedFiles = fs.existsSync(reportsDir)
     ? fs.readdirSync(reportsDir).filter((name) => !name.startsWith('.'))
     : [];
-  if (packagedFiles.length === 0) {
-    success(`${description} 일지 양식 미포함 확인`);
-  } else {
-    error(`${description}에 현장 양식을 덮어쓸 수 있는 파일이 포함됨: ${packagedFiles.join(', ')}`);
+  const permittedNewDefault = '월운영보고서.xlsx';
+  const disallowed = packagedFiles.filter((name) => name !== permittedNewDefault);
+  if (disallowed.length === 0 && packagedFiles.includes(permittedNewDefault)) success(`${description} 신규 월운영보고서 기본양식만 포함됨`);
+  else if (disallowed.length > 0) error(`${description}에 현장 양식을 덮어쓸 수 있는 파일이 포함됨: ${disallowed.join(', ')}`);
+  else error(`${description}에 신규 월운영보고서 기본양식이 누락됨`);
+}
+
+function validateMonthlyOperationReportContract() {
+  try {
+    execSync(`"${process.execPath}" "${path.join(BASE_DIR, 'scripts', 'validate-monthly-operation-report.cjs')}"`, { cwd: BASE_DIR, stdio: 'pipe' });
+    success('월운영보고서 양식·수식·자동재계산 보호 계약 확인');
+  } catch (validationError) {
+    error(`월운영보고서 보호 계약 실패: ${validationError.stderr?.toString().trim() || validationError.message}`);
   }
 }
 
@@ -1634,6 +1644,7 @@ function printSummary() {
   validateNativeModuleReleaseContract();
   validateInstallerNamingPolicy();
   validateRegressionContracts();
+  validateMonthlyOperationReportContract();
   validateAuthSessionContract();
   validateRouteRegistry();
   validateApiSpec();

@@ -50,6 +50,7 @@ const routeRegistry = [
   { tier: 2, path: '/',                   module: './routes/certificateRoutes.cjs',    args: ['db'] },
   { tier: 2, path: '/',                   module: './routes/locationRoutes.cjs',       args: ['BASE_DIR'] },
   { tier: 2, path: '/',                   module: './routes/dailyWorkLogRoutes.cjs',   args: ['db', 'BASE_DIR', 'appDataPath'] },
+  { tier: 2, path: '/',                   module: './routes/monthlyOperationReportRoutes.cjs', args: ['db', 'BASE_DIR', 'appDataPath'] },
   { tier: 2, path: '/',                   module: './routes/roadworkHelperRoutes.cjs', args: ['db'] },
 ];
 

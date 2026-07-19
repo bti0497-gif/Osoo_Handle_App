@@ -17,6 +17,7 @@ const WaterQualityView = lazy(() => import('./features/water').then((module) => 
 const OperationStatusView = lazy(() => import('./features/operation').then((module) => ({ default: module.OperationStatusView })));
 const FacilityManagementView = lazy(() => import('./features/facility').then((module) => ({ default: module.FacilityManagementView })));
 const DailyLogView = lazy(() => import('./features/dailylog').then((module) => ({ default: module.DailyLogView })));
+const MonthlyOperationReportView = lazy(() => import('./features/monthly-report').then((module) => ({ default: module.MonthlyOperationReportView })));
 const BoardView = lazy(() => import('./features/board').then((module) => ({ default: module.BoardView })));
 const SettingsView = lazy(() => import('./features/settings').then((module) => ({ default: module.SettingsView })));
 const KitManagementView = lazy(() => import('./features/kit').then((module) => ({ default: module.KitManagementView })));
@@ -307,6 +308,7 @@ function App() {
             case 'equipment_card': return <PlaceholderView title="장비이력카드" />;
             case 'log': return <PlaceholderView title="일지작성" />;
             case 'log_daily': return <DailyLogView key="log_daily" currentUser={user} templateName="일일업무일지" title="일일업무일지" />;
+            case 'log_monthly_operation': return <MonthlyOperationReportView currentUser={user} />;
             case 'log_water': return <DailyLogView key="log_water" currentUser={user} templateName="수질분석일지" title="수질분석일지" />;
             case 'log_med_mgmt': return <MedicineRegisterView currentUser={user} />;
             case 'log_med_in': return <MedicineInView currentUser={user} />;

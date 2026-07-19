@@ -96,6 +96,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
     // --- Log Mapping State ---
     const LOG_TYPES = [
         { id: 'daily_work_log', label: '일일업무일지' },
+        { id: 'monthly_operation_report', label: '월운영보고서' },
         { id: 'water_analysis_log', label: '수질분석일지' },
         { id: 'medicine_ledger', label: '약품관리대장' },
         { id: 'medicine_receipt_log', label: '약품입고일지' },
