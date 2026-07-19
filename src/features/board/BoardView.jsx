@@ -61,7 +61,7 @@ const BoardView = ({ currentUser }) => {
     const {
         posts, allPostsCount, loading, form, updateForm,
         submitPost, deletePost, viewPost, editPost,
-        selectedPost, comments, submitComment, deleteComment, uploadFile,
+        selectedPost, comments, sites, submitComment, deleteComment, uploadFile,
         viewMode, setViewMode, searchTerm, setSearchTerm,
         currentPage, setCurrentPage, totalPages, resetForm, loadPosts, replyToPost
     } = useBoardViewModel(currentUser, { showAlert, showConfirm });
@@ -72,6 +72,7 @@ const BoardView = ({ currentUser }) => {
     const quillRef = useRef(null);
 
     const isAdmin = PRIVILEGED_BOARD_ROLES.has(currentUser?.role);
+    const isSuperAdmin = String(currentUser?.role || '').trim() === 'admin';
     const isAuthor = (authorName) => currentUser?.name === authorName;
     const resolveAttachmentHref = (attachment) => {
         const rawUrl = String(attachment?.url || '').trim();
@@ -462,12 +463,12 @@ const BoardView = ({ currentUser }) => {
                                 </button>
 
                                 {isAuthor(selectedPost.author) && (
-                                    <>
                                         <button onClick={() => editPost(selectedPost)}
                                             style={{ height: '30px', padding: '0 12px', backgroundColor: 'white', color: '#1e293b', borderRadius: '6px', border: '1.5px solid #e2e8f0', fontWeight: 700, fontSize: '0.75rem', cursor: 'pointer' }}>수정</button>
+                                )}
+                                {(isAuthor(selectedPost.author) || isSuperAdmin) && (
                                         <button onClick={() => deletePost(selectedPost.id)}
                                             style={{ height: '30px', padding: '0 12px', backgroundColor: '#fee2e2', color: '#dc2626', borderRadius: '6px', border: '1.5px solid #fecaca', fontWeight: 700, fontSize: '0.75rem', cursor: 'pointer' }}>삭제</button>
-                                    </>
                                 )}
                             </div>
 
@@ -496,7 +497,7 @@ const BoardView = ({ currentUser }) => {
                                                         }}>
                                                         <span className="material-icons" style={{ fontSize: '12px' }}>reply</span> 댓글
                                                     </button>
-                                                    {isAuthor(c.author) && (
+                                                    {(isAuthor(c.author) || isSuperAdmin) && (
                                                         <button onClick={() => deleteComment(c.id, selectedPost.id)}
                                                             style={{
                                                                 background: '#fff1f2', border: '1px solid #fecdd3',
@@ -525,7 +526,7 @@ const BoardView = ({ currentUser }) => {
                                                                 padding: '1px 6px', borderRadius: '4px', cursor: 'pointer',
                                                                 fontSize: '0.625rem', fontWeight: 700, color: '#64748b'
                                                             }}>답글</button>
-                                                        {isAuthor(r.author) && (
+                                                        {(isAuthor(r.author) || isSuperAdmin) && (
                                                             <button onClick={() => deleteComment(r.id, selectedPost.id)}
                                                                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.625rem', fontWeight: 700, color: '#ef4444' }}>삭제</button>
                                                         )}
@@ -592,33 +593,18 @@ const BoardView = ({ currentUser }) => {
                                 {isAdmin && (
                                     <div style={{ marginBottom: '0.75rem' }}>
                                         <label style={{ display: 'block', fontSize: '0.6875rem', fontWeight: 800, color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>대상 현장</label>
-                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8125rem', fontWeight: 700, cursor: 'pointer' }}>
-                                                <input type="radio" name="target_site" value=""
-                                                    checked={!form.target_site}
-                                                    onChange={() => updateForm({ target_site: '' })} />
-                                                전체 현장
-                                            </label>
-                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8125rem', fontWeight: 700, cursor: 'pointer' }}>
-                                                <input type="radio" name="target_site" value="specific"
-                                                    checked={!!form.target_site}
-                                                    onChange={() => updateForm({ target_site: form.target_site || '' })} />
-                                                특정 현장
-                                            </label>
-                                            {!!form.target_site !== false && (
-                                                <input
-                                                    value={form.target_site}
-                                                    onChange={e => updateForm({ target_site: e.target.value })}
-                                                    placeholder="현장명 입력"
-                                                    style={{ border: '1.5px solid #e2e8f0', height: '32px', padding: '0 10px', fontSize: '0.8125rem', fontWeight: 600, outline: 'none', borderRadius: '6px', width: '160px' }}
-                                                    onFocus={e => e.target.style.borderColor = '#1e293b'}
-                                                    onBlur={e => e.target.style.borderColor = '#e2e8f0'}
-                                                />
-                                            )}
-                                        </div>
-                                        <p style={{ fontSize: '0.625rem', color: '#94a3b8', marginTop: '4px', fontWeight: 600 }}>
-                                            * 전체: 모든 현장관리자 + 중앙관리자에게 표시 / 특정 현장: 해당 현장관리자 + 중앙관리자에게만 표시
-                                        </p>
+                                        <select
+                                            value={form.target_site || ''}
+                                            onChange={e => updateForm({ target_site: e.target.value })}
+                                            style={{ border: '1.5px solid #e2e8f0', height: '36px', padding: '0 10px', fontSize: '0.8125rem', fontWeight: 700, color: '#1e293b', outline: 'none', borderRadius: '6px', minWidth: '280px', backgroundColor: 'white' }}
+                                        >
+                                            <option value="">전체 현장</option>
+                                            {sites.map((site) => (
+                                                <option key={site.id || site.site_name} value={site.site_name}>
+                                                    {site.site_name}
+                                                </option>
+                                            ))}
+                                        </select>
                                     </div>
                                 )}
 

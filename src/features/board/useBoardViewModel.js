@@ -40,6 +40,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
     const [currentPage, setCurrentPage] = useState(1);
     const [selectedPost, setSelectedPost] = useState(null);
     const [comments, setComments] = useState([]);
+    const [sites, setSites] = useState([]);
     const [form, setForm] = useState({ title: '', content: '', is_notice: 0, attachments: '', parent_id: null, target_site: '' });
     const postsPerPage = 10;
 
@@ -53,14 +54,18 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
             content: '',
             is_notice: 0,
             attachments: '',
-            parent_id: parentPost.id
+            parent_id: parentPost.id,
+            target_site: parentPost.target_site || ''
         });
         setViewMode('form');
     };
 
     const sortThreadedPosts = (data) => {
         const isNotice = (post) => post.is_notice === 1 || post.is_notice === true;
-        const notices = data.filter(isNotice).map(p => ({ ...p, depth: 0 }));
+        const notices = data
+            .filter(isNotice)
+            .map(p => ({ ...p, depth: 0 }))
+            .sort((a, b) => toTimestampMs(b.created_at) - toTimestampMs(a.created_at));
         const regulars = data.filter(p => !isNotice(p));
 
         const postMap = {};
@@ -135,6 +140,21 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
     }, [currentUser, showAlert]);
 
     useEffect(() => { loadPosts(); }, [loadPosts]);
+
+    useEffect(() => {
+        if (!['admin', 'group_admin', 'super_admin', 'central_admin'].includes(String(currentUser?.role || ''))) {
+            setSites([]);
+            return;
+        }
+        BoardModel.fetchSites()
+            .then((data) => setSites(data
+                .filter((site) => site?.site_name && Number(site?.is_active ?? 1) === 1)
+                .sort((a, b) => String(a.site_name).localeCompare(String(b.site_name), 'ko'))))
+            .catch((error) => {
+                console.error('Failed to load board target sites:', error);
+                setSites([]);
+            });
+    }, [currentUser?.role]);
 
     const updateForm = (patch) => setForm(prev => ({ ...prev, ...patch }));
 
@@ -281,6 +301,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
         getReplyParentPost,
         selectedPost,
         comments,
+        sites,
         submitComment,
         deleteComment,
         uploadFile,

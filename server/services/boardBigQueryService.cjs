@@ -187,6 +187,16 @@ async function getComments(postId) {
   return rows;
 }
 
+async function getComment(id) {
+  const bq = getBigQueryClient();
+  if (!bq) throw new Error('BigQuery 클라이언트 초기화 실패');
+  const [rows] = await bq.query({
+    query: `SELECT * FROM \`${DATASET_ID}.comments\` WHERE id = @id AND is_deleted = FALSE LIMIT 1`,
+    params: { id }
+  });
+  return rows[0] || null;
+}
+
 /**
  * 댓글 생성
  */
@@ -209,9 +219,17 @@ async function createComment(postId, data) {
 /**
  * 댓글 생성
  */
-async function deleteComment(id) {
+async function deleteComment(id, user = {}) {
   const bq = getBigQueryClient();
   if (!bq) throw new Error('BigQuery 클라이언트 초기화 실패');
+
+  const comment = await getComment(id);
+  if (!comment) throw new Error('댓글을 찾을 수 없습니다.');
+  if (String(user?.role || '').trim() !== 'admin' && String(comment.author || '') !== String(user.name || '')) {
+    const err = new Error('댓글 삭제 권한 없음');
+    err.status = 403;
+    throw err;
+  }
 
   await bq.query({
     query: `UPDATE \`${DATASET_ID}.comments\` SET is_deleted = TRUE WHERE id = @id`,
@@ -226,6 +244,7 @@ module.exports = {
   updatePost,
   deletePost,
   getComments,
+  getComment,
   createComment,
   deleteComment
 };

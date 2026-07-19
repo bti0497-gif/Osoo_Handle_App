@@ -206,13 +206,16 @@ function buildInitialDraft(tabId, item, roundValue) {
 
     if (tabId === 'flow') {
         const isSludge = isSludgeFlowItem(item);
+        const isPower = String(item?.key || item?.name || item?.label || '').includes('전력');
         const previousMonthlyExport = toNumberOrNull(item?.previous?.monthlyExport)
             ?? toNumberOrNull(item?.previous?.monthly_export)
             ?? 0;
         return {
             reading: item.values?.reading ?? (isSludge ? 0 : ''),
             calculatedFlow: item.values?.flow ?? (isSludge ? round1(previousMonthlyExport) : ''),
-            readingUnit: item.values?.readingUnit || getStoredPowerReadingUnit() || item.previous?.readingUnit || 'KWH',
+            readingUnit: isPower
+                ? (item.values?.readingUnit || getStoredPowerReadingUnit() || item.previous?.readingUnit || 'KWH')
+                : '',
         };
     }
 
@@ -633,13 +636,13 @@ export default function UnifiedRecordModal({
                 const isSludge = isSludgeFlowItem(item);
 
                 if (reading === null && isSludge) {
-                    const previousMonthlyExport = toNumberOrNull(item?.previous?.monthlyExport)
-                        ?? toNumberOrNull(item?.previous?.monthly_export)
+                    const previousYearlyExport = toNumberOrNull(item?.previous?.yearlyExport)
+                        ?? toNumberOrNull(item?.previous?.yearly_export)
                         ?? 0;
                     flowItemsToSave.push({
                         type: item.key || item.name || item.label,
                         raw_value: 0,
-                        calculated_flow: round1(previousMonthlyExport),
+                        calculated_flow: round1(previousYearlyExport),
                         sludge_export: 0,
                         is_manual: false,
                         is_reset: false,
@@ -674,8 +677,14 @@ export default function UnifiedRecordModal({
                 flowItemsToSave.push({
                     type: item.key || item.name || item.label,
                     raw_value: reading,
-                    calculated_flow: calculatedFlow,
-                    reading_unit: String(values.readingUnit || '').trim().toUpperCase() || null,
+                    calculated_flow: isSludge
+                        ? round1((toNumberOrNull(item?.previous?.yearlyExport)
+                            ?? toNumberOrNull(item?.previous?.yearly_export)
+                            ?? 0) + (reading ?? 0))
+                        : calculatedFlow,
+                    reading_unit: String(item.key || item.name || item.label || '').includes('전력')
+                        ? (String(values.readingUnit || '').trim().toUpperCase() || 'KWH')
+                        : null,
                     sludge_export: isSludge ? reading : null,
                     is_manual: false,
                     is_reset: false,
@@ -993,10 +1002,20 @@ export default function UnifiedRecordModal({
                                 <button
                                     type="button"
                                     onClick={async () => {
-                                        if (isRange) {
-                                            await onImportQntechRange?.(rangeStartDate, rangeEndDate);
-                                        } else if (isSameDay) {
-                                            await onImportQntech?.(rangeStartDate);
+                                        try {
+                                            if (isRange) {
+                                                if (typeof onImportQntechRange !== 'function') {
+                                                    throw new Error('기간 불러오기 기능이 연결되지 않았습니다.');
+                                                }
+                                                await onImportQntechRange(rangeStartDate, rangeEndDate);
+                                            } else if (isSameDay) {
+                                                if (typeof onImportQntech !== 'function') {
+                                                    throw new Error('QnTECH 불러오기 기능이 연결되지 않았습니다.');
+                                                }
+                                                await onImportQntech(rangeStartDate);
+                                            }
+                                        } catch (error) {
+                                            onValidationError?.(`QnTECH 불러오기를 시작하지 못했습니다: ${error.message}`);
                                         }
                                     }}
                                     disabled={isImportingQntech || !hasBoth}

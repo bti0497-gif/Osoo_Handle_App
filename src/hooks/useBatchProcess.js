@@ -5,8 +5,19 @@ const waitForNextPaint = () => new Promise((resolve) => {
         setTimeout(resolve, 0);
         return;
     }
+
+    let settled = false;
+    const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(fallbackTimer);
+        resolve();
+    };
+    // Electron/Chromium may suspend requestAnimationFrame while the window is
+    // occluded or inactive. UI painting must never block the actual operation.
+    const fallbackTimer = setTimeout(finish, 200);
     window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(resolve);
+        window.requestAnimationFrame(finish);
     });
 });
 

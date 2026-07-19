@@ -23,7 +23,7 @@ const express = require('express');
 const router  = express.Router();
 const {
   getPosts, getPost, createPost, updatePost, deletePost,
-  getComments, createComment, deleteComment
+  getComments, getComment, createComment, deleteComment
 } = require('../services/boardService.cjs');
 
 const ADMIN_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
@@ -50,6 +50,10 @@ function isAdmin(user) {
 
 function isAdminRole(role) {
   return ADMIN_ROLES.has(String(role || '').trim());
+}
+
+function isSuperAdmin(user) {
+  return String(user?.role || '').trim() === 'admin';
 }
 
 function canViewPost(user, post) {
@@ -168,8 +172,8 @@ module.exports = function () {
       if (!canViewPost(user, existing)) {
         return res.status(403).json({ success: false, message: '게시글 조회 권한 없음' });
       }
-      if (!isAdmin(user) && existing.author !== user.name) {
-        return res.status(403).json({ success: false, message: '수정 권한 없음' });
+      if (!isSuperAdmin(user) && existing.author !== user.name) {
+        return res.status(403).json({ success: false, message: '삭제 권한 없음' });
       }
       await deletePost(req.params.id);
       res.json({ success: true });
@@ -213,6 +217,13 @@ module.exports = function () {
   router.delete('/api/board/comments/:id', async (req, res) => {
     const user = extractUser(req);
     try {
+      const comment = await getComment(req.params.id);
+      if (!comment) return res.status(404).json({ success: false, message: '댓글 없음' });
+      const post = await getPost(comment.post_id);
+      if (!post) return res.status(404).json({ success: false, message: '게시글 없음' });
+      if (!canViewPost(user, post)) {
+        return res.status(403).json({ success: false, message: '댓글 삭제 권한 없음' });
+      }
       await deleteComment(req.params.id, user);
       res.json({ success: true });
     } catch (err) { handleError(res, err, 'deleteComment'); }

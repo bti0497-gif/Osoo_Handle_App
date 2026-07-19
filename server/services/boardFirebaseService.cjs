@@ -277,6 +277,13 @@ async function getComments(postId) {
   return comments;
 }
 
+async function getComment(id) {
+  ensureInitialized();
+  const doc = await db.collection('comments').doc(id).get();
+  if (!doc.exists || doc.data()?.is_deleted) return null;
+  return { id: doc.id, ...doc.data() };
+}
+
 /**
  * 댓글 생성
  */
@@ -309,7 +316,7 @@ async function deleteComment(id, user = {}) {
   if (!doc.exists) throw new Error('댓글을 찾을 수 없습니다.');
 
   const comment = doc.data();
-  if (!isAdmin(user) && String(comment.author || '') !== String(user.name || '')) {
+  if (String(user?.role || '').trim() !== 'admin' && String(comment.author || '') !== String(user.name || '')) {
     const err = new Error('댓글 삭제 권한 없음');
     err.status = 403;
     throw err;
@@ -327,6 +334,7 @@ module.exports = {
   updatePost,
   deletePost,
   getComments,
+  getComment,
   createComment,
   deleteComment
 };

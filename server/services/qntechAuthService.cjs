@@ -5,6 +5,7 @@ const https = require('https');
 const DEFAULT_BASE_URL = 'https://eco.qntech.co.kr';
 const SESSION_REVALIDATE_MS = 5 * 60 * 1000;
 const SESSION_MAX_IDLE_MS = 30 * 60 * 1000;
+const HTTP_REQUEST_TIMEOUT_MS = 60 * 1000;
 
 const LOGIN_MUTATION = `mutation Login($userId: String!, $password: String!) {
   signIn(data: { userId: $userId, password: $password }) {
@@ -121,6 +122,9 @@ function httpRequest(urlString, { method = 'GET', headers = {}, body } = {}) {
     });
 
     request.on('error', reject);
+    request.setTimeout(HTTP_REQUEST_TIMEOUT_MS, () => {
+      request.destroy(new Error(`QnTECH 요청 시간이 ${HTTP_REQUEST_TIMEOUT_MS / 1000}초를 초과했습니다.`));
+    });
     if (body) request.write(body);
     request.end();
   });

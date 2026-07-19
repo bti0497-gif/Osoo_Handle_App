@@ -53,8 +53,19 @@ const waitForUiPaint = () => new Promise((resolve) => {
         setTimeout(resolve, 0);
         return;
     }
+
+    let settled = false;
+    const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(fallbackTimer);
+        resolve();
+    };
+    // A hidden or inactive Electron window can pause animation frames. The
+    // import request must still start even when the progress UI cannot repaint.
+    const fallbackTimer = setTimeout(finish, 200);
     window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(resolve);
+        window.requestAnimationFrame(finish);
     });
 });
 
@@ -135,6 +146,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
         isImportingFromQntech,
         handleImportFromQntech,
         handleImportRangeFromQntech,
+        recordQntechDiagnostic,
     } = useWaterQualityViewModel(currentUser, { showToast });
 
     const batchProcess = useBatchProcess();
@@ -336,19 +348,24 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
     };
 
     const handleQntechImportRangeClick = async (startDate, endDate) => {
+        void recordQntechDiagnostic('range-clicked', { startDate, endDate });
         if (!startDate || !endDate) {
+            void recordQntechDiagnostic('range-validation-failed', { reason: 'missing-date', startDate, endDate });
             showToast?.('가져올 기간을 선택하세요.', 'error');
             return;
         }
         if (startDate > endDate) {
+            void recordQntechDiagnostic('range-validation-failed', { reason: 'start-after-end', startDate, endDate });
             showToast?.('시작 날짜가 종료 날짜보다 늦을 수 없습니다.', 'error');
             return;
         }
         if (startDate > todayStr || endDate > todayStr) {
+            void recordQntechDiagnostic('range-validation-failed', { reason: 'future-date', startDate, endDate, today: todayStr });
             showToast?.('오늘보다 미래 날짜는 불러올 수 없습니다.', 'error');
             return;
         }
         if (startDate === endDate) {
+            void recordQntechDiagnostic('single-date-dispatch', { date: startDate });
             await handleQntechImportClick(startDate);
             return;
         }
@@ -360,14 +377,20 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
 
         let confirmed = false;
         try {
+            void recordQntechDiagnostic('range-confirm-shown', { startDate, endDate });
             confirmed = await showConfirm('기간 불러오기는 즉시 저장됩니다. 기존 값이 있는 날짜는 값을 유지하고 사진을 함께 저장합니다. 계속할까요?');
         } catch (error) {
+            void recordQntechDiagnostic('range-confirm-error', { startDate, endDate, message: error.message });
             showToast?.(`확인창 처리 중 오류가 발생했습니다: ${error.message}`, 'error');
             return;
         }
-        if (!confirmed) return;
+        if (!confirmed) {
+            void recordQntechDiagnostic('range-confirm-cancelled', { startDate, endDate });
+            return;
+        }
 
         let rangeResult = null;
+        void recordQntechDiagnostic('range-api-dispatch', { startDate, endDate });
         const success = await batchProcess.executeBatch(
             [`${startDate}:${endDate}`],
             () => ({ id: `${startDate}:${endDate}`, title: `${startDate} ~ ${endDate} 데이터` }),
@@ -391,6 +414,13 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
         );
 
         if (success) {
+            void recordQntechDiagnostic('range-completed', {
+                startDate,
+                endDate,
+                insertedRowCount: rangeResult?.summary?.insertedRowCount || 0,
+                savedPhotoCount: rangeResult?.summary?.savedPhotoCount || 0,
+                unmatchedItemCount: rangeResult?.summaryRows?.reduce((count, row) => count + (row.unmatchedItems?.length || 0), 0) || 0,
+            });
             batchProcess.resetBatch();
             if (startDate <= modalDate && modalDate <= endDate) {
                 setModalState((prev) => ({ ...prev, mode: 'edit' }));
@@ -405,6 +435,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
                 totalDriveUploadErrorCount > 0 ? 'warning' : 'success'
             );
         } else {
+            void recordQntechDiagnostic('range-failed', { startDate, endDate });
             showToast?.('기간 데이터 불러오기에 실패했습니다. 진행상황은 다시 화면을 열어 확인할 수 있습니다.', 'error');
         }
     };

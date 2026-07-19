@@ -93,10 +93,15 @@ module.exports = function (db) {
         } else if (prevRaw != null && Number.isFinite(prevRaw)) {
           // 검침값은 누적이므로 어제보다 작을 수 없다. 작아지면(마이너스) 0으로
           // 클램프한다. 필요하면 전날 검침값을 먼저 수정하거나 '초기화'로 처리한다.
-          const readingUnit = String(row.reading_unit || prevReadingUnit || 'KWH').toUpperCase();
-          const effectivePreviousUnit = String(prevReadingUnit || readingUnit).toUpperCase();
-          const currentMultiplier = readingUnit === 'MWH' ? 1000 : 1;
-          const previousMultiplier = effectivePreviousUnit === 'MWH' ? 1000 : 1;
+          const isPowerType = String(type || '').includes('전력');
+          const readingUnit = isPowerType
+            ? String(row.reading_unit || prevReadingUnit || 'KWH').toUpperCase()
+            : 'KWH';
+          const effectivePreviousUnit = isPowerType
+            ? String(prevReadingUnit || readingUnit).toUpperCase()
+            : 'KWH';
+          const currentMultiplier = isPowerType && readingUnit === 'MWH' ? 1000 : 1;
+          const previousMultiplier = isPowerType && effectivePreviousUnit === 'MWH' ? 1000 : 1;
           const diff = (rawNum * currentMultiplier) - (prevRaw * previousMultiplier);
           flow = Math.round(diff * 10) / 10;
           if (flow < 0) flow = 0;
@@ -106,7 +111,7 @@ module.exports = function (db) {
           flow = rawNum;
         }
         prevRaw = rawNum;
-        prevReadingUnit = row.reading_unit || prevReadingUnit;
+        prevReadingUnit = String(type || '').includes('전력') ? (row.reading_unit || prevReadingUnit) : null;
       }
 
       const prevFlow = row.calculated_flow == null ? null : Number(row.calculated_flow);
@@ -195,13 +200,16 @@ module.exports = function (db) {
         for (const item of rows) {
           const { type, raw_value, calculated_flow, reading_unit, sludge_export, is_reset, is_manual } = item;
           const sludgeAmount = type === '슬러지' ? (sludge_export ?? raw_value ?? null) : null;
+          const safeReadingUnit = String(type || '').includes('전력')
+            ? (String(reading_unit || '').trim().toUpperCase() || 'KWH')
+            : null;
           // 프론트엔드에서 이미 계산된 flow와 raw를 넘겨주므로 그대로 저장 (수동이든 자동이든)
           stmt.run(
             date,
             type,
             raw_value,
             calculated_flow,
-            String(reading_unit || '').trim().toUpperCase() || null,
+            safeReadingUnit,
             is_reset ? 1 : 0,
             0,
             sludgeAmount,

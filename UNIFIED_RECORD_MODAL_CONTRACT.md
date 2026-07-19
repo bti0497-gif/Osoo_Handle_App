@@ -34,6 +34,8 @@ This document protects the integrated input modal used by flow, water, medicine,
 - Medicine and kit have inventory.
 - Empty medicine and kit purchase/usage inputs default to zero, and inventory carries forward from the previous date.
 - Empty sludge export defaults to zero, while its cumulative value carries forward.
+- The sludge field labelled `월 반출량` must display only the sum of sludge exports in the selected calendar month, including the selected day's input.
+- Sludge `calculated_flow` remains the selected calendar year's cumulative export and must be saved independently from the modal's monthly display value.
 - Editing purchase or usage recalculates that day's inventory from previous inventory plus purchase minus usage.
 - Medicine and kit inventory must be clamped at zero when purchase/usage calculations would otherwise go negative.
 - The kit bulk `+1/-1` control must apply to every active kit item together. If a `+1` would make a kit negative, usage still changes together and that kit inventory is clamped at zero.

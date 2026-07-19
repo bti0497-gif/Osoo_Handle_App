@@ -718,12 +718,17 @@ function buildBindingsForDate(db, date, context = {}) {
   const parsedPowerFlow = parseFloat(flowPower?.calculated_flow);
   const parsedOutFlow = parseFloat(flowOut?.calculated_flow); // 방류처리량(calculated_flow) 사용
   if (!isNaN(parsedPowerFlow) && !isNaN(parsedOutFlow) && parsedOutFlow > 0) {
-    kwPerM3 = (parsedPowerFlow / parsedOutFlow).toFixed(3); // 1m3당 사용량 (보통 소수점 3자리까지)
+    // Excel 후속 수식에서 텍스트가 아닌 숫자로 인식되도록
+    // toFixed() 문자열 대신 소수점 세 자리 반올림 숫자를 바인딩한다.
+    kwPerM3 = Math.round((parsedPowerFlow / parsedOutFlow) * 1000) / 1000;
   }
-  bindings['kw당사용량'] = kwPerM3;
-  bindings['전력효율'] = kwPerM3;
-  bindings['1m3당사용량'] = kwPerM3;
-  bindings['전력계산'] = kwPerM3;
+  setBindingAliases(bindings, [
+    'kw당사용량',
+    '전력효율',
+    '1m3당사용량',
+    '1제곱미터당사용량',
+    '전력계산',
+  ], kwPerM3);
 
   // 전력계산(방류량 전력량 계산값 바인딩
   bindings['전력효율'] = kwPerM3;

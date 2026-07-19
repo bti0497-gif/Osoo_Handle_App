@@ -24,6 +24,12 @@ function userQuery(currentUser) {
 }
 
 export const BoardModel = {
+    async fetchSites() {
+        const res = await apiClient.get('/api/settings/sites');
+        if (!res.success) throw new Error(res.message || '현장 목록 로드 실패');
+        return Array.isArray(res.sites) ? res.sites : [];
+    },
+
     async fetchPosts(currentUser) {
         const u = userPayload(currentUser)._user;
         const res = await apiClient.get('/api/board/posts', {

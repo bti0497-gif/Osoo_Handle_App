@@ -250,7 +250,9 @@ function registerLazyApplication() {
       if (shouldLog) {
         try {
           const rawResponseText = args?.[0] ? String(args[0]) : '';
-          const responseText = rawResponseText.slice(0, 2000);
+          const responseText = pathName === '/api/settings/web-app-credentials'
+            ? '<redacted credential response>'
+            : rawResponseText.slice(0, 2000);
           let responseCount;
           try {
             const parsedResponse = rawResponseText ? JSON.parse(rawResponseText) : null;

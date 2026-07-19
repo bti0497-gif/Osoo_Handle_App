@@ -40,12 +40,12 @@ const getPreviousFlowCell = (history, selectedDate, flowName) => {
     return null;
 };
 
-const getYearlySludgeExportBefore = (history, selectedDate, flowName) => {
-    const yearKey = String(selectedDate || '').slice(0, 4);
-    if (!yearKey) return 0;
+const getSludgeExportBefore = (history, selectedDate, flowName, periodLength) => {
+    const periodKey = String(selectedDate || '').slice(0, periodLength);
+    if (!periodKey) return 0;
 
     return history.reduce((sum, row) => {
-        if (!row?.date || row.date >= selectedDate || String(row.date).slice(0, 4) !== yearKey) return sum;
+        if (!row?.date || row.date >= selectedDate || String(row.date).slice(0, periodLength) !== periodKey) return sum;
         const value = toNumberOrNull(row?.[flowName]?.raw);
         return value === null ? sum : sum + value;
     }, 0);
@@ -135,9 +135,15 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                 const prev = getPreviousFlowCell(history, modalDate, item.name);
                 const isSludge = isSludgeItem(item.name);
                 const previousYearlyExport = isSludge
-                    ? getYearlySludgeExportBefore(history, modalDate, item.name)
+                    ? getSludgeExportBefore(history, modalDate, item.name, 4)
+                    : null;
+                const previousMonthlyExport = isSludge
+                    ? getSludgeExportBefore(history, modalDate, item.name, 7)
                     : null;
                 const currentExport = isSludge ? toNumberOrNull(cell?.reading) : null;
+                const currentMonthlyExport = isSludge && currentExport !== null
+                    ? previousMonthlyExport + currentExport
+                    : previousMonthlyExport > 0 ? previousMonthlyExport : 0;
                 const currentYearlyExport = isSludge && currentExport !== null
                     ? previousYearlyExport + currentExport
                     : previousYearlyExport > 0 ? previousYearlyExport : '';
@@ -147,7 +153,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                     label: item.name,
                     values: {
                         reading: cell?.reading ?? '',
-                        flow: isSludge ? currentYearlyExport : (cell?.flow ?? ''),
+                        flow: isSludge ? currentMonthlyExport : (cell?.flow ?? ''),
                         readingUnit: rawCell?.reading_unit || '',
                     },
                     previous: {
@@ -155,6 +161,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                         flow: prev?.diff ?? '',
                         readingUnit: prev?.reading_unit || '',
                         yearlyExport: previousYearlyExport,
+                        monthlyExport: previousMonthlyExport,
                     },
                     summary: isSludge
                         ? [

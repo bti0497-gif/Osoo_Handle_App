@@ -486,6 +486,10 @@ function validateRegressionContracts() {
   const useTemplateSettingsPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'hooks', 'useTemplateSettings.js');
   const boardServicePath = path.join(BASE_DIR, 'server', 'services', 'boardService.cjs');
   const boardFirebaseServicePath = path.join(BASE_DIR, 'server', 'services', 'boardFirebaseService.cjs');
+  const boardRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'boardRoutes.cjs');
+  const boardModelPath = path.join(BASE_DIR, 'src', 'features', 'board', 'BoardModel.js');
+  const boardViewModelPath = path.join(BASE_DIR, 'src', 'features', 'board', 'useBoardViewModel.js');
+  const boardViewPath = path.join(BASE_DIR, 'src', 'features', 'board', 'BoardView.jsx');
   const databasePath = path.join(BASE_DIR, 'server', 'database.cjs');
   const facilityRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'facilityRoutes.cjs');
   const facilityModelPath = path.join(BASE_DIR, 'src', 'features', 'facility', 'FacilityModel.js');
@@ -559,6 +563,10 @@ function validateRegressionContracts() {
   const localDataBackupContractText = readText(localDataBackupContractPath);
   const boardServiceText = readText(boardServicePath);
   const boardFirebaseServiceText = readText(boardFirebaseServicePath);
+  const boardRoutesText = readText(boardRoutesPath);
+  const boardModelText = readText(boardModelPath);
+  const boardViewModelText = readText(boardViewModelPath);
+  const boardViewText = readText(boardViewPath);
   const parentManagementViews = [
     ['유량', flowManagementViewText],
     ['약품', medicineManagementViewText],
@@ -582,6 +590,34 @@ function validateRegressionContracts() {
       boardFirebaseServiceText.includes('const visiblePosts = posts;'),
     '소통게시판 visible_sites 단일 가시성 판정 계약 유지',
     'Firebase visible_sites 조회 후 작성자 역할 중복 필터로 대상 글이 사라질 수 있습니다'
+  );
+
+  checkSource(
+    boardModelText.includes("apiClient.get('/api/settings/sites')") &&
+      boardViewText.includes('<select') &&
+      boardViewText.includes('{site.site_name}') &&
+      !boardViewText.includes('* 전체: 모든 현장관리자'),
+    '소통게시판 대상 현장 드롭다운 계약 유지',
+    '소통게시판 현장 선택이 직접 입력으로 되돌아가거나 불필요한 설명이 다시 노출될 수 있습니다'
+  );
+
+  checkSource(
+    boardViewModelText.includes('.sort((a, b) => toTimestampMs(b.created_at) - toTimestampMs(a.created_at))') &&
+      boardViewModelText.includes("target_site: parentPost.target_site || ''"),
+    '소통게시판 최신 공지 우선·답글 대상 승계 계약 유지',
+    '최신 공지가 위로 오지 않거나 답글이 원글과 다른 현장에 노출될 수 있습니다'
+  );
+
+  checkSource(
+    boardRoutesText.includes('const comment = await getComment(req.params.id)') &&
+      boardRoutesText.includes('const post = await getPost(comment.post_id)') &&
+      boardRoutesText.includes('if (!canViewPost(user, post))') &&
+      boardRoutesText.includes("String(user?.role || '').trim() === 'admin'") &&
+      boardViewText.includes('(isAuthor(selectedPost.author) || isSuperAdmin)') &&
+      boardViewText.includes('(isAuthor(c.author) || isSuperAdmin)') &&
+      boardViewText.includes('(isAuthor(r.author) || isSuperAdmin)'),
+    '소통게시판 댓글 삭제 원글 권한 재검증 계약 유지',
+    '댓글 삭제 시 원글의 현장 가시성 권한을 우회할 수 있습니다'
   );
 
   checkSource(
@@ -864,13 +900,33 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    viewModelText.includes('sumSludgeExportsBefore(history, date, name, 7)') &&
+      viewModelText.includes('sumSludgeExportsBefore(history, date, name, 4)') &&
+      flowManagementViewText.includes('getSludgeExportBefore(history, modalDate, item.name, 7)') &&
+      flowManagementViewText.includes('getSludgeExportBefore(history, modalDate, item.name, 4)') &&
+      modalText.includes("toNumberOrNull(item?.previous?.yearlyExport)") &&
+      unifiedRecordModalContractText.includes('The sludge field labelled `월 반출량`') &&
+      unifiedRecordModalContractText.includes("Sludge `calculated_flow` remains the selected calendar year's cumulative export"),
+    '통합 모달 슬러지 월 반출량 표시·연 누계 저장 분리 계약 유지',
+    '슬러지 월 반출량에 연 누계가 표시되거나 저장 누계가 월 합계로 바뀌 수 있습니다'
+  );
+
+  checkSource(
     modalText.includes("POWER_UNIT_STORAGE_KEY = 'osoo:power-reading-unit'") &&
       modalText.includes("event.target.checked ? 'MWH' : 'KWH'") &&
       modalText.includes('(effectiveReading - previousReading) * readingMultiplier') &&
       modalText.includes('(calculatedFlow / 1000)') &&
-      modalText.includes('reading_unit: String(values.readingUnit') &&
-      flowRoutesText.includes("currentMultiplier = readingUnit === 'MWH' ? 1000 : 1") &&
+      modalText.includes("reading_unit: String(item.key || item.name || item.label || '').includes('전력')") &&
+      modalText.includes("String(item?.key || item?.name || item?.label || '').includes('전력')") &&
+      modalText.includes("? (String(values.readingUnit || '').trim().toUpperCase() || 'KWH')") &&
+      flowRoutesText.includes("currentMultiplier = isPowerType && readingUnit === 'MWH' ? 1000 : 1") &&
+      flowRoutesText.includes("const isPowerType = String(type || '').includes('전력')") &&
+      flowRoutesText.includes('const safeReadingUnit = String(type || \'\').includes(\'전력\')') &&
+      databaseText.includes('전력 외 MWh 오염 유량 자동 복구') &&
+      databaseText.includes("type NOT LIKE '%전력%'") &&
       dailyWorkLogServiceText.includes("bindings['전일전력입력단위']") &&
+      dailyWorkLogServiceText.includes('Math.round((parsedPowerFlow / parsedOutFlow) * 1000) / 1000') &&
+      dailyWorkLogServiceText.includes("'1제곱미터당사용량'") &&
       dailyWorkLogHwpxServiceText.includes("bookmark === '오늘지침'") &&
       dailyWorkLogHwpxServiceText.includes("toUpperCase() === 'MWH'"),
     '전력 MWh 검침·kWh 사용량·체크 유지·일지 소수 바인딩 계약 유지',

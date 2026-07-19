@@ -661,6 +661,64 @@ if (!sludgeCols.includes('sludge_photo_taken_at')) {
   db.prepare('ALTER TABLE sludge_photo_logs ADD COLUMN sludge_photo_taken_at TEXT').run();
 }
 
+// MWh 선택은 전력계에만 적용되어야 한다. 1.1.x 구버전에서 전력 단위가
+// 다른 유량계에도 저장되어 일일 유량이 1,000배가 된 행을 시작 시 복구한다.
+(() => {
+  const contaminated = db.prepare(`
+    SELECT type, MIN(date) AS start_date
+    FROM flow_readings
+    WHERE type NOT LIKE '%전력%'
+      AND UPPER(COALESCE(reading_unit, '')) = 'MWH'
+    GROUP BY type
+  `).all();
+  if (contaminated.length === 0) return;
+
+  const now = new Date().toISOString();
+  const clearUnit = db.prepare(`
+    UPDATE flow_readings SET reading_unit = NULL
+    WHERE type = ? AND UPPER(COALESCE(reading_unit, '')) = 'MWH'
+  `);
+  const previousStmt = db.prepare(`
+    SELECT raw_value FROM flow_readings
+    WHERE type = ? AND date < ? AND raw_value IS NOT NULL
+    ORDER BY date DESC, id DESC LIMIT 1
+  `);
+  const rowsStmt = db.prepare(`
+    SELECT id, raw_value, calculated_flow, is_reset
+    FROM flow_readings WHERE type = ? AND date >= ?
+    ORDER BY date ASC, id ASC
+  `);
+  const updateStmt = db.prepare(`
+    UPDATE flow_readings
+    SET calculated_flow = ?, reading_unit = NULL, last_modified = ?, is_synced = 0
+    WHERE id = ?
+  `);
+
+  db.transaction(() => {
+    for (const group of contaminated) {
+      clearUnit.run(group.type);
+      const previous = previousStmt.get(group.type, group.start_date);
+      let previousRaw = previous?.raw_value == null ? null : Number(previous.raw_value);
+      for (const row of rowsStmt.all(group.type, group.start_date)) {
+        const raw = row.raw_value == null ? null : Number(row.raw_value);
+        if (!Number.isFinite(raw)) continue;
+        const stored = row.calculated_flow == null ? null : Number(row.calculated_flow);
+        let calculated = stored;
+        if (!(row.is_reset && Number.isFinite(stored))) {
+          calculated = Number.isFinite(previousRaw)
+            ? Math.max(0, Math.round((raw - previousRaw) * 10) / 10)
+            : (Number.isFinite(stored) ? stored : raw);
+        }
+        if (calculated !== stored || row.is_reset !== 1) {
+          updateStmt.run(calculated, now, row.id);
+        }
+        previousRaw = raw;
+      }
+    }
+  })();
+  console.warn(`[Migration] 전력 외 MWh 오염 유량 자동 복구: ${contaminated.length}개 유량계`);
+})();
+
 // --- 슬러지 반출관리대장 기본설정 테이블 시드 ---
 db.prepare(`
   INSERT OR IGNORE INTO sludge_export_settings (id, company_name, default_amount, updated_at)

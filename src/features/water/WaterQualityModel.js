@@ -12,6 +12,17 @@ const clearHistoryCache = () => {
 };
 
 export const WaterQualityModel = {
+    async recordQntechUiDiagnostic(event, details = {}) {
+        try {
+            await apiClient.post('/api/auth/ui-diagnostic', {
+                event: `qntech-${event}`,
+                details,
+            });
+        } catch (error) {
+            console.warn('QnTECH UI diagnostic failed:', error);
+        }
+    },
+
     async fetchHistory(options = {}) {
         if (!options.force && historyCache) return historyCache;
         if (!options.force && historyPromise) return historyPromise;

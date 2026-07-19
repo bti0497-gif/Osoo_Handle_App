@@ -503,6 +503,7 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
         lastRangeImportSummary,
         handleImportFromQntech,
         handleImportRangeFromQntech,
+        recordQntechDiagnostic: WaterQualityModel.recordQntechUiDiagnostic,
         applyImportedWaterValues,
         saveModalDraft,
     };
