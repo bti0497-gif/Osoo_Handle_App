@@ -43,6 +43,18 @@ This document protects the integrated input modal used by flow, water, medicine,
 - Saving a past medicine or kit date triggers server-side recalculation of later inventory values.
 - Water quality values have no formula cascade and only the edited date/round/location is saved.
 
+## Power MWh Rules
+
+- The persisted MWh/KWh selection belongs only to an item whose flow type is power.
+- Power readings remain stored in the unit selected by the user.
+- When power uses MWh, daily `calculated_flow` must equal the reading difference multiplied by 1,000 and is stored as kWh.
+- When power uses KWh, daily `calculated_flow` must equal the reading difference without a multiplier.
+- Non-power flow items must always save `reading_unit` as null and must never inherit the persisted power unit.
+- The server must independently verify that the flow type is power before applying the MWh multiplier.
+- Startup migration must clear any historical non-power MWh contamination and recalculate affected flow rows from consecutive raw readings.
+- Repaired rows must be marked unsynced so corrected values can be synchronized downstream.
+- Daily-log power-per-cubic-meter bindings must remain numeric and preserve decimal precision for spreadsheet formulas.
+
 ## Close And Save Rules
 
 - Save happens only from the save button.
@@ -65,3 +77,13 @@ This document protects the integrated input modal used by flow, water, medicine,
 - Kit server save must upsert by `(kit_name, date)`.
 - Water server save must upsert by `(date, measurement_group, location, item_code)`.
 - Save failures must return `success: false` to the modal and must not be treated as success.
+
+## QnTECH Import Entry-Point Rules
+
+- The active modal tab determines the available operation; the parent menu used to open the modal must never disable another tab's operation.
+- Single-date and range QnTECH imports must work when the unified modal is opened from flow, water, medicine, or kit management.
+- Parent-provided water callbacks may be used when available, but the unified modal must retain an internal QnTECH fallback for every other parent menu.
+- The range fallback must validate dates, show the confirmation dialog, start the server background job, poll its progress, and display completed/total dates.
+- A completed QnTECH import must force-refresh both water and kit modal contexts.
+- Missing optional parent callbacks must never produce a `feature is not connected` user error.
+- Any change to the unified modal or any of its four parent management views must pass the entry-point regression guard in `npm run validate`.

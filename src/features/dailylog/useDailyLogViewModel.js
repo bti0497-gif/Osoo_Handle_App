@@ -58,12 +58,24 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
     const [outputFormat, setOutputFormat] = useState('pdf');
     const [activeDates, setActiveDates] = useState([]);
     const [siteName, setSiteName] = useState('');
+    const [localSite, setLocalSite] = useState({ id: '', name: '' });
+    const [outputSites, setOutputSites] = useState([]);
+    const [selectedOutputSiteId, setSelectedOutputSiteId] = useState('');
     const [dashboardRows, setDashboardRows] = useState([]);
     const [isDashboardLoading, setIsDashboardLoading] = useState(false);
-    const requestContext = useMemo(() => ({
-        siteId: currentUser?.site_id || '',
-        author: currentUser?.name || '',
-    }), [currentUser?.site_id, currentUser?.name]);
+    const requestContext = useMemo(() => {
+        const selectedSite = outputSites.find((site) => String(site.id) === String(selectedOutputSiteId));
+        const selectedSiteId = selectedSite?.id || currentUser?.site_id || localSite.id || '';
+        const selectedSiteName = selectedSite?.site_name || siteName || localSite.name || '';
+        const isRemote = Boolean(selectedSiteId && localSite.id && String(selectedSiteId) !== String(localSite.id));
+        return {
+            siteId: selectedSiteId,
+            siteName: selectedSiteName,
+            author: currentUser?.name || '',
+            dataSource: isRemote ? 'bigquery' : 'local',
+            localSiteName: localSite.name || '',
+        };
+    }, [currentUser?.site_id, currentUser?.name, localSite, outputSites, selectedOutputSiteId, siteName]);
     
     // 달력 표시 기준이 되는 년/월
     const [calendarActiveStartDate, setCalendarActiveStartDate] = useState(new Date(today));
@@ -78,10 +90,41 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
     useEffect(() => {
         SettingsModel.getSettings().then(res => {
             if (res.success && res.settings?.site_name) {
-                setSiteName(res.settings.site_name);
+                const nextLocalSite = {
+                    id: String(res.settings.site_id || currentUser?.site_id || ''),
+                    name: String(res.settings.site_name || ''),
+                };
+                setLocalSite(nextLocalSite);
+
+                const managedSites = Array.isArray(currentUser?.managed_sites) ? currentUser.managed_sites : [];
+                const pairedSites = isDailyWorkLog && String(currentUser?.name || '').trim() === '손규복'
+                    ? managedSites.filter((site) => (
+                        String(site?.manager_name || currentUser?.name || '').trim() === '손규복'
+                        && String(site?.site_name || '').includes('죽암휴게소')
+                    ))
+                    : [];
+                if (pairedSites.length >= 2) {
+                    const defaultSite = pairedSites.find((site) => String(site.site_name || '').includes('부산방향'))
+                        || pairedSites.find((site) => String(site.id) === nextLocalSite.id)
+                        || pairedSites[0];
+                    setOutputSites(pairedSites);
+                    setSelectedOutputSiteId(String(defaultSite.id || ''));
+                    setSiteName(String(defaultSite.site_name || nextLocalSite.name));
+                } else {
+                    setOutputSites([]);
+                    setSelectedOutputSiteId(nextLocalSite.id);
+                    setSiteName(nextLocalSite.name);
+                }
             }
         }).catch(err => console.error('Failed to fetch site name for daily log:', err));
-    }, []);
+    }, [currentUser, isDailyWorkLog]);
+
+    const handleOutputSiteChange = (siteId) => {
+        const selectedSite = outputSites.find((site) => String(site.id) === String(siteId));
+        if (!selectedSite) return;
+        setSelectedOutputSiteId(String(selectedSite.id || ''));
+        setSiteName(String(selectedSite.site_name || ''));
+    };
 
     const sortedDates = [...selectedDates].sort();
     const computedStartDate = sortedDates[0] || today;
@@ -497,5 +540,8 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         dashboardDateRows,
         dashboardSummary,
         isDashboardLoading,
+        outputSites,
+        selectedOutputSiteId,
+        handleOutputSiteChange,
     };
 };

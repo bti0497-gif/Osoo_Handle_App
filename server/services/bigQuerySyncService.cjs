@@ -146,6 +146,19 @@ const TABLE_MAPPINGS = {
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
   }),
+  operation_status_logs: (row, siteName, authorName, siteId) => ({
+    site_id: siteId,
+    site_name: siteName,
+    author: row.author || authorName,
+    local_id: row.id,
+    created_at: row.created_at,
+    date: row.date,
+    ph: row.ph,
+    do_value: row.do_value,
+    svi: row.svi,
+    updated_at: row.last_modified,
+    uploaded_at: new Date().toISOString()
+  }),
   facility_logs: (row, siteName, authorName, siteId) => ({
     site_id: siteId,
     site_name: siteName,
@@ -169,6 +182,7 @@ const TABLE_NATURAL_KEYS = {
   medicine_logs: ['site_id', 'date', 'medicine_name'],
   qntech_water_quality: ['site_id', 'date', 'measurement_group', 'location', 'item_code'],
   kit_logs: ['site_id', 'date', 'kit_name'],
+  operation_status_logs: ['site_id', 'date'],
   facility_logs: ['site_id', 'date', 'location', 'facility_name'],
 };
 
@@ -211,6 +225,9 @@ const BIGQUERY_FIELD_TYPES = {
   company: 'STRING',
   price: 'INTEGER',
   notes: 'STRING',
+  ph: 'FLOAT',
+  do_value: 'FLOAT',
+  svi: 'FLOAT',
 };
 
 function quoteIdentifier(value) {
@@ -219,6 +236,16 @@ function quoteIdentifier(value) {
 
 async function ensureTargetTableColumns(table, rows) {
   if (!rows.length) return;
+  const [exists] = await table.exists();
+  if (!exists) {
+    const fields = Object.keys(rows[0]).map((name) => ({ name, type: BIGQUERY_FIELD_TYPES[name] || 'STRING' }));
+    try {
+      await table.create({ schema: { fields } });
+      return;
+    } catch (error) {
+      if (Number(error?.code) !== 409) throw error;
+    }
+  }
   const [metadata] = await table.getMetadata();
   const schemaFields = metadata.schema?.fields || [];
   const existing = new Set(schemaFields.map((field) => field.name));

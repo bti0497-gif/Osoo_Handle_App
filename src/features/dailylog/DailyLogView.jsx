@@ -24,6 +24,9 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         dashboardDateRows,
         dashboardSummary,
         isDashboardLoading,
+        outputSites,
+        selectedOutputSiteId,
+        handleOutputSiteChange,
     } = useDailyLogViewModel(currentUser, undefined, templateName, showToast);
     const lastAlertMessageRef = useRef('');
 
@@ -94,6 +97,34 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                              />
                         </div>
                     </div>
+
+                    {isDailyWorkLog && (
+                    <div style={{ display: outputSites.length > 1 ? 'flex' : 'none', flexDirection: 'column', gap: '6px' }}>
+                        <label htmlFor="daily-log-output-site" style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#475569' }}>
+                            출력 현장
+                        </label>
+                        <select
+                            id="daily-log-output-site"
+                            value={selectedOutputSiteId}
+                            onChange={(event) => handleOutputSiteChange(event.target.value)}
+                            style={{
+                                width: '100%',
+                                height: '38px',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: '8px',
+                                padding: '0 10px',
+                                backgroundColor: '#fff',
+                                color: '#1e293b',
+                                fontSize: '0.8125rem',
+                                fontWeight: 800,
+                            }}
+                        >
+                            {outputSites.map((site) => (
+                                <option key={site.id} value={site.id}>{site.site_name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    )}
 
                     {isDailyWorkLog && (
                     <div style={{ display: 'flex', flexDirection: 'column' }}>

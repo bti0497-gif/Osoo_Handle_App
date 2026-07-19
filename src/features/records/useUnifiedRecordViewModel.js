@@ -311,5 +311,6 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
         isLoading,
         isSaving,
         saveAllTabs,
+        reloadContexts,
     };
 }

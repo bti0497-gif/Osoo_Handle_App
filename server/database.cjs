@@ -152,6 +152,7 @@ db.exec(`
     author TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+    is_synced INTEGER DEFAULT 0,
     UNIQUE(date, site_id)
   );
   CREATE TABLE IF NOT EXISTS sludge_photo_logs (
@@ -836,7 +837,7 @@ db.transaction(() => {
 
 // --- Sync Columns Migration (BigQuery Synchronization) ---
 // 동기화 대상 테이블 목록
-const syncTables = ['flow_readings', 'medicine_logs', 'water_quality', 'qntech_water_quality', 'kit_logs', 'facility_logs'];
+const syncTables = ['flow_readings', 'medicine_logs', 'water_quality', 'qntech_water_quality', 'kit_logs', 'facility_logs', 'operation_status_logs'];
 const inputStatusTables = ['flow_readings', 'medicine_logs', 'qntech_water_quality', 'kit_logs'];
 const syncDefaults = db.prepare('SELECT site_name, manager_name FROM app_settings WHERE id = 1').get() || {};
 const defaultSiteName = syncDefaults.site_name || 'Unknown Site';

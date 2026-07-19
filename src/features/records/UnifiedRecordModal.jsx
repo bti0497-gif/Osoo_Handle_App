@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useUnifiedRecordViewModel } from './useUnifiedRecordViewModel';
+import { WaterQualityModel } from '../water/WaterQualityModel';
+import { getTodayKST } from '../../core/constants';
 
 const TAB_META = [
     { id: 'flow', label: '유량관리' },
@@ -276,6 +278,7 @@ export default function UnifiedRecordModal({
     onSaveComplete,
     onImportQntech,
     onImportQntechRange,
+    onConfirm,
     onSyncAnalysisKits,
     onValidationError,
     onDateChange,
@@ -293,6 +296,8 @@ export default function UnifiedRecordModal({
     const [waterInputMode, setWaterInputMode] = useState('manual');
     const [saveStatusMode, setSaveStatusMode] = useState('manual');
     const [savedTabs, setSavedTabs] = useState([]);
+    const [internalQntechProgress, setInternalQntechProgress] = useState(null);
+    const [isInternalQntechImporting, setIsInternalQntechImporting] = useState(false);
     const wasOpenRef = useRef(false);
     const initialWaterSignature = JSON.stringify({
         measurementOrder: contexts.water?.measurementOrder || 1,
@@ -303,7 +308,76 @@ export default function UnifiedRecordModal({
         isLoading: isLoadingUnifiedData,
         isSaving,
         saveAllTabs,
+        reloadContexts,
     } = useUnifiedRecordViewModel({ isOpen, date, contexts });
+
+    const runInternalQntechImport = async (targetDate) => {
+        setIsInternalQntechImporting(true);
+        setInternalQntechProgress({ message: `${targetDate} 데이터를 불러오는 중...` });
+        try {
+            await WaterQualityModel.recordQntechUiDiagnostic('unified-single-dispatch', { date: targetDate });
+            const result = await WaterQualityModel.importFromQntech(targetDate);
+            if (!result?.success) throw new Error(result?.error || 'QnTECH 데이터를 불러오지 못했습니다.');
+            await reloadContexts({ force: true, tabs: ['water', 'kit'] });
+            setInternalQntechProgress({ message: 'QnTECH 데이터 불러오기가 완료되었습니다.', completed: true });
+            return result;
+        } catch (error) {
+            setInternalQntechProgress({ status: 'error', message: error.message });
+            throw error;
+        } finally {
+            setIsInternalQntechImporting(false);
+        }
+    };
+
+    const runInternalQntechRangeImport = async (startDate, endDate) => {
+        if (!startDate || !endDate) throw new Error('가져올 기간을 선택하세요.');
+        if (startDate > endDate) throw new Error('시작 날짜가 종료 날짜보다 늦을 수 없습니다.');
+        if (startDate > getTodayKST() || endDate > getTodayKST()) throw new Error('오늘보다 미래 날짜는 불러올 수 없습니다.');
+        const confirmImport = typeof onConfirm === 'function'
+            ? onConfirm
+            : (message) => Promise.resolve(window.confirm(message));
+        const confirmed = await confirmImport('기간 불러오기는 즉시 저장됩니다. 기존 값이 있는 날짜는 값을 유지하고 사진을 함께 저장합니다. 계속할까요?');
+        if (!confirmed) return null;
+
+        setIsInternalQntechImporting(true);
+        setInternalQntechProgress({ message: '서버 백그라운드 작업을 시작하는 중...', completedDates: 0, totalDates: 0 });
+        try {
+            await WaterQualityModel.recordQntechUiDiagnostic('unified-range-dispatch', { startDate, endDate });
+            const started = await WaterQualityModel.importRangeFromQntech(startDate, endDate);
+            if (!started?.success) throw new Error(started?.error || 'QnTECH 기간 불러오기를 시작하지 못했습니다.');
+
+            let result = null;
+            while (!result) {
+                const response = await WaterQualityModel.fetchRangeImportProgress();
+                const progress = response?.progress;
+                if (!progress || (started.jobId && progress.jobId !== started.jobId)) {
+                    throw new Error('QnTECH 기간 작업 상태를 확인할 수 없습니다.');
+                }
+                setInternalQntechProgress(progress);
+                if (progress.status === 'completed') result = progress.result;
+                else if (progress.status === 'error') throw new Error(progress.message || 'QnTECH 기간 불러오기에 실패했습니다.');
+                else await new Promise((resolve) => setTimeout(resolve, 1000));
+            }
+
+            if (!result?.success) throw new Error(result?.error || 'QnTECH 기간 불러오기에 실패했습니다.');
+            await reloadContexts({ force: true, tabs: ['water', 'kit'] });
+            setInternalQntechProgress((previous) => ({
+                ...previous,
+                status: 'completed',
+                message: `기간 데이터 불러오기 완료 - 값 ${result.summary?.insertedRowCount || 0}건, 사진 ${result.summary?.savedPhotoCount || 0}건`,
+            }));
+            return result;
+        } catch (error) {
+            setInternalQntechProgress({ status: 'error', message: error.message });
+            throw error;
+        } finally {
+            setIsInternalQntechImporting(false);
+        }
+    };
+
+    const effectiveImportQntech = typeof onImportQntech === 'function' ? onImportQntech : runInternalQntechImport;
+    const effectiveImportQntechRange = typeof onImportQntechRange === 'function' ? onImportQntechRange : runInternalQntechRangeImport;
+    const effectiveIsImportingQntech = isImportingQntech || isInternalQntechImporting;
 
     useEffect(() => {
         if (!isOpen) {
@@ -324,6 +398,8 @@ export default function UnifiedRecordModal({
             setDraft({});
             setDefaultPurchaseAppliedByTab({});
             setSavedTabs([]);
+            setInternalQntechProgress(null);
+            setIsInternalQntechImporting(false);
             setSaveStatusMode('manual');
             setWaterRounds(rounds);
             setSelectedWaterRound(rounds[0]?.value || 1);
@@ -1004,30 +1080,24 @@ export default function UnifiedRecordModal({
                                     onClick={async () => {
                                         try {
                                             if (isRange) {
-                                                if (typeof onImportQntechRange !== 'function') {
-                                                    throw new Error('기간 불러오기 기능이 연결되지 않았습니다.');
-                                                }
-                                                await onImportQntechRange(rangeStartDate, rangeEndDate);
+                                                await effectiveImportQntechRange(rangeStartDate, rangeEndDate);
                                             } else if (isSameDay) {
-                                                if (typeof onImportQntech !== 'function') {
-                                                    throw new Error('QnTECH 불러오기 기능이 연결되지 않았습니다.');
-                                                }
-                                                await onImportQntech(rangeStartDate);
+                                                await effectiveImportQntech(rangeStartDate);
                                             }
                                         } catch (error) {
                                             onValidationError?.(`QnTECH 불러오기를 시작하지 못했습니다: ${error.message}`);
                                         }
                                     }}
-                                    disabled={isImportingQntech || !hasBoth}
+                                    disabled={effectiveIsImportingQntech || !hasBoth}
                                     style={{
                                         ...buttonBaseStyle,
                                         borderColor: '#2563eb',
                                         background: '#eff6ff',
                                         color: '#1d4ed8',
-                                        cursor: isImportingQntech || !hasBoth ? 'not-allowed' : 'pointer',
+                                        cursor: effectiveIsImportingQntech || !hasBoth ? 'not-allowed' : 'pointer',
                                     }}
                                 >
-                                    {isImportingQntech
+                                    {effectiveIsImportingQntech
                                         ? '불러오는 중...'
                                         : isRange
                                             ? '기간불러오기'
@@ -1035,6 +1105,14 @@ export default function UnifiedRecordModal({
                                                 ? `${rangeStartDate} 불러오기`
                                                 : '불러오기'}
                                 </button>
+                                {internalQntechProgress?.message && (
+                                    <span style={{ fontSize: 12, color: internalQntechProgress.status === 'error' ? '#dc2626' : '#2563eb', fontWeight: 800, lineHeight: 1.5 }}>
+                                        {internalQntechProgress.message}
+                                        {internalQntechProgress.totalDates > 0
+                                            ? ` (${internalQntechProgress.completedDates || 0}/${internalQntechProgress.totalDates})`
+                                            : ''}
+                                    </span>
+                                )}
                                 <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700, lineHeight: 1.5 }}>
                                     시작·종료 날짜가 같으면 해당일만, 다르면 기간을 불러옵니다.
                                 </span>

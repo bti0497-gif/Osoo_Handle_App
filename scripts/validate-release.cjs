@@ -479,6 +479,11 @@ function validateRegressionContracts() {
   const excelRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'excelRoutes.cjs');
   const roadworkHelperRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'roadworkHelperRoutes.cjs');
   const bigQueryRestoreServicePath = path.join(BASE_DIR, 'server', 'services', 'bigQueryRestoreService.cjs');
+  const bidirectionalDailyLogServicePath = path.join(BASE_DIR, 'server', 'services', 'bidirectionalDailyLogService.cjs');
+  const bidirectionalDailyLogContractPath = path.join(BASE_DIR, 'BIDIRECTIONAL_DAILY_LOG_CONTRACT.md');
+  const dailyLogViewPath = path.join(BASE_DIR, 'src', 'features', 'dailylog', 'DailyLogView.jsx');
+  const dailyLogViewModelPath = path.join(BASE_DIR, 'src', 'features', 'dailylog', 'useDailyLogViewModel.js');
+  const operationStatusRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'operationStatusRoutes.cjs');
   const diagnosticLogServicePath = path.join(BASE_DIR, 'server', 'services', 'diagnosticLogService.cjs');
   const serverIndexPath = path.join(BASE_DIR, 'server', 'index.cjs');
   const sludgePhotoRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'sludgePhotoRoutes.cjs');
@@ -557,6 +562,11 @@ function validateRegressionContracts() {
   const excelRoutesText = readText(excelRoutesPath);
   const roadworkHelperRoutesText = readText(roadworkHelperRoutesPath);
   const bigQueryRestoreServiceText = readText(bigQueryRestoreServicePath);
+  const bidirectionalDailyLogServiceText = readText(bidirectionalDailyLogServicePath);
+  const bidirectionalDailyLogContractText = readText(bidirectionalDailyLogContractPath);
+  const dailyLogViewText = readText(dailyLogViewPath);
+  const dailyLogViewModelText = readText(dailyLogViewModelPath);
+  const operationStatusRoutesText = readText(operationStatusRoutesPath);
   const diagnosticLogServiceText = readText(diagnosticLogServicePath);
   const serverIndexText = readText(serverIndexPath);
   const sludgePhotoRoutesText = readText(sludgePhotoRoutesPath);
@@ -924,9 +934,15 @@ function validateRegressionContracts() {
       flowRoutesText.includes('const safeReadingUnit = String(type || \'\').includes(\'전력\')') &&
       databaseText.includes('전력 외 MWh 오염 유량 자동 복구') &&
       databaseText.includes("type NOT LIKE '%전력%'") &&
+      databaseText.includes('reading_unit = NULL') &&
+      databaseText.includes('is_synced = 0') &&
       dailyWorkLogServiceText.includes("bindings['전일전력입력단위']") &&
       dailyWorkLogServiceText.includes('Math.round((parsedPowerFlow / parsedOutFlow) * 1000) / 1000') &&
       dailyWorkLogServiceText.includes("'1제곱미터당사용량'") &&
+      unifiedRecordModalContractText.includes('The persisted MWh/KWh selection belongs only to an item whose flow type is power') &&
+      unifiedRecordModalContractText.includes('daily `calculated_flow` must equal the reading difference multiplied by 1,000') &&
+      unifiedRecordModalContractText.includes('Non-power flow items must always save `reading_unit` as null') &&
+      unifiedRecordModalContractText.includes('Startup migration must clear any historical non-power MWh contamination') &&
       dailyWorkLogHwpxServiceText.includes("bookmark === '오늘지침'") &&
       dailyWorkLogHwpxServiceText.includes("toUpperCase() === 'MWH'"),
     '전력 MWh 검침·kWh 사용량·체크 유지·일지 소수 바인딩 계약 유지',
@@ -1097,6 +1113,30 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    modalText.includes('runInternalQntechImport') &&
+      modalText.includes('runInternalQntechRangeImport') &&
+      modalText.includes('WaterQualityModel.importFromQntech(targetDate)') &&
+      modalText.includes('WaterQualityModel.importRangeFromQntech(startDate, endDate)') &&
+      modalText.includes('WaterQualityModel.fetchRangeImportProgress()') &&
+      modalText.includes("progress.status === 'completed'") &&
+      modalText.includes("progress.status === 'error'") &&
+      modalText.includes("typeof onImportQntech === 'function' ? onImportQntech : runInternalQntechImport") &&
+      modalText.includes("typeof onImportQntechRange === 'function' ? onImportQntechRange : runInternalQntechRangeImport") &&
+      modalText.includes("reloadContexts({ force: true, tabs: ['water', 'kit'] })") &&
+      !modalText.includes('기능이 연결되지 않았습니다.') &&
+      unifiedRecordModalContractText.includes('The active modal tab determines the available operation') &&
+      unifiedRecordModalContractText.includes('must retain an internal QnTECH fallback') &&
+      flowManagementViewText.includes('onConfirm={showConfirm}') &&
+      flowManagementViewText.includes('onValidationError={(message) => showAlert?.(message)}') &&
+      medicineManagementViewText.includes('onConfirm={showConfirm}') &&
+      medicineManagementViewText.includes('onValidationError={(message) => showAlert?.(message)}') &&
+      kitManagementViewText.includes('onConfirm={showConfirm}') &&
+      kitManagementViewText.includes('onValidationError={(message) => showAlert?.(message)}'),
+    '통합 모달 모든 진입 메뉴 QnTECH 단일일·기간불러오기 연결 계약 유지',
+    '통합 모달을 유량·약품·키트 메뉴에서 열면 QnTECH 불러오기가 끊길 수 있습니다.'
+  );
+
+  checkSource(
     databaseText.includes('CREATE TABLE IF NOT EXISTS work_records') &&
       databaseText.includes('CREATE TABLE IF NOT EXISTS work_record_photos') &&
       facilityRoutesText.includes("router.get('/api/work-records'") &&
@@ -1184,6 +1224,57 @@ function validateRegressionContracts() {
       roadworkHelperRoutesText.includes('medicine'),
     '공사입력 도우미 서버 일괄 조회 계약 유지',
     '공사입력 도우미 서버의 /all 구성 데이터 계약이 깨졌습니다'
+  );
+  checkSource(
+    bidirectionalDailyLogContractText.includes('current enabled account is exactly `손규복`') &&
+      bidirectionalDailyLogContractText.includes('default output site is `죽암휴게소(부산방향)`') &&
+      bidirectionalDailyLogContractText.includes('separate temporary SQLite snapshot') &&
+      bidirectionalDailyLogContractText.includes('operational SQLite database must never receive remote') &&
+      dailyLogViewModelText.includes("String(currentUser?.name || '').trim() === '손규복'") &&
+      dailyLogViewModelText.includes("includes('죽암휴게소')") &&
+      dailyLogViewModelText.includes("includes('부산방향')") &&
+      dailyLogViewModelText.includes("dataSource: isRemote ? 'bigquery' : 'local'") &&
+      dailyLogViewText.includes('출력 현장') &&
+      dailyLogViewText.includes('outputSites.length > 1'),
+    '양방향 일일업무일지 대상자·기본방향·선택 UI 계약 유지',
+    '양방향 일일업무일지의 손규복 전용 노출, 부산방향 기본값 또는 출력 현장 선택기가 깨졌습니다.'
+  );
+
+  checkSource(
+    bidirectionalDailyLogServiceText.includes("const ENABLED_MANAGER_NAMES = new Set(['손규복'])") &&
+      bidirectionalDailyLogServiceText.includes('await db.backup(dbPath)') &&
+      bidirectionalDailyLogServiceText.includes("'operation_status_logs'") &&
+      bidirectionalDailyLogServiceText.includes("dataSource: 'bigquery'") &&
+      bidirectionalDailyLogServiceText.includes("new Database(entry.dbPath, { readonly: true, fileMustExist: true })") &&
+      bidirectionalDailyLogServiceText.includes("tables: ['flow_readings', 'medicine_logs', 'kit_logs', 'qntech_water_quality', 'operation_status_logs']") &&
+      dailyWorkLogText.includes('acquireDailyLogDatabase') &&
+      dailyWorkLogText.includes('if (!acquired.isRemote) await syncCertificateCacheForRange') &&
+      dailyWorkLogText.includes("dataSource: acquired.isRemote ? 'bigquery' : 'local'"),
+    '양방향 일일업무일지 임시 DB 격리·원격 실패 차단 계약 유지',
+    '서울방향 자료가 운영 로컬 DB와 격리되지 않거나 원격 조회 경로가 일부 출력에서 누락됐습니다.'
+  );
+
+  checkSource(
+    dailyWorkLogHwpxServiceText.includes('replaceVisibleTextInXml') &&
+      dailyWorkLogHwpxServiceText.includes("context.dataSource === 'bigquery'") &&
+      dailyWorkLogHwpxServiceText.includes('replaceVisibleTextInXml(xml, context.localSiteName, context.siteName)') &&
+      bidirectionalDailyLogContractText.includes('only the generated in-memory/output copy may replace') &&
+      bidirectionalDailyLogContractText.includes('`죽암휴게소(부산방향)` must become `죽암휴게소(서울방향)`'),
+    '양방향 HWPX 임시 출력본 현장명 교체·원본 양식 보호 계약 유지',
+    '서울방향 HWPX 문구 교체 또는 원본 양식 비수정 계약이 깨졌습니다.'
+  );
+
+  checkSource(
+    databaseText.includes("'operation_status_logs'") &&
+      databaseText.includes('is_synced INTEGER DEFAULT 0') &&
+      operationStatusRoutesText.includes('is_synced = 0') &&
+      bigQuerySyncServiceText.includes("operation_status_logs: ['site_id', 'date']") &&
+      bigQuerySyncServiceText.includes('await table.create({ schema: { fields } })') &&
+      bigQueryRestoreServiceText.includes('restoreOperationStatusRows') &&
+      bigQueryRestoreServiceText.includes("'operation_status_logs'") &&
+      bidirectionalDailyLogContractText.includes('PH, DO, or SVI'),
+    'PH·DO·SVI 운전상태 BigQuery 동기화·복원 계약 유지',
+    'operation_status_logs의 미동기화 표시, BigQuery 자연키/테이블 생성 또는 원격 복원 경로가 누락됐습니다.'
   );
 }
 

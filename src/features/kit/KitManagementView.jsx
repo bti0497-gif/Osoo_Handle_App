@@ -41,7 +41,7 @@ const ManagementFooter = ({ count, loading, onOpen }) => (
 );
 
 const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSessionChange }) => {
-    const { showAlert } = useDialog();
+    const { showAlert, showConfirm } = useDialog();
     const { itemState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
     const {
@@ -253,10 +253,12 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
                 initialTab={modalState.tab}
                 initialDate={selectedDate || todayStr}
                 contexts={buildModalContexts()}
+                onConfirm={showConfirm}
                 isSyncingAnalysisKits={isSyncingAnalysisKits}
                 onClose={handleModalClose}
                 onSaveComplete={handleSaveComplete}
                 onSyncAnalysisKits={syncAnalysisKits}
+                onValidationError={(message) => showAlert?.(message)}
             />
         </div>
     );

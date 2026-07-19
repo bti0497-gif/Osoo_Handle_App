@@ -82,6 +82,78 @@ function escapeXml(value) {
     .replace(/'/g, '&apos;');
 }
 
+function decodeXmlText(value) {
+  return String(value || '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function replaceVisibleTextInXml(xml, sourceText, targetText) {
+  const source = String(sourceText || '').trim();
+  const target = String(targetText || '').trim();
+  if (!source || !target || source === target) return { xml, replaced: false };
+
+  const escapedSource = escapeXml(source);
+  if (xml.includes(escapedSource)) {
+    return { xml: xml.split(escapedSource).join(escapeXml(target)), replaced: true };
+  }
+
+  const textNodeRegex = /<hp:t\b[^>]*>([\s\S]*?)<\/hp:t>/gi;
+  const nodes = [];
+  let match;
+  while ((match = textNodeRegex.exec(xml)) !== null) {
+    nodes.push({
+      start: match.index,
+      end: textNodeRegex.lastIndex,
+      full: match[0],
+      content: match[1],
+      text: decodeXmlText(match[1]),
+    });
+  }
+  const visibleText = nodes.map((node) => node.text).join('');
+  const foundAt = visibleText.indexOf(source);
+  if (foundAt < 0) return { xml, replaced: false };
+
+  const foundEnd = foundAt + source.length;
+  let offset = 0;
+  let startNode = -1;
+  let endNode = -1;
+  let startOffset = 0;
+  let endOffset = 0;
+  nodes.forEach((node, index) => {
+    const nodeEnd = offset + node.text.length;
+    if (startNode < 0 && foundAt >= offset && foundAt < nodeEnd) {
+      startNode = index;
+      startOffset = foundAt - offset;
+    }
+    if (endNode < 0 && foundEnd > offset && foundEnd <= nodeEnd) {
+      endNode = index;
+      endOffset = foundEnd - offset;
+    }
+    offset = nodeEnd;
+  });
+  if (startNode < 0 || endNode < 0) return { xml, replaced: false };
+
+  const replacements = new Map();
+  const prefix = nodes[startNode].text.slice(0, startOffset);
+  const suffix = nodes[endNode].text.slice(endOffset);
+  replacements.set(startNode, escapeXml(`${prefix}${target}${startNode === endNode ? suffix : ''}`));
+  for (let index = startNode + 1; index < endNode; index += 1) replacements.set(index, '');
+  if (endNode !== startNode) replacements.set(endNode, escapeXml(suffix));
+
+  let output = xml;
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    if (!replacements.has(index)) continue;
+    const node = nodes[index];
+    const nextNode = node.full.replace(node.content, replacements.get(index));
+    output = output.slice(0, node.start) + nextNode + output.slice(node.end);
+  }
+  return { xml: output, replaced: true };
+}
+
 function formatValue(value) {
   return value === null || value === undefined ? '' : String(value);
 }
@@ -423,6 +495,15 @@ async function buildDailyWorkLogHwpx({ db, appDataPath, templateInfo, date, cont
     replacedCount += result.replacedCount;
   }
 
+  if (context.dataSource === 'bigquery' && context.localSiteName && context.siteName) {
+    const xmlNames = Object.keys(zip.files).filter((name) => /\.xml$/i.test(name));
+    for (const xmlName of xmlNames) {
+      const xml = await zip.file(xmlName).async('string');
+      const replaced = replaceVisibleTextInXml(xml, context.localSiteName, context.siteName);
+      if (replaced.replaced) zip.file(xmlName, replaced.xml);
+    }
+  }
+
   const mimeEntry = zip.file('mimetype');
   if (mimeEntry) {
     const mimeType = await mimeEntry.async('string');
@@ -491,4 +572,5 @@ module.exports = {
   buildDailyWorkLogHwpx,
   buildHwpxBookmarkValues,
   replaceBookmarkText,
+  replaceVisibleTextInXml,
 };

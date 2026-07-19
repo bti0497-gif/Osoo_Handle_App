@@ -16,6 +16,7 @@ const {
   buildBatchDailyWorkLogPdf,
 } = require('../services/dailyWorkLogHwpxService.cjs');
 const { syncCertificateCacheForSiteMonth } = require('../services/certificateCacheSyncService.cjs');
+const { acquireDailyLogDatabase } = require('../services/bidirectionalDailyLogService.cjs');
 
 const TEMPLATE_NAME = '일일업무일지';
 
@@ -69,6 +70,8 @@ module.exports = function (db, baseDir, appDataPath) {
     siteName: req.query.siteName || req.query.site_name || '',
     author: req.query.author || '',
     method: req.query.method || getCurrentMethod(),
+    dataSource: req.query.dataSource || req.query.data_source || 'local',
+    localSiteName: req.query.localSiteName || req.query.local_site_name || '',
   });
 
   const syncCertificateCacheForRange = async (range, context) => {
@@ -99,10 +102,14 @@ module.exports = function (db, baseDir, appDataPath) {
       }
 
       const range = normalizeDateRange(startDate, endDate);
-      await syncCertificateCacheForRange(range, getRequestContext(req));
-      const activeDates = getActiveDates(db, range.startDate, range.endDate, getRequestContext(req));
-
-      return res.json({ success: true, activeDates });
+      const acquired = await acquireDailyLogDatabase(db, appDataPath, getRequestContext(req), range.startDate, range.endDate);
+      try {
+        if (!acquired.isRemote) await syncCertificateCacheForRange(range, acquired.context);
+        const activeDates = getActiveDates(acquired.db, range.startDate, range.endDate, acquired.context);
+        return res.json({ success: true, activeDates, dataSource: acquired.isRemote ? 'bigquery' : 'local' });
+      } finally {
+        acquired.release();
+      }
     } catch (err) {
       return res.status(400).json({ success: false, error: err.message });
     }
@@ -120,7 +127,6 @@ module.exports = function (db, baseDir, appDataPath) {
 
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await syncCertificateCacheForRange(range, getRequestContext(req));
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
 
       return res.json({ success: true, ...manifest });
@@ -145,7 +151,6 @@ module.exports = function (db, baseDir, appDataPath) {
       const range = requestedDate
         ? normalizeDateRange(requestedDate, requestedDate)
         : normalizeDateRange(startDate, endDate);
-      await syncCertificateCacheForRange(range, getRequestContext(req));
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
       const targetPage = findPageInManifest(manifest, pageKey)
         || (parsedPageKey?.date === range.startDate ? manifest.pages[0] : null);
@@ -154,12 +159,18 @@ module.exports = function (db, baseDir, appDataPath) {
         return res.status(404).json({ error: 'Preview page not found' });
       }
 
-      const renderData = buildPageRenderData(db, targetPage, getRequestContext(req));
-
-      return res.json({
-        success: true,
-        page: renderData,
-      });
+      const acquired = await acquireDailyLogDatabase(db, appDataPath, getRequestContext(req), range.startDate, range.endDate);
+      try {
+        if (!acquired.isRemote) await syncCertificateCacheForRange(range, acquired.context);
+        const renderData = buildPageRenderData(acquired.db, targetPage, acquired.context);
+        return res.json({
+          success: true,
+          page: renderData,
+          dataSource: acquired.isRemote ? 'bigquery' : 'local',
+        });
+      } finally {
+        acquired.release();
+      }
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
     }
@@ -181,20 +192,26 @@ module.exports = function (db, baseDir, appDataPath) {
 
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await syncCertificateCacheForRange(range, getRequestContext(req));
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
       
       if (!manifest.pages.length) {
           return res.status(400).json({ error: '선택한 기간에 데이터가 없습니다.' });
       }
 
-      const outputPaths = await buildBatchExportExcel({
-          db,
-          appDataPath,
-          templateInfo,
-          manifest,
-          context: getRequestContext(req)
-      });
+      const acquired = await acquireDailyLogDatabase(db, appDataPath, getRequestContext(req), range.startDate, range.endDate);
+      let outputPaths;
+      try {
+        if (!acquired.isRemote) await syncCertificateCacheForRange(range, acquired.context);
+        outputPaths = await buildBatchExportExcel({
+            db: acquired.db,
+            appDataPath,
+            templateInfo,
+            manifest,
+            context: acquired.context
+        });
+      } finally {
+        acquired.release();
+      }
       
       // 생성된 각 파일을 시스템 기본 프로그램(Excel)으로 열기
       const { openExcelFile } = require('../services/excelOpenService.cjs');
@@ -228,15 +245,21 @@ module.exports = function (db, baseDir, appDataPath) {
 
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await syncCertificateCacheForRange(range, context);
+      const acquired = await acquireDailyLogDatabase(db, appDataPath, context, range.startDate, range.endDate);
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
-      const result = await buildBatchDailyWorkLogPdf({
-        db,
-        appDataPath,
-        templateInfo,
-        manifest,
-        context,
-      });
+      let result;
+      try {
+        if (!acquired.isRemote) await syncCertificateCacheForRange(range, acquired.context);
+        result = await buildBatchDailyWorkLogPdf({
+          db: acquired.db,
+          appDataPath,
+          templateInfo,
+          manifest,
+          context: acquired.context,
+        });
+      } finally {
+        acquired.release();
+      }
       const { openExcelFile } = require('../services/excelOpenService.cjs');
       await openExcelFile(result.outputPath);
       return res.json({
@@ -275,16 +298,22 @@ module.exports = function (db, baseDir, appDataPath) {
 
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      await syncCertificateCacheForRange(range, context);
+      const acquired = await acquireDailyLogDatabase(db, appDataPath, context, range.startDate, range.endDate);
 
       const manifest = buildPreviewManifest(range.startDate, range.endDate);
-      const results = await buildBatchDailyWorkLogHwpx({
-        db,
-        appDataPath,
-        templateInfo,
-        manifest,
-        context,
-      });
+      let results;
+      try {
+        if (!acquired.isRemote) await syncCertificateCacheForRange(range, acquired.context);
+        results = await buildBatchDailyWorkLogHwpx({
+          db: acquired.db,
+          appDataPath,
+          templateInfo,
+          manifest,
+          context: acquired.context,
+        });
+      } finally {
+        acquired.release();
+      }
 
       const { openExcelFile } = require('../services/excelOpenService.cjs');
       for (const result of results) {

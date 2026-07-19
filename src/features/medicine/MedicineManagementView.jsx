@@ -41,7 +41,7 @@ const ManagementFooter = ({ count, loading, onOpen }) => (
 );
 
 const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSessionChange }) => {
-    const { showAlert } = useDialog();
+    const { showAlert, showConfirm } = useDialog();
     const { itemState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
     const { history = [], loading, medicineTypes = [], refresh } = useMedicineViewModel(currentUser, { showAlert });
@@ -247,8 +247,10 @@ const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspac
                 initialTab={modalState.tab}
                 initialDate={selectedDate || todayStr}
                 contexts={buildModalContexts()}
+                onConfirm={showConfirm}
                 onClose={handleModalClose}
                 onSaveComplete={handleSaveComplete}
+                onValidationError={(message) => showAlert?.(message)}
             />
         </div>
     );

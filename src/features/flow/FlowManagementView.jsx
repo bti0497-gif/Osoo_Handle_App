@@ -67,7 +67,7 @@ const ManagementFooter = ({ count, loading, onOpen }) => (
 );
 
 const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSessionChange }) => {
-    const { showAlert } = useDialog();
+    const { showAlert, showConfirm } = useDialog();
     const { itemState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
 
@@ -351,6 +351,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                 initialTab={modalState.tab}
                 initialDate={modalDate}
                 contexts={buildModalContexts()}
+                onConfirm={showConfirm}
                 onClose={handleModalClose}
                 onSaveComplete={handleSaveComplete}
                 onValidationError={(message) => showAlert?.(message)}

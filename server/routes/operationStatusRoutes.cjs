@@ -73,15 +73,16 @@ module.exports = function operationStatusRoutes(db) {
 
       const stmt = db.prepare(`
         INSERT INTO operation_status_logs (
-          date, site_id, site_name, ph, do_value, svi, author, created_at, last_modified
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          date, site_id, site_name, ph, do_value, svi, author, created_at, last_modified, is_synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
         ON CONFLICT(date, site_id) DO UPDATE SET
           site_name = excluded.site_name,
           ph = excluded.ph,
           do_value = excluded.do_value,
           svi = excluded.svi,
           author = excluded.author,
-          last_modified = excluded.last_modified
+          last_modified = excluded.last_modified,
+          is_synced = 0
       `);
 
       stmt.run(

@@ -180,6 +180,38 @@ function restoreQntechWaterRows(db, rows) {
   })();
 }
 
+function restoreOperationStatusRows(db, rows) {
+  const stmt = db.prepare(`
+    INSERT INTO operation_status_logs (
+      date, site_id, site_name, ph, do_value, svi, author,
+      created_at, last_modified, is_synced
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+    ON CONFLICT(date, site_id) DO UPDATE SET
+      site_name = excluded.site_name,
+      ph = excluded.ph,
+      do_value = excluded.do_value,
+      svi = excluded.svi,
+      author = excluded.author,
+      last_modified = excluded.last_modified,
+      is_synced = 1
+  `);
+  db.transaction(() => {
+    rows.forEach((row) => {
+      stmt.run(
+        row.date?.value || row.date,
+        row.site_id || null,
+        row.site_name || null,
+        row.ph ?? null,
+        row.do_value ?? null,
+        row.svi ?? null,
+        row.author || null,
+        row.created_at?.value || row.created_at || new Date().toISOString(),
+        row.updated_at?.value || row.updated_at || new Date().toISOString()
+      );
+    });
+  })();
+}
+
 async function restoreOperationalData(db, { startDate, endDate, tables = [], siteId = '', siteName = '' } = {}) {
   const normalizedStart = String(startDate || '').slice(0, 10);
   const normalizedEnd = String(endDate || startDate || '').slice(0, 10);
@@ -193,7 +225,7 @@ async function restoreOperationalData(db, { startDate, endDate, tables = [], sit
     siteName: String(siteName || defaults.siteName || '').trim(),
   };
 
-  const targetTables = tables.length ? tables : ['flow_readings', 'medicine_logs', 'kit_logs', 'qntech_water_quality'];
+  const targetTables = tables.length ? tables : ['flow_readings', 'medicine_logs', 'kit_logs', 'qntech_water_quality', 'operation_status_logs'];
   const result = {};
 
   for (const tableName of targetTables) {
@@ -203,6 +235,7 @@ async function restoreOperationalData(db, { startDate, endDate, tables = [], sit
       if (tableName === 'medicine_logs') restoreMedicineRows(db, tableName, 'medicine_name', rows);
       if (tableName === 'kit_logs') restoreMedicineRows(db, tableName, 'kit_name', rows);
       if (tableName === 'qntech_water_quality') restoreQntechWaterRows(db, rows);
+      if (tableName === 'operation_status_logs') restoreOperationStatusRows(db, rows);
       result[tableName] = { success: true, count: rows.length };
     } catch (err) {
       result[tableName] = { success: false, error: err.message };
