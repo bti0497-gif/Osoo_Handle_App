@@ -36,11 +36,11 @@ export const MENUS = [
     icon: 'edit_note',
     children: [
       { id: 'log_daily', label: '일일업무일지' },
-      { id: 'log_monthly_operation', label: '월운영보고서' },
       { id: 'log_water', label: '수질분석일지' },
       { id: 'log_med_mgmt', label: '약품관리대장' },
       { id: 'log_med_in', label: '약품입고일지' },
       { id: 'log_sludge_photo', label: '슬러지사진대지' },
+      { id: 'log_monthly_operation', label: '월운영보고서' },
       { id: 'log_roadwork_helper', label: '공사 입력 도우미' }
     ]
   },
