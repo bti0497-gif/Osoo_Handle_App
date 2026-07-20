@@ -41,7 +41,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
     const [selectedPost, setSelectedPost] = useState(null);
     const [comments, setComments] = useState([]);
     const [sites, setSites] = useState([]);
-    const [form, setForm] = useState({ title: '', content: '', is_notice: 0, attachments: '', parent_id: null, target_site: '' });
+    const [form, setForm] = useState({ title: '', content: '', is_notice: 0, is_popup: 0, popup_days: 1, attachments: '', parent_id: null, target_site: '' });
     const postsPerPage = 10;
 
     const getReplyParentPost = (parentId) => {
@@ -53,6 +53,8 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
             title: `[답글] ${parentPost.title}`,
             content: '',
             is_notice: 0,
+            is_popup: 0,
+            popup_days: 1,
             attachments: '',
             parent_id: parentPost.id,
             target_site: parentPost.target_site || ''
@@ -215,6 +217,8 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
             title: post.title,
             content: post.content,
             is_notice: post.is_notice || 0,
+            is_popup: post.is_popup || 0,
+            popup_days: 1,
             attachments: post.attachments || '',
             parent_id: post.parent_id || null,
             target_site: post.target_site || ''
@@ -223,7 +227,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
     };
 
     const resetForm = () => {
-        setForm({ title: '', content: '', is_notice: 0, attachments: '', parent_id: null, target_site: '' });
+        setForm({ title: '', content: '', is_notice: 0, is_popup: 0, popup_days: 1, attachments: '', parent_id: null, target_site: '' });
         setSelectedPost(null);
         setComments([]);
     };

@@ -1,10 +1,9 @@
 /**
  * 서버 포트 자동 탐색 모듈
- * 서버가 포트 충돌로 18731 이 아닌 다른 포트를 사용할 경우에도 자동으로 찾아 연결합니다.
+ * 운영 서버는 앱 전용 포트 18731만 사용합니다.
  */
 
 const PORT_MIN = 18731;
-const PORT_MAX = 18734;
 const PING_TIMEOUT_MS = 600;
 const CACHE_KEY = 'osoo_server_port';
 
@@ -16,7 +15,9 @@ async function pingPort(port) {
     const timer = setTimeout(() => ctrl.abort(), PING_TIMEOUT_MS);
     const res = await fetch(`http://localhost:${port}/api/ping`, { signal: ctrl.signal });
     clearTimeout(timer);
-    return res.ok;
+    if (!res.ok) return false;
+    const payload = await res.json();
+    return payload?.app === 'osoo-handle-app' && payload?.ready === true;
   } catch {
     return false;
   }
@@ -37,13 +38,11 @@ export async function initServerConfig() {
     localStorage.removeItem(CACHE_KEY);
   }
 
-  for (let port = PORT_MIN; port <= PORT_MAX; port++) {
-    if (await pingPort(port)) {
-      _cachedBase = `http://localhost:${port}`;
-      localStorage.setItem(CACHE_KEY, String(port));
-      console.log(`[ServerConfig] 포트 ${port}에서 서버 발견`);
-      return _cachedBase;
-    }
+  if (await pingPort(PORT_MIN)) {
+    _cachedBase = `http://localhost:${PORT_MIN}`;
+    localStorage.setItem(CACHE_KEY, String(PORT_MIN));
+    console.log(`[ServerConfig] 전용 포트 ${PORT_MIN}에서 서버 발견`);
+    return _cachedBase;
   }
 
   _cachedBase = `http://localhost:${PORT_MIN}`;

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import ReactQuill from 'react-quill-new';
+import { sanitizeBoardHtml } from './sanitizeBoardHtml';
 import Quill from 'quill';
 import QuillResize from 'quill-resize-module';
 import 'react-quill-new/dist/quill.snow.css';
@@ -438,7 +439,7 @@ const BoardView = ({ currentUser }) => {
                             {/* 본문 (HTML) */}
                             <div className="ql-snow">
                                 <div className="ql-editor" style={{ padding: 0, minHeight: '80px', fontSize: '0.875rem', color: '#334155', lineHeight: 1.8 }}
-                                    dangerouslySetInnerHTML={{ __html: selectedPost.content }} />
+                                    dangerouslySetInnerHTML={{ __html: sanitizeBoardHtml(selectedPost.content) }} />
                             </div>
 
                             {/* 첨부파일 */}
@@ -582,10 +583,20 @@ const BoardView = ({ currentUser }) => {
                                             style={{ width: '100%', border: '2px solid #1e293b', height: '40px', padding: '0 12px', fontWeight: 700, color: '#1e293b', outline: 'none' }} />
                                     </div>
                                     {isAdmin && (
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', height: '40px', fontSize: '0.75rem', fontWeight: 700, color: '#d97706', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                                            <input type="checkbox" checked={form.is_notice === 1} onChange={e => updateForm({ is_notice: e.target.checked ? 1 : 0 })} />
-                                            📌 공지
-                                        </label>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', height: '40px' }}>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 700, color: '#d97706', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                                <input type="checkbox" checked={form.is_notice === 1 || form.is_notice === true} onChange={e => updateForm({ is_notice: e.target.checked ? 1 : 0 })} />
+                                                📌 공지
+                                            </label>
+                                            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 700, color: '#2563eb', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                                                <input type="checkbox" checked={form.is_popup === 1 || form.is_popup === true} onChange={e => updateForm({ is_popup: e.target.checked ? 1 : 0 })} />
+                                                팝업 공지
+                                            </label>
+                                            {(form.is_popup === 1 || form.is_popup === true) && <select aria-label="팝업 게시 기간" value={form.popup_days || 1} onChange={e => updateForm({ popup_days: Number(e.target.value) })}
+                                                style={{ height: 30, border: '1px solid #bfdbfe', borderRadius: 6, color: '#1d4ed8', fontSize: '0.72rem', fontWeight: 800, background: '#eff6ff' }}>
+                                                {Array.from({ length: 7 }, (_, index) => index + 1).map(days => <option key={days} value={days}>{days}일간</option>)}
+                                            </select>}
+                                        </div>
                                     )}
                                 </div>
 

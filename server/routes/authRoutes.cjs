@@ -511,6 +511,10 @@ module.exports = (db) => {
         const dateKST = getTodayLocal();
         try {
             const activeSession = db.prepare('SELECT * FROM attendance WHERE member_id = ? AND date = ? AND logout_time IS NULL').get(memberId, dateKST);
+            if (activeSession) {
+                const member = db.prepare('SELECT * FROM members WHERE id = ? LIMIT 1').get(memberId);
+                if (member) setActiveUser(member, 'session-restore');
+            }
             res.json({ success: true, session: activeSession || null });
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });

@@ -28,5 +28,15 @@ export const DashboardModel = {
     async fetchKitDefaults() {
         return apiClient.get('/api/settings/kit-defaults');
     },
+    async recordLoadDiagnostic(details = {}) {
+        try {
+            await apiClient.post('/api/auth/ui-diagnostic', {
+                event: 'dashboard-widget-load-failed',
+                details,
+            });
+        } catch (error) {
+            console.warn('[Dashboard] 진단로그 기록 실패:', error?.message || error);
+        }
+    },
 };
 

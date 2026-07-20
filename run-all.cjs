@@ -145,10 +145,11 @@ async function waitForBackendReady() {
     while (Date.now() - startedAt < 30000) {
         for (let port = BACKEND_PORT_MIN; port <= BACKEND_PORT_MAX; port += 1) {
             try {
-                // ping은 DB/인증 라우트 초기화 전에 응답할 수 있으므로 로그인 API로 준비 상태를 판정한다.
-                const url = `http://127.0.0.1:${port}/api/auth/login-hint`;
+                // ping의 ready=true는 DB/전체 라우트 초기화 완료 뒤에만 설정된다.
+                const url = `http://127.0.0.1:${port}/api/ping`;
                 const res = await fetch(url, { method: 'GET' });
-                if (res.ok) {
+                const payload = res.ok ? await res.json() : null;
+                if (payload?.app === 'osoo-handle-app' && payload?.ready === true) {
                     console.log(`[Backend] ready: ${url}`);
                     return port;
                 }

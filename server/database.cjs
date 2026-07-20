@@ -2,11 +2,16 @@ const sqlite3 = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const {
+  protectDatabaseBeforeMigration,
+  recordSchemaBaseline,
+} = require('./services/sqliteProtectionService.cjs');
 
 const DEFAULT_ROAD_WEB_URL = 'https://nwpo.ex.co.kr:5002//security/login.do';
 const DEFAULT_WATER_ANALYSIS_URL = 'https://eco.qntech.co.kr';
 
-const appDataPath = path.join(process.env.APPDATA, 'Osoo_Handle_App');
+const appDataPath = process.env.OSOO_APP_DATA_PATH
+  || path.join(process.env.APPDATA || process.env.LOCALAPPDATA || path.join(__dirname, '..'), 'Osoo_Handle_App');
 if (!fs.existsSync(appDataPath)) {
   fs.mkdirSync(appDataPath, { recursive: true });
 }
@@ -62,8 +67,16 @@ function migrateLegacyQntechPhotoRoot(dbInstance) {
 }
 
 const dbPath = path.join(appDataPath, 'osoo.db');
+const hadExistingDatabase = fs.existsSync(dbPath) && fs.statSync(dbPath).size > 0;
 const db = new sqlite3(dbPath);
 console.log(`Using database at: ${dbPath}`);
+const databaseProtection = protectDatabaseBeforeMigration(db, {
+  appDataPath,
+  hadExistingDatabase,
+});
+if (databaseProtection.backupPath) {
+  console.log(`Verified pre-migration backup at: ${databaseProtection.backupPath}`);
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS flow_readings (
@@ -1048,6 +1061,7 @@ if (currentSiteId) {
   db.prepare('UPDATE attendance SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
 }
 
+recordSchemaBaseline(db);
 console.log('Database migration check complete.');
 
 module.exports = { db, appDataPath };

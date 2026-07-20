@@ -31,6 +31,9 @@ jobs:
       - name: Validate release contracts
         run: npm run validate
 
+      - name: Block high-risk production dependency vulnerabilities
+        run: npm run audit:prod
+
       - name: Build frontend
         run: npm run build
 

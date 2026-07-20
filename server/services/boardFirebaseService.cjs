@@ -80,6 +80,12 @@ function isAdmin(user) {
   return ADMIN_ROLES.has(String(user?.role || '').trim());
 }
 
+function isPopupActive(data) {
+  if (!data?.is_popup || !data?.popup_expires_at) return false;
+  const expiresAt = new Date(data.popup_expires_at).getTime();
+  return Number.isFinite(expiresAt) && expiresAt > Date.now();
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Posts
 // ─────────────────────────────────────────────────────────────────────
@@ -116,6 +122,7 @@ async function getPosts(role, siteName, userName = '') {
     posts.push({
       id: doc.id,
       ...data,
+      is_popup: isPopupActive(data),
       view_count: Number(data.view_count) || 0,
       comment_count: commentCounts.get(doc.id) || 0
     });
@@ -167,7 +174,7 @@ async function getPost(id, { incrementView = false } = {}) {
     });
   }
 
-  return { id: doc.id, ...data, view_count: viewCount };
+  return { id: doc.id, ...data, is_popup: isPopupActive(data), view_count: viewCount };
 }
 
 /**
@@ -191,6 +198,8 @@ async function createPost(data) {
     title:        data.title       || '',
     content:      data.content     || '',
     is_notice:    Boolean(data.is_notice),
+    is_popup:     Boolean(data.is_popup),
+    popup_expires_at: data.popup_expires_at || null,
     attachments:  data.attachments || '[]',
     parent_id:    data.parent_id   || null,
     is_deleted:   false,
@@ -221,6 +230,8 @@ async function updatePost(id, data) {
   if (data.title !== undefined) updateData.title = data.title;
   if (data.content !== undefined) updateData.content = data.content;
   if (data.is_notice !== undefined) updateData.is_notice = Boolean(data.is_notice);
+  if (data.is_popup !== undefined) updateData.is_popup = Boolean(data.is_popup);
+  if (data.popup_expires_at !== undefined) updateData.popup_expires_at = data.popup_expires_at || null;
   if (data.attachments !== undefined) updateData.attachments = data.attachments;
   if (data.target_site !== undefined) {
     updateData.target_site = data.target_site;

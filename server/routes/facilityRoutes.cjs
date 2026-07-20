@@ -4,15 +4,17 @@ const path = require('path');
 const { spawn } = require('child_process');
 const multer = require('multer');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
+const {
+  COMMON_MULTIPART_LIMITS,
+  MAX_IMAGE_BYTES,
+  imageFileFilter,
+} = require('../middleware/uploadSecurity.cjs');
 
 const router = express.Router();
 const photoUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024, files: 10 },
-  fileFilter: (_req, file, callback) => {
-    const allowed = String(file.mimetype || '').startsWith('image/');
-    callback(allowed ? null : new Error('이미지 파일만 저장할 수 있습니다.'), allowed);
-  },
+  limits: { ...COMMON_MULTIPART_LIMITS, fileSize: MAX_IMAGE_BYTES, files: 10 },
+  fileFilter: imageFileFilter,
 });
 
 function normalizeRecordId(value) {

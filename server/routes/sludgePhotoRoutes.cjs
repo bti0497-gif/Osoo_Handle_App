@@ -27,7 +27,17 @@ const {
 } = require('../services/drivePathService.cjs');
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const {
+  COMMON_MULTIPART_LIMITS,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGE_PIXELS,
+  imageFileFilter,
+} = require('../middleware/uploadSecurity.cjs');
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { ...COMMON_MULTIPART_LIMITS, fileSize: MAX_IMAGE_BYTES, files: 1 },
+  fileFilter: imageFileFilter,
+});
 
 function sanitizeName(name) {
   return String(name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
@@ -180,6 +190,7 @@ function decodeBmpToRgb(buf) {
   const heightRaw     = buf.readInt32LE(22);
   const height        = Math.abs(heightRaw);
   const bitsPerPixel  = buf.readUInt16LE(28);
+  if (width <= 0 || height <= 0 || width * height > MAX_IMAGE_PIXELS) throw new Error('BMP 이미지 크기가 허용 범위를 초과했습니다.');
   const bytesPerPixel = bitsPerPixel === 32 ? 4 : 3;
   const rowSize       = Math.floor((bitsPerPixel * width + 31) / 32) * 4;
   const bottomUp      = heightRaw > 0;
@@ -612,7 +623,7 @@ module.exports = function (db, baseDir, appDataPath) {
         await require('sharp')(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
           .jpeg({ quality: 90 }).toFile(destPath);
       } else {
-        await sharp(srcBuf).rotate().jpeg({ quality: 90 }).toFile(destPath);
+        await sharp(srcBuf, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate().jpeg({ quality: 90 }).toFile(destPath);
       }
 
       const url     = label === '반출'

@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
+const crypto = require('crypto');
 const { fork, spawnSync } = require('child_process');
 const { setupAutoUpdater, checkForUpdates, installDownloadedUpdateAndQuit, hasDownloadedUpdate } = require('./updater.cjs');
 
@@ -40,37 +42,47 @@ let mainWindow = null;
 let serverProcess = null;
 let tray = null;
 let isQuitting = false;
+let serverGuardTimer = null;
+let serverRestartTimer = null;
+let serverHealthFailures = 0;
+let serverInstanceToken = null;
+let serverLaunchedAt = 0;
+
+const DEDICATED_SERVER_PORT = 18731;
+const SERVER_GUARD_INTERVAL_MS = 3000;
+const SERVER_HEALTH_FAILURE_LIMIT = 3;
+const SERVER_STARTUP_GRACE_MS = 120000;
 
 const isDev = !app.isPackaged;
 const useExternalServer = isDev && process.env.OSOO_EXTERNAL_SERVER === '1';
 
-function cleanupStalePackagedServerPorts() {
-  if (isDev || process.platform !== 'win32') return;
+function reclaimDedicatedServerPort() {
+  if (useExternalServer || process.platform !== 'win32') return true;
 
   const script = `
 $ErrorActionPreference = 'SilentlyContinue'
 $currentPid = ${process.pid}
-$ports = 18731..18734
+$port = ${DEDICATED_SERVER_PORT}
 $owners = Get-NetTCPConnection -State Listen |
-  Where-Object { $ports -contains $_.LocalPort -and $_.OwningProcess -ne $currentPid } |
+  Where-Object { $_.LocalPort -eq $port -and $_.OwningProcess -ne $currentPid } |
   Select-Object -ExpandProperty OwningProcess -Unique
 
 foreach ($ownerPid in $owners) {
   $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid"
-  if (-not $proc) { continue }
-  $name = [string]$proc.Name
-  $command = [string]$proc.CommandLine
-  $path = [string]$proc.ExecutablePath
-  $isOsooProcess =
-    $name -eq 'Osoo Handle App.exe' -or
-    $path -like '*\\Osoo Handle App\\Osoo Handle App.exe' -or
-    (($name -eq 'node.exe' -or $name -eq 'electron.exe') -and
-      ($command -match 'Osoo Handle App' -or $command -match 'server\\.cjs'))
-  if ($isOsooProcess) {
-    Stop-Process -Id $ownerPid -Force
-  }
+  $name = if ($proc) { [string]$proc.Name } else { '<unknown>' }
+  $path = if ($proc) { [string]$proc.ExecutablePath } else { '' }
+  Write-Output "reclaim pid=$ownerPid name=$name path=$path"
+  Stop-Process -Id $ownerPid -Force
 }
-Start-Sleep -Milliseconds 500
+for ($attempt = 0; $attempt -lt 20; $attempt++) {
+  $remaining = Get-NetTCPConnection -State Listen |
+    Where-Object { $_.LocalPort -eq $port } |
+    Select-Object -First 1
+  if (-not $remaining) { exit 0 }
+  Start-Sleep -Milliseconds 250
+}
+Write-Error "전용 포트 $port 해제 실패"
+exit 1
 `.trim();
 
   const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
@@ -79,8 +91,78 @@ Start-Sleep -Milliseconds 500
     timeout: 10000,
   });
   if (result.error) {
-    console.warn('[Electron] Stale server port cleanup failed:', result.error.message);
+    console.error('[Electron] Dedicated server port reclaim failed:', result.error.message);
+    return false;
   }
+  if (result.stdout?.trim()) console.warn(`[Electron] ${result.stdout.trim()}`);
+  if (result.status !== 0) {
+    console.error('[Electron] Dedicated server port is still occupied:', result.stderr?.trim() || result.status);
+    return false;
+  }
+  return true;
+}
+
+function scheduleServerRestart(delayMs = 500) {
+  if (isQuitting || useExternalServer || serverRestartTimer) return;
+  serverRestartTimer = setTimeout(() => {
+    serverRestartTimer = null;
+    startServer();
+  }, delayMs);
+}
+
+function checkEmbeddedServerHealth() {
+  if (isQuitting || useExternalServer || !serverProcess || !serverInstanceToken) {
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    const request = http.get({
+      hostname: '127.0.0.1',
+      port: DEDICATED_SERVER_PORT,
+      path: '/api/ping',
+      timeout: 1200,
+      headers: { 'x-osoo-server-token': serverInstanceToken },
+    }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => {
+        try {
+          const payload = JSON.parse(body);
+          resolve(response.statusCode === 200
+            && payload?.app === 'osoo-handle-app'
+            && payload?.ready === true
+            && payload?.instanceVerified === true);
+        } catch (_) {
+          resolve(false);
+        }
+      });
+    });
+    request.on('timeout', () => request.destroy());
+    request.on('error', () => resolve(false));
+  });
+}
+
+function startServerGuard() {
+  if (useExternalServer || serverGuardTimer) return;
+  serverGuardTimer = setInterval(async () => {
+    if (isQuitting) return;
+    const healthy = await checkEmbeddedServerHealth();
+    if (healthy) {
+      serverHealthFailures = 0;
+      return;
+    }
+    if (serverProcess && Date.now() - serverLaunchedAt < SERVER_STARTUP_GRACE_MS) return;
+    serverHealthFailures += 1;
+    if (serverHealthFailures < SERVER_HEALTH_FAILURE_LIMIT) return;
+    serverHealthFailures = 0;
+    console.error('[Electron] Embedded server health lost; forcing clean restart on port 18731.');
+    const failedProcess = serverProcess;
+    serverProcess = null;
+    serverInstanceToken = null;
+    try { failedProcess?.kill('SIGKILL'); } catch (_) {}
+    scheduleServerRestart();
+  }, SERVER_GUARD_INTERVAL_MS);
+  serverGuardTimer.unref?.();
 }
 
 function handleVersionMigration() {
@@ -123,7 +205,12 @@ function startServer() {
     console.log('[Electron] External dev server mode: skip embedded server start');
     return;
   }
-  if (serverProcess) return;
+  if (serverProcess || isQuitting) return;
+  if (!reclaimDedicatedServerPort()) {
+    console.error('[Electron] Cannot start until dedicated port 18731 is clean. Retrying.');
+    scheduleServerRestart(1500);
+    return;
+  }
 
   const appRootPath = isDev ? path.join(__dirname, '..') : app.getAppPath();
   const unpackedServerScript = path.join(process.resourcesPath, 'app.asar.unpacked', 'server.cjs');
@@ -141,6 +228,9 @@ function startServer() {
     'Osoo_Handle_App'
   );
 
+  serverInstanceToken = crypto.randomUUID();
+  serverLaunchedAt = Date.now();
+  const launchedToken = serverInstanceToken;
   serverProcess = fork(serverScriptPath, [], {
     cwd: serverWorkingDirectory,
     stdio: 'pipe',
@@ -151,8 +241,11 @@ function startServer() {
       OSOO_APP_DATA_PATH: osooAppDataPath,
       // 진단 로그가 asar 패키징 환경에서도 정확한 버전을 기록하도록 main 프로세스에서 주입.
       OSOO_APP_VERSION: app.getVersion(),
+      OSOO_API_PORT: String(DEDICATED_SERVER_PORT),
+      OSOO_SERVER_TOKEN: launchedToken,
     }
   });
+  const launchedProcess = serverProcess;
 
   serverProcess.stdout?.on('data', (data) => {
     console.log(`[Server] ${data.toString().trim()}`);
@@ -162,11 +255,13 @@ function startServer() {
     console.error(`[Server Error] ${data.toString().trim()}`);
   });
 
-  serverProcess.on('exit', (code) => {
+  launchedProcess.on('exit', (code) => {
     console.log(`[Server] Process exited with code ${code}`);
-    serverProcess = null;
+    if (serverProcess === launchedProcess) serverProcess = null;
+    if (serverInstanceToken === launchedToken) serverInstanceToken = null;
+    serverLaunchedAt = 0;
     if (!isQuitting && mainWindow && !mainWindow.isDestroyed()) {
-      setTimeout(() => startServer(), 2000);
+      scheduleServerRestart();
     }
   });
 
@@ -178,6 +273,8 @@ function stopServer() {
   if (serverProcess) {
     serverProcess.kill();
     serverProcess = null;
+    serverInstanceToken = null;
+    serverLaunchedAt = 0;
   }
 }
 
@@ -457,8 +554,8 @@ app.whenReady().then(() => {
   }
 
   handleVersionMigration();
-  cleanupStalePackagedServerPorts();
   startServer();
+  startServerGuard();
   createWindow();
   createTray();
 
@@ -479,10 +576,16 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
+  if (serverGuardTimer) clearInterval(serverGuardTimer);
+  if (serverRestartTimer) clearTimeout(serverRestartTimer);
+  serverGuardTimer = null;
+  serverRestartTimer = null;
   stopServer();
 });
 
 ipcMain.handle('app:getVersion', () => app.getVersion());
+ipcMain.handle('server:getToken', () => serverInstanceToken || '');
 ipcMain.handle('app:checkVersionChanged', async () => {
   const userDataPath = app.getPath('userData');
   const markerPath = path.join(userDataPath, '.version-changed');

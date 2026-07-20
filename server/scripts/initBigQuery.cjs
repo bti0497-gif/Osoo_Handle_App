@@ -163,6 +163,8 @@ const SCHEMAS = {
     { name: 'title',       type: 'STRING',    mode: 'REQUIRED' },
     { name: 'content',     type: 'STRING' },
     { name: 'is_notice',   type: 'BOOLEAN' },
+    { name: 'is_popup',    type: 'BOOLEAN' },
+    { name: 'popup_expires_at', type: 'TIMESTAMP' },
     { name: 'attachments', type: 'STRING' },                        // JSON 배열 문자열
     { name: 'parent_id',   type: 'STRING' },                        // ?듦? ?먭? id
     { name: 'is_deleted',  type: 'BOOLEAN' },

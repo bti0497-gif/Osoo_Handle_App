@@ -19,6 +19,7 @@ const FacilityManagementView = lazy(() => import('./features/facility').then((mo
 const DailyLogView = lazy(() => import('./features/dailylog').then((module) => ({ default: module.DailyLogView })));
 const MonthlyOperationReportView = lazy(() => import('./features/monthly-report').then((module) => ({ default: module.MonthlyOperationReportView })));
 const BoardView = lazy(() => import('./features/board').then((module) => ({ default: module.BoardView })));
+const BoardPopupNotice = lazy(() => import('./features/board').then((module) => ({ default: module.BoardPopupNotice })));
 const SettingsView = lazy(() => import('./features/settings').then((module) => ({ default: module.SettingsView })));
 const KitManagementView = lazy(() => import('./features/kit').then((module) => ({ default: module.KitManagementView })));
 const CertificateView = lazy(() => import('./features/certificate').then((module) => ({ default: module.CertificateView })));
@@ -389,6 +390,10 @@ function App() {
                 helpText={getHelpText()}
                 locationStatus={locationStatus}
             />
+
+            <Suspense fallback={null}>
+                <BoardPopupNotice currentUser={user} activeTab={activeTab} onOpenBoard={() => setActiveTab('board')} />
+            </Suspense>
 
             {forcedUpdateNotice && (
                 <div style={{

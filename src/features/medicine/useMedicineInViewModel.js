@@ -41,7 +41,7 @@ export function useMedicineInViewModel(currentUser) {
     author: currentUser?.name || '',
   }), [currentUser?.site_id, currentUser?.site_name1, currentUser?.name]);
 
-  const loadDefaults = useCallback(async () => {
+  const loadDefaults = useCallback(async function loadDefaultsImpl() {
     setIsLoading(true);
     try {
       const result = await MedicineInModel.fetchDefaults(year, month, requestContext);
@@ -90,7 +90,7 @@ export function useMedicineInViewModel(currentUser) {
         });
         if (restored?.success && restored.count > 0) {
           showToast(`${restored.count}개 사진을 내려받았습니다.`);
-          await loadDefaults();
+          await loadDefaultsImpl();
         }
       };
 

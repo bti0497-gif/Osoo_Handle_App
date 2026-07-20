@@ -1,0 +1,1087 @@
+{
+  "schemaVersion": 1,
+  "endpointCount": 135,
+  "digest": "cc4c70d267a9dab0f165d0340658db56c26696dbe40b19e9f2c67427fe9e2c47",
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/auth/attendance",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/attendance",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/discovery-login",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/local-login",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/login-hint",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout-current",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/mark-attendance-synced",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/members",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/members",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/auth/members/:id",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/session",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/sync-attendance-bq",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/sync-member",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/ui-diagnostic",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/unsynced-attendance",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/board/comments/:id",
+      "module": "./routes/boardRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/board/posts",
+      "module": "./routes/boardRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/board/posts",
+      "module": "./routes/boardRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/board/posts/:id",
+      "module": "./routes/boardRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/board/posts/:id",
+      "module": "./routes/boardRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/board/posts/:id",
+      "module": "./routes/boardRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/board/posts/:id/comments",
+      "module": "./routes/boardRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/board/posts/:id/comments",
+      "module": "./routes/boardRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/certificates",
+      "module": "./routes/certificateRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/certificates/:id/download",
+      "module": "./routes/certificateRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/certificates/download-selected-pdf",
+      "module": "./routes/certificateRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/certificates/files/:id",
+      "module": "./routes/certificateRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/certificates/sync-cache",
+      "module": "./routes/certificateRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/daily-work-log/active-dates",
+      "module": "./routes/dailyWorkLogRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/daily-work-log/export",
+      "module": "./routes/dailyWorkLogRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/daily-work-log/export-hwpx",
+      "module": "./routes/dailyWorkLogRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/daily-work-log/export-pdf",
+      "module": "./routes/dailyWorkLogRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/daily-work-log/preview-manifest",
+      "module": "./routes/dailyWorkLogRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/daily-work-log/preview-page-data",
+      "module": "./routes/dailyWorkLogRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/download",
+      "module": "./routes/uploadRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/flows",
+      "module": "./routes/flowRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/flows",
+      "module": "./routes/flowRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/flows/bulk",
+      "module": "./routes/flowRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/flows/history",
+      "module": "./routes/flowRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/kits/bulk",
+      "module": "./routes/kitRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/kits/history",
+      "module": "./routes/kitRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/kits/purchase",
+      "module": "./routes/kitRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/kits/sync-analysis-usage",
+      "module": "./routes/kitRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/location/current",
+      "module": "./routes/locationRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/active-dates",
+      "module": "./routes/excelRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/batch-pdf",
+      "module": "./routes/excelRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/export",
+      "module": "./routes/excelRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/generate-excel",
+      "module": "./routes/excelRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/preview-manifest",
+      "module": "./routes/excelRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/preview-page-data",
+      "module": "./routes/excelRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/preview-pdf",
+      "module": "./routes/excelRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/preview-photo",
+      "module": "./routes/excelRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs/preview-template-html",
+      "module": "./routes/excelRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/medicine-in/defaults",
+      "module": "./routes/medicineInRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/medicine-in/export",
+      "module": "./routes/medicineInRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/medicine-in/photo",
+      "module": "./routes/medicineInRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/medicine-in/remote-photos/check",
+      "module": "./routes/medicineInRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/medicine-in/remote-photos/restore",
+      "module": "./routes/medicineInRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/medicine-in/save",
+      "module": "./routes/medicineInRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/medicine-in/upload-photo",
+      "module": "./routes/medicineInRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/medicine-register",
+      "module": "./routes/medicineRegisterRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/medicine-register/export",
+      "module": "./routes/medicineRegisterRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/medicines",
+      "module": "./routes/medicineRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/medicines",
+      "module": "./routes/medicineRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/medicines/bulk",
+      "module": "./routes/medicineRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/medicines/history",
+      "module": "./routes/medicineRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/medicines/purchase",
+      "module": "./routes/medicineRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/monthly-operation-report",
+      "module": "./routes/monthlyOperationReportRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/monthly-operation-report/export",
+      "module": "./routes/monthlyOperationReportRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/operation-status",
+      "module": "./routes/operationStatusRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/operation-status",
+      "module": "./routes/operationStatusRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/operation-status/history",
+      "module": "./routes/operationStatusRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/photo/upload",
+      "module": "./routes/uploadRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/roadwork-helper/all",
+      "module": "./routes/roadworkHelperRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/roadwork-helper/diagnostic",
+      "module": "./routes/roadworkHelperRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/roadwork-helper/electricity",
+      "module": "./routes/roadworkHelperRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/roadwork-helper/flow",
+      "module": "./routes/roadworkHelperRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/roadwork-helper/kit",
+      "module": "./routes/roadworkHelperRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/roadwork-helper/medicine",
+      "module": "./routes/roadworkHelperRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/add-item",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/bootstrap-site-member",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/excel-preview",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/excel-status",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/import-progress",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/kit-defaults",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/kit-defaults",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/medicine-defaults",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/medicine-defaults",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/open-local-folder",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/qntech-import-settings",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/save-flow-mapping",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/save-flow-option",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/save-kit-mapping",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/save-medicine-mapping",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/save-water-mapping",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/select-site",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/site-location",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/sites",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/sites",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/settings/sites/:siteId",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/settings/sludge-export-settings",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/sludge-export-settings",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/sync-initial-to-sheets",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/toggle-item",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/upload",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/web-app-credentials",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/sludge-ledger",
+      "module": "./routes/sludgePhotoRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sludge-photos",
+      "module": "./routes/sludgePhotoRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/sludge-photos/:date",
+      "module": "./routes/sludgePhotoRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/sludge-photos/export",
+      "module": "./routes/sludgePhotoRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/sludge-photos/export-ledger",
+      "module": "./routes/sludgePhotoRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sludge-photos/flow-amount",
+      "module": "./routes/sludgePhotoRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/sludge-photos/remote-photos/check",
+      "module": "./routes/sludgePhotoRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/sludge-photos/remote-photos/restore",
+      "module": "./routes/sludgePhotoRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/sludge-photos/save",
+      "module": "./routes/sludgePhotoRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/sludge-photos/upload-photo",
+      "module": "./routes/sludgePhotoRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/upload",
+      "module": "./routes/uploadRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/water-quality",
+      "module": "./routes/waterQualityRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/water-quality",
+      "module": "./routes/waterQualityRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/water-quality/bulk",
+      "module": "./routes/waterQualityRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/water-quality/history",
+      "module": "./routes/waterQualityRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/water-quality/import-from-qntech",
+      "module": "./routes/waterQualityRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/water-quality/import-photos-from-qntech",
+      "module": "./routes/waterQualityRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/water-quality/import-range-from-qntech",
+      "module": "./routes/waterQualityRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/water-quality/import-range-progress",
+      "module": "./routes/waterQualityRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/water-quality/import-values-from-qntech",
+      "module": "./routes/waterQualityRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/work-records",
+      "module": "./routes/facilityRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/work-records",
+      "module": "./routes/facilityRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/work-records/:id",
+      "module": "./routes/facilityRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/work-records/:id",
+      "module": "./routes/facilityRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/work-records/:id/open-photo-folder",
+      "module": "./routes/facilityRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/work-records/:id/photos",
+      "module": "./routes/facilityRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    }
+  ]
+}

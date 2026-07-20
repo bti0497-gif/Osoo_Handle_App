@@ -25,17 +25,19 @@ const {
   getPosts, getPost, createPost, updatePost, deletePost,
   getComments, getComment, createComment, deleteComment
 } = require('../services/boardService.cjs');
+const { sanitizeBoardHtml } = require('../services/boardHtmlSanitizer.cjs');
+const { getActiveUser, requireActiveUser } = require('../services/activeUserSessionService.cjs');
 
 const ADMIN_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
 
 // ── 요청에서 현재 사용자 추출 ──────────────────────────────────────
 // 우선순위: 헤더 > body._user > query params
 function extractUser(req) {
-  const u = req.body?._user || {};
+  const active = req.activeUser || getActiveUser();
   return {
-    name: req.headers['x-user-name'] || u.name  || req.query._name || req.query.name || 'unknown',
-    role: req.headers['x-user-role'] || u.role  || req.query._role || req.query.role || 'manager',
-    site: req.headers['x-user-site'] || u.site  || req.query._site || req.query.site || ''
+    name: active?.name || 'unknown',
+    role: active?.role || 'manager',
+    site: active?.siteName || ''
   };
 }
 
@@ -92,7 +94,15 @@ function normalizeAttachments(value) {
   return '[]';
 }
 
+function popupExpiry(isPopup, requestedDays) {
+  if (!isPopup) return null;
+  const days = Math.min(7, Math.max(1, Number.parseInt(requestedDays, 10) || 1));
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
 module.exports = function () {
+
+  router.use('/api/board', requireActiveUser);
 
   // 1. 게시글 목록
   router.get('/api/board/posts', async (req, res) => {
@@ -128,8 +138,10 @@ module.exports = function () {
         author_site: adminUser ? 'CENTRAL' : user.site,
         target_site: adminUser ? (body.target_site ?? '') : '',
         title:       body.title        || '',
-        content:     body.content      || '',
+        content:     sanitizeBoardHtml(body.content),
         is_notice:   adminUser ? Boolean(body.is_notice) : false,
+        is_popup:    adminUser ? Boolean(body.is_popup) : false,
+        popup_expires_at: adminUser ? popupExpiry(Boolean(body.is_popup), body.popup_days) : null,
         attachments: normalizeAttachments(body.attachments),
         parent_id:   body.parent_id    || null
       });
@@ -154,8 +166,12 @@ module.exports = function () {
 
       await updatePost(req.params.id, {
         title:       body.title,
-        content:     body.content,
+        content:     body.content === undefined ? undefined : sanitizeBoardHtml(body.content),
         is_notice:   isAdmin(user) ? body.is_notice : undefined,
+        is_popup:    isAdmin(user) ? body.is_popup : undefined,
+        popup_expires_at: isAdmin(user) && body.is_popup !== undefined
+          ? popupExpiry(Boolean(body.is_popup), body.popup_days)
+          : undefined,
         attachments: body.attachments != null ? normalizeAttachments(body.attachments) : undefined,
         target_site: isAdmin(user) ? body.target_site : undefined
       });

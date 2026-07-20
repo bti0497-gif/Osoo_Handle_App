@@ -41,7 +41,7 @@ const buildQntechImportMessage = (result) => {
     const photoCnt = result?.summary?.savedPhotoCount || 0;
     const driveErrors = result?.summary?.driveUploadErrorCount || 0;
     if (rowCnt === 0 && photoCnt === 0) {
-        return 'QnTECH에 해당 날짜 데이터가 없습니다.';
+        return '서버에 해당 날짜 데이터가 없습니다.';
     }
     return driveErrors > 0
         ? `값 ${rowCnt}건, 사진 ${photoCnt}건 저장됨, Drive 실패 ${driveErrors}건`
@@ -293,12 +293,12 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
         onWorkspaceSessionChange?.({ selectedKey: row.rowKey });
     };
 
-    const openModal = (mode = 'add') => {
+    const openModal = (mode = 'add', row = null) => {
         setModalState({
             open: true,
             tab: 'water',
             mode,
-            date: selectedRow?.date || todayStr,
+            date: row?.date || selectedRow?.date || todayStr,
         });
     };
 
@@ -320,9 +320,9 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
         let importedResult = null;
         const success = await batchProcess.executeBatch(
             [targetDate],
-            (dateStr) => ({ id: dateStr, title: `${formatImportProgressDate(dateStr)} QnTECH 데이터` }),
+            (dateStr) => ({ id: dateStr, title: `${formatImportProgressDate(dateStr)} 서버 데이터` }),
             async (dateStr, updateMessage) => {
-                updateMessage('QnTECH 서버에 접속 중...');
+                updateMessage('서버에서 가져오는 중...');
                 await waitForUiPaint();
                 const result = await handleImportFromQntech(dateStr, true);
                 importedResult = result;
@@ -341,7 +341,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
             const message = buildQntechImportMessage(importedResult);
             showToast?.(message, importedResult?.summary?.importedRowCount || importedResult?.summary?.savedPhotoCount ? 'success' : 'warning');
         } else {
-            showToast?.('QnTECH 불러오기에 실패했습니다.', 'error');
+            showToast?.('서버에서 가져오기에 실패했습니다.', 'error');
         }
 
         return importedResult;
@@ -366,8 +366,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
         }
         if (startDate === endDate) {
             void recordQntechDiagnostic('single-date-dispatch', { date: startDate });
-            await handleQntechImportClick(startDate);
-            return;
+            return handleQntechImportClick(startDate);
         }
 
         if (typeof showConfirm !== 'function') {
@@ -401,7 +400,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
                         ? ` (${progress.completedDates || 0}/${progress.totalDates})`
                         : '';
                     updateMessage(
-                        `${progress.message || 'QnTECH 서버에서 수집 중...'}${count}`,
+                        `${progress.message || '서버에서 가져오는 중...'}${count}`,
                         {
                             completedUnits: progress.completedDates || 0,
                             errorUnits: 0,
@@ -438,6 +437,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
             void recordQntechDiagnostic('range-failed', { startDate, endDate });
             showToast?.('기간 데이터 불러오기에 실패했습니다. 진행상황은 다시 화면을 열어 확인할 수 있습니다.', 'error');
         }
+        return success ? rangeResult : null;
     };
 
     const handleSaveComplete = async ({ date, savedTabs = [] }) => {
@@ -518,7 +518,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
                 <AdvancedDataGrid
                     {...ADVANCED_DATAGRID_READ_ONLY_PROPS}
                     title="수질분석 데이터"
-                    description="그리드는 조회와 행 선택만 지원합니다. QnTECH 불러오기, 수동 추가와 수정은 통합 입력 모달에서 확인합니다."
+                    description="그리드는 조회와 행 선택만 지원합니다. 서버에서 가져오기, 수동 추가와 수정은 통합 입력 모달에서 확인합니다."
                     columns={gridCols}
                     data={history}
                     keyField="rowKey"
@@ -534,7 +534,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
                     rowHeaderWidth={94}
                     rowHeaderLabel="날짜"
                     onRowSelect={handleRowSelect}
-                    onCellDoubleClick={() => openModal('edit')}
+                    onCellDoubleClick={(row) => openModal('edit', row)}
                     getRowStyle={getRowStyle}
                     renderRowHeader={renderRowHeader}
                     renderCell={renderCell}
@@ -574,7 +574,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
 
             <BatchProgressDialog
                 isOpen={batchProcess.tasks.length > 0}
-                title={batchProcess.tasks.length > 1 ? 'QnTECH 데이터 일괄 가져오기' : 'QnTECH 데이터 가져오기'}
+                title={batchProcess.tasks.length > 1 ? '서버에서 기간 데이터 가져오기' : '서버에서 가져오기'}
                 tasks={batchProcess.tasks}
                 progress={batchProcess.progress}
                 isProcessing={batchProcess.isProcessing}

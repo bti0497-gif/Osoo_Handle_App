@@ -65,6 +65,30 @@ const getKitExperimentStep = (item, analysisLocationCount) => {
     return Math.max(1, Number(analysisLocationCount) || 0);
 };
 
+const getWaterFieldForKit = (item) => {
+    const kitName = String(item?.key || item?.name || item?.label || '')
+        .normalize('NFKC')
+        .toUpperCase()
+        .replace(/[^\p{L}\p{N}]/gu, '');
+    if (kitName.includes('NH3') || kitName.includes('암모니아')) return 'nh3_n';
+    if (kitName.includes('NO3') || kitName.includes('질산')) return 'no3_n';
+    if (kitName.includes('PO4') || kitName.includes('인산염인') || kitName.includes('오르토인산')) return 'po4_p';
+    if (kitName.includes('ALK') || kitName.includes('알칼리')) return 'alkalinity';
+    return '';
+};
+
+const countAnalysisUsage = (history = [], targetDate = '') => {
+    const counts = { nh3_n: 0, no3_n: 0, po4_p: 0, alkalinity: 0 };
+    history.forEach((row) => {
+        if (String(row?.date || '').slice(0, 10) !== targetDate) return;
+        Object.keys(counts).forEach((field) => {
+            const value = row?.[field];
+            if (value !== '' && value !== null && value !== undefined) counts[field] += 1;
+        });
+    });
+    return counts;
+};
+
 const formatValue = (value) => {
     if (value === null || value === undefined || value === '') return '-';
     if (Number.isFinite(Number(value))) return Number(value).toLocaleString();
@@ -98,6 +122,7 @@ const buttonBaseStyle = {
     fontSize: 14,
     fontWeight: 900,
     color: '#334155',
+    whiteSpace: 'nowrap',
 };
 
 const ADMIN_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
@@ -273,13 +298,11 @@ export default function UnifiedRecordModal({
     initialDate = '',
     contexts = {},
     isImportingQntech = false,
-    isSyncingAnalysisKits = false,
     onClose,
     onSaveComplete,
     onImportQntech,
     onImportQntechRange,
     onConfirm,
-    onSyncAnalysisKits,
     onValidationError,
     onDateChange,
 }) {
@@ -298,6 +321,8 @@ export default function UnifiedRecordModal({
     const [savedTabs, setSavedTabs] = useState([]);
     const [internalQntechProgress, setInternalQntechProgress] = useState(null);
     const [isInternalQntechImporting, setIsInternalQntechImporting] = useState(false);
+    const [isLookingUpExperimentCounts, setIsLookingUpExperimentCounts] = useState(false);
+    const [experimentLookupMessage, setExperimentLookupMessage] = useState('');
     const wasOpenRef = useRef(false);
     const initialWaterSignature = JSON.stringify({
         measurementOrder: contexts.water?.measurementOrder || 1,
@@ -313,13 +338,13 @@ export default function UnifiedRecordModal({
 
     const runInternalQntechImport = async (targetDate) => {
         setIsInternalQntechImporting(true);
-        setInternalQntechProgress({ message: `${targetDate} 데이터를 불러오는 중...` });
+        setInternalQntechProgress({ message: `${targetDate} 서버 데이터를 가져오는 중...` });
         try {
             await WaterQualityModel.recordQntechUiDiagnostic('unified-single-dispatch', { date: targetDate });
             const result = await WaterQualityModel.importFromQntech(targetDate);
-            if (!result?.success) throw new Error(result?.error || 'QnTECH 데이터를 불러오지 못했습니다.');
+            if (!result?.success) throw new Error(result?.error || '서버에서 데이터를 가져오지 못했습니다.');
             await reloadContexts({ force: true, tabs: ['water', 'kit'] });
-            setInternalQntechProgress({ message: 'QnTECH 데이터 불러오기가 완료되었습니다.', completed: true });
+            setInternalQntechProgress({ message: '서버에서 데이터 가져오기가 완료되었습니다.', completed: true });
             return result;
         } catch (error) {
             setInternalQntechProgress({ status: 'error', message: error.message });
@@ -344,22 +369,22 @@ export default function UnifiedRecordModal({
         try {
             await WaterQualityModel.recordQntechUiDiagnostic('unified-range-dispatch', { startDate, endDate });
             const started = await WaterQualityModel.importRangeFromQntech(startDate, endDate);
-            if (!started?.success) throw new Error(started?.error || 'QnTECH 기간 불러오기를 시작하지 못했습니다.');
+            if (!started?.success) throw new Error(started?.error || '서버에서 기간 데이터 가져오기를 시작하지 못했습니다.');
 
             let result = null;
             while (!result) {
                 const response = await WaterQualityModel.fetchRangeImportProgress();
                 const progress = response?.progress;
                 if (!progress || (started.jobId && progress.jobId !== started.jobId)) {
-                    throw new Error('QnTECH 기간 작업 상태를 확인할 수 없습니다.');
+                    throw new Error('서버의 기간 작업 상태를 확인할 수 없습니다.');
                 }
                 setInternalQntechProgress(progress);
                 if (progress.status === 'completed') result = progress.result;
-                else if (progress.status === 'error') throw new Error(progress.message || 'QnTECH 기간 불러오기에 실패했습니다.');
+                else if (progress.status === 'error') throw new Error(progress.message || '서버에서 기간 데이터 가져오기에 실패했습니다.');
                 else await new Promise((resolve) => setTimeout(resolve, 1000));
             }
 
-            if (!result?.success) throw new Error(result?.error || 'QnTECH 기간 불러오기에 실패했습니다.');
+            if (!result?.success) throw new Error(result?.error || '서버에서 기간 데이터 가져오기에 실패했습니다.');
             await reloadContexts({ force: true, tabs: ['water', 'kit'] });
             setInternalQntechProgress((previous) => ({
                 ...previous,
@@ -639,6 +664,52 @@ export default function UnifiedRecordModal({
         applyInventoryDefaults(nextTab);
     };
 
+    const handleLookupExperimentCounts = async () => {
+        if (!date || isLookingUpExperimentCounts) return;
+        setIsLookingUpExperimentCounts(true);
+        setExperimentLookupMessage('분석결과를 조회하는 중...');
+        try {
+            const response = await WaterQualityModel.fetchHistory({ force: true });
+            const history = Array.isArray(response) ? response : (Array.isArray(response?.history) ? response.history : []);
+            const counts = countAnalysisUsage(history, date);
+            const matchedCount = currentItems.reduce((sum, item) => (
+                sum + (counts[getWaterFieldForKit(item)] || 0)
+            ), 0);
+
+            setDraft((prev) => {
+                const next = { ...prev };
+                currentItems.forEach((item) => {
+                    const field = getWaterFieldForKit(item);
+                    if (!field) return;
+                    const key = getDraftKeyForItem('kit', item);
+                    const current = next[key] || buildInitialDraft('kit', item);
+                    const updated = {
+                        ...current,
+                        usage: counts[field] || 0,
+                        __dirty: { ...(current.__dirty || {}), usage: true },
+                    };
+                    next[key] = recalculateInventoryDraft(item, updated);
+                });
+                return next;
+            });
+            setExperimentLookupMessage(
+                matchedCount > 0
+                    ? `분석결과를 기준으로 실험횟수 ${matchedCount}건을 채웠습니다.`
+                    : '선택한 날짜에 저장된 분석결과가 없습니다.'
+            );
+        } catch (error) {
+            console.error('[UnifiedRecordModal] automatic experiment count lookup failed:', error);
+            setExperimentLookupMessage('자동실험횟수를 조회하지 못했습니다.');
+            onValidationError?.(`자동실험횟수 조회 실패: ${error.message}`);
+        } finally {
+            setIsLookingUpExperimentCounts(false);
+        }
+    };
+
+    const markTabsSaved = (tabIds = []) => {
+        setSavedTabs((prev) => Array.from(new Set([...prev, ...tabIds])));
+    };
+
     const handleAddWaterRound = () => {
         const nextOrder = Math.max(0, ...waterRounds.map((round) => Number(round.value) || 0)) + 1;
         const nextRound = {
@@ -702,7 +773,10 @@ export default function UnifiedRecordModal({
         const waterItemsToSave = [];
         const effectiveSaveStatusMode = canUseBaselineStatus ? saveStatusMode : 'manual';
         const isAdminUser = ADMIN_ROLES.has(String(currentUser?.role || '').trim().toLowerCase());
-        const shouldAutoAdjustKitUsageFromWater = !isAdminUser && effectiveSaveStatusMode !== 'baseline';
+        const shouldAutoAdjustKitUsageFromWater = targetTabs.has('water')
+            && targetTabs.has('kit')
+            && !isAdminUser
+            && effectiveSaveStatusMode !== 'baseline';
 
         if (targetTabs.has('flow')) {
             (resolvedContexts.flow?.items || []).forEach((item) => {
@@ -928,7 +1002,7 @@ export default function UnifiedRecordModal({
         }
 
         if (result.savedTabs.length > 0) {
-            setSavedTabs((prev) => Array.from(new Set([...prev, ...result.savedTabs])));
+            markTabsSaved(result.savedTabs);
             setDraft((prev) => {
                 const savedTabSet = new Set(result.savedTabs);
                 return Object.fromEntries(
@@ -968,7 +1042,7 @@ export default function UnifiedRecordModal({
         if (isLoadingUnifiedData || isSaving) return;
 
         const dirtyUnsavedTabs = TAB_META
-            .filter((tab) => hasDraftTabData(tab.id) && !savedTabs.includes(tab.id))
+            .filter((tab) => hasDraftTabData(tab.id))
             .map((tab) => tab.id);
 
         if (dirtyUnsavedTabs.length > 0) {
@@ -979,7 +1053,31 @@ export default function UnifiedRecordModal({
             if (!window.confirm('저장하지 않은 입력이 있습니다. 저장하지 않고 닫을까요?')) return;
         }
 
+        const statusLines = TAB_META.map((tab) => {
+            const dirty = hasDraftTabData(tab.id);
+            const saved = savedTabs.includes(tab.id);
+            const status = dirty
+                ? (saved ? '저장 후 다시 변경됨 — 현재 변경은 미저장' : '변경 후 미저장')
+                : (saved ? '저장됨' : '작업하지 않음');
+            return `- ${tab.label}: ${status}`;
+        });
+        window.alert(['이번 통합입력 작업 현황', '', ...statusLines].join('\n'));
+
         onClose?.();
+    };
+
+    const handleModalDateChange = (nextDate) => {
+        const hasUnsaved = TAB_META.some((tab) => hasDraftTabData(tab.id));
+        if (hasUnsaved && !window.confirm('저장하지 않은 입력이 있습니다. 날짜를 바꾸면 현재 입력이 사라집니다. 계속할까요?')) {
+            return;
+        }
+        setDate(nextDate);
+        setRangeStartDate(nextDate);
+        setRangeEndDate(nextDate);
+        setSelectedByTab({});
+        setDraft({});
+        setSavedTabs([]);
+        onDateChange?.(nextDate);
     };
 
     const renderWaterSidebar = () => {
@@ -1041,7 +1139,7 @@ export default function UnifiedRecordModal({
                                     >
                                         <div>{round.label}</div>
                                         <div style={{ marginTop: 2, fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>
-                                            {round.sourceType === 'qntech' ? 'QnTECH' : '수동입력'}
+                                            {round.sourceType === 'qntech' ? '서버자료' : '수동입력'}
                                         </div>
                                     </button>
                                 );
@@ -1079,13 +1177,18 @@ export default function UnifiedRecordModal({
                                     type="button"
                                     onClick={async () => {
                                         try {
+                                            let importResult = null;
                                             if (isRange) {
-                                                await effectiveImportQntechRange(rangeStartDate, rangeEndDate);
+                                                importResult = await effectiveImportQntechRange(rangeStartDate, rangeEndDate);
                                             } else if (isSameDay) {
-                                                await effectiveImportQntech(rangeStartDate);
+                                                importResult = await effectiveImportQntech(rangeStartDate);
+                                            }
+                                            if (importResult?.success) {
+                                                markTabsSaved(['water', 'kit']);
+                                                await onSaveComplete?.({ date, savedTabs: ['water', 'kit'], source: 'qntech' });
                                             }
                                         } catch (error) {
-                                            onValidationError?.(`QnTECH 불러오기를 시작하지 못했습니다: ${error.message}`);
+                                            onValidationError?.(`서버에서 가져오기를 시작하지 못했습니다: ${error.message}`);
                                         }
                                     }}
                                     disabled={effectiveIsImportingQntech || !hasBoth}
@@ -1098,12 +1201,12 @@ export default function UnifiedRecordModal({
                                     }}
                                 >
                                     {effectiveIsImportingQntech
-                                        ? '불러오는 중...'
+                                        ? '서버에서 가져오는 중...'
                                         : isRange
-                                            ? '기간불러오기'
+                                            ? '서버에서 기간 가져오기'
                                             : isSameDay
-                                                ? `${rangeStartDate} 불러오기`
-                                                : '불러오기'}
+                                                ? '서버에서 가져오기'
+                                                : '서버에서 가져오기'}
                                 </button>
                                 {internalQntechProgress?.message && (
                                     <span style={{ fontSize: 12, color: internalQntechProgress.status === 'error' ? '#dc2626' : '#2563eb', fontWeight: 800, lineHeight: 1.5 }}>
@@ -1229,7 +1332,7 @@ export default function UnifiedRecordModal({
             const defaultButtonLabel = defaultPurchaseAppliedByTab[activeTab] ? `${purchaseLabel} 적용 해제` : `${purchaseLabel} 적용`;
             return (
                 <div style={{ display: 'grid', gap: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
                         <button
                             type="button"
                             onClick={handleToggleDefaultPurchases}
@@ -1247,18 +1350,18 @@ export default function UnifiedRecordModal({
                             <>
                                 <button
                                     type="button"
-                                    onClick={() => onSyncAnalysisKits?.(date)}
-                                    disabled={isSyncingAnalysisKits || !date}
+                                    onClick={handleLookupExperimentCounts}
+                                    disabled={isLookingUpExperimentCounts || !date}
                                     style={{
                                         ...buttonBaseStyle,
                                         padding: '0 14px',
                                         borderColor: '#16a34a',
                                         background: '#f0fdf4',
                                         color: '#166534',
-                                        cursor: isSyncingAnalysisKits || !date ? 'not-allowed' : 'pointer',
+                                        cursor: isLookingUpExperimentCounts || !date ? 'not-allowed' : 'pointer',
                                     }}
                                 >
-                                    {isSyncingAnalysisKits ? '동기화 중...' : '분석키트 동기화'}
+                                    {isLookingUpExperimentCounts ? '조회 중...' : '자동실험횟수 조회'}
                                 </button>
                                 <button
                                     type="button"
@@ -1289,6 +1392,11 @@ export default function UnifiedRecordModal({
                             </>
                         )}
                     </div>
+                    {isKitTab && experimentLookupMessage && (
+                        <div style={{ textAlign: 'right', fontSize: 12, color: '#166534', fontWeight: 800 }}>
+                            {experimentLookupMessage}
+                        </div>
+                    )}
 
                     <div style={{
                         display: 'grid',
@@ -1512,14 +1620,7 @@ export default function UnifiedRecordModal({
 
                             <DateOnlyInput
                                 value={date}
-                                onChange={(nextDate) => {
-                                    setDate(nextDate);
-                                    setRangeStartDate(nextDate);
-                                    setRangeEndDate(nextDate);
-                                    setSelectedByTab({});
-                                    setDraft({});
-                                    onDateChange?.(nextDate);
-                                }}
+                                onChange={handleModalDateChange}
                                 style={{ width: 140, flex: '0 0 auto' }}
                             />
 
@@ -1611,7 +1712,7 @@ export default function UnifiedRecordModal({
                             </div>
                             <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
                                 {(activeTab === 'water'
-                                    ? [{ label: '날짜', value: date }, { label: '입력방식', value: selectedRound?.sourceType === 'qntech' ? 'QnTECH' : '수동입력' }]
+                                    ? [{ label: '날짜', value: date }, { label: '입력방식', value: selectedRound?.sourceType === 'qntech' ? '서버자료' : '수동입력' }]
                                     : activeTab === 'flow'
                                         ? [{ label: '날짜', value: date }, { label: '항목', value: `${selectedFlowGroup?.items?.length || 0}개` }]
                                     : activeTab === 'medicine' || activeTab === 'kit'
@@ -1631,7 +1732,7 @@ export default function UnifiedRecordModal({
                             overflowY: 'auto',
                             scrollbarGutter: 'stable',
                             opacity: isLoadingUnifiedData ? 0.55 : 1,
-                            pointerEvents: 'auto',
+                            pointerEvents: isLoadingUnifiedData ? 'none' : 'auto',
                         }}>
                             {renderFields()}
                         </div>

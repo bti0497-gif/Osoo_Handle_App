@@ -286,7 +286,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         return [...normalizedDefaults, ...extraItems];
     };
 
-    const loadSettings = async (options = {}) => {
+    async function loadSettings(options = {}) {
         try {
             setIsSiteListLoading(true);
             const [data, sitesData] = await Promise.all([
@@ -444,7 +444,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
             setIsSiteListLoading(false);
             setIsLoading(false);
         }
-    };
+    }
 
     const handleApply = async () => {
         try {
@@ -466,10 +466,12 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
             const response = await SettingsModel.saveSettings({ settings: siteInfo, configItems });
 
             if (response.success) {
-                showAlert?.('설정이 성공적으로 저장되었습니다.');
                 setIsAppSiteConfigured(true);
                 setTemplateFiles([]);
-                loadSettings();
+                await loadSettings();
+                showAlert?.(response.storageWarning
+                    ? `설정은 정상적으로 저장되었습니다.\n${response.storageWarning}`
+                    : '설정이 성공적으로 저장되고 다시 확인되었습니다.');
             } else {
                 throw new Error(response.message || '알 수 없는 오류가 발생했습니다.');
             }

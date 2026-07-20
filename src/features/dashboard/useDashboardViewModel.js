@@ -3,6 +3,21 @@ import { DashboardModel } from './DashboardModel';
 import { buildWaterSummary } from './waterSummary';
 
 const FLOW_KEYS = ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '전력량계'];
+const EMPTY_WIDGET_ERRORS = { flow: null, water: null, inventory: null };
+
+async function requestWithOneRetry(request) {
+    try {
+        return await request();
+    } catch (firstError) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        try {
+            return await request();
+        } catch (secondError) {
+            secondError.firstError = firstError;
+            throw secondError;
+        }
+    }
+}
 
 function toDateKey(date = new Date()) {
     return date.toISOString().slice(0, 10);
@@ -50,6 +65,7 @@ export function useDashboardViewModel(currentUser) {
     const [kitRows, setKitRows] = useState([]);
     const [medicineDefaults, setMedicineDefaults] = useState([]);
     const [kitDefaults, setKitDefaults] = useState([]);
+    const [widgetErrors, setWidgetErrors] = useState(EMPTY_WIDGET_ERRORS);
     const [weekOffset, setWeekOffset] = useState(0);
     const [visibleSeries, setVisibleSeries] = useState({
         inflow: true,
@@ -73,6 +89,14 @@ export function useDashboardViewModel(currentUser) {
             }
             const params = siteId ? { site_id: siteId } : {};
 
+            const results = await Promise.allSettled([
+                requestWithOneRetry(() => DashboardModel.fetchFlowHistory(params)),
+                requestWithOneRetry(() => DashboardModel.fetchWaterHistory(params)),
+                requestWithOneRetry(() => DashboardModel.fetchMedicineHistory(params)),
+                requestWithOneRetry(() => DashboardModel.fetchKitHistory(params)),
+                requestWithOneRetry(() => DashboardModel.fetchMedicineDefaults()),
+                requestWithOneRetry(() => DashboardModel.fetchKitDefaults()),
+            ]);
             const [
                 flowResponse,
                 waterResponse,
@@ -80,18 +104,13 @@ export function useDashboardViewModel(currentUser) {
                 kitResponse,
                 medicineDefaultsResponse,
                 kitDefaultsResponse,
-            ] = await Promise.all([
-                DashboardModel.fetchFlowHistory(params),
-                DashboardModel.fetchWaterHistory(params),
-                DashboardModel.fetchMedicineHistory(params),
-                DashboardModel.fetchKitHistory(params),
-                DashboardModel.fetchMedicineDefaults(),
-                DashboardModel.fetchKitDefaults(),
-            ]);
+            ] = results.map((result) => (result.status === 'fulfilled' ? result.value : null));
+            const nextErrors = { ...EMPTY_WIDGET_ERRORS };
+            const failureMessages = results.map((result) => (
+                result.status === 'rejected' ? String(result.reason?.message || result.reason || '알 수 없는 오류') : null
+            ));
 
-            if (!flowResponse?.success || !Array.isArray(flowResponse.history)) {
-                setHistoryRows([]);
-            } else {
+            if (flowResponse?.success && Array.isArray(flowResponse.history)) {
                 const today = toDateKey(new Date());
                 const normalized = flowResponse.history
                     .filter((row) => String(row?.date || '') <= today)
@@ -106,11 +125,11 @@ export function useDashboardViewModel(currentUser) {
                     .sort((a, b) => a.date.localeCompare(b.date));
                 setHistoryRows(normalized);
                 setWeekOffset(0);
+            } else {
+                nextErrors.flow = failureMessages[0] || '유량·전력 데이터를 불러오지 못했습니다.';
             }
 
-            if (!waterResponse?.success || !Array.isArray(waterResponse.history)) {
-                setWaterRows([]);
-            } else {
+            if (waterResponse?.success && Array.isArray(waterResponse.history)) {
                 const today = toDateKey(new Date());
                 const normalizedWater = waterResponse.history
                     .filter((row) => String(row?.date || '') <= today)
@@ -124,37 +143,43 @@ export function useDashboardViewModel(currentUser) {
                     }))
                     .sort((a, b) => b.date.localeCompare(a.date));
                 setWaterRows(normalizedWater);
+            } else {
+                nextErrors.water = failureMessages[1] || '수질 데이터를 불러오지 못했습니다.';
             }
 
-            if (!medicineResponse?.success || !Array.isArray(medicineResponse.history)) {
-                setMedicineRows([]);
-            } else {
+            if (medicineResponse?.success && Array.isArray(medicineResponse.history)) {
                 setMedicineRows(medicineResponse.history);
             }
 
-            if (!kitResponse?.success || !Array.isArray(kitResponse.history)) {
-                setKitRows([]);
-            } else {
+            if (kitResponse?.success && Array.isArray(kitResponse.history)) {
                 setKitRows(kitResponse.history);
             }
-            setMedicineDefaults(
-                medicineDefaultsResponse?.success && Array.isArray(medicineDefaultsResponse.items)
-                    ? medicineDefaultsResponse.items
-                    : []
-            );
-            setKitDefaults(
-                kitDefaultsResponse?.success && Array.isArray(kitDefaultsResponse.items)
-                    ? kitDefaultsResponse.items
-                    : []
-            );
+            if (medicineDefaultsResponse?.success && Array.isArray(medicineDefaultsResponse.items)) {
+                setMedicineDefaults(medicineDefaultsResponse.items);
+            }
+            if (kitDefaultsResponse?.success && Array.isArray(kitDefaultsResponse.items)) {
+                setKitDefaults(kitDefaultsResponse.items);
+            }
+            if (!medicineResponse?.success || !Array.isArray(medicineResponse.history)
+                || !kitResponse?.success || !Array.isArray(kitResponse.history)
+                || !medicineDefaultsResponse?.success || !Array.isArray(medicineDefaultsResponse.items)
+                || !kitDefaultsResponse?.success || !Array.isArray(kitDefaultsResponse.items)) {
+                nextErrors.inventory = failureMessages.slice(2).filter(Boolean).join(' / ')
+                    || '약품·키트 재고 데이터를 일부 불러오지 못했습니다.';
+            }
+            setWidgetErrors(nextErrors);
+            const failedWidgets = Object.entries(nextErrors).filter(([, message]) => Boolean(message));
+            if (failedWidgets.length > 0) {
+                DashboardModel.recordLoadDiagnostic({
+                    siteId: siteId || null,
+                    widgets: failedWidgets.map(([widget, message]) => ({ widget, message })),
+                });
+            }
         } catch (error) {
             console.error('[Dashboard] 데이터 조회 실패:', error);
-            setHistoryRows([]);
-            setWaterRows([]);
-            setMedicineRows([]);
-            setKitRows([]);
-            setMedicineDefaults([]);
-            setKitDefaults([]);
+            const message = String(error?.message || error || '대시보드 조회 실패');
+            setWidgetErrors({ flow: message, water: message, inventory: message });
+            DashboardModel.recordLoadDiagnostic({ fatal: true, message });
         } finally {
             setLoading(false);
         }
@@ -253,6 +278,7 @@ export function useDashboardViewModel(currentUser) {
         kitRows,
         medicineDefaults,
         kitDefaults,
+        widgetErrors,
         refresh: loadHistory,
     };
 }

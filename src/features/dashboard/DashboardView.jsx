@@ -4,6 +4,20 @@ import FlowTrendWidget from './widgets/FlowTrendWidget';
 import WaterQualityWidget from './widgets/WaterQualityWidget';
 import InventoryLevelWidget from './widgets/InventoryLevelWidget';
 
+const WidgetError = ({ message, onRetry }) => message ? (
+    <div role="alert" style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        marginBottom: 8, padding: '9px 11px', borderRadius: 9,
+        background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412', fontSize: '0.78rem', fontWeight: 800,
+    }}>
+        <span>이 위젯만 조회하지 못했습니다. 다른 위젯은 계속 사용할 수 있습니다.</span>
+        <button type="button" onClick={onRetry} style={{
+            border: '1px solid #fdba74', background: '#fff', color: '#9a3412', borderRadius: 7,
+            padding: '5px 9px', fontWeight: 900, cursor: 'pointer', whiteSpace: 'nowrap',
+        }}>다시 시도</button>
+    </div>
+) : null;
+
 const DashboardView = ({ currentUser }) => {
     const [isFlowWidgetOpen, setIsFlowWidgetOpen] = useState(() => {
         try {
@@ -27,6 +41,8 @@ const DashboardView = ({ currentUser }) => {
         kitRows,
         medicineDefaults,
         kitDefaults,
+        widgetErrors,
+        refresh,
     } = useDashboardViewModel(currentUser);
 
     useEffect(() => {
@@ -41,6 +57,7 @@ const DashboardView = ({ currentUser }) => {
         <div className="dashboard-view">
             <div className="dashboard-view__stack">
                 <div className="dashboard-view__widget-wrap">
+                    <WidgetError message={widgetErrors.flow} onRetry={refresh} />
                     <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, backgroundColor: '#ffffff' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.4rem 0.55rem 0.25rem' }}>
                             <span style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 800 }}>
@@ -87,9 +104,11 @@ const DashboardView = ({ currentUser }) => {
                 </div>
 
                 <div className="dashboard-view__widget-wrap">
+                    <WidgetError message={widgetErrors.water} onRetry={refresh} />
                     <WaterQualityWidget rows={waterWidgetRows} summary={waterSummary} />
                 </div>
                 <div className="dashboard-view__widget-wrap">
+                    <WidgetError message={widgetErrors.inventory} onRetry={refresh} />
                     <InventoryLevelWidget
                         medicineRows={medicineRows}
                         kitRows={kitRows}

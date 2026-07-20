@@ -11,6 +11,7 @@ const mappingSettingsService = require('../services/settings/mappingSettingsServ
 const siteSettingsService = require('../services/settings/siteSettingsService.cjs');
 const templateSettingsService = require('../services/settings/templateSettingsService.cjs');
 const { reconcileConfiguredQntechSiteId } = require('../services/qntechAuthService.cjs');
+const { requireAdminSession } = require('../services/activeUserSessionService.cjs');
 const {
   getCustomReportTemplatesDir,
   syncBundledTemplatesToAppData,
@@ -111,7 +112,16 @@ module.exports = function (db, baseDir, appDataPath) {
       }
     }
   });
-  const reportUpload = multer({ storage: reportStorage });
+  const {
+    COMMON_MULTIPART_LIMITS,
+    MAX_TEMPLATE_BYTES,
+    templateFileFilter,
+  } = require('../middleware/uploadSecurity.cjs');
+  const reportUpload = multer({
+    storage: reportStorage,
+    limits: { ...COMMON_MULTIPART_LIMITS, fileSize: MAX_TEMPLATE_BYTES, files: 21 },
+    fileFilter: templateFileFilter,
+  });
 
   const verifyQntechSettingsIntegrity = async (hints = {}) => {
     try {
@@ -121,6 +131,11 @@ module.exports = function (db, baseDir, appDataPath) {
       return { qntechSiteId: '', repaired: false, source: 'error', error: error.message };
     }
   };
+
+  router.use('/api/settings', (req, res, next) => {
+    if (req.method === 'GET') return next();
+    return requireAdminSession(req, res, next);
+  });
 
   // 설정 조회 API
   router.get('/api/settings', async (req, res) => {
@@ -348,7 +363,7 @@ module.exports = function (db, baseDir, appDataPath) {
   // 파일 업로드(엑셀 원본 + 템플릿 리셋 시 파일 초기화 + DB 준비 확인)
   router.post('/api/settings/upload', reportUpload.fields([
     { name: 'excel_original', maxCount: 1 },
-    { name: 'report_templates' }
+    { name: 'report_templates', maxCount: 20 }
   ]), async (req, res) => {
     try {
       const result = await templateSettingsService.handleSettingsUpload(db, req.files, {

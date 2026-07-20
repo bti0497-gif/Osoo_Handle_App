@@ -114,15 +114,27 @@ function buildDirectLocationMap(activeLocations, configuredSampleMappings = []) 
     configuredMap.set(sourceName, targetLocation);
   });
 
+  const findActiveLocation = (tokens, fallback) => (
+    activeLocations.find((location) => {
+      const normalizedLocation = normalizeSampleName(location);
+      return tokens.some((token) => normalizedLocation.includes(token));
+    }) || fallback
+  );
+
   return (sampleName) => {
     const normalized = normalizeSampleName(sampleName);
     if (configuredMap.has(normalized)) return configuredMap.get(normalized);
     if (candidates.has(normalized)) return candidates.get(normalized);
-    if (normalized.includes('유량')) return '유량조정조';
-    if (normalized.includes('무산')) return '무산소조';
-    if (normalized.includes('폭기') || normalized.includes('포기')) return '폭기조';
-    if (normalized.includes('침전')) return '침전조';
-    if (normalized.includes('방류') || normalized.includes('말단')) return '방류조';
+    if (normalized.includes('유량')) return findActiveLocation(['유량'], '유량조정조');
+    if (normalized.includes('혐기')) return findActiveLocation(['혐기'], '혐기조');
+    if (normalized.includes('무산')) return findActiveLocation(['무산'], '무산소조');
+    if (normalized.includes('폭기') || normalized.includes('포기')) return findActiveLocation(['폭기', '포기'], '포기조');
+    // 최종 응집침전/여과 시료는 1차침전보다 뒤의 방류 지점이다.
+    // 일반 "침전" 판정보다 먼저 검사해야 두 장소가 같은 칸에 충돌하지 않는다.
+    if (normalized.includes('응집침전') || normalized.includes('여과') || normalized.includes('최종처리')) return findActiveLocation(['방류', '말단', '처리수'], '방류조');
+    if (normalized.includes('1차침전')) return findActiveLocation(['침전'], '침전조');
+    if (normalized.includes('침전')) return findActiveLocation(['침전'], '침전조');
+    if (normalized.includes('방류') || normalized.includes('말단') || normalized.includes('처리수')) return findActiveLocation(['방류', '말단', '처리수'], '방류조');
     return null;
   };
 }
@@ -218,6 +230,8 @@ function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappi
   const rowMap = new Map();
   const unmatchedSamples = [];
   const unmatchedItems = [];
+  const mappingCollisions = [];
+  const sourceSampleByRowKey = new Map();
   const projectsWithDate = (Array.isArray(projects) ? projects : []).map((project) => ({
     project,
     projectDate: normalizeProjectDate(project?.regDt, fallbackDate)
@@ -253,6 +267,20 @@ function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappi
       }
 
       const rowKey = `${projectDate}|${measurementGroup}|${targetLocation}|${definition.itemCode}`;
+      const sourceSampleName = String(measurement?.sample?.name || '').trim();
+      const previousSourceSampleName = sourceSampleByRowKey.get(rowKey);
+      if (previousSourceSampleName && previousSourceSampleName !== sourceSampleName) {
+        mappingCollisions.push({
+          date: projectDate,
+          measurementGroup,
+          targetLocation,
+          itemCode: definition.itemCode,
+          keptSampleName: previousSourceSampleName,
+          skippedSampleName: sourceSampleName,
+        });
+        return;
+      }
+      sourceSampleByRowKey.set(rowKey, sourceSampleName);
       const row = rowMap.get(rowKey) || {
         date: projectDate,
         measurement_group: measurementGroup,
@@ -275,7 +303,8 @@ function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappi
   return {
     importedRows: Array.from(rowMap.values()),
     unmatchedSamples: Array.from(new Set(unmatchedSamples.filter(Boolean))),
-    unmatchedItems: Array.from(new Set(unmatchedItems.filter(Boolean)))
+    unmatchedItems: Array.from(new Set(unmatchedItems.filter(Boolean))),
+    mappingCollisions,
   };
 }
 

@@ -15,7 +15,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const { runUnifiedRecordModalRegressionTests } = require('./validate-unified-record-modal.cjs');
 
 const BASE_DIR = path.join(__dirname, '..');
@@ -332,6 +332,12 @@ function validateNativeModuleReleaseContract() {
     error('신규 현장 통합 설치파일의 네이티브 모듈 실행 검증이 누락되었습니다');
   }
 
+  if (!fieldInstallerScript.includes('-AppVersion')) {
+    success('통합 설치파일이 package.json 현재 버전을 자동 사용함');
+  } else {
+    error('통합 설치파일 명령에 낡은 고정 AppVersion이 남아 있습니다');
+  }
+
   if (
     fieldInstallerScript.includes('build-integrated-installer.ps1')
     && safeReleaseScript.includes('package:field-installer')
@@ -363,13 +369,13 @@ function validateNativeModuleReleaseContract() {
 
   if (
     devRunnerText.includes("['@electron/rebuild', '--force', '--arch=x64', '--electron-version=40.6.0']")
-    && devRunnerText.includes('/api/auth/login-hint')
+    && devRunnerText.includes('/api/ping')
+    && devRunnerText.includes("payload?.app === 'osoo-handle-app' && payload?.ready === true")
     && devRunnerText.includes('Get-NetTCPConnection -State Listen')
     && devRunnerText.includes('BACKEND_PORT_MIN + 1')
     && devRunnerText.includes('Stop-Process -Id $_ -Force')
-    && !devRunnerText.includes('const url = `http://127.0.0.1:${port}/api/ping`')
   ) {
-    success('개발 실행이 기존 포트 정리·Electron 재빌드·로그인 API 준비 상태를 강제함');
+    success('개발 실행이 기존 포트 정리·Electron 재빌드·전체 라우트 준비 상태를 강제함');
   } else {
     error('dev:all이 기존 포트 정리, Electron ABI 재빌드 또는 로그인 API 준비 확인을 강제하지 않습니다');
   }
@@ -466,6 +472,7 @@ function validateRegressionContracts() {
   const integratedInstallerScriptPath = path.join(BASE_DIR, 'scripts', 'build-integrated-installer.ps1');
   const electronMainPath = path.join(BASE_DIR, 'electron', 'main.cjs');
   const electronPreloadPath = path.join(BASE_DIR, 'electron', 'preload.cjs');
+  const serverConfigPath = path.join(BASE_DIR, 'src', 'core', 'api', 'serverConfig.js');
   const excelMappingTemplateContractPath = path.join(BASE_DIR, 'EXCEL_MAPPING_TEMPLATE_CONTRACT.md');
   const unifiedRecordModalContractPath = path.join(BASE_DIR, 'UNIFIED_RECORD_MODAL_CONTRACT.md');
   const flowManagementViewPath = path.join(BASE_DIR, 'src', 'features', 'flow', 'FlowManagementView.jsx');
@@ -483,6 +490,7 @@ function validateRegressionContracts() {
   const sitesSheetsServicePath = path.join(BASE_DIR, 'server', 'services', 'sitesSheetsService.cjs');
   const siteSettingsServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'siteSettingsService.cjs');
   const dashboardModelPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'DashboardModel.js');
+  const dashboardViewPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'DashboardView.jsx');
   const dashboardViewModelPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'useDashboardViewModel.js');
   const inventoryLevelWidgetPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'widgets', 'InventoryLevelWidget.jsx');
   const medicineInRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineInRoutes.cjs');
@@ -505,7 +513,16 @@ function validateRegressionContracts() {
   const boardModelPath = path.join(BASE_DIR, 'src', 'features', 'board', 'BoardModel.js');
   const boardViewModelPath = path.join(BASE_DIR, 'src', 'features', 'board', 'useBoardViewModel.js');
   const boardViewPath = path.join(BASE_DIR, 'src', 'features', 'board', 'BoardView.jsx');
+  const boardPopupNoticePath = path.join(BASE_DIR, 'src', 'features', 'board', 'BoardPopupNotice.jsx');
+  const boardPopupContractPath = path.join(BASE_DIR, 'docs', 'BOARD_POPUP_NOTICE_CONTRACT.md');
+  const boardHtmlSanitizerPath = path.join(BASE_DIR, 'server', 'services', 'boardHtmlSanitizer.cjs');
+  const boardClientSanitizerPath = path.join(BASE_DIR, 'src', 'features', 'board', 'sanitizeBoardHtml.js');
+  const indexHtmlPath = path.join(BASE_DIR, 'index.html');
+  const localApiSecurityPath = path.join(BASE_DIR, 'server', 'middleware', 'localApiSecurity.cjs');
+  const activeUserSessionServicePath = path.join(BASE_DIR, 'server', 'services', 'activeUserSessionService.cjs');
+  const authRoutesSecurityPath = path.join(BASE_DIR, 'server', 'routes', 'authRoutes.cjs');
   const databasePath = path.join(BASE_DIR, 'server', 'database.cjs');
+  const sqliteProtectionServicePath = path.join(BASE_DIR, 'server', 'services', 'sqliteProtectionService.cjs');
   const facilityRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'facilityRoutes.cjs');
   const facilityModelPath = path.join(BASE_DIR, 'src', 'features', 'facility', 'FacilityModel.js');
   const facilityViewPath = path.join(BASE_DIR, 'src', 'features', 'facility', 'FacilityManagementView.jsx');
@@ -535,10 +552,12 @@ function validateRegressionContracts() {
   const templateSettingsServiceText = readText(templateSettingsServicePath);
   const settingsRoutesText = readText(settingsRoutesPath);
   const settingsModelText = readText(settingsModelPath);
+  const settingsViewModelText = readText(settingsViewModelPath);
   const useTemplateSettingsText = readText(useTemplateSettingsPath);
   const appSettingsServiceText = readText(appSettingsServicePath);
   const basicSitePanelText = readText(basicSitePanelPath);
   const databaseText = readText(databasePath);
+  const sqliteProtectionServiceText = readText(sqliteProtectionServicePath);
   const dailyWorkLogServiceText = readText(dailyWorkLogServicePath);
   const dailyWorkLogHwpxServiceText = readText(dailyWorkLogHwpxServicePath);
   const facilityRoutesText = readText(facilityRoutesPath);
@@ -549,6 +568,8 @@ function validateRegressionContracts() {
   const integratedInstallerScriptText = readText(integratedInstallerScriptPath);
   const electronMainText = readText(electronMainPath);
   const electronPreloadText = readText(electronPreloadPath);
+  const serverConfigText = readText(serverConfigPath);
+  const packageText = readText(path.join(BASE_DIR, 'package.json'));
   const excelMappingTemplateContractText = readText(excelMappingTemplateContractPath);
   const unifiedRecordModalContractText = readText(unifiedRecordModalContractPath);
   const flowManagementViewText = readText(flowManagementViewPath);
@@ -566,6 +587,7 @@ function validateRegressionContracts() {
   const sitesSheetsServiceText = readText(sitesSheetsServicePath);
   const siteSettingsServiceText = readText(siteSettingsServicePath);
   const dashboardModelText = readText(dashboardModelPath);
+  const dashboardViewText = readText(dashboardViewPath);
   const dashboardViewModelText = readText(dashboardViewModelPath);
   const inventoryLevelWidgetText = readText(inventoryLevelWidgetPath);
   const medicineInRoutesText = readText(medicineInRoutesPath);
@@ -587,6 +609,14 @@ function validateRegressionContracts() {
   const boardModelText = readText(boardModelPath);
   const boardViewModelText = readText(boardViewModelPath);
   const boardViewText = readText(boardViewPath);
+  const boardPopupNoticeText = readText(boardPopupNoticePath);
+  const boardPopupContractText = readText(boardPopupContractPath);
+  const boardHtmlSanitizerText = readText(boardHtmlSanitizerPath);
+  const boardClientSanitizerText = readText(boardClientSanitizerPath);
+  const indexHtmlText = readText(indexHtmlPath);
+  const localApiSecurityText = readText(localApiSecurityPath);
+  const activeUserSessionServiceText = readText(activeUserSessionServicePath);
+  const authRoutesSecurityText = readText(authRoutesSecurityPath);
   const parentManagementViews = [
     ['유량', flowManagementViewText],
     ['약품', medicineManagementViewText],
@@ -603,6 +633,37 @@ function validateRegressionContracts() {
     boardServiceText.includes("process.env.BOARD_BACKEND || 'firebase'"),
     '소통게시판 Firebase 운영 원본 기본값 계약 유지',
     '소통게시판 기본 백엔드가 Firebase가 아니어서 중앙관리자/현장 목록이 분리될 수 있습니다'
+  );
+
+  checkSource(
+    boardRoutesText.includes("require('../services/boardHtmlSanitizer.cjs')") &&
+      boardRoutesText.includes('content:     sanitizeBoardHtml(body.content)') &&
+      boardViewText.includes('sanitizeBoardHtml(selectedPost.content)') &&
+      boardHtmlSanitizerText.includes("allowedSchemesByTag") &&
+      boardHtmlSanitizerText.includes("disallowedTagsMode: 'discard'") &&
+      boardClientSanitizerText.includes("disallowedTagsMode: 'discard'") &&
+      indexHtmlText.includes('Content-Security-Policy') &&
+      indexHtmlText.includes("object-src 'none'") &&
+      indexHtmlText.includes('frame-src https:') &&
+      boardHtmlSanitizerText.includes("'img', 'a', 'sub', 'sup', 'hr'") &&
+      !boardHtmlSanitizerText.includes("'iframe'") &&
+      fs.existsSync(path.join(BASE_DIR, 'scripts', 'validate-board-html-security.cjs')) &&
+      packageText.includes('validate-board-html-security.cjs'),
+    '소통게시판 서버·표시 이중 HTML 정화 및 CSP 계약 유지',
+    '소통게시판 HTML 정화 또는 CSP 보호가 빠져 스크립트가 실행될 수 있습니다'
+  );
+
+  checkSource(
+    appSettingsServiceText.includes('const updateTransaction = db.transaction') &&
+      appSettingsServiceText.includes('설정 저장 검증 실패:') &&
+      appSettingsServiceText.includes('설정 항목 저장 검증 실패:') &&
+      appSettingsServiceText.includes('storageWarning') &&
+      settingsViewModelText.includes('await loadSettings();') &&
+      sqliteProtectionServiceText.includes("db.pragma('busy_timeout = 5000')") &&
+      fs.existsSync(path.join(BASE_DIR, 'scripts', 'validate-settings-persistence.cjs')) &&
+      packageText.includes('validate-settings-persistence.cjs'),
+    '관리자 환경설정 원자 저장·DB 재검증·재조회 계약 유지',
+    '환경설정이 일부만 저장되거나 저장 성공 후 실제 DB 값을 재확인하지 않을 수 있습니다'
   );
 
   checkSource(
@@ -638,6 +699,21 @@ function validateRegressionContracts() {
       boardViewText.includes('(isAuthor(r.author) || isSuperAdmin)'),
     '소통게시판 댓글 삭제 원글 권한 재검증 계약 유지',
     '댓글 삭제 시 원글의 현장 가시성 권한을 우회할 수 있습니다'
+  );
+
+  checkSource(
+    boardRoutesText.includes('adminUser ? Boolean(body.is_popup) : false') &&
+      boardRoutesText.includes('Math.min(7, Math.max(1') &&
+      boardFirebaseServiceText.includes('isPopupActive(data)') &&
+      boardPopupNoticeText.includes("activeTab !== 'dashboard'") &&
+      boardPopupNoticeText.includes('osoo.board-popup.dismissed.') &&
+      boardPopupNoticeText.includes('다시 보지 않기') &&
+      boardPopupNoticeText.includes("transform: 'translate(-50%, -50%)'") &&
+      boardPopupNoticeText.includes('role="alertdialog"') &&
+      boardPopupNoticeText.includes('attempt < 2') &&
+      boardPopupContractText.includes('1일 이상 7일 이하'),
+    '소통게시판 대상별 팝업·만료·다시보지않기 계약 유지',
+    '팝업 공지 권한, 최대 7일 만료 또는 사용자별 다시보지않기 보호가 깨졌습니다'
   );
 
   checkSource(
@@ -693,14 +769,22 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    flowManagementViewText.includes('const modalDate = selectedDate || todayStr;') &&
-      medicineManagementViewText.includes('initialDate={selectedDate || todayStr}') &&
-      kitManagementViewText.includes('initialDate={selectedDate || todayStr}') &&
-      waterQualityViewText.includes('date: selectedRow?.date || todayStr,') &&
-      flowManagementViewText.includes('onCellDoubleClick={() => openModal(\'edit\')}') &&
-      medicineManagementViewText.includes('onCellDoubleClick={() => openModal(\'edit\')}') &&
-      kitManagementViewText.includes('onCellDoubleClick={() => openModal(\'edit\')}') &&
-      waterQualityViewText.includes('onCellDoubleClick={() => openModal(\'edit\')}'),
+    flowManagementViewText.includes('const modalDate = modalState.date || selectedDate || todayStr;') &&
+      medicineManagementViewText.includes('initialDate={modalState.date || selectedDate || todayStr}') &&
+      kitManagementViewText.includes('initialDate={modalState.date || selectedDate || todayStr}') &&
+      waterQualityViewText.includes('date: row?.date || selectedRow?.date || todayStr,') &&
+      flowManagementViewText.includes("const targetDate = row?.date || selectedDate || todayStr;") &&
+      medicineManagementViewText.includes("const targetDate = row?.date || selectedDate || todayStr;") &&
+      kitManagementViewText.includes("const targetDate = row?.date || selectedDate || todayStr;") &&
+      flowManagementViewText.includes("onCellDoubleClick={(row) => openModal('edit', row)}") &&
+      medicineManagementViewText.includes("onCellDoubleClick={(row) => openModal('edit', row)}") &&
+      kitManagementViewText.includes("onCellDoubleClick={(row) => openModal('edit', row)}") &&
+      waterQualityViewText.includes("onCellDoubleClick={(row) => openModal('edit', row)}") &&
+      [flowManagementViewText, medicineManagementViewText, kitManagementViewText, waterQualityViewText].every((text) => (
+        text.includes('initialScrollTop={workspaceSession.scrollTop}') &&
+        text.includes('onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}') &&
+        text.includes('onWorkspaceSessionChange?.({ selectedKey:')
+      )),
     '통합 모달 선택 날짜 우선 열기 계약 유지',
     '선택 날짜가 add/edit 모드에 의해 오늘 날짜로 덮일 수 있습니다'
   );
@@ -733,8 +817,7 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    !modalText.includes("pointerEvents: isLoadingUnifiedData || isSaving ? 'none' : 'auto'") &&
-      modalText.includes("pointerEvents: 'auto'") &&
+    modalText.includes("pointerEvents: isLoadingUnifiedData ? 'none' : 'auto'") &&
       modalText.includes('onChange={(e) => setFlowDraftFieldForItem(item, field, e.target.value)}') &&
       modalText.includes('onChange={(e) => setInventoryDraftFieldForItem(activeTab, item, field, e.target.value)}') &&
       modalText.includes('onChange={(e) => {') &&
@@ -917,6 +1000,57 @@ function validateRegressionContracts() {
       diagnosticLogServiceText.includes("runtime: process.versions?.electron ? 'electron' : 'node'"),
     'Drive 진단로그 PC/실행환경 식별 계약 유지',
     '현장과 개발 PC를 구분할 machine/runtime 진단 필드가 누락되었습니다'
+  );
+
+  checkSource(
+    modalText.includes('tabIds: [activeTab]') &&
+      modalText.includes("targetTabs.has('water')") &&
+      modalText.includes("targetTabs.has('kit')") &&
+      modalText.includes('이번 통합입력 작업 현황') &&
+      modalText.includes('저장 후 다시 변경됨 — 현재 변경은 미저장') &&
+      modalText.includes("markTabsSaved(['water', 'kit'])") &&
+      waterQualityViewText.includes('return success ? rangeResult : null;'),
+    '통합 모달 탭별 단독 저장·닫기 작업요약·모든 진입경로 QnTECH 계약 유지',
+    '통합 모달 저장이 다른 탭을 함께 변경하거나 닫기 요약/QnTECH 공통 진입이 깨졌습니다'
+  );
+
+  checkSource(
+    modalText.includes('자동실험횟수 조회') &&
+      modalText.includes('handleLookupExperimentCounts') &&
+      modalText.includes('WaterQualityModel.fetchHistory({ force: true })') &&
+      modalText.includes('__dirty: { ...(current.__dirty || {}), usage: true }') &&
+      modalText.includes('next[key] = recalculateInventoryDraft(item, updated)') &&
+      modalText.includes('서버에서 가져오기') &&
+      !modalText.includes("round.sourceType === 'qntech' ? 'QnTECH'") &&
+      waterQualityViewText.includes('서버에서 가져오기'),
+    '키트 자동실험횟수 수동조회·저장 전 초안·외부서비스명 비노출 계약 유지',
+    '키트 사용량 자동 조회가 즉시 저장되거나 수질 화면에 외부서비스명이 다시 노출될 수 있습니다'
+  );
+
+  checkSource(
+    viewModelText.includes("reading: hasValue(previous.raw) ? previous.raw : (basePrevious.reading ?? '')") &&
+      viewModelText.includes("inventory: hasValue(previous.current_inventory)") &&
+      viewModelText.includes("? previous.current_inventory") &&
+      viewModelText.includes("purchase: hasCurrent ? (isDefaulted(current) ? '' : (current.purchase_amount ?? '')) : ''") &&
+      viewModelText.includes("usage: hasCurrent ? (isDefaulted(current) ? '' : (current.usage_amount ?? '')) : ''") &&
+      viewModelText.includes("acc[field] = hasValue(row?.[field]) ? row[field] : ''") &&
+      viewModelText.includes('requestSequenceRef') &&
+      viewModelText.includes('resolvedDate !== date') &&
+      modalText.includes("pointerEvents: isLoadingUnifiedData ? 'none' : 'auto'") &&
+      packageText.includes('validate-qntech-location-mapping.cjs'),
+    '통합 모달 연속 날짜 전일 검침 기준·날짜 조회 경합·시료명 매칭 회귀방지 계약 유지',
+    '연속 날짜 입력이 오래된 전일 검침값을 사용하거나 자동실험 장소 매칭이 다시 충돌할 수 있습니다'
+  );
+
+  checkSource(
+    dashboardViewModelText.includes('Promise.allSettled') &&
+      dashboardViewModelText.includes('requestWithOneRetry') &&
+      dashboardViewModelText.includes('widgetErrors') &&
+      dashboardModelText.includes("event: 'dashboard-widget-load-failed'") &&
+      dashboardViewText.includes('이 위젯만 조회하지 못했습니다') &&
+      dashboardViewText.includes('다시 시도'),
+    '대시보드 위젯 독립 조회·1회 재시도·실패 진단 계약 유지',
+    '한 위젯의 조회 실패가 대시보드 전체 데이터에 연쇄 영향을 줄 수 있습니다'
   );
 
   checkSource(
@@ -1218,12 +1352,63 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-      electronMainTextForWindow.includes('function cleanupStalePackagedServerPorts()') &&
-      electronMainTextForWindow.includes('$ports = 18731..18734') &&
-      electronMainTextForWindow.includes("$name -eq 'Osoo Handle App.exe'") &&
-      /handleVersionMigration\(\);\s*cleanupStalePackagedServerPorts\(\);\s*startServer\(\);/.test(electronMainTextForWindow),
-    '배포 앱 시작 전 잔존 로컬 서버 포트 정리 계약 유지',
-    '배포 앱이 낡은 18731~18734 서버에 연결될 수 있습니다'
+      electronMainTextForWindow.includes('const DEDICATED_SERVER_PORT = 18731') &&
+      electronMainTextForWindow.includes('function reclaimDedicatedServerPort()') &&
+      electronMainTextForWindow.includes('function startServerGuard()') &&
+      electronMainTextForWindow.includes('const SERVER_STARTUP_GRACE_MS = 120000') &&
+      electronMainTextForWindow.includes('OSOO_SERVER_TOKEN: launchedToken') &&
+      electronMainTextForWindow.includes('if (serverProcess === launchedProcess) serverProcess = null') &&
+      electronMainTextForWindow.includes('isQuitting = true;') &&
+      electronMainTextForWindow.includes('Embedded server health lost; forcing clean restart') &&
+      /handleVersionMigration\(\);\s*startServer\(\);\s*startServerGuard\(\);/.test(electronMainTextForWindow),
+    '전용 18731 포트 강제 회수·고정 기동·지속 감시 계약 유지',
+    '배포 앱의 전용 포트 클린 부팅 또는 서버 지속 보호 계약이 깨졌습니다'
+  );
+
+  checkSource(
+    electronMainTextForWindow.includes("headers: { 'x-osoo-server-token': serverInstanceToken }") &&
+      electronMainTextForWindow.includes("ipcMain.handle('server:getToken'") &&
+      electronPreloadText.includes('getServerToken:') &&
+      serverIndexText.includes('createLocalApiAuthMiddleware(process.env.OSOO_SERVER_TOKEN)') &&
+      serverIndexText.includes('instanceVerified:') &&
+      !serverIndexText.includes('serverToken: process.env.OSOO_SERVER_TOKEN') &&
+      serverConfigText.includes("payload?.app === 'osoo-handle-app'") &&
+      localApiSecurityText.includes("const TOKEN_HEADER = 'x-osoo-server-token'") &&
+      localApiSecurityText.includes("code: 'LOCAL_API_UNAUTHORIZED'") &&
+      activeUserSessionServiceText.includes('function requireActiveUser') &&
+      activeUserSessionServiceText.includes('function requireAdminSession') &&
+      authRoutesSecurityText.includes("setActiveUser(member, 'session-restore')") &&
+      boardRoutesText.includes("router.use('/api/board', requireActiveUser)") &&
+      boardRoutesText.includes('const active = req.activeUser || getActiveUser()') &&
+      !boardRoutesText.includes("req.headers['x-user-role'] ||") &&
+      settingsRoutesText.includes("router.use('/api/settings'") &&
+      settingsRoutesText.includes('return requireAdminSession(req, res, next)') &&
+      fs.existsSync(path.join(BASE_DIR, 'scripts', 'validate-local-api-security.cjs')) &&
+      packageText.includes('validate-local-api-security.cjs'),
+    '클린부팅 인스턴스 토큰의 전체 로컬 API 인증 경계 계약 유지',
+    '로컬 API 토큰이 노출되거나 일반 API 인증 검사가 빠졌습니다'
+  );
+
+  checkSource(
+    serverIndexText.includes('let serverReady = false;') &&
+      serverIndexText.includes("ready: serverReady") &&
+      serverIndexText.includes("db.pragma('quick_check')") &&
+      serverIndexText.includes("db.exec('BEGIN IMMEDIATE; ROLLBACK;')") &&
+      serverIndexText.includes('serverReady = true;') &&
+      serverIndexText.includes('writePortFileEarly(activeServerPort)') &&
+      databaseText.includes('process.env.OSOO_APP_DATA_PATH') &&
+      !serverIndexText.includes('findFreePort') &&
+      !serverConfigText.includes('PORT_MAX') &&
+      serverConfigText.includes("payload?.app === 'osoo-handle-app' && payload?.ready === true"),
+    'DB·전체 라우트 준비 완료 후에만 프론트 연결 허용 계약 유지',
+    '반쪽 서버 또는 무결성 미확인 DB에 프론트가 연결될 수 있습니다'
+  );
+
+  checkSource(
+    fs.existsSync(path.join(BASE_DIR, 'scripts', 'validate-clean-server-boot.cjs')) &&
+      packageText.includes('validate-clean-server-boot.cjs'),
+    '클린 서버 부팅·DB 손상 차단 실제 회귀검증 유지',
+    '전용 서버 클린 부팅의 실제 회귀검증이 validate 명령에서 빠졌습니다'
   );
 
   checkSource(
@@ -1467,21 +1652,28 @@ async function testApiEndpoints(devServerUrl) {
   info(`대상 서버: ${devServerUrl}`);
   
   try {
-    const { getAllEndpoints } = require(path.join(BASE_DIR, 'server', 'api-spec.cjs'));
-    const endpoints = getAllEndpoints();
-    
-    // GET 요청만 테스트 (POST는 부작용 가능)
-    const testableEndpoints = endpoints.filter(ep => ep.method === 'GET').slice(0, 10);
+    const testableEndpoints = [
+      { method: 'GET', fullPath: '/api/ping', expectedStatuses: [200] },
+      { method: 'GET', fullPath: '/api/flows', expectedStatuses: [200] },
+      { method: 'GET', fullPath: '/api/flows/history', expectedStatuses: [200] },
+      { method: 'GET', fullPath: '/api/water-quality', expectedStatuses: [200] },
+      { method: 'GET', fullPath: '/api/water-quality/history', expectedStatuses: [200] },
+      { method: 'GET', fullPath: '/api/medicines', expectedStatuses: [200] },
+      { method: 'GET', fullPath: '/api/medicines/history', expectedStatuses: [200] },
+      { method: 'GET', fullPath: '/api/kits/history', expectedStatuses: [200] },
+      { method: 'GET', fullPath: '/api/settings', expectedStatuses: [200] },
+      { method: 'GET', fullPath: '/api/settings/sites', expectedStatuses: [200] },
+    ];
     
     let tested = 0;
     for (const ep of testableEndpoints) {
       try {
         const response = await fetch(`${devServerUrl}${ep.fullPath}`, {
           method: ep.method,
-          timeout: 3000,
+          signal: AbortSignal.timeout(3000),
         });
         
-        if (response.ok || response.status === 401 || response.status === 404) {
+        if (ep.expectedStatuses.includes(response.status)) {
           success(`${ep.method} ${ep.fullPath} → ${response.status}`);
           tested++;
         } else if (response.status === 500) {
@@ -1491,7 +1683,7 @@ async function testApiEndpoints(devServerUrl) {
         }
       } catch (e) {
         if (e.message.includes('fetch failed') || e.code === 'ECONNREFUSED') {
-          warn(`${ep.method} ${ep.fullPath} → ${e.message} (테스트 서버 연결 실패, 실행 중인지 확인하세요)`);
+          error(`${ep.method} ${ep.fullPath} → ${e.message} (테스트 서버 연결 실패)`);
         } else {
           error(`${ep.method} ${ep.fullPath} → ${e.message}`);
         }
@@ -1499,10 +1691,55 @@ async function testApiEndpoints(devServerUrl) {
     }
     
     info(`테스트 완료: ${tested}/${testableEndpoints.length}`);
+    if (tested !== testableEndpoints.length) {
+      error(`API 실제 요청 미완료: ${tested}/${testableEndpoints.length}`);
+    }
     
   } catch (e) {
     error(`API 테스트 실패: ${e.message}`);
   }
+}
+
+async function waitForReadyServer(devServerUrl, timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${devServerUrl}/api/ping`, { signal: AbortSignal.timeout(1000) });
+      const payload = await response.json();
+      if (response.ok && payload?.app === 'osoo-handle-app' && payload?.ready === true) return true;
+    } catch (_) {
+      // Startup is polled until the deadline.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
+async function startApiValidationServer(devServerUrl) {
+  const tempAppDataPath = path.join(BASE_DIR, '.tmp-validation', `api-test-${process.pid}`);
+  fs.mkdirSync(tempAppDataPath, { recursive: true });
+  const child = spawn(process.execPath, ['server.cjs'], {
+    cwd: BASE_DIR,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      OSOO_APP_DATA_PATH: tempAppDataPath,
+      OSOO_MINIMAL_BUILD: '0',
+      OSOO_API_PORT_MIN: new URL(devServerUrl).port,
+      BIGQUERY_SYNC_ENABLED: 'false',
+      BIGQUERY_SYNC_SCHEDULER: 'false',
+    },
+  });
+  let output = '';
+  child.stdout.on('data', (chunk) => { output += chunk.toString(); });
+  child.stderr.on('data', (chunk) => { output += chunk.toString(); });
+
+  if (!await waitForReadyServer(devServerUrl)) {
+    try { child.kill('SIGKILL'); } catch (_) {}
+    throw new Error(`API 검증 서버가 준비되지 않았습니다.\n${output.slice(-4000)}`);
+  }
+  return child;
 }
 
 function validateEnvVariables() {
@@ -1657,8 +1894,18 @@ function printSummary() {
   }
   
   if (hasApiTest) {
-    const devServerUrl = 'http://127.0.0.1:18731';
-    await testApiEndpoints(devServerUrl);
+    const devServerUrl = 'http://127.0.0.1:18739';
+    let validationServer = null;
+    try {
+      validationServer = await startApiValidationServer(devServerUrl);
+      await testApiEndpoints(devServerUrl);
+    } catch (apiTestError) {
+      error(`API 검증 서버 실행 실패: ${apiTestError.message}`);
+    } finally {
+      if (validationServer) {
+        try { validationServer.kill('SIGKILL'); } catch (_) {}
+      }
+    }
   }
   
   printSummary();

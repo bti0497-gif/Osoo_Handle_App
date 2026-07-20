@@ -14,6 +14,14 @@ const {
 const SECRET_KEY_PATTERN = /(password|passwd|pwd|token|secret|key|credential|authorization|cookie|client_secret|refresh_token)/i;
 const MAX_STRING_LENGTH = 2000;
 const MAX_DETAIL_LENGTH = 15000;
+const SENSITIVE_STRING_PATTERNS = [
+  [/-----BEGIN(?: [A-Z]+)* PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z]+)* PRIVATE KEY-----/gi, '<redacted:private-key>'],
+  [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer <redacted>'],
+  [/\bAIza[0-9A-Za-z_-]{20,}\b/g, '<redacted:google-api-key>'],
+  [/\bya29\.[0-9A-Za-z._-]+\b/g, '<redacted:oauth-token>'],
+  [/(https?:\/\/[^\s?#]+[?&](?:access_token|refresh_token|token|key|client_secret)=)[^&#\s]+/gi, '$1<redacted>'],
+  [/(\"?(?:private_key|client_secret|refresh_token|access_token|password|authorization)\"?\s*[:=]\s*\"?)[^\"\s,}]+/gi, '$1<redacted>'],
+];
 const DIAGNOSTIC_COUNT_TABLES = [
   'flow_readings',
   'medicine_logs',
@@ -26,7 +34,10 @@ const DIAGNOSTIC_COUNT_TABLES = [
 
 function safeString(value) {
   if (value === null || value === undefined) return '';
-  const text = String(value);
+  let text = String(value);
+  for (const [pattern, replacement] of SENSITIVE_STRING_PATTERNS) {
+    text = text.replace(pattern, replacement);
+  }
   return text.length > MAX_STRING_LENGTH ? `${text.slice(0, MAX_STRING_LENGTH)}...<truncated>` : text;
 }
 

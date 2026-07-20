@@ -1,7 +1,6 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const net = require('net');
 const cors = require('cors');
 const { loadRuntimeEnv } = require('./config/runtimeConfig.cjs');
 const dotenvResult = loadRuntimeEnv();
@@ -11,12 +10,14 @@ if (dotenvResult.error) {
   console.log('[dotenv] 런타임 환경설정 로드 성공:', dotenvResult.envPath);
 }
 const routeRegistry = require('./routeRegistry.cjs');
+const { TOKEN_HEADER, tokensMatch, createLocalApiAuthMiddleware, isAllowedLocalOrigin } = require('./middleware/localApiSecurity.cjs');
 
 const BASE_DIR = path.join(__dirname, '..');
 const IS_MINIMAL_BUILD = String(process.env.OSOO_MINIMAL_BUILD || '0') === '1';
 
 function resolveAppDataPathForPort() {
-  return path.join(process.env.APPDATA, 'Osoo_Handle_App');
+  return process.env.OSOO_APP_DATA_PATH
+    || path.join(process.env.APPDATA || process.env.LOCALAPPDATA || BASE_DIR, 'Osoo_Handle_App');
 }
 
 function writePortFileEarly(port) {
@@ -57,13 +58,22 @@ process.stderr.write = ((orig) => function(chunk, encoding, cb) {
 })(process.stderr.write);
 
 const app = express();
-app.use(cors());
+let serverReady = false;
+app.use(cors({
+  origin(origin, callback) {
+    callback(isAllowedLocalOrigin(origin) ? null : new Error('허용되지 않은 API 출처입니다.'), isAllowedLocalOrigin(origin));
+  },
+  allowedHeaders: ['Content-Type', 'x-user-name', 'x-user-role', 'x-user-site', TOKEN_HEADER],
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(createLocalApiAuthMiddleware(process.env.OSOO_SERVER_TOKEN));
 
 process.on('uncaughtException', (err) => {
+  serverReady = false;
   console.error('[UncaughtException]', err.message);
   console.error(err.stack);
+  setTimeout(() => process.exit(1), 100);
 });
 process.on('unhandledRejection', (reason) => {
   console.error('[UnhandledRejection]', reason instanceof Error ? reason.message : reason);
@@ -82,17 +92,23 @@ app.get('/', (req, res) => {
   `);
 });
 
-app.get('/api/ping', (req, res) => res.json({
-  ok: true,
-  app: 'osoo-handle-app',
-  serverToken: process.env.OSOO_SERVER_TOKEN || null,
-}));
+app.get('/api/ping', (req, res) => {
+  const expectedToken = process.env.OSOO_SERVER_TOKEN || '';
+  const suppliedToken = req.get(TOKEN_HEADER) || '';
+  res.json({
+    ok: true,
+    app: 'osoo-handle-app',
+    ready: serverReady,
+    instanceVerified: !expectedToken || tokensMatch(expectedToken, suppliedToken),
+  });
+});
 
 const isBigQuerySyncEnabled = String(process.env.BIGQUERY_SYNC_ENABLED || 'true') === 'true';
 const isBigQuerySchedulerEnabled = String(process.env.BIGQUERY_SYNC_SCHEDULER || 'true') === 'true';
 
 let postStartupTasksScheduled = false;
 let postStartupCtx = null;
+let activeServerPort = null;
 
 /**
  * makeLazy 시 첫 HTTP 요청 시 모듈을 로드하는 Lazy Loader
@@ -169,6 +185,17 @@ function schedulePostStartupTasks() {
 
 function registerLazyApplication() {
   const { db, appDataPath } = require('./database.cjs');
+  const quickCheck = db.pragma('quick_check');
+  if (!Array.isArray(quickCheck) || quickCheck.some((row) => String(row.quick_check || '').toLowerCase() !== 'ok')) {
+    throw new Error(`SQLite quick_check 실패: ${JSON.stringify(quickCheck)}`);
+  }
+  const requiredTables = ['members', 'app_settings', 'flow_readings', 'medicine_logs', 'water_quality', 'kit_logs'];
+  const existingTables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+  const missingTables = requiredTables.filter((name) => !existingTables.has(name));
+  if (missingTables.length > 0) {
+    throw new Error(`필수 SQLite 테이블 누락: ${missingTables.join(', ')}`);
+  }
+  db.exec('BEGIN IMMEDIATE; ROLLBACK;');
   const { warmUpExcelPdfConverter } = require('./services/excelPdfService.cjs');
   const { triggerSync: triggerBigQuerySync } = require('./services/bigQueryTriggerService.cjs');
   const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
@@ -378,35 +405,27 @@ function registerLazyApplication() {
     });
   });
 
+  const { uploadErrorMiddleware } = require('./middleware/uploadSecurity.cjs');
+  app.use(uploadErrorMiddleware);
+
   return { appDataPath, warmUpExcelPdfConverter, triggerBigQuerySync, normalizeLegacyPhotoFiles };
 }
 
-async function findFreePort(startPort, endPort) {
-  for (let p = startPort; p <= endPort; p++) {
-    const free = await new Promise((resolve) => {
-      const srv = net.createServer();
-      srv.once('error', () => resolve(false));
-      srv.once('listening', () => { srv.close(); resolve(true); });
-      srv.listen(p, '127.0.0.1');
-    });
-    if (free) return p;
-  }
-  return startPort;
-}
-
 const API_PORT_MIN = Number(process.env.OSOO_API_PORT_MIN) || 18731;
-const API_PORT_MAX = Number(process.env.OSOO_API_PORT_MAX) || 18734;
 
 function runDeferredFullStack() {
   try {
     console.time('[Server] full-stack-init');
     postStartupCtx = registerLazyApplication();
+    serverReady = true;
+    writePortFileEarly(activeServerPort);
     console.timeEnd('[Server] full-stack-init');
     
     if (!IS_MINIMAL_BUILD) {
       schedulePostStartupTasks();
     }
   } catch (e) {
+    serverReady = false;
     console.error('[Server] full-stack-init 실패:', e);
     // ping만 살아 있는 반쪽 서버를 정상 서버로 오인하지 않도록 즉시 실패시킨다.
     process.exitCode = 1;
@@ -415,8 +434,7 @@ function runDeferredFullStack() {
 }
 
 function startListening(actualPort) {
-  writePortFileEarly(actualPort);
-
+  activeServerPort = actualPort;
   const server = app.listen(actualPort, '127.0.0.1', () => {
     console.log(`Local Bridge Server running at http://localhost:${actualPort}`);
     if (actualPort !== API_PORT_MIN) {
@@ -424,13 +442,16 @@ function startListening(actualPort) {
     }
     setImmediate(runDeferredFullStack);
   });
-  server.on('error', (err) => { console.error('[Server Error]', err.message); });
+  server.on('error', (err) => {
+    serverReady = false;
+    console.error('[Server Error]', err.message);
+    if (process.env.ELECTRON === '1') process.exit(1);
+  });
 }
 
 if (process.env.ELECTRON === '1') {
-  findFreePort(API_PORT_MIN, API_PORT_MAX).then((actualPort) => {
-    startListening(actualPort);
-  });
+  const fixedPort = Number(process.env.OSOO_API_PORT) || API_PORT_MIN;
+  startListening(fixedPort);
 } else {
   const fixedPort = API_PORT_MIN;
   writePortFileEarly(fixedPort);

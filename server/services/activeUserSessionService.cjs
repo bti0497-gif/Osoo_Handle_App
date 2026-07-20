@@ -44,10 +44,33 @@ function isAdminSessionActive() {
   return isAdminUser(activeUser);
 }
 
+function requireActiveUser(req, res, next) {
+  const user = getActiveUser();
+  if (!user) {
+    return res.status(401).json({ success: false, code: 'ACTIVE_SESSION_REQUIRED', message: '로그인 세션을 확인할 수 없습니다.' });
+  }
+  req.activeUser = user;
+  return next();
+}
+
+function requireAdminSession(req, res, next) {
+  const user = getActiveUser();
+  if (!user) {
+    return res.status(401).json({ success: false, code: 'ACTIVE_SESSION_REQUIRED', message: '로그인 세션을 확인할 수 없습니다.' });
+  }
+  if (!isAdminUser(user)) {
+    return res.status(403).json({ success: false, code: 'ADMIN_SESSION_REQUIRED', message: '관리자 권한이 필요합니다.' });
+  }
+  req.activeUser = user;
+  return next();
+}
+
 module.exports = {
   setActiveUser,
   clearActiveUser,
   getActiveUser,
   isAdminUser,
   isAdminSessionActive,
+  requireActiveUser,
+  requireAdminSession,
 };

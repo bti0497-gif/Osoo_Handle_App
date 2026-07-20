@@ -54,7 +54,7 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
     } = useKitViewModel(currentUser, { showAlert });
 
     const [selectedDate, setSelectedDate] = useState(workspaceSession.selectedKey || null);
-    const [modalState, setModalState] = useState({ open: false, tab: 'kit', mode: 'add' });
+    const [modalState, setModalState] = useState({ open: false, tab: 'kit', mode: 'add', date: null });
     const pendingParentRefreshRef = useRef(false);
     const todayStr = todayText();
     useEffect(() => {
@@ -124,8 +124,9 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
         onWorkspaceSessionChange?.({ selectedKey: row.date });
     };
 
-    const openModal = (mode = 'add') => {
-        setModalState({ open: true, tab: 'kit', mode });
+    const openModal = (mode = 'add', row = null) => {
+        const targetDate = row?.date || selectedDate || todayStr;
+        setModalState({ open: true, tab: 'kit', mode, date: targetDate });
     };
 
     const hasSelectedRowData = () => {
@@ -232,7 +233,7 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
                     rowHeaderWidth={84}
                     rowHeaderLabel="날짜"
                     onRowSelect={handleRowSelect}
-                    onCellDoubleClick={() => openModal('edit')}
+                    onCellDoubleClick={(row) => openModal('edit', row)}
                     getRowStyle={getRowStyle}
                     renderRowHeader={renderRowHeader}
                     renderCell={renderCell}
@@ -251,7 +252,7 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
                 mode={modalState.mode}
                 currentUser={currentUser}
                 initialTab={modalState.tab}
-                initialDate={selectedDate || todayStr}
+                initialDate={modalState.date || selectedDate || todayStr}
                 contexts={buildModalContexts()}
                 onConfirm={showConfirm}
                 isSyncingAnalysisKits={isSyncingAnalysisKits}

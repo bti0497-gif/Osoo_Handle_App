@@ -85,7 +85,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
     } = useFlowViewModel(currentUser, { showAlert, flowTypes: flowMeterTypes });
 
     const [selectedDate, setSelectedDate] = useState(workspaceSession.selectedKey || null);
-    const [modalState, setModalState] = useState({ open: false, tab: 'flow', mode: 'add' });
+    const [modalState, setModalState] = useState({ open: false, tab: 'flow', mode: 'add', date: null });
     const pendingParentRefreshRef = useRef(false);
     const todayStr = getTodayKST();
 
@@ -95,7 +95,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
         onWorkspaceSessionChange?.({ selectedKey: todayStr });
     }, [history, onWorkspaceSessionChange, selectedDate, todayStr]);
 
-    const modalDate = selectedDate || todayStr;
+    const modalDate = modalState.date || selectedDate || todayStr;
     const selectedRow = history.find((row) => row.date === selectedDate) || null;
     const modalRow = history.find((row) => row.date === modalDate) || null;
 
@@ -214,8 +214,9 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
         onWorkspaceSessionChange?.({ selectedKey: row.date });
     };
 
-    const openModal = (mode = 'add') => {
-        setModalState({ open: true, tab: 'flow', mode });
+    const openModal = (mode = 'add', row = null) => {
+        const targetDate = row?.date || selectedDate || todayStr;
+        setModalState({ open: true, tab: 'flow', mode, date: targetDate });
     };
 
     const hasSelectedRowData = () => {
@@ -330,7 +331,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                     selectionMode="row"
                     contextMenu={false}
                     onRowSelect={handleRowSelect}
-                    onCellDoubleClick={() => openModal('edit')}
+                    onCellDoubleClick={(row) => openModal('edit', row)}
                     getRowStyle={getRowStyle}
                     renderRowHeader={renderRowHeader}
                     renderCell={renderCell}

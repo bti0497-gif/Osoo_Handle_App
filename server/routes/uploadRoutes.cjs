@@ -4,14 +4,30 @@ const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
 const { drive, getOrCreateBoardUploadsFolder } = require('../services/driveService.cjs');
+const {
+  COMMON_MULTIPART_LIMITS,
+  MAX_BOARD_ATTACHMENT_BYTES,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGE_PIXELS,
+  boardFileFilter,
+  imageFileFilter,
+} = require('../middleware/uploadSecurity.cjs');
 const router = express.Router();
 
 module.exports = function(appDataPath) {
   const uploadDir = path.join(appDataPath, 'uploads');
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-  const boardUpload = multer({ dest: uploadDir, limits: { fileSize: 50 * 1024 * 1024 } });
-  const imageUpload = multer({ storage: multer.memoryStorage() });
+  const boardUpload = multer({
+    dest: uploadDir,
+    limits: { ...COMMON_MULTIPART_LIMITS, fileSize: MAX_BOARD_ATTACHMENT_BYTES, files: 1 },
+    fileFilter: boardFileFilter,
+  });
+  const imageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { ...COMMON_MULTIPART_LIMITS, fileSize: MAX_IMAGE_BYTES, files: 1 },
+    fileFilter: imageFileFilter,
+  });
 
   const sanitizeName = (name) => String(name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
   const toDateStamp = (value) => {
@@ -153,7 +169,7 @@ module.exports = function(appDataPath) {
     const fileName = `${type}_${Date.now()}.jpg`;
     const targetPath = path.join(targetDir, fileName);
     try {
-      await sharp(req.file.buffer).jpeg({ quality: 80 }).toFile(targetPath);
+      await sharp(req.file.buffer, { limitInputPixels: MAX_IMAGE_PIXELS }).jpeg({ quality: 80 }).toFile(targetPath);
       res.json({ success: true, path: `resources/images/${date}/${fileName}` });
     } catch (err) {
       res.status(500).json({ error: 'Image processing failed: ' + err.message });

@@ -22,6 +22,27 @@ const crypto = require('crypto');
 const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
 
 const ADMIN_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
+let popupColumnReadyPromise = null;
+
+async function ensurePopupColumn() {
+  if (!popupColumnReadyPromise) {
+    const bq = getBigQueryClient();
+    popupColumnReadyPromise = (async () => {
+      await bq.query({ query: `ALTER TABLE \`${DATASET_ID}.posts\` ADD COLUMN IF NOT EXISTS is_popup BOOL` });
+      await bq.query({ query: `ALTER TABLE \`${DATASET_ID}.posts\` ADD COLUMN IF NOT EXISTS popup_expires_at TIMESTAMP` });
+    })().catch((error) => {
+      popupColumnReadyPromise = null;
+      throw error;
+    });
+  }
+  await popupColumnReadyPromise;
+}
+
+function normalizePopup(row) {
+  const rawExpiry = row?.popup_expires_at?.value || row?.popup_expires_at;
+  const expiresAt = rawExpiry ? new Date(rawExpiry).getTime() : 0;
+  return { ...row, is_popup: Boolean(row?.is_popup) && Number.isFinite(expiresAt) && expiresAt > Date.now() };
+}
 
 function isAdminRole(role) {
   return ADMIN_ROLES.has(String(role || '').trim());
@@ -66,6 +87,7 @@ function buildVisibilityFilter(role, siteName, userName) {
 async function getPosts(role, siteName, userName = '') {
   const bq = getBigQueryClient();
   if (!bq) throw new Error('BigQuery 클라이언트 초기화 실패');
+  await ensurePopupColumn();
 
   const { where, params } = buildVisibilityFilter(role, siteName, userName);
 
@@ -81,7 +103,7 @@ async function getPosts(role, siteName, userName = '') {
   `;
 
   const [rows] = await bq.query({ query, params });
-  return rows;
+  return rows.map(normalizePopup);
 }
 
 /**
@@ -90,6 +112,7 @@ async function getPosts(role, siteName, userName = '') {
 async function getPost(id) {
   const bq = getBigQueryClient();
   if (!bq) throw new Error('BigQuery 클라이언트 초기화 실패');
+  await ensurePopupColumn();
 
   const query = `
     SELECT * FROM \`${DATASET_ID}.posts\`
@@ -107,6 +130,7 @@ async function getPost(id) {
 async function createPost(data) {
   const bq = getBigQueryClient();
   if (!bq) throw new Error('BigQuery 클라이언트 초기화 실패');
+  await ensurePopupColumn();
 
   const now = new Date().toISOString();
   const id = newUUID();
@@ -119,6 +143,8 @@ async function createPost(data) {
     title:        data.title       || '',
     content:      data.content     || '',
     is_notice:    Boolean(data.is_notice),
+    is_popup:     Boolean(data.is_popup),
+    popup_expires_at: data.popup_expires_at || null,
     attachments:  data.attachments || '[]',
     parent_id:    data.parent_id   || null,
     is_deleted:   false,
@@ -136,6 +162,7 @@ async function createPost(data) {
 async function updatePost(id, data) {
   const bq = getBigQueryClient();
   if (!bq) throw new Error('BigQuery 클라이언트 초기화 실패');
+  await ensurePopupColumn();
 
   const now = new Date().toISOString();
   const sets = [];
@@ -144,6 +171,8 @@ async function updatePost(id, data) {
   if (data.title     !== undefined) { sets.push('title = @title');         params.title       = data.title; }
   if (data.content   !== undefined) { sets.push('content = @content');     params.content     = data.content; }
   if (data.is_notice !== undefined) { sets.push('is_notice = @is_notice'); params.is_notice   = Boolean(data.is_notice); }
+  if (data.is_popup !== undefined) { sets.push('is_popup = @is_popup'); params.is_popup = Boolean(data.is_popup); }
+  if (data.popup_expires_at !== undefined) { sets.push('popup_expires_at = @popup_expires_at'); params.popup_expires_at = data.popup_expires_at || null; }
   if (data.attachments !== undefined) { sets.push('attachments = @attachments'); params.attachments = data.attachments; }
   if (data.target_site !== undefined) { sets.push('target_site = @target_site'); params.target_site = data.target_site; }
   sets.push('updated_at = @updated_at');
@@ -194,7 +223,7 @@ async function getComment(id) {
     query: `SELECT * FROM \`${DATASET_ID}.comments\` WHERE id = @id AND is_deleted = FALSE LIMIT 1`,
     params: { id }
   });
-  return rows[0] || null;
+  return rows[0] ? normalizePopup(rows[0]) : null;
 }
 
 /**

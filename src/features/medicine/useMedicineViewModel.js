@@ -20,10 +20,6 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
     const [isSavingPurchase, setIsSavingPurchase] = useState(false);
     const pendingChangesRef = useRef({});
 
-    useEffect(() => {
-        loadLogs();
-    }, []);
-
     const toDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
     const correctData = (data) => {
@@ -42,7 +38,7 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
         }
     };
 
-    const loadLogs = async (options = {}) => {
+    async function loadLogs(options = {}) {
         setLoading(true);
         try {
             const todayStr = getTodayKST();
@@ -142,7 +138,11 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
         } finally {
             setLoading(false);
         }
-    };
+    }
+
+    useEffect(() => {
+        loadLogs();
+    }, []);
 
     const updateAmount = (rowDate, type, field, val) => {
         const numVal = val === '' ? null : parseFloat(val);

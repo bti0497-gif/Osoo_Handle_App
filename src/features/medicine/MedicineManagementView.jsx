@@ -47,7 +47,7 @@ const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspac
     const { history = [], loading, medicineTypes = [], refresh } = useMedicineViewModel(currentUser, { showAlert });
 
     const [selectedDate, setSelectedDate] = useState(workspaceSession.selectedKey || null);
-    const [modalState, setModalState] = useState({ open: false, tab: 'medicine', mode: 'add' });
+    const [modalState, setModalState] = useState({ open: false, tab: 'medicine', mode: 'add', date: null });
     const pendingParentRefreshRef = useRef(false);
     const todayStr = todayText();
 
@@ -118,8 +118,9 @@ const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspac
         onWorkspaceSessionChange?.({ selectedKey: row.date });
     };
 
-    const openModal = (mode = 'add') => {
-        setModalState({ open: true, tab: 'medicine', mode });
+    const openModal = (mode = 'add', row = null) => {
+        const targetDate = row?.date || selectedDate || todayStr;
+        setModalState({ open: true, tab: 'medicine', mode, date: targetDate });
     };
 
     const hasSelectedRowData = () => {
@@ -226,7 +227,7 @@ const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspac
                     rowHeaderWidth={84}
                     rowHeaderLabel="날짜"
                     onRowSelect={handleRowSelect}
-                    onCellDoubleClick={() => openModal('edit')}
+                    onCellDoubleClick={(row) => openModal('edit', row)}
                     getRowStyle={getRowStyle}
                     renderRowHeader={renderRowHeader}
                     renderCell={renderCell}
@@ -245,7 +246,7 @@ const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspac
                 mode={modalState.mode}
                 currentUser={currentUser}
                 initialTab={modalState.tab}
-                initialDate={selectedDate || todayStr}
+                initialDate={modalState.date || selectedDate || todayStr}
                 contexts={buildModalContexts()}
                 onConfirm={showConfirm}
                 onClose={handleModalClose}

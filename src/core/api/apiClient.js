@@ -22,8 +22,12 @@ async function request(endpoint, options = {}) {
   const timer = setTimeout(() => controller.abort(), timeout);
 
   try {
+    const serverToken = await window.electronAPI?.getServerToken?.();
+    const headers = new Headers(fetchOptions.headers || {});
+    if (serverToken) headers.set('x-osoo-server-token', serverToken);
     const response = await fetch(url, {
       ...fetchOptions,
+      headers,
       signal: controller.signal,
     });
     clearTimeout(timer);

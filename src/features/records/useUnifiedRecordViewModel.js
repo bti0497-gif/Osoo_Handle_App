@@ -59,7 +59,6 @@ const mergeFlowContext = (baseContext = {}, history = [], date) => {
             const hasCurrent = current.raw !== undefined || current.diff !== undefined;
             const previousRow = latestBefore(history, date, (row) => row?.[name]);
             const previous = previousRow?.[name] || {};
-            const baseValues = item.values || {};
             const basePrevious = item.previous || {};
             const isSludge = isSludgeFlowName(name);
             const currentExport = hasCurrent && !isDefaulted(current) && hasValue(current.raw)
@@ -70,17 +69,17 @@ const mergeFlowContext = (baseContext = {}, history = [], date) => {
             return {
                 ...item,
                 values: {
-                    reading: hasCurrent ? (isDefaulted(current) ? '' : (current.raw ?? '')) : (baseValues.reading ?? ''),
+                    reading: hasCurrent ? (isDefaulted(current) ? '' : (current.raw ?? '')) : '',
                     flow: isSludge
                         ? previousMonthlyExport + (Number.isFinite(currentExport) ? currentExport : 0)
-                        : (hasCurrent ? (isDefaulted(current) ? '' : (current.diff ?? '')) : (baseValues.flow ?? '')),
-                    readingUnit: hasCurrent ? (current.reading_unit || '') : (baseValues.readingUnit || ''),
+                        : (hasCurrent ? (isDefaulted(current) ? '' : (current.diff ?? '')) : ''),
+                    readingUnit: hasCurrent ? (current.reading_unit || '') : '',
                 },
                 previous: {
                     ...basePrevious,
-                    reading: hasValue(basePrevious.reading) ? basePrevious.reading : (previous.raw ?? ''),
-                    flow: hasValue(basePrevious.flow) ? basePrevious.flow : (previous.diff ?? ''),
-                    readingUnit: basePrevious.readingUnit || previous.reading_unit || '',
+                    reading: hasValue(previous.raw) ? previous.raw : (basePrevious.reading ?? ''),
+                    flow: hasValue(previous.diff) ? previous.diff : (basePrevious.flow ?? ''),
+                    readingUnit: previous.reading_unit || basePrevious.readingUnit || '',
                     ...(isSludge && {
                         monthlyExport: previousMonthlyExport,
                         yearlyExport: previousYearlyExport,
@@ -98,7 +97,6 @@ const mergeInventoryContext = (baseContext = {}, history = [], date, nameField, 
         const current = history.find((row) => row?.date === date && row?.[nameField] === name) || {};
         const hasCurrent = Boolean(current?.date);
         const previous = latestBefore(history, date, (row) => row?.[nameField] === name) || {};
-        const baseValues = item.values || {};
         const basePrevious = item.previous || {};
         const defaultAmount = defaultAmounts.has(String(name || '').trim())
             ? defaultAmounts.get(String(name || '').trim())
@@ -107,15 +105,15 @@ const mergeInventoryContext = (baseContext = {}, history = [], date, nameField, 
             ...item,
             defaultPurchase: defaultAmount,
             values: {
-                purchase: hasCurrent ? (isDefaulted(current) ? '' : (current.purchase_amount ?? '')) : (baseValues.purchase ?? ''),
-                usage: hasCurrent ? (isDefaulted(current) ? '' : (current.usage_amount ?? '')) : (baseValues.usage ?? ''),
-                inventory: hasCurrent ? (isDefaulted(current) ? '' : (current.current_inventory ?? '')) : (baseValues.inventory ?? ''),
+                purchase: hasCurrent ? (isDefaulted(current) ? '' : (current.purchase_amount ?? '')) : '',
+                usage: hasCurrent ? (isDefaulted(current) ? '' : (current.usage_amount ?? '')) : '',
+                inventory: hasCurrent ? (isDefaulted(current) ? '' : (current.current_inventory ?? '')) : '',
             },
             previous: {
                 ...basePrevious,
-                inventory: hasValue(basePrevious.inventory)
-                    ? basePrevious.inventory
-                    : (previous.current_inventory ?? ''),
+                inventory: hasValue(previous.current_inventory)
+                    ? previous.current_inventory
+                    : (basePrevious.inventory ?? ''),
             },
         };
     }),
@@ -171,9 +169,8 @@ const mergeWaterContext = (baseContext = {}, history = [], date) => {
                     candidate?.location === location
                     && getWaterRound(candidate, index + 1) === Number(round.value)
                 ));
-                const baseValues = valuesByRound[round.value] || {};
                 valuesByRound[round.value] = WATER_FIELDS.reduce((acc, field) => {
-                    acc[field] = hasValue(baseValues[field]) ? baseValues[field] : (row?.[field] ?? '');
+                    acc[field] = hasValue(row?.[field]) ? row[field] : '';
                     return acc;
                 }, {});
             });
@@ -204,9 +201,14 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
     const [resolvedContexts, setResolvedContexts] = useState(contexts);
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [resolvedDate, setResolvedDate] = useState('');
+    const requestSequenceRef = useRef(0);
 
     const reloadContexts = useCallback(async ({ force = false, tabs = ['flow', 'medicine', 'kit', 'water'] } = {}) => {
         if (!date) return;
+        const requestSequence = requestSequenceRef.current + 1;
+        requestSequenceRef.current = requestSequence;
+        const requestedDate = date;
         const baseContexts = contextsRef.current;
         const targetTabs = new Set(tabs);
         setIsLoading(true);
@@ -233,6 +235,7 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
             ]);
             const medicineDefaultMap = buildDefaultAmountMap(medicineDefaults);
             const kitDefaultMap = buildDefaultAmountMap(kitDefaults);
+            if (requestSequence !== requestSequenceRef.current) return;
             setResolvedContexts((previous) => ({
                 ...previous,
                 ...(targetTabs.has('flow') && {
@@ -248,11 +251,14 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                     water: mergeWaterContext(baseContexts.water, unwrapHistory(waterResult), date),
                 }),
             }));
+            setResolvedDate(requestedDate);
         } catch (error) {
+            if (requestSequence !== requestSequenceRef.current) return;
             console.error('[unified-record] failed to load contexts:', error);
             setResolvedContexts(baseContexts);
+            setResolvedDate(requestedDate);
         } finally {
-            setIsLoading(false);
+            if (requestSequence === requestSequenceRef.current) setIsLoading(false);
         }
     }, [date]);
 
@@ -308,7 +314,7 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
 
     return {
         contexts: resolvedContexts,
-        isLoading,
+        isLoading: isLoading || resolvedDate !== date,
         isSaving,
         saveAllTabs,
         reloadContexts,

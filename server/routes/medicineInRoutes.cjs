@@ -3,6 +3,12 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const multer = require('multer');
+const {
+  COMMON_MULTIPART_LIMITS,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGE_PIXELS,
+  imageFileFilter,
+} = require('../middleware/uploadSecurity.cjs');
 const { openExcelFile } = require('../services/excelOpenService.cjs');
 
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
@@ -480,7 +486,11 @@ module.exports = function (db, baseDir, appDataPath) {
    * 브라우저(웹 모드)에서 사진 파일 자체를 업로드해 로컬에 저장
    * multipart: date, medicineName, photo(file)
    */
-  const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+  const photoUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { ...COMMON_MULTIPART_LIMITS, fileSize: MAX_IMAGE_BYTES, files: 1 },
+    fileFilter: imageFileFilter,
+  });
   router.post('/api/medicine-in/upload-photo', photoUpload.single('photo'), async (req, res) => {
     try {
       const { date, medicineName } = req.body;
@@ -501,7 +511,7 @@ module.exports = function (db, baseDir, appDataPath) {
         await sharp(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
           .jpeg({ quality: 90 }).toFile(destPath);
       } else {
-        await sharp(srcBuf).rotate().jpeg({ quality: 90 }).toFile(destPath);
+        await sharp(srcBuf, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate().jpeg({ quality: 90 }).toFile(destPath);
       }
       const url = `/api/medicine-in/photo?p=${encodeURIComponent(`${yearStr}/${fileName}`)}`;
       updateMedicinePhotoUrl(db, 'medicine', date, medicineName, url);
@@ -911,6 +921,7 @@ function decodeBmpToRgb(buf) {
   const compression = buf.readUInt32LE(30);
   if (compression !== 0) throw new Error(`압축 BMP는 지원하지 않습니다 (compression=${compression})`);
   if (bitsPerPixel !== 24 && bitsPerPixel !== 32) throw new Error(`BMP ${bitsPerPixel}bpp는 지원하지 않습니다`);
+  if (width <= 0 || height <= 0 || width * height > MAX_IMAGE_PIXELS) throw new Error('BMP 이미지 크기가 허용 범위를 초과했습니다.');
 
   const channels = bitsPerPixel >>> 3; // 3 or 4
   const rowSize = Math.floor((bitsPerPixel * width + 31) / 32) * 4;

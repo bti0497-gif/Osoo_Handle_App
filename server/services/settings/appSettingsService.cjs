@@ -72,27 +72,59 @@ async function saveSettings(db, payload, siteStorageRoot) {
       .forEach((row) => {
         if (!flowNames.has(row.item_name)) deleteConfig.run('flow', row.item_name);
       });
+
+    const savedSeries = String(s.series || '').trim() || '1계열';
+    if (savedSeries === '2계열') {
+      db.prepare(`
+        UPDATE app_settings SET flow_option = CASE
+          WHEN flow_option IS NULL OR TRIM(flow_option) = '' THEN 'combined'
+          ELSE flow_option
+        END WHERE id = 1
+      `).run();
+    } else {
+      db.prepare("UPDATE app_settings SET flow_option = 'single1' WHERE id = 1").run();
+    }
+
+    const persisted = db.prepare(`
+      SELECT site_id, site_name, manager_name, method, series, flow_option
+      FROM app_settings WHERE id = 1
+    `).get();
+    const expected = {
+      site_id: String(s.siteId || s.site_id || persisted?.site_id || '').trim(),
+      site_name: String(s.siteName || ''),
+      manager_name: String(s.managerName || ''),
+      method: String(s.method || ''),
+      series: String(s.series || ''),
+    };
+    for (const [field, value] of Object.entries(expected)) {
+      if (String(persisted?.[field] ?? '') !== value) {
+        throw new Error(`설정 저장 검증 실패: ${field}`);
+      }
+    }
+    const verifyConfig = db.prepare(`
+      SELECT is_active, display_order FROM config_items
+      WHERE category = ? AND item_name = ?
+    `);
+    configRows.forEach((item, idx) => {
+      const row = verifyConfig.get(item.category, item.name);
+      if (!row || Number(row.is_active) !== (item.checked ? 1 : 0) || Number(row.display_order) !== idx) {
+        throw new Error(`설정 항목 저장 검증 실패: ${item.category}/${item.name}`);
+      }
+    });
+    return persisted;
   });
 
-  updateTransaction(settings, items);
-  saveSeriesFlowOption(db, settings.series);
-
-  return ensureSiteStorageFolders(db, settings, siteStorageRoot);
-}
-
-function saveSeriesFlowOption(db, series) {
-  const savedSeries = String(series || '').trim() || '1계열';
-  if (savedSeries === '2계열') {
-    db.prepare(`
-      UPDATE app_settings SET flow_option = CASE
-        WHEN flow_option IS NULL OR TRIM(flow_option) = '' THEN 'combined'
-        ELSE flow_option
-      END WHERE id = 1
-    `).run();
-    return;
+  const savedSettings = updateTransaction(settings, items);
+  try {
+    const storage = await ensureSiteStorageFolders(db, settings, siteStorageRoot);
+    return { ...storage, savedSettings };
+  } catch (error) {
+    console.warn('[Settings] 설정은 저장되었으나 보조 폴더 준비 실패:', error.message);
+    return {
+      savedSettings,
+      storageWarning: `설정은 저장되었지만 보조 폴더를 준비하지 못했습니다: ${error.message}`,
+    };
   }
-
-  db.prepare(`UPDATE app_settings SET flow_option = 'single1' WHERE id = 1`).run();
 }
 
 async function ensureSiteStorageFolders(db, settings, siteStorageRoot) {
