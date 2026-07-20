@@ -147,7 +147,7 @@ try {
     }
 
     Write-Host 'Rebuilding native modules for Electron...'
-    & npx.cmd '@electron/rebuild' --force --arch=x64 --electron-version=40.6.0
+    & npx.cmd '@electron/rebuild' --force --arch=x64 --version=40.6.0
     if ($LASTEXITCODE -ne 0) {
         throw "Electron 네이티브 모듈 재빌드에 실패했습니다. 종료 코드: $LASTEXITCODE"
     }

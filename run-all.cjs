@@ -222,7 +222,7 @@ async function startAll() {
     console.log('[Native] Rebuilding better-sqlite3 for Electron 40.6.0...');
     await runCommandAndWait(
         process.platform === 'win32' ? 'npx.cmd' : 'npx',
-        ['@electron/rebuild', '--force', '--arch=x64', '--electron-version=40.6.0'],
+        ['@electron/rebuild', '--force', '--arch=x64', '--version=40.6.0'],
         'Electron native rebuild'
     );
     // Start the Vite frontend HMR server.

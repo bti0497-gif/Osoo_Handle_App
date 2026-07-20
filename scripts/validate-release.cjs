@@ -368,7 +368,7 @@ function validateNativeModuleReleaseContract() {
   }
 
   if (
-    devRunnerText.includes("['@electron/rebuild', '--force', '--arch=x64', '--electron-version=40.6.0']")
+    devRunnerText.includes("['@electron/rebuild', '--force', '--arch=x64', '--version=40.6.0']")
     && devRunnerText.includes('/api/ping')
     && devRunnerText.includes("payload?.app === 'osoo-handle-app' && payload?.ready === true")
     && devRunnerText.includes('Get-NetTCPConnection -State Listen')
