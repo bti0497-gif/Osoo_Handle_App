@@ -84,6 +84,8 @@ This document protects the integrated input modal used by flow, water, medicine,
 - Single-date and range QnTECH imports must work when the unified modal is opened from flow, water, medicine, or kit management.
 - Parent-provided water callbacks may be used when available, but the unified modal must retain an internal QnTECH fallback for every other parent menu.
 - The range fallback must validate dates, show the confirmation dialog, start the server background job, poll its progress, and display completed/total dates.
+- Every entry point must show the shared blocking batch progress dialog while a single-date or range import is running. An inline count alone is not sufficient.
+- The progress dialog must remain non-dismissible while processing, then show success or error details and allow the user to close it.
 - A completed QnTECH import must force-refresh both water and kit modal contexts.
 - Missing optional parent callbacks must never produce a `feature is not connected` user error.
 - Any change to the unified modal or any of its four parent management views must pass the entry-point regression guard in `npm run validate`.

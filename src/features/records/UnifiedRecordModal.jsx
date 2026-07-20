@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useUnifiedRecordViewModel } from './useUnifiedRecordViewModel';
 import { WaterQualityModel } from '../water/WaterQualityModel';
 import { getTodayKST } from '../../core/constants';
+import { BatchProgressDialog } from '../../components/common';
 
 const TAB_META = [
     { id: 'flow', label: '유량관리' },
@@ -403,6 +404,30 @@ export default function UnifiedRecordModal({
     const effectiveImportQntech = typeof onImportQntech === 'function' ? onImportQntech : runInternalQntechImport;
     const effectiveImportQntechRange = typeof onImportQntechRange === 'function' ? onImportQntechRange : runInternalQntechRangeImport;
     const effectiveIsImportingQntech = isImportingQntech || isInternalQntechImporting;
+    const usesInternalQntechProgress = typeof onImportQntech !== 'function' || typeof onImportQntechRange !== 'function';
+    const internalProgressStatus = internalQntechProgress?.status === 'error'
+        ? 'error'
+        : internalQntechProgress?.status === 'completed' || internalQntechProgress?.completed
+            ? 'success'
+            : 'processing';
+    const internalProgressTotal = Math.max(1, Number(internalQntechProgress?.totalDates) || 1);
+    const internalProgressCompleted = internalProgressStatus === 'success'
+        ? internalProgressTotal
+        : Math.min(internalProgressTotal, Math.max(0, Number(internalQntechProgress?.completedDates) || 0));
+    const internalProgressPercent = internalProgressStatus === 'success' || internalProgressStatus === 'error'
+        ? 100
+        : Math.min(100, Math.round((internalProgressCompleted / internalProgressTotal) * 100));
+    const internalProgressTasks = internalQntechProgress ? [{
+        id: 'unified-water-import',
+        title: rangeStartDate === rangeEndDate
+            ? `${rangeStartDate} 서버 데이터`
+            : `${rangeStartDate} ~ ${rangeEndDate} 데이터`,
+        status: internalProgressStatus,
+        message: internalQntechProgress.message || '서버에서 가져오는 중...',
+        completedUnits: internalProgressCompleted,
+        errorUnits: internalProgressStatus === 'error' ? 1 : 0,
+        totalUnits: internalProgressTotal,
+    }] : [];
 
     useEffect(() => {
         if (!isOpen) {
@@ -1561,6 +1586,7 @@ export default function UnifiedRecordModal({
     };
 
     return (
+        <>
         <div style={{
             position: 'fixed',
             inset: 0,
@@ -1763,5 +1789,19 @@ export default function UnifiedRecordModal({
                 </div>
             </div>
         </div>
+        {usesInternalQntechProgress && internalQntechProgress && (
+            <BatchProgressDialog
+                isOpen
+                title={rangeStartDate === rangeEndDate ? '서버에서 가져오기' : '서버에서 기간 데이터 가져오기'}
+                tasks={internalProgressTasks}
+                progress={internalProgressPercent}
+                isProcessing={isInternalQntechImporting}
+                isFinished={!isInternalQntechImporting && (internalProgressStatus === 'success' || internalProgressStatus === 'error')}
+                onClose={() => {
+                    if (!isInternalQntechImporting) setInternalQntechProgress(null);
+                }}
+            />
+        )}
+        </>
     );
 }

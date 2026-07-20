@@ -1267,6 +1267,12 @@ function validateRegressionContracts() {
       modalText.includes("typeof onImportQntech === 'function' ? onImportQntech : runInternalQntechImport") &&
       modalText.includes("typeof onImportQntechRange === 'function' ? onImportQntechRange : runInternalQntechRangeImport") &&
       modalText.includes("reloadContexts({ force: true, tabs: ['water', 'kit'] })") &&
+      modalText.includes("import { BatchProgressDialog } from '../../components/common'") &&
+      modalText.includes('usesInternalQntechProgress && internalQntechProgress') &&
+      modalText.includes('isProcessing={isInternalQntechImporting}') &&
+      modalText.includes('tasks={internalProgressTasks}') &&
+      unifiedRecordModalContractText.includes('shared blocking batch progress dialog') &&
+      unifiedRecordModalContractText.includes('inline count alone is not sufficient') &&
       !modalText.includes('기능이 연결되지 않았습니다.') &&
       unifiedRecordModalContractText.includes('The active modal tab determines the available operation') &&
       unifiedRecordModalContractText.includes('must retain an internal QnTECH fallback') &&
