@@ -207,7 +207,11 @@ function registerLazyApplication() {
     sanitize,
   } = require('./services/diagnosticLogService.cjs');
   const ctx = { db, appDataPath, BASE_DIR };
-  const DIAGNOSTIC_VERBOSE_INITIAL = process.env.DIAGNOSTIC_VERBOSE_INITIAL !== 'false';
+  // Stable releases keep high-volume successful read diagnostics off by default.
+  // Set DIAGNOSTIC_VERBOSE_INITIAL=true temporarily when a field investigation
+  // needs every successful API read. Failures and mutation/sync routes are
+  // always recorded regardless of this switch.
+  const DIAGNOSTIC_VERBOSE_INITIAL = process.env.DIAGNOSTIC_VERBOSE_INITIAL === 'true';
   recordDiagnostic(db, appDataPath, {
     level: 'info',
     area: 'server',
@@ -245,7 +249,7 @@ function registerLazyApplication() {
 
   // --- 초기 배포 진단 로그 ---
   // 1.0.x 현장 안정화 기간에는 /api/ping을 제외한 API 흐름을 넓게 기록한다.
-  // 이후 운영 안정화 시 DIAGNOSTIC_VERBOSE_INITIAL=false 로 줄일 수 있다.
+  // 운영 기본값은 정상 조회를 생략하고 실패·저장·동기화 요청을 유지한다.
   const BIGQUERY_IMMEDIATE_SYNC_PREFIXES = routeRegistry
     .filter(r => r.watch)
     .map(r => r.path);
@@ -260,11 +264,11 @@ function registerLazyApplication() {
       && shouldWatchPath
       && !pathName.startsWith('/api/auth')
       && pathName !== '/api/preload-trigger';
-    const shouldLog = isApiPath
-      && pathName !== '/api/ping'
+    const shouldInspect = isApiPath && pathName !== '/api/ping';
+    const shouldLogSuccessfulResponse = shouldInspect
       && (DIAGNOSTIC_VERBOSE_INITIAL || shouldTriggerSync);
 
-    if (!shouldLog && !shouldTriggerSync) return next();
+    if (!shouldInspect && !shouldTriggerSync) return next();
 
     const startedAt = Date.now();
     const requestBody = sanitize(req.body || {});
@@ -274,7 +278,8 @@ function registerLazyApplication() {
         triggerBigQuerySync(`after-save:${method}:${pathName}`);
       }
 
-      if (shouldLog) {
+      const shouldLogResponse = shouldLogSuccessfulResponse || (shouldInspect && res.statusCode >= 400);
+      if (shouldLogResponse) {
         try {
           const rawResponseText = args?.[0] ? String(args[0]) : '';
           const responseText = pathName === '/api/settings/web-app-credentials'

@@ -501,6 +501,7 @@ function validateRegressionContracts() {
   const bidirectionalDailyLogContractPath = path.join(BASE_DIR, 'BIDIRECTIONAL_DAILY_LOG_CONTRACT.md');
   const dailyLogViewPath = path.join(BASE_DIR, 'src', 'features', 'dailylog', 'DailyLogView.jsx');
   const dailyLogViewModelPath = path.join(BASE_DIR, 'src', 'features', 'dailylog', 'useDailyLogViewModel.js');
+  const dailyLogModelPath = path.join(BASE_DIR, 'src', 'features', 'dailylog', 'DailyLogModel.js');
   const operationStatusRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'operationStatusRoutes.cjs');
   const diagnosticLogServicePath = path.join(BASE_DIR, 'server', 'services', 'diagnosticLogService.cjs');
   const serverIndexPath = path.join(BASE_DIR, 'server', 'index.cjs');
@@ -598,6 +599,7 @@ function validateRegressionContracts() {
   const bidirectionalDailyLogContractText = readText(bidirectionalDailyLogContractPath);
   const dailyLogViewText = readText(dailyLogViewPath);
   const dailyLogViewModelText = readText(dailyLogViewModelPath);
+  const dailyLogModelText = readText(dailyLogModelPath);
   const operationStatusRoutesText = readText(operationStatusRoutesPath);
   const diagnosticLogServiceText = readText(diagnosticLogServicePath);
   const serverIndexText = readText(serverIndexPath);
@@ -1101,6 +1103,21 @@ function validateRegressionContracts() {
       serverIndexText.includes('responseCount = parsedResponse.history.length'),
     'Drive 진단로그 DB 경로·식별정보·테이블/API 행 개수 계약 유지',
     'Drive 진단로그 DB 식별 및 데이터 행 개수 계약이 누락되었습니다'
+  );
+
+  checkSource(
+    serverIndexText.includes("process.env.DIAGNOSTIC_VERBOSE_INITIAL === 'true'") &&
+      serverIndexText.includes('const shouldLogResponse = shouldLogSuccessfulResponse || (shouldInspect && res.statusCode >= 400)') &&
+      serverIndexText.includes('DIAGNOSTIC_VERBOSE_INITIAL || shouldTriggerSync'),
+    '안정화 버전 정상 조회 진단 기본 비활성화·실패/저장 진단 유지 계약',
+    '정상 조회 로그가 다시 폭증하거나 실패·저장 진단이 누락될 수 있습니다'
+  );
+
+  checkSource(
+    dailyLogModelText.includes('Object.entries({ templateName, siteName, ...context })') &&
+      !dailyLogModelText.includes('siteName=${encodeURIComponent(siteName)}'),
+    '일지 Excel 내보내기 siteName 단일 쿼리 파라미터 계약',
+    'siteName이 중복 전달되어 Excel 내보내기가 실패할 수 있습니다'
   );
 
   checkSource(

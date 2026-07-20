@@ -53,12 +53,16 @@ export const DailyLogModel = {
     },
     fetchExportExcel: async (dateString, templateName, siteName, context = {}) => {
         let url;
-        const encodedTemplateName = templateName ? encodeURIComponent(templateName) : '';
         const ranges = dateString.split(',');
+        // Build one canonical query object. requestContext also contains siteName,
+        // so concatenating both values creates duplicate query parameters and
+        // Express turns req.query.siteName into an array.
+        const baseParam = new URLSearchParams(
+            Object.entries({ templateName, siteName, ...context })
+                .filter(([, value]) => value != null && value !== '')
+        ).toString();
 
         if (templateName === '일일업무일지') {
-            const contextParam = new URLSearchParams(Object.entries(context).filter(([, value]) => value != null && value !== '')).toString();
-            const baseParam = `templateName=${encodedTemplateName}${siteName ? `&siteName=${encodeURIComponent(siteName)}` : ''}${contextParam ? `&${contextParam}` : ''}`;
             if (ranges.length === 1) {
                 const encodedDate = encodeURIComponent(ranges[0].trim());
                 url = `/api/daily-work-log/export?date=${encodedDate}&${baseParam}`;
@@ -68,8 +72,6 @@ export const DailyLogModel = {
                 url = `/api/daily-work-log/export?startDate=${encodedStartDate}&endDate=${encodedEndDate}&${baseParam}`;
             }
         } else {
-            const contextParam = new URLSearchParams(Object.entries(context).filter(([, value]) => value != null && value !== '')).toString();
-            const baseParam = `templateName=${encodedTemplateName}${siteName ? `&siteName=${encodeURIComponent(siteName)}` : ''}${contextParam ? `&${contextParam}` : ''}`;
             if (ranges.length === 1) {
                 const encodedDate = encodeURIComponent(ranges[0].trim());
                 url = `/api/logs/export?date=${encodedDate}&${baseParam}`;

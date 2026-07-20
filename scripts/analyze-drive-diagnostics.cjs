@@ -11,6 +11,7 @@
  */
 
 const path = require('path');
+const fs = require('fs');
 const {
   drive,
   isDriveConfigured,
@@ -35,6 +36,8 @@ function parseArgs(argv) {
     site: 'cheondeungsan',
     limitIssues: 80,
     listOnly: false,
+    downloadDir: '',
+    deleteAfterAnalysis: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -45,7 +48,9 @@ function parseArgs(argv) {
     if (arg === '--site' && next) out.site = next;
     if (arg === '--limit-issues' && next) out.limitIssues = Number(next) || out.limitIssues;
     if (arg === '--list-only') out.listOnly = true;
-    if (arg.startsWith('--') && next && arg !== '--list-only') i += 1;
+    if (arg === '--download-dir' && next) out.downloadDir = next;
+    if (arg === '--delete-after-analysis') out.deleteAfterAnalysis = true;
+    if (arg.startsWith('--') && next && !['--list-only', '--delete-after-analysis'].includes(arg)) i += 1;
   }
 
   return out;
@@ -164,8 +169,12 @@ async function main() {
   const selectedFiles = siteNeedle
     ? files.filter((file) => String(file.name || '').includes(siteNeedle))
     : files;
+  const diagnosticFiles = selectedFiles.filter((file) =>
+    file.mimeType !== 'application/vnd.google-apps.folder' &&
+    String(file.name || '').endsWith('_diagnostics.jsonl')
+  );
 
-  const fileSummary = selectedFiles.map((file) => ({
+  const fileSummary = diagnosticFiles.map((file) => ({
     name: file.name,
     size: file.size,
     createdTime: file.createdTime,
@@ -181,8 +190,16 @@ async function main() {
   if (options.listOnly) return;
 
   const events = [];
-  for (const file of selectedFiles) {
+  const downloadedFiles = [];
+  const downloadRoot = options.downloadDir ? path.resolve(options.downloadDir) : '';
+  if (downloadRoot) fs.mkdirSync(downloadRoot, { recursive: true });
+  for (const file of diagnosticFiles) {
     const text = await downloadDriveText(file.id);
+    if (downloadRoot) {
+      const safeName = path.basename(file.name);
+      fs.writeFileSync(path.join(downloadRoot, safeName), text, 'utf8');
+    }
+    downloadedFiles.push(file);
     const lines = text.split(/\r?\n/);
     lines.forEach((line, index) => {
       if (!line.trim()) return;
@@ -202,15 +219,41 @@ async function main() {
 
   const summary = summarizeEvents(events, options.limitIssues);
   console.log('---SUMMARY---');
-  console.log(JSON.stringify({
-    selectedFileCount: selectedFiles.length,
+  const resultSummary = {
+    selectedFileCount: diagnosticFiles.length,
+    downloadedFileCount: downloadedFiles.length,
     eventCount: summary.eventCount,
     byVersion: summary.byVersion,
     issueCount: summary.issueCount,
     byAction: summary.byAction,
-  }, null, 2));
+  };
+  console.log(JSON.stringify(resultSummary, null, 2));
   console.log('---ISSUES---');
   console.log(JSON.stringify(summary.issues, null, 2));
+
+  if (downloadRoot) {
+    fs.writeFileSync(path.join(downloadRoot, 'analysis-summary.json'), JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      folder: path.posix.join(TEXT.diagnosticRoot, options.year, options.month),
+      ...resultSummary,
+      issues: summary.issues,
+    }, null, 2), 'utf8');
+  }
+
+  if (options.deleteAfterAnalysis) {
+    if (downloadedFiles.length !== diagnosticFiles.length) {
+      throw new Error(`Download count mismatch; refusing Drive deletion (${downloadedFiles.length}/${diagnosticFiles.length}).`);
+    }
+    for (const file of downloadedFiles) {
+      await drive.files.delete({ fileId: file.id, supportsAllDrives: true });
+    }
+    const remaining = (await listDriveFiles(folder.id)).filter((file) =>
+      file.mimeType !== 'application/vnd.google-apps.folder' &&
+      String(file.name || '').endsWith('_diagnostics.jsonl')
+    );
+    console.log('---DELETE---');
+    console.log(JSON.stringify({ deletedFileCount: downloadedFiles.length, remainingDiagnosticFileCount: remaining.length }, null, 2));
+  }
 }
 
 main().catch((error) => {
