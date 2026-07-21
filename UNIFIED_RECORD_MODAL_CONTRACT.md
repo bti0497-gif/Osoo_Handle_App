@@ -22,6 +22,9 @@ This document protects the integrated input modal used by flow, water, medicine,
 
 - Flow, medicine, kit, and enabled water text inputs must remain clickable and editable.
 - The modal body must not use a blanket `pointer-events: none` rule that blocks text-box editing.
+- After the selected date has resolved once, refreshes and rerenders for that same date must never block editing again.
+- Switching tabs must preserve every unsaved draft value; tab changes must not clear or rebuild drafts from DB data.
+- A successful save may clear only the saved tab's draft, and only after that tab has been reloaded from DB.
 - Flow and inventory inputs must not be disabled just because the modal is in add/edit mode.
 - Water PO4-P may remain disabled only for locations where that field is not applicable.
 

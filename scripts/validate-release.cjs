@@ -821,6 +821,9 @@ function validateRegressionContracts() {
   checkSource(
     modalText.includes("pointerEvents: isDateContextPending ? 'none' : 'auto'") &&
       !modalText.includes("pointerEvents: isLoadingUnifiedData ? 'none' : 'auto'") &&
+      modalText.includes('const handleTabChange = (nextTab) =>') &&
+      /const handleTabChange = \(nextTab\) => \{\s*setActiveTab\(nextTab\);\s*applyInventoryDefaults\(nextTab\);\s*\};/.test(modalText) &&
+      modalText.includes('return draft[key] || buildInitialDraft(tabId, item, roundValue);') &&
       modalText.includes('onChange={(e) => setFlowDraftFieldForItem(item, field, e.target.value)}') &&
       modalText.includes('onChange={(e) => setInventoryDraftFieldForItem(activeTab, item, field, e.target.value)}') &&
       modalText.includes('onChange={(e) => {') &&
@@ -1044,6 +1047,8 @@ function validateRegressionContracts() {
       modalText.includes("recordQntechUiDiagnostic('unified-context-load-slow'") &&
       !modalText.includes('isLoadingUnifiedData') &&
       unifiedRecordModalContractText.includes('same-date refresh after save must not disable') &&
+      unifiedRecordModalContractText.includes('Switching tabs must preserve every unsaved draft value') &&
+      unifiedRecordModalContractText.includes("clear only the saved tab's draft") &&
       unifiedRecordModalContractText.includes('unified-context-load-slow') &&
       packageText.includes('validate-qntech-location-mapping.cjs'),
     '통합 모달 연속 날짜 전일 검침 기준·날짜 조회 경합·시료명 매칭 회귀방지 계약 유지',
