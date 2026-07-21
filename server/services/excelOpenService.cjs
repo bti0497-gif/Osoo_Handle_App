@@ -139,7 +139,7 @@ function pixelToRow(ws, yPx) {
  * @param {{ fitBy?: 'width'|'height', pct?: number, cellW?: number, cellH?: number, leftPt?: number, topPt?: number, boxWidthPt?: number, boxHeightPt?: number }} [opts]
  */
 async function insertImageToCell(wb, ws, extent, imgSource, opts = {}) {
-  const sharp = require('sharp');
+  const sharp = require('../compat/sharp.cjs');
 
   // ── 1. 셀 전체 픽셀 크기 (opts로 직접 지정하거나 시트에서 계산) ──────────
   // 엑셀 column.width 단위: "문자 폭"(≈7 px/단위), row.height 단위: pt(1pt ≈ 1.333 px)

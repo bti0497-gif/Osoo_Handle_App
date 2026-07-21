@@ -3,9 +3,9 @@
  * Keep this in sync with electron-builder.config.js until the main config is migrated.
  */
 module.exports = {
-  appId: 'com.osoo.handle-app',
-  productName: 'Osoo Handle App',
-  artifactName: 'Osoo.Handle.App.Setup.${version}.${ext}',
+  appId: 'com.osoo.handle-app.win7-x86',
+  productName: 'Osoo Handle App Win7 x86',
+  artifactName: 'Osoo.Handle.App.Win7.x86.Setup.${version}.${ext}',
   npmRebuild: false,
   nodeGypRebuild: false,
   directories: {
@@ -39,7 +39,7 @@ module.exports = {
   ],
   win: {
     target: [
-      { target: 'nsis', arch: ['x64'] },
+      { target: 'nsis', arch: ['ia32'] },
     ],
     icon: 'public/icon.ico',
     compression: 'store',
@@ -53,12 +53,6 @@ module.exports = {
     installerHeaderIcon: 'public/icon.ico',
     createDesktopShortcut: true,
     createStartMenuShortcut: true,
-    shortcutName: 'Osoo Handle App',
-  },
-  publish: {
-    provider: 'github',
-    owner: 'bti0497-gif',
-    repo: 'Osoo_Handle_App',
-    releaseType: 'release',
+    shortcutName: 'Osoo Handle App Win7 x86',
   },
 };

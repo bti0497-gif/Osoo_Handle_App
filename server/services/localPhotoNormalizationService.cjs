@@ -1,6 +1,6 @@
 ﻿const fs = require('fs');
 const path = require('path');
-const sharp = require('sharp');
+const sharp = require('../compat/sharp.cjs');
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']);
 

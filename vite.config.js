@@ -10,6 +10,7 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
+    target: 'chrome108',
     outDir: 'dist',
     assetsDir: 'assets',
   },

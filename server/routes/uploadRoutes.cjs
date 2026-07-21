@@ -1,6 +1,6 @@
 ﻿const express = require('express');
 const multer = require('multer');
-const sharp = require('sharp');
+const sharp = require('../compat/sharp.cjs');
 const path = require('path');
 const fs = require('fs');
 const { drive, getOrCreateBoardUploadsFolder } = require('../services/driveService.cjs');

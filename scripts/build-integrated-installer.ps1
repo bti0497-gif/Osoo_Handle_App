@@ -6,14 +6,28 @@ param(
     [string]$OutputDir = '',
 
     [Parameter(Mandatory = $false)]
+    [string]$CredentialSourceRoot = '',
+
+    [Parameter(Mandatory = $false)]
     [switch]$LowMemoryMode = $true
 )
 
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if (-not $CredentialSourceRoot) {
+    $CredentialSourceRoot = if ($env:OSOO_CREDENTIAL_SOURCE_ROOT) {
+        $env:OSOO_CREDENTIAL_SOURCE_ROOT
+    } else {
+        $projectRoot
+    }
+}
+$credentialRoot = [System.IO.Path]::GetFullPath($CredentialSourceRoot)
 $packageJson = Get-Content -Raw -LiteralPath (Join-Path $projectRoot 'package.json') |
     ConvertFrom-Json
+$isLegacyWin7X86 = $packageJson.name -eq 'osoo-handle-app-win7-x86'
+$artifactPrefix = if ($isLegacyWin7X86) { 'Osoo.Handle.App.Win7.x86.Integrated.Setup' } else { 'Osoo.Handle.App.Integrated.Setup' }
+$unpackedFolder = if ($isLegacyWin7X86) { 'win-ia32-unpacked' } else { 'win-unpacked' }
 if (-not $AppVersion) {
     $AppVersion = $packageJson.version
 }
@@ -28,10 +42,10 @@ $outputRoot = [System.IO.Path]::GetFullPath($OutputDir)
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 
 $requiredFiles = @{
-    '.env.local' = Join-Path $projectRoot '.env.local'
-    'google-key.json' = Join-Path $projectRoot 'server\config\google-key.json'
-    'bigquery-service-account.json' = Join-Path $projectRoot 'server\config\work-jindan-194620a46d59.json'
-    'firebase-service-account.json' = Join-Path $projectRoot 'server\config\firebase-service-account.json'
+    '.env.local' = Join-Path $credentialRoot '.env.local'
+    'google-key.json' = Join-Path $credentialRoot 'server\config\google-key.json'
+    'bigquery-service-account.json' = Join-Path $credentialRoot 'server\config\work-jindan-194620a46d59.json'
+    'firebase-service-account.json' = Join-Path $credentialRoot 'server\config\firebase-service-account.json'
 }
 
 foreach ($entry in $requiredFiles.GetEnumerator()) {
@@ -40,7 +54,7 @@ foreach ($entry in $requiredFiles.GetEnumerator()) {
     }
 }
 
-$oauthFile = Get-ChildItem -LiteralPath $projectRoot -File -Filter 'client_secret_*.json' |
+$oauthFile = Get-ChildItem -LiteralPath $credentialRoot -File -Filter 'client_secret_*.json' |
     Select-Object -First 1
 if (-not $oauthFile) {
     throw 'Google OAuth client_secret_*.json 파일을 찾을 수 없습니다.'
@@ -51,7 +65,7 @@ $buildRoot = Join-Path $outputRoot '.integrated-build'
 $includeFile = Join-Path $buildRoot 'installer-credentials.nsh'
 $processGuardFile = Join-Path $projectRoot 'scripts\installer-process-guard.nsh'
 $configFile = Join-Path $buildRoot 'electron-builder.integrated.cjs'
-$outputFile = Join-Path $outputRoot "Osoo.Handle.App.Integrated.Setup.$AppVersion.exe"
+$outputFile = Join-Path $outputRoot "$artifactPrefix.$AppVersion.exe"
 
 function ConvertTo-JsSingleQuotedString([string]$Value) {
     return $Value.Replace('\', '\\').Replace("'", "\'")
@@ -108,13 +122,14 @@ $outputConfigPath = ConvertTo-JsSingleQuotedString $outputRoot
 # runtime dependency must therefore be unpacked beside it; unpacking only
 # native modules makes Node fail at startup with MODULE_NOT_FOUND (express).
 $asarUnpackSection = '  asarUnpack: base.asarUnpack,'
+$concurrencySection = if ($isLegacyWin7X86) { '' } else { '  concurrency: { jobs: 1 },' }
 
 $configText = @"
 const base = require('$baseConfigPath');
 
 module.exports = {
   ...base,
-  concurrency: { jobs: 1 },
+$concurrencySection
   files: [
     ...base.files,
     'templates/**/*',
@@ -128,7 +143,7 @@ module.exports = {
     output: '$outputConfigPath',
   },
 $asarUnpackSection
-    artifactName: 'Osoo.Handle.App.Integrated.Setup.`${version}.`${ext}',
+    artifactName: '$artifactPrefix.`${version}.`${ext}',
   nsis: {
     ...base.nsis,
     include: '$includeConfigPath',
@@ -147,7 +162,11 @@ try {
     }
 
     Write-Host 'Rebuilding native modules for Electron...'
-    & npx.cmd '@electron/rebuild' --force --arch=x64 --version=40.6.0
+    if ($isLegacyWin7X86) {
+        & npx.cmd '@electron/rebuild' --force --arch=ia32 --version=22.3.27
+    } else {
+        & npx.cmd '@electron/rebuild' --force --arch=x64 --version=40.6.0
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Electron 네이티브 모듈 재빌드에 실패했습니다. 종료 코드: $LASTEXITCODE"
     }
@@ -159,7 +178,11 @@ try {
     }
 
     Write-Host "Building single-stage integrated installer: $outputFile"
-    & npx.cmd electron-builder --config $configFile --win nsis
+    if ($isLegacyWin7X86) {
+        & npx.cmd electron-builder --config $configFile --win nsis --ia32
+    } else {
+        & npx.cmd electron-builder --config $configFile --win nsis
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "통합 설치파일 생성에 실패했습니다. 종료 코드: $LASTEXITCODE"
     }
@@ -168,19 +191,22 @@ try {
         throw "통합 설치파일이 생성되지 않았습니다: $outputFile"
     }
 
-    $unpackedAsar = Join-Path $outputRoot 'win-unpacked\resources\app.asar'
-    Write-Host 'Restoring native modules for Node.js validation...'
-    & npm.cmd rebuild better-sqlite3
-    if ($LASTEXITCODE -ne 0) {
-        throw "Node.js 검증용 네이티브 모듈 복원에 실패했습니다. 종료 코드: $LASTEXITCODE"
-    }
+    $unpackedAsar = Join-Path $outputRoot "$unpackedFolder\resources\app.asar"
     Write-Host 'Validating packaged application...'
-    & node.exe scripts\validate-release.cjs --asar-path $unpackedAsar
+    if ($isLegacyWin7X86) {
+        & node.exe scripts\run-with-legacy-electron.cjs scripts\validate-release.cjs --asar-path $unpackedAsar
+    } else {
+        & npm.cmd rebuild better-sqlite3
+        if ($LASTEXITCODE -ne 0) {
+            throw "Node.js 검증용 네이티브 모듈 복원에 실패했습니다. 종료 코드: $LASTEXITCODE"
+        }
+        & node.exe scripts\validate-release.cjs --asar-path $unpackedAsar
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "패키지 검증에 실패했습니다. 종료 코드: $LASTEXITCODE"
     }
 
-    $unpackedRoot = Join-Path $outputRoot 'win-unpacked'
+    $unpackedRoot = Join-Path $outputRoot $unpackedFolder
     Write-Host 'Smoke testing packaged native modules...'
     & node.exe scripts\validate-packaged-native.cjs $unpackedRoot
     if ($LASTEXITCODE -ne 0) {
@@ -228,6 +254,8 @@ finally {
         Remove-Item -LiteralPath $buildRoot -Recurse -Force
     }
 
-    Write-Host 'Restoring native modules for the local Node.js runtime...'
-    & npm.cmd rebuild better-sqlite3
+    if (-not $isLegacyWin7X86) {
+        Write-Host 'Restoring native modules for the local Node.js runtime...'
+        & npm.cmd rebuild better-sqlite3
+    }
 }

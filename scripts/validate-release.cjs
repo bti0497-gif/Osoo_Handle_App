@@ -264,6 +264,7 @@ function validateNativeModuleReleaseContract() {
   console.log(`\n${colors.blue}▶ Electron 네이티브 모듈 릴리즈 계약 검증${colors.reset}`);
 
   const packageJson = JSON.parse(fs.readFileSync(path.join(BASE_DIR, 'package.json'), 'utf8'));
+  const isLegacyWin7X86 = packageJson.name === 'osoo-handle-app-win7-x86';
   const buildScript = packageJson.scripts?.['electron:build'] || '';
   const nativeValidationScript = packageJson.scripts?.['validate:native'] || '';
   const fieldInstallerScript = packageJson.scripts?.['package:field-installer'] || '';
@@ -338,7 +339,9 @@ function validateNativeModuleReleaseContract() {
     error('통합 설치파일 명령에 낡은 고정 AppVersion이 남아 있습니다');
   }
 
-  if (
+  if (isLegacyWin7X86 && !safeReleaseScript.includes('package:field-installer') && !safeReleaseScript.includes('validate:field-installer')) {
+    success('Win7 x86 호환판은 자동업데이트·정기 통합 설치본 생성에서 분리됨');
+  } else if (
     fieldInstallerScript.includes('build-integrated-installer.ps1')
     && safeReleaseScript.includes('package:field-installer')
     && safeReleaseScript.includes('validate:field-installer')
@@ -351,7 +354,9 @@ function validateNativeModuleReleaseContract() {
   const nodeRebuildIndex = safeReleaseScript.indexOf('npm rebuild better-sqlite3');
   const validateIndex = safeReleaseScript.indexOf('npm run validate');
   const electronBuildIndex = safeReleaseScript.indexOf('npm run electron:build');
-  if (nodeRebuildIndex >= 0 && validateIndex > nodeRebuildIndex && electronBuildIndex > validateIndex) {
+  if (isLegacyWin7X86 && validateIndex >= 0 && electronBuildIndex > validateIndex && safeReleaseScript.includes('run-with-legacy-electron.cjs') === false) {
+    success('Win7 x86 안전 릴리즈가 32비트 Electron DB 검증 후 패키징 순서를 강제함');
+  } else if (nodeRebuildIndex >= 0 && validateIndex > nodeRebuildIndex && electronBuildIndex > validateIndex) {
     success('안전 릴리즈가 Node DB 검증 후 Electron ABI 패키징 순서를 강제함');
   } else {
     error('release:safe의 Node 검증 → Electron 패키징 ABI 전환 순서가 잘못되었습니다');
@@ -400,17 +405,23 @@ function validateInstallerNamingPolicy() {
   const latestYmlPath = path.join(BASE_DIR, 'release', 'latest.yml');
 
   const builderConfigText = fs.readFileSync(builderConfigPath, 'utf8');
+  const packageJson = JSON.parse(fs.readFileSync(path.join(BASE_DIR, 'package.json'), 'utf8'));
+  const isLegacyWin7X86 = packageJson.name === 'osoo-handle-app-win7-x86';
   const integratedBuilderScriptText = fs.readFileSync(integratedBuilderScriptPath, 'utf8');
   const installWithProvisioningText = fs.readFileSync(installWithProvisioningPath, 'utf8');
   const deploymentPackageScriptText = fs.readFileSync(deploymentPackageScriptPath, 'utf8');
 
-  if (builderConfigText.includes("artifactName: 'Osoo.Handle.App.Setup.${version}.${ext}'")) {
+  if (isLegacyWin7X86 && builderConfigText.includes("artifactName: 'Osoo.Handle.App.Win7.x86.Setup.${version}.${ext}'")) {
+    success('Win7 x86 별도 설치파일명 정책 확인');
+  } else if (builderConfigText.includes("artifactName: 'Osoo.Handle.App.Setup.${version}.${ext}'")) {
     success('electron-builder 기본 설치파일명 정책 확인: Osoo.Handle.App.Setup.{version}.{ext}');
   } else {
     error('electron-builder 기본 설치파일명 정책이 점(.) 규칙이 아닙니다');
   }
 
-  if (integratedBuilderScriptText.includes("artifactName: 'Osoo.Handle.App.Integrated.Setup.`${version}.`${ext}'")) {
+  if (isLegacyWin7X86 && integratedBuilderScriptText.includes("'Osoo.Handle.App.Win7.x86.Integrated.Setup'")) {
+    success('Win7 x86 최초 설치파일명 정책 확인');
+  } else if (integratedBuilderScriptText.includes("artifactName: 'Osoo.Handle.App.Integrated.Setup.`${version}.`${ext}'")) {
     success('통합 설치파일명 정책 확인: Osoo.Handle.App.Integrated.Setup.{version}.{ext}');
   } else {
     error('통합 설치파일명 정책이 점(.) 규칙이 아닙니다');
@@ -1732,7 +1743,7 @@ async function testApiEndpoints(devServerUrl) {
       try {
         const response = await fetch(`${devServerUrl}${ep.fullPath}`, {
           method: ep.method,
-          signal: AbortSignal.timeout(3000),
+          signal: AbortSignal.timeout(process.arch === 'ia32' ? 15000 : 3000),
         });
         
         if (ep.expectedStatuses.includes(response.status)) {

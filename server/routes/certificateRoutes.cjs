@@ -1,5 +1,5 @@
 const express = require('express');
-const sharp = require('sharp');
+const sharp = require('../compat/sharp.cjs');
 const { PDFDocument } = require('pdf-lib');
 const { drive } = require('../services/driveService.cjs');
 const { isSheetsConfigured: isSitesSheetsConfigured, getSites: getSitesFromSheets } = require('../services/sitesSheetsService.cjs');

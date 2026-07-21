@@ -215,7 +215,7 @@ function decodeBmpToRgb(buf) {
  */
 async function savePhotoToLocal(appDataPath, date, label, srcPath) {
   if (!srcPath || !fs.existsSync(srcPath)) return { destPath: null, takenAt: null };
-  const sharp    = require('sharp');
+  const sharp    = require('../compat/sharp.cjs');
   const srcBuf   = fs.readFileSync(srcPath);
   const isSludge = label === '반출';
   const fileName = isSludge
@@ -228,7 +228,7 @@ async function savePhotoToLocal(appDataPath, date, label, srcPath) {
   const isBmp = srcBuf[0] === 0x42 && srcBuf[1] === 0x4D;
   if (isBmp) {
     const bmpRaw = decodeBmpToRgb(srcBuf);
-    await require('sharp')(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
+    await require('../compat/sharp.cjs')(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
       .jpeg({ quality: 90 }).toFile(destPath);
   } else {
     await sharp(srcBuf).rotate().jpeg({ quality: 90 }).toFile(destPath);
@@ -607,7 +607,7 @@ module.exports = function (db, baseDir, appDataPath) {
       if (!req.file)       return res.status(400).json({ success: false, error: '파일 없음' });
 
       const label    = type === 'certificate' ? '청소필증' : '반출';
-      const sharp    = require('sharp');
+      const sharp    = require('../compat/sharp.cjs');
       const isSludge = label === '반출';
       const fileName = isSludge
         ? buildSludgePhotoFileName(date, (resolveLatestSludgePhotoInfo(appDataPath, date)?.index || 0) + 1)
@@ -621,7 +621,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const isBmp  = srcBuf[0] === 0x42 && srcBuf[1] === 0x4D;
       if (isBmp) {
         const bmpRaw = decodeBmpToRgb(srcBuf);
-        await require('sharp')(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
+        await require('../compat/sharp.cjs')(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
           .jpeg({ quality: 90 }).toFile(destPath);
       } else {
         await sharp(srcBuf, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate().jpeg({ quality: 90 }).toFile(destPath);

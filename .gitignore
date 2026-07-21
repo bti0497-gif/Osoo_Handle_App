@@ -6,6 +6,7 @@ logs/
 
 # Dependencies and build output
 node_modules/
+node_modules.partial-*/
 dist/
 dist-ssr/
 build/

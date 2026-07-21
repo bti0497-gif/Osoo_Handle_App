@@ -6,7 +6,8 @@ const { spawnSync } = require('child_process');
 
 const projectRoot = path.join(__dirname, '..');
 const unpackedRoot = path.resolve(process.argv[2] || path.join(projectRoot, 'release', 'win-unpacked'));
-const electronExe = path.join(unpackedRoot, 'Osoo Handle App.exe');
+const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+const electronExe = path.join(unpackedRoot, `${packageJson.build?.productName || 'Osoo Handle App Win7 x86'}.exe`);
 const sqlitePackage = path.join(
   unpackedRoot,
   'resources',

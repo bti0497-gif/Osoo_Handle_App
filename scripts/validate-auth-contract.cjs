@@ -49,6 +49,8 @@ const mainText = read('src/main.jsx');
 const statusBarText = read('src/components/StatusBar.jsx');
 const electronMainText = read('electron/main.cjs');
 const updaterText = read('electron/updater.cjs');
+const packageJson = JSON.parse(read('package.json'));
+const isLegacyWin7X86 = packageJson.name === 'osoo-handle-app-win7-x86';
 
 check(
   containsAll(contractText, [
@@ -309,7 +311,11 @@ check(
 );
 
 check(
-  containsAll(appText, [
+  (isLegacyWin7X86 && containsAll(updaterText, [
+    "reason: 'legacy-win7-x86'",
+    'setupAutoUpdater() {',
+    'return false;',
+  ])) || (containsAll(appText, [
     'const requestLoginUpdateCheck = (attempt = 0)',
     'requestLoginUpdateCheck(attempt + 1)',
     '15000',
@@ -321,9 +327,13 @@ check(
     "writeUpdateLog('check-failed'",
     "writeUpdateLog('update-downloaded'",
     "writeUpdateLog('install-started'",
-  ]),
-  'login update check retries once and writes a dedicated updater log',
-  'login update retry or updater diagnostic logging contract was removed'
+  ])),
+  isLegacyWin7X86
+    ? 'Win7 x86 호환판 자동업데이트 제외 계약 유지'
+    : 'login update check retries once and writes a dedicated updater log',
+  isLegacyWin7X86
+    ? 'Win7 x86 호환판에서 자동업데이트 차단 계약이 제거됨'
+    : 'login update retry or updater diagnostic logging contract was removed'
 );
 
 console.log(`[AUTH SUMMARY] pass=${passed} fail=${failed}`);

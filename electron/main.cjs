@@ -59,47 +59,43 @@ const useExternalServer = isDev && process.env.OSOO_EXTERNAL_SERVER === '1';
 function reclaimDedicatedServerPort() {
   if (useExternalServer || process.platform !== 'win32') return true;
 
-  const script = `
-$ErrorActionPreference = 'SilentlyContinue'
-$currentPid = ${process.pid}
-$port = ${DEDICATED_SERVER_PORT}
-$owners = Get-NetTCPConnection -State Listen |
-  Where-Object { $_.LocalPort -eq $port -and $_.OwningProcess -ne $currentPid } |
-  Select-Object -ExpandProperty OwningProcess -Unique
+  const findOwners = () => {
+    const result = spawnSync('netstat.exe', ['-ano', '-p', 'tcp'], {
+      windowsHide: true,
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    if (result.error || result.status !== 0) return [];
+    const owners = new Set();
+    for (const line of String(result.stdout || '').split(/\r?\n/)) {
+      const columns = line.trim().split(/\s+/);
+      if (columns.length < 5 || String(columns[3]).toUpperCase() !== 'LISTENING') continue;
+      const port = Number(String(columns[1]).split(':').pop());
+      const pid = Number(columns[4]);
+      if (port === DEDICATED_SERVER_PORT && pid > 0 && pid !== process.pid) owners.add(pid);
+    }
+    return [...owners];
+  };
 
-foreach ($ownerPid in $owners) {
-  $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid"
-  $name = if ($proc) { [string]$proc.Name } else { '<unknown>' }
-  $path = if ($proc) { [string]$proc.ExecutablePath } else { '' }
-  Write-Output "reclaim pid=$ownerPid name=$name path=$path"
-  Stop-Process -Id $ownerPid -Force
-}
-for ($attempt = 0; $attempt -lt 20; $attempt++) {
-  $remaining = Get-NetTCPConnection -State Listen |
-    Where-Object { $_.LocalPort -eq $port } |
-    Select-Object -First 1
-  if (-not $remaining) { exit 0 }
-  Start-Sleep -Milliseconds 250
-}
-Write-Error "전용 포트 $port 해제 실패"
-exit 1
-`.trim();
-
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-    windowsHide: true,
-    encoding: 'utf8',
-    timeout: 10000,
-  });
-  if (result.error) {
-    console.error('[Electron] Dedicated server port reclaim failed:', result.error.message);
-    return false;
+  try {
+    for (const ownerPid of findOwners()) {
+      console.warn(`[Electron] reclaim legacy port pid=${ownerPid}`);
+      spawnSync('taskkill.exe', ['/PID', String(ownerPid), '/T', '/F'], {
+        windowsHide: true,
+        encoding: 'utf8',
+        timeout: 10000,
+      });
+    }
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      if (findOwners().length === 0) return true;
+      spawnSync('ping.exe', ['127.0.0.1', '-n', '2', '-w', '250'], { windowsHide: true });
+    }
+  } catch (error) {
+    console.error('[Electron] Windows 7 port reclaim failed:', error.message);
   }
-  if (result.stdout?.trim()) console.warn(`[Electron] ${result.stdout.trim()}`);
-  if (result.status !== 0) {
-    console.error('[Electron] Dedicated server port is still occupied:', result.stderr?.trim() || result.status);
-    return false;
-  }
-  return true;
+  console.error(`[Electron] Dedicated server port ${DEDICATED_SERVER_PORT} is still occupied.`);
+  return false;
 }
 
 function scheduleServerRestart(delayMs = 500) {

@@ -5,7 +5,7 @@ const JSZip = require('jszip');
 const os = require('os');
 const path = require('path');
 const { PDFDocument } = require('pdf-lib');
-const sharp = require('sharp');
+const sharp = require('../compat/sharp.cjs');
 
 const { convertExcelToPdf } = require('./excelPdfService.cjs');
 const { getActiveLocations } = require('./qntechWaterValueImportService.cjs');

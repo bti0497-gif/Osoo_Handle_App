@@ -124,7 +124,7 @@ function siteWhere(scope) {
  */
 async function savePhotoToLocal(appDataPath, year, mm, date, medicineName, srcPath) {
   if (!srcPath || !fs.existsSync(srcPath)) return null;
-  const sharp = require('sharp');
+  const sharp = require('../compat/sharp.cjs');
   const srcBuf = fs.readFileSync(srcPath);
   const yyyymmdd = String(date || '').replace(/-/g, '').slice(0, 8);
   const fileName = `${yyyymmdd}+${sanitizeName(medicineName)}.jpg`;
@@ -498,7 +498,7 @@ module.exports = function (db, baseDir, appDataPath) {
         return res.status(400).json({ success: false, error: 'date, medicineName, photo 필드가 필요합니다.' });
       }
       const yearStr = date.split('-')[0];
-      const sharp = require('sharp');
+      const sharp = require('../compat/sharp.cjs');
       const yyyymmdd = String(date || '').replace(/-/g, '').slice(0, 8);
       const fileName = `${yyyymmdd}+${sanitizeName(medicineName)}.jpg`;
       const destDir = path.join(appDataPath, '사진관리', '약품입고', yearStr);
@@ -786,7 +786,7 @@ const KIT_NAME_TO_NAMED = {
  */
 async function exportMedicineInXlsx({ templatePath, outputPath, year, month, medicineDate, kitDate, baseMeds, extraMeds, kits, imageMap }) {
   const ExcelJS = require('exceljs');
-  const sharp = require('sharp');
+  const sharp = require('../compat/sharp.cjs');
   const fsLocal = require('fs');
 
   const wb = new ExcelJS.Workbook();
