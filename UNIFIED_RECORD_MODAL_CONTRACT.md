@@ -39,6 +39,11 @@ This document protects the integrated input modal used by flow, water, medicine,
 - Empty sludge export defaults to zero, while its cumulative value carries forward.
 - The sludge field labelled `월 반출량` must display only the sum of sludge exports in the selected calendar month, including the selected day's input.
 - Sludge `calculated_flow` remains the selected calendar year's cumulative export and must be saved independently from the modal's monthly display value.
+- The sludge flow group must reuse the photo-ledger `SludgePhotoButton` for both the export photo and cleaning certificate.
+- Sludge photo buttons remain disabled until the selected date has a positive export amount, either loaded from the DB or entered in the current draft.
+- Newly selected sludge photos remain part of the flow-tab draft and upload only after the flow save succeeds.
+- The export-photo picker must support selecting multiple images at once and upload every selected image sequentially; the cleaning certificate remains a single file.
+- The sludge photo upload route must accept multipart `date` and `type` fields from the request body, while retaining query fallback compatibility.
 - Editing purchase or usage recalculates that day's inventory from previous inventory plus purchase minus usage.
 - Medicine and kit inventory must be clamped at zero when purchase/usage calculations would otherwise go negative.
 - The kit bulk `+1/-1` control must apply to every active kit item together. If a `+1` would make a kit negative, usage still changes together and that kit inventory is clamped at zero.

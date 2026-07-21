@@ -1,53 +1,15 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import Calendar from 'react-calendar';
 import 'react-calendar/dist/Calendar.css';
 import '../../styles/calendar-custom.css';
 import { useSludgePhotoViewModel } from './useSludgePhotoViewModel';
+import SludgePhotoButton from './SludgePhotoButton';
 
 const toDateStr = (d) => {
   const m  = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${m}-${dd}`;
 };
-
-function PhotoButton({ label, hasPhoto, onFile }) {
-  const ref = useRef(null);
-  return (
-    <div style={{ display: 'flex', alignItems: 'center' }}>
-      <button
-        type="button"
-        onClick={() => ref.current?.click()}
-        style={{
-          padding: '5px 12px',
-          borderRadius: 6,
-          border: hasPhoto ? '1.5px solid #22c55e' : '1.5px solid #94a3b8',
-          background: hasPhoto ? '#f0fdf4' : '#f8fafc',
-          color: hasPhoto ? '#16a34a' : '#64748b',
-          fontSize: 12,
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 5,
-          whiteSpace: 'nowrap',
-        }}
-      >
-        <span>{hasPhoto ? '✓' : '📷'}</span>
-        <span>{label}</span>
-      </button>
-      <input
-        ref={ref}
-        type="file"
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={e => {
-          const f = e.target.files?.[0];
-          if (f) onFile(f);
-          e.target.value = '';
-        }}
-      />
-    </div>
-  );
-}
 
 const th = {
   padding: '8px 12px',
@@ -131,12 +93,12 @@ export default function SludgePhotoView() {
           style={amountInput(newEntry ? '#bae6fd' : '#bfdbfe')}
         />
       </div>
-      <PhotoButton
+      <SludgePhotoButton
         label="반출사진"
         hasPhoto={!!(editEntry.sludgePhotoUrl || editEntry.sludgePhotoFile)}
         onFile={handleSludgePhoto}
       />
-      <PhotoButton
+      <SludgePhotoButton
         label="청소필증"
         hasPhoto={!!(editEntry.certPhotoUrl || editEntry.certPhotoFile)}
         onFile={handleCertPhoto}

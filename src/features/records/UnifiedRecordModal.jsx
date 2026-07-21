@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useUnifiedRecordViewModel } from './useUnifiedRecordViewModel';
 import { WaterQualityModel } from '../water/WaterQualityModel';
+import { SludgePhotoModel } from '../sludge/SludgePhotoModel';
+import SludgePhotoButton from '../sludge/SludgePhotoButton';
 import { getTodayKST } from '../../core/constants';
 import { BatchProgressDialog } from '../../components/common';
 
@@ -324,6 +326,15 @@ export default function UnifiedRecordModal({
     const [isInternalQntechImporting, setIsInternalQntechImporting] = useState(false);
     const [isLookingUpExperimentCounts, setIsLookingUpExperimentCounts] = useState(false);
     const [experimentLookupMessage, setExperimentLookupMessage] = useState('');
+    const [sludgePhotoDraft, setSludgePhotoDraft] = useState({
+        date: '',
+        sludgeFiles: [],
+        certificateFile: null,
+        sludgePhotoUrl: null,
+        certificatePhotoUrl: null,
+    });
+    const [isLoadingSludgePhotos, setIsLoadingSludgePhotos] = useState(false);
+    const [isUploadingSludgePhotos, setIsUploadingSludgePhotos] = useState(false);
     const wasOpenRef = useRef(false);
     const initialWaterSignature = JSON.stringify({
         measurementOrder: contexts.water?.measurementOrder || 1,
@@ -483,6 +494,30 @@ export default function UnifiedRecordModal({
         }, 0);
         return () => clearTimeout(timer);
     }, [isOpen, isDateContextPending, resolvedContexts.water]);
+
+    useEffect(() => {
+        if (!isOpen || !date) return undefined;
+        let cancelled = false;
+        const [year, month] = date.split('-').map(Number);
+        setSludgePhotoDraft({ date, sludgeFiles: [], certificateFile: null, sludgePhotoUrl: null, certificatePhotoUrl: null });
+        setIsLoadingSludgePhotos(true);
+        SludgePhotoModel.fetchByMonth(year, month)
+            .then((result) => {
+                if (cancelled || !result?.success) return;
+                const item = (result.items || []).find((row) => row.date === date);
+                if (!item) return;
+                setSludgePhotoDraft((current) => current.date === date ? {
+                    ...current,
+                    sludgePhotoUrl: item.sludge_photo_url || null,
+                    certificatePhotoUrl: item.certificate_photo_url || null,
+                } : current);
+            })
+            .catch((error) => console.error('[UnifiedRecordModal] sludge photo load failed', error))
+            .finally(() => {
+                if (!cancelled) setIsLoadingSludgePhotos(false);
+            });
+        return () => { cancelled = true; };
+    }, [isOpen, date]);
 
     const currentItems = useMemo(
         () => resolvedContexts[activeTab]?.items || [],
@@ -774,6 +809,58 @@ export default function UnifiedRecordModal({
         else window.alert(message);
     };
 
+    const hasPendingSludgePhotos = sludgePhotoDraft.date === date
+        && Boolean(sludgePhotoDraft.sludgeFiles.length || sludgePhotoDraft.certificateFile);
+
+    const handleSludgePhotoFiles = (files) => {
+        setSludgePhotoDraft((current) => ({
+            ...current,
+            date,
+            sludgeFiles: [...current.sludgeFiles, ...files],
+        }));
+    };
+
+    const handleCertificatePhotoFile = (file) => {
+        setSludgePhotoDraft((current) => ({ ...current, date, certificateFile: file }));
+    };
+
+    const uploadPendingSludgePhotos = async () => {
+        if (!hasPendingSludgePhotos) return true;
+        const pending = sludgePhotoDraft;
+        setIsUploadingSludgePhotos(true);
+        try {
+            let driveUploadFailed = false;
+            const uploadQueue = [
+                ...pending.sludgeFiles.map((file) => ({ type: 'sludge', file, urlKey: 'sludgePhotoUrl' })),
+                ...(pending.certificateFile
+                    ? [{ type: 'certificate', file: pending.certificateFile, urlKey: 'certificatePhotoUrl' }]
+                    : []),
+            ];
+            for (const { type, file, urlKey } of uploadQueue) {
+                const result = await SludgePhotoModel.uploadPhoto(date, type, file);
+                if (!result?.success) throw new Error(result?.error || `${type} 사진 업로드에 실패했습니다.`);
+                if (result.driveUploaded === false) driveUploadFailed = true;
+                setSludgePhotoDraft((current) => current.date === date ? {
+                    ...current,
+                    sludgeFiles: type === 'sludge'
+                        ? current.sludgeFiles.filter((candidate) => candidate !== file)
+                        : current.sludgeFiles,
+                    certificateFile: type === 'certificate' ? null : current.certificateFile,
+                    [urlKey]: result.url || current[urlKey] || true,
+                } : current);
+            }
+            if (driveUploadFailed) {
+                notifyValidation('사진은 로컬에 저장되었지만 Drive 업로드에 실패했습니다. 진단로그를 확인해 주세요.');
+            }
+            return true;
+        } catch (error) {
+            notifyValidation(`슬러지 사진 저장 실패: ${error.message}`);
+            return false;
+        } finally {
+            setIsUploadingSludgePhotos(false);
+        }
+    };
+
     const logOperationalNotice = (message, extra = {}) => {
         if (!message) return;
         console.info('[UnifiedRecordModal]', message, { date, activeTab, ...extra });
@@ -791,7 +878,10 @@ export default function UnifiedRecordModal({
         }
     };
 
-    const hasDraftTabData = (tabId) => Object.keys(draft).some((key) => key.startsWith(`${tabId}:`));
+    const hasDraftTabData = (tabId) => (
+        Object.keys(draft).some((key) => key.startsWith(`${tabId}:`))
+        || (tabId === 'flow' && hasPendingSludgePhotos)
+    );
 
     const hasDraftForItem = (tabId, item) => (
         Object.prototype.hasOwnProperty.call(draft, getDraftKeyForItem(tabId, item))
@@ -1056,7 +1146,7 @@ export default function UnifiedRecordModal({
     };
 
     const handleSave = async () => {
-        if (isDateContextPending || isSaving) return;
+        if (isDateContextPending || isSaving || isUploadingSludgePhotos) return;
         const plan = buildSavePlan({
             tabIds: [activeTab],
             validateFlow: activeTab === 'flow',
@@ -1071,13 +1161,16 @@ export default function UnifiedRecordModal({
 
         const result = await savePlan(plan);
         if (!result) return;
+        if (activeTab === 'flow' && result.savedTabs.includes('flow') && hasPendingSludgePhotos) {
+            await uploadPendingSludgePhotos();
+        }
         if (plan.notices.length > 0) {
             logOperationalNotice('저장 중 자동 처리된 항목이 있습니다.', { notices: plan.notices });
         }
     };
 
     const handleClose = async () => {
-        if (isDateContextPending || isSaving) return;
+        if (isDateContextPending || isSaving || isUploadingSludgePhotos) return;
 
         const dirtyUnsavedTabs = TAB_META
             .filter((tab) => hasDraftTabData(tab.id))
@@ -1105,6 +1198,7 @@ export default function UnifiedRecordModal({
     };
 
     const handleModalDateChange = (nextDate) => {
+        if (isUploadingSludgePhotos) return;
         const hasUnsaved = TAB_META.some((tab) => hasDraftTabData(tab.id));
         if (hasUnsaved && !window.confirm('저장하지 않은 입력이 있습니다. 날짜를 바꾸면 현재 입력이 사라집니다. 계속할까요?')) {
             return;
@@ -1278,6 +1372,9 @@ export default function UnifiedRecordModal({
         if (activeTab === 'flow') {
             const visibleFlowItems = selectedFlowGroup?.items || [];
             const isSludgeGroup = visibleFlowItems.length > 0 && visibleFlowItems.every(isSludgeFlowItem);
+            const sludgeItem = isSludgeGroup ? visibleFlowItems[0] : null;
+            const sludgeValues = sludgeItem ? getDraftForItem('flow', sludgeItem) : {};
+            const hasSludgeAmount = (toNumberOrNull(sludgeValues.reading) || 0) > 0;
             const flowHeaderLabels = isSludgeGroup ? ['항목', '반출량', '월 반출량'] : ['유량계', '검침값', '유량 계산값'];
             return (
                 <div style={{
@@ -1359,6 +1456,38 @@ export default function UnifiedRecordModal({
                             </React.Fragment>
                         );
                     })}
+                    {isSludgeGroup && (
+                        <div style={{
+                            gridColumn: '1 / -1',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            flexWrap: 'wrap',
+                            padding: '10px 12px',
+                            background: '#f8fafc',
+                        }}>
+                            <SludgePhotoButton
+                                label={`반출사진${sludgePhotoDraft.sludgeFiles.length ? ` (${sludgePhotoDraft.sludgeFiles.length}장)` : ''}`}
+                                disabled={!hasSludgeAmount || isLoadingSludgePhotos}
+                                busy={isUploadingSludgePhotos}
+                                multiple
+                                hasPhoto={Boolean(sludgePhotoDraft.sludgeFiles.length || sludgePhotoDraft.sludgePhotoUrl)}
+                                onFiles={handleSludgePhotoFiles}
+                            />
+                            <SludgePhotoButton
+                                label="청소필증"
+                                disabled={!hasSludgeAmount || isLoadingSludgePhotos}
+                                busy={isUploadingSludgePhotos}
+                                hasPhoto={Boolean(sludgePhotoDraft.certificateFile || sludgePhotoDraft.certificatePhotoUrl)}
+                                onFile={handleCertificatePhotoFile}
+                            />
+                            {!hasSludgeAmount && (
+                                <span style={{ color: '#94a3b8', fontSize: 12, fontWeight: 700 }}>
+                                    반출량을 입력하면 사진을 등록할 수 있습니다.
+                                </span>
+                            )}
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -1785,19 +1914,19 @@ export default function UnifiedRecordModal({
                     <button
                         type="button"
                         onClick={handleSave}
-                        disabled={isDateContextPending || isSaving}
+                        disabled={isDateContextPending || isSaving || isUploadingSludgePhotos}
                         style={{
                             padding: '8px 16px',
                             borderRadius: 7,
                             border: 0,
                             background: '#1e293b',
-                            cursor: isDateContextPending || isSaving ? 'wait' : 'pointer',
+                            cursor: isDateContextPending || isSaving || isUploadingSludgePhotos ? 'wait' : 'pointer',
                             fontWeight: 900,
                             color: '#fff',
-                            opacity: isDateContextPending || isSaving ? 0.65 : 1,
+                            opacity: isDateContextPending || isSaving || isUploadingSludgePhotos ? 0.65 : 1,
                         }}
                     >
-                        {isDateContextPending ? '데이터 확인 중...' : isSaving ? '저장 중...' : `${TAB_LABEL_BY_ID[activeTab] || '현재 탭'} 저장하기`}
+                        {isDateContextPending ? '데이터 확인 중...' : isSaving ? '저장 중...' : isUploadingSludgePhotos ? '사진 저장 중...' : `${TAB_LABEL_BY_ID[activeTab] || '현재 탭'} 저장하기`}
                     </button>
                 </div>
             </div>

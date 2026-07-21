@@ -506,6 +506,9 @@ function validateRegressionContracts() {
   const diagnosticLogServicePath = path.join(BASE_DIR, 'server', 'services', 'diagnosticLogService.cjs');
   const serverIndexPath = path.join(BASE_DIR, 'server', 'index.cjs');
   const sludgePhotoRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'sludgePhotoRoutes.cjs');
+  const sludgePhotoModelPath = path.join(BASE_DIR, 'src', 'features', 'sludge', 'SludgePhotoModel.js');
+  const sludgePhotoViewPath = path.join(BASE_DIR, 'src', 'features', 'sludge', 'SludgePhotoView.jsx');
+  const sludgePhotoButtonPath = path.join(BASE_DIR, 'src', 'features', 'sludge', 'SludgePhotoButton.jsx');
   const localDataBackupContractPath = path.join(BASE_DIR, 'LOCAL_DATA_BACKUP_CONTRACT.md');
   const useTemplateSettingsPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'hooks', 'useTemplateSettings.js');
   const boardServicePath = path.join(BASE_DIR, 'server', 'services', 'boardService.cjs');
@@ -604,6 +607,9 @@ function validateRegressionContracts() {
   const diagnosticLogServiceText = readText(diagnosticLogServicePath);
   const serverIndexText = readText(serverIndexPath);
   const sludgePhotoRoutesText = readText(sludgePhotoRoutesPath);
+  const sludgePhotoModelText = readText(sludgePhotoModelPath);
+  const sludgePhotoViewText = readText(sludgePhotoViewPath);
+  const sludgePhotoButtonText = readText(sludgePhotoButtonPath);
   const localDataBackupContractText = readText(localDataBackupContractPath);
   const boardServiceText = readText(boardServicePath);
   const boardFirebaseServiceText = readText(boardFirebaseServicePath);
@@ -764,6 +770,7 @@ function validateRegressionContracts() {
       unifiedRecordModalContractText.includes('inventory must be clamped at zero') &&
       unifiedRecordModalContractText.includes('Flow server save must upsert by `(date, type)`') &&
       unifiedRecordModalContractText.includes('After a successful save, the modal must force reload only the saved tabs') &&
+      unifiedRecordModalContractText.includes('Newly selected sludge photos remain part of the flow-tab draft') &&
       unifiedRecordModalContractText.includes('parent grid must not refresh after each save') &&
       unifiedRecordModalContractText.includes('only when the modal closes'),
     '통합 입력 모달 날짜/입력/계산 계약 문서 확인',
@@ -1006,6 +1013,27 @@ function validateRegressionContracts() {
       diagnosticLogServiceText.includes("runtime: process.versions?.electron ? 'electron' : 'node'"),
     'Drive 진단로그 PC/실행환경 식별 계약 유지',
     '현장과 개발 PC를 구분할 machine/runtime 진단 필드가 누락되었습니다'
+  );
+
+  checkSource(
+    modalText.includes("import SludgePhotoButton from '../sludge/SludgePhotoButton'") &&
+      modalText.includes("SludgePhotoModel.uploadPhoto(date, type, file)") &&
+      modalText.includes("...pending.sludgeFiles.map((file)") &&
+      modalText.includes('multiple') &&
+      modalText.includes('onFiles={handleSludgePhotoFiles}') &&
+      modalText.includes("const hasSludgeAmount = (toNumberOrNull(sludgeValues.reading) || 0) > 0") &&
+      modalText.includes("activeTab === 'flow' && result.savedTabs.includes('flow') && hasPendingSludgePhotos") &&
+      sludgePhotoViewText.includes("import SludgePhotoButton from './SludgePhotoButton'") &&
+      sludgePhotoViewText.includes('<SludgePhotoButton') &&
+      sludgePhotoButtonText.includes('disabled={isDisabled}') &&
+      sludgePhotoButtonText.includes('multiple={multiple}') &&
+      sludgePhotoButtonText.includes('onFiles?.(files)') &&
+      sludgePhotoModelText.includes("formData.append('date', date)") &&
+      sludgePhotoModelText.includes("formData.append('type', type)") &&
+      sludgePhotoRoutesText.includes("req.body?.date || req.query?.date") &&
+      sludgePhotoRoutesText.includes("req.body?.type || req.query?.type"),
+    '통합 모달 슬러지 사진 저장 계약 확인',
+    '반출량 저장 후 사진 업로드 또는 슬러지사진대지 공통 버튼 계약이 깨졌습니다.'
   );
 
   checkSource(

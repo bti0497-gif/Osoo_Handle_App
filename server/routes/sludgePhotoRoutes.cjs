@@ -601,7 +601,8 @@ module.exports = function (db, baseDir, appDataPath) {
   /** POST /api/sludge-photos/upload-photo  (multipart, ???섍꼍?? */
   router.post('/api/sludge-photos/upload-photo', upload.single('photo'), async (req, res) => {
     try {
-      const { date, type } = req.query;
+      const date = String(req.body?.date || req.query?.date || '').trim();
+      const type = String(req.body?.type || req.query?.type || '').trim();
       if (!date || !type) return res.status(400).json({ success: false, error: '날짜/타입 없음' });
       if (!req.file)       return res.status(400).json({ success: false, error: '파일 없음' });
 
