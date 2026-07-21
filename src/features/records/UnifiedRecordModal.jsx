@@ -331,7 +331,8 @@ export default function UnifiedRecordModal({
     });
     const {
         contexts: resolvedContexts,
-        isLoading: isLoadingUnifiedData,
+        isDateContextPending,
+        isRefreshing: isRefreshingUnifiedData,
         isSaving,
         saveAllTabs,
         reloadContexts,
@@ -430,6 +431,18 @@ export default function UnifiedRecordModal({
     }] : [];
 
     useEffect(() => {
+        if (!isOpen || !isRefreshingUnifiedData) return undefined;
+        const timer = setTimeout(() => {
+            void WaterQualityModel.recordQntechUiDiagnostic('unified-context-load-slow', {
+                date,
+                activeTab,
+                isDateContextPending,
+            });
+        }, 8000);
+        return () => clearTimeout(timer);
+    }, [isOpen, isRefreshingUnifiedData, isDateContextPending, date, activeTab]);
+
+    useEffect(() => {
         if (!isOpen) {
             wasOpenRef.current = false;
             return undefined;
@@ -459,7 +472,7 @@ export default function UnifiedRecordModal({
     }, [isOpen, initialTab, initialDate, initialWaterSignature]);
 
     useEffect(() => {
-        if (!isOpen || isLoadingUnifiedData) return;
+        if (!isOpen || isDateContextPending) return;
         const waterContext = resolvedContexts.water || {};
         const rounds = normalizeRoundOptions(waterContext.rounds, waterContext.measurementOrder || 1);
         const timer = setTimeout(() => {
@@ -469,7 +482,7 @@ export default function UnifiedRecordModal({
             ));
         }, 0);
         return () => clearTimeout(timer);
-    }, [isOpen, isLoadingUnifiedData, resolvedContexts.water]);
+    }, [isOpen, isDateContextPending, resolvedContexts.water]);
 
     const currentItems = useMemo(
         () => resolvedContexts[activeTab]?.items || [],
@@ -1043,7 +1056,7 @@ export default function UnifiedRecordModal({
     };
 
     const handleSave = async () => {
-        if (isLoadingUnifiedData || isSaving) return;
+        if (isDateContextPending || isSaving) return;
         const plan = buildSavePlan({
             tabIds: [activeTab],
             validateFlow: activeTab === 'flow',
@@ -1064,7 +1077,7 @@ export default function UnifiedRecordModal({
     };
 
     const handleClose = async () => {
-        if (isLoadingUnifiedData || isSaving) return;
+        if (isDateContextPending || isSaving) return;
 
         const dirtyUnsavedTabs = TAB_META
             .filter((tab) => hasDraftTabData(tab.id))
@@ -1757,8 +1770,8 @@ export default function UnifiedRecordModal({
                             flex: 1,
                             overflowY: 'auto',
                             scrollbarGutter: 'stable',
-                            opacity: isLoadingUnifiedData ? 0.55 : 1,
-                            pointerEvents: isLoadingUnifiedData ? 'none' : 'auto',
+                            opacity: isDateContextPending ? 0.55 : 1,
+                            pointerEvents: isDateContextPending ? 'none' : 'auto',
                         }}>
                             {renderFields()}
                         </div>
@@ -1772,19 +1785,19 @@ export default function UnifiedRecordModal({
                     <button
                         type="button"
                         onClick={handleSave}
-                        disabled={isLoadingUnifiedData || isSaving}
+                        disabled={isDateContextPending || isSaving}
                         style={{
                             padding: '8px 16px',
                             borderRadius: 7,
                             border: 0,
                             background: '#1e293b',
-                            cursor: isLoadingUnifiedData || isSaving ? 'wait' : 'pointer',
+                            cursor: isDateContextPending || isSaving ? 'wait' : 'pointer',
                             fontWeight: 900,
                             color: '#fff',
-                            opacity: isLoadingUnifiedData || isSaving ? 0.65 : 1,
+                            opacity: isDateContextPending || isSaving ? 0.65 : 1,
                         }}
                     >
-                        {isLoadingUnifiedData ? '데이터 확인 중...' : isSaving ? '저장 중...' : `${TAB_LABEL_BY_ID[activeTab] || '현재 탭'} 저장하기`}
+                        {isDateContextPending ? '데이터 확인 중...' : isSaving ? '저장 중...' : `${TAB_LABEL_BY_ID[activeTab] || '현재 탭'} 저장하기`}
                     </button>
                 </div>
             </div>

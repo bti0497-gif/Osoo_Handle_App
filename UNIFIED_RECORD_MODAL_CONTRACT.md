@@ -69,6 +69,8 @@ This document protects the integrated input modal used by flow, water, medicine,
 - Water save must call `WaterQualityModel.bulkSave(waterItems)` and post to `/api/water-quality/bulk`.
 - Each model must clear its history cache before save.
 - After a successful save, the modal must force reload only the saved tabs so visible values match the DB.
+- A same-date refresh after save must not disable or blanket-block the modal inputs; only an unresolved date transition may temporarily block editing.
+- A context refresh lasting longer than eight seconds must emit the low-volume `unified-context-load-slow` diagnostic.
 - While the modal remains open, the parent grid must not refresh after each save.
 - The parent grid may refresh only when the modal closes, and only for the currently open management screen.
 - Saving one tab must not reload unrelated flow, medicine, kit, or water histories.

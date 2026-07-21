@@ -314,7 +314,10 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
 
     return {
         contexts: resolvedContexts,
-        isLoading: isLoading || resolvedDate !== date,
+        // Only a date transition may block editing. A same-date refresh after
+        // save must not freeze every input while the latest values are read.
+        isDateContextPending: resolvedDate !== date,
+        isRefreshing: isLoading,
         isSaving,
         saveAllTabs,
         reloadContexts,

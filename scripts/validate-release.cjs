@@ -819,7 +819,8 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    modalText.includes("pointerEvents: isLoadingUnifiedData ? 'none' : 'auto'") &&
+    modalText.includes("pointerEvents: isDateContextPending ? 'none' : 'auto'") &&
+      !modalText.includes("pointerEvents: isLoadingUnifiedData ? 'none' : 'auto'") &&
       modalText.includes('onChange={(e) => setFlowDraftFieldForItem(item, field, e.target.value)}') &&
       modalText.includes('onChange={(e) => setInventoryDraftFieldForItem(activeTab, item, field, e.target.value)}') &&
       modalText.includes('onChange={(e) => {') &&
@@ -1037,8 +1038,13 @@ function validateRegressionContracts() {
       viewModelText.includes("usage: hasCurrent ? (isDefaulted(current) ? '' : (current.usage_amount ?? '')) : ''") &&
       viewModelText.includes("acc[field] = hasValue(row?.[field]) ? row[field] : ''") &&
       viewModelText.includes('requestSequenceRef') &&
-      viewModelText.includes('resolvedDate !== date') &&
-      modalText.includes("pointerEvents: isLoadingUnifiedData ? 'none' : 'auto'") &&
+      viewModelText.includes('isDateContextPending: resolvedDate !== date') &&
+      viewModelText.includes('isRefreshing: isLoading') &&
+      modalText.includes("pointerEvents: isDateContextPending ? 'none' : 'auto'") &&
+      modalText.includes("recordQntechUiDiagnostic('unified-context-load-slow'") &&
+      !modalText.includes('isLoadingUnifiedData') &&
+      unifiedRecordModalContractText.includes('same-date refresh after save must not disable') &&
+      unifiedRecordModalContractText.includes('unified-context-load-slow') &&
       packageText.includes('validate-qntech-location-mapping.cjs'),
     '통합 모달 연속 날짜 전일 검침 기준·날짜 조회 경합·시료명 매칭 회귀방지 계약 유지',
     '연속 날짜 입력이 오래된 전일 검침값을 사용하거나 자동실험 장소 매칭이 다시 충돌할 수 있습니다'
