@@ -24,7 +24,7 @@
     "package:field-installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-integrated-installer.ps1",
     "validate:field-installer": "node scripts/validate-field-installer.cjs",
     "clean:release": "node scripts/clean-release.cjs",
-    "release:safe": "npm run clean:release && npm rebuild better-sqlite3 && npm run build && npm run validate && npm run validate:api && npm run electron:build && npm run package:field-installer && npm run validate:field-installer && npm rebuild better-sqlite3"
+    "release:safe": "npm run clean:release && npm rebuild better-sqlite3 && npm run build && npm run validate && npm run validate:api && npm run electron:build && npm rebuild better-sqlite3"
   },
   "dependencies": {
     "@google-cloud/bigquery": "^8.1.1",

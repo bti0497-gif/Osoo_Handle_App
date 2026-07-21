@@ -340,12 +340,12 @@ function validateNativeModuleReleaseContract() {
 
   if (
     fieldInstallerScript.includes('build-integrated-installer.ps1')
-    && safeReleaseScript.includes('package:field-installer')
-    && safeReleaseScript.includes('validate:field-installer')
+    && !safeReleaseScript.includes('package:field-installer')
+    && !safeReleaseScript.includes('validate:field-installer')
   ) {
-    success('안전 릴리즈가 업데이트용/신규 현장용 설치본과 배포 매니페스트 검증을 함께 강제함');
+    success('정기 안전 릴리즈는 자동업데이트 설치본만 만들고 통합 설치본은 수동 복구 명령으로 분리됨');
   } else {
-    error('안전 릴리즈의 신규 현장 통합 설치본 강제 계약이 누락되었습니다');
+    error('정기 릴리즈에 통합 설치본 생성이 다시 포함됐거나 수동 복구 명령이 제거되었습니다');
   }
 
   const nodeRebuildIndex = safeReleaseScript.indexOf('npm rebuild better-sqlite3');
