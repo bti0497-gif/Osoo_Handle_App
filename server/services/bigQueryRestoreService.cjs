@@ -15,16 +15,15 @@ function getDefaultScope(db) {
 }
 
 function buildSiteFilter(scope, params) {
-  const clauses = [];
   if (scope.siteId) {
-    clauses.push('site_id = @siteId');
     params.siteId = scope.siteId;
+    return ' AND site_id = @siteId';
   }
   if (scope.siteName) {
-    clauses.push('site_name = @siteName');
     params.siteName = scope.siteName;
+    return ' AND site_name = @siteName';
   }
-  return clauses.length ? ` AND (${clauses.join(' OR ')})` : '';
+  return '';
 }
 
 async function queryRows(tableName, startDate, endDate, scope) {
@@ -52,7 +51,7 @@ function restoreFlowRows(db, rows) {
       date, type, raw_value, calculated_flow, reading_unit, is_reset, is_manual, sludge_export,
       input_status, site_id, site_name, author, created_at, last_modified, is_synced
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-    ON CONFLICT(date, type) DO UPDATE SET
+    ON CONFLICT(site_id, date, type) DO UPDATE SET
       raw_value = excluded.raw_value,
       calculated_flow = excluded.calculated_flow,
       reading_unit = excluded.reading_unit,
@@ -97,7 +96,7 @@ function restoreMedicineRows(db, tableName, nameColumn, rows) {
       ${localNameColumn}, date, purchase_amount, usage_amount, current_inventory, photo_url,
       input_status, site_id, site_name, author, created_at, last_modified, is_synced
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-    ON CONFLICT(${localNameColumn}, date) DO UPDATE SET
+    ON CONFLICT(site_id, ${localNameColumn}, date) DO UPDATE SET
       purchase_amount = excluded.purchase_amount,
       usage_amount = excluded.usage_amount,
       current_inventory = excluded.current_inventory,
@@ -137,7 +136,7 @@ function restoreQntechWaterRows(db, rows) {
       location, item_name, item_code, result_value, result_numeric, unit,
       input_status, site_id, site_name, author, created_at, last_modified, is_synced
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-    ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET
+    ON CONFLICT(site_id, date, measurement_group, location, item_code) DO UPDATE SET
       measurement_order = excluded.measurement_order,
       source_type = excluded.source_type,
       input_status = excluded.input_status,
@@ -230,7 +229,12 @@ async function restoreOperationalData(db, { startDate, endDate, tables = [], sit
 
   for (const tableName of targetTables) {
     try {
-      const rows = await queryRows(tableName, normalizedStart, normalizedEnd, scope);
+      const queriedRows = await queryRows(tableName, normalizedStart, normalizedEnd, scope);
+      const rows = queriedRows.map((row) => ({
+        ...row,
+        site_id: String(row.site_id || scope.siteId || '').trim(),
+        site_name: String(row.site_name || scope.siteName || '').trim(),
+      }));
       if (tableName === 'flow_readings') restoreFlowRows(db, rows);
       if (tableName === 'medicine_logs') restoreMedicineRows(db, tableName, 'medicine_name', rows);
       if (tableName === 'kit_logs') restoreMedicineRows(db, tableName, 'kit_name', rows);

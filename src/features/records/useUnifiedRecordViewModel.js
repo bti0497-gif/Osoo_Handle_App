@@ -6,6 +6,12 @@ import { WaterQualityModel } from '../water/WaterQualityModel';
 import { SettingsModel } from '../settings/SettingsModel';
 
 const WATER_FIELDS = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity'];
+const emitFocusDiagnostic = (event, details = {}) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('osoo:focus-diagnostic', {
+        detail: { event, details },
+    }));
+};
 
 const hasValue = (value) => value !== '' && value !== null && value !== undefined;
 const isDefaulted = (row) => String(row?.input_status || row?.inputStatus || '').trim() === 'defaulted';
@@ -212,6 +218,12 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
         const baseContexts = contextsRef.current;
         const targetTabs = new Set(tabs);
         setIsLoading(true);
+        emitFocusDiagnostic('context-load-start', {
+            requestedDate,
+            requestSequence,
+            force,
+            tabs: [...targetTabs],
+        });
 
         try {
             const [
@@ -252,13 +264,29 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                 }),
             }));
             setResolvedDate(requestedDate);
+            emitFocusDiagnostic('context-load-applied', {
+                requestedDate,
+                requestSequence,
+                tabs: [...targetTabs],
+            });
         } catch (error) {
             if (requestSequence !== requestSequenceRef.current) return;
             console.error('[unified-record] failed to load contexts:', error);
             setResolvedContexts(baseContexts);
             setResolvedDate(requestedDate);
+            emitFocusDiagnostic('context-load-failed', {
+                requestedDate,
+                requestSequence,
+                message: String(error?.message || error).slice(0, 240),
+            });
         } finally {
-            if (requestSequence === requestSequenceRef.current) setIsLoading(false);
+            const isCurrentRequest = requestSequence === requestSequenceRef.current;
+            if (isCurrentRequest) setIsLoading(false);
+            emitFocusDiagnostic('context-load-finished', {
+                requestedDate,
+                requestSequence,
+                isCurrentRequest,
+            });
         }
     }, [date]);
 
@@ -280,6 +308,7 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
     const saveAllTabs = useCallback(async ({ flowItems, medicineItems, waterItems, kitItems }) => {
         const savedTabs = [];
         setIsSaving(true);
+        emitFocusDiagnostic('save-start', { date });
         try {
             if (flowItems.length > 0) {
                 const result = await FlowModel.bulkSave(date, flowItems);
@@ -306,9 +335,15 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
             }
             return { success: true, savedTabs };
         } catch (error) {
+            emitFocusDiagnostic('save-failed', {
+                date,
+                savedTabs,
+                message: String(error?.message || error).slice(0, 240),
+            });
             return { success: false, savedTabs, error: error.message };
         } finally {
             setIsSaving(false);
+            emitFocusDiagnostic('save-finished', { date, savedTabs });
         }
     }, [date, reloadContexts]);
 

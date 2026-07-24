@@ -454,6 +454,22 @@ export default function UnifiedRecordModal({
     }, [isOpen, isRefreshingUnifiedData, isDateContextPending, date, activeTab]);
 
     useEffect(() => {
+        if (!isOpen) return;
+        window.dispatchEvent(new CustomEvent('osoo:focus-diagnostic', {
+            detail: {
+                event: 'modal-input-gate-state',
+                details: {
+                    date,
+                    activeTab,
+                    isDateContextPending,
+                    isRefreshingUnifiedData,
+                    isSaving,
+                },
+            },
+        }));
+    }, [isOpen, date, activeTab, isDateContextPending, isRefreshingUnifiedData, isSaving]);
+
+    useEffect(() => {
         if (!isOpen) {
             wasOpenRef.current = false;
             return undefined;
@@ -624,12 +640,16 @@ export default function UnifiedRecordModal({
 
             const isPower = String(item?.key || item?.name || item?.label || '').includes('전력');
             const readingMultiplier = isPower && String(nextDraft.readingUnit || '').toUpperCase() === 'MWH' ? 1000 : 1;
+            const isBaselineFlow = canUseBaselineStatus && saveStatusMode === 'baseline' && !isSludge;
 
             if (!isSludge && (field === 'reading' || field === 'readingUnit')) {
                 const reading = toNumberOrNull(value);
                 const effectiveReading = field === 'readingUnit' ? toNumberOrNull(nextDraft.reading) : reading;
                 const previousReading = toNumberOrNull(item?.previous?.reading);
-                if (effectiveReading !== null && previousReading !== null) {
+                if (isBaselineFlow) {
+                    // 기준값 모드에서는 검침값과 사용량을 관리자가 각각 직접 확정한다.
+                    // 검침값 변경으로 사용량을 자동계산하지 않는다.
+                } else if (effectiveReading !== null && previousReading !== null) {
                     nextDraft.calculatedFlow = round1(Math.max(0, (effectiveReading - previousReading) * readingMultiplier));
                 } else if (effectiveReading !== null) {
                     nextDraft.calculatedFlow = round1(effectiveReading * readingMultiplier);
@@ -637,6 +657,9 @@ export default function UnifiedRecordModal({
             }
 
             if (!isSludge && field === 'calculatedFlow') {
+                if (isBaselineFlow) {
+                    return { ...prev, [key]: nextDraft };
+                }
                 const calculatedFlow = toNumberOrNull(value);
                 const previousReading = toNumberOrNull(item?.previous?.reading) ?? 0;
                 if (calculatedFlow !== null) {
@@ -952,6 +975,16 @@ export default function UnifiedRecordModal({
                     }
                     return;
                 }
+                if (effectiveSaveStatusMode === 'baseline' && !isSludge && calculatedFlow === null) {
+                    if (validateFlow) {
+                        flowMissing.push({
+                            tab: 'flow',
+                            item,
+                            message: `${item.label || item.key} 기준 사용량`,
+                        });
+                    }
+                    return;
+                }
                 flowItemsToSave.push({
                     type: item.key || item.name || item.label,
                     raw_value: reading,
@@ -965,7 +998,7 @@ export default function UnifiedRecordModal({
                         : null,
                     sludge_export: isSludge ? reading : null,
                     is_manual: false,
-                    is_reset: false,
+                    is_reset: effectiveSaveStatusMode === 'baseline' && !isSludge,
                     input_status: effectiveSaveStatusMode === 'baseline' ? 'baseline' : 'manual',
                 });
             });
@@ -1163,6 +1196,9 @@ export default function UnifiedRecordModal({
         if (!result) return;
         if (activeTab === 'flow' && result.savedTabs.includes('flow') && hasPendingSludgePhotos) {
             await uploadPendingSludgePhotos();
+        }
+        if (saveStatusMode === 'baseline' && result.savedTabs.length > 0) {
+            setSaveStatusMode('manual');
         }
         if (plan.notices.length > 0) {
             logOperationalNotice('저장 중 자동 처리된 항목이 있습니다.', { notices: plan.notices });
@@ -1729,7 +1765,7 @@ export default function UnifiedRecordModal({
 
     return (
         <>
-        <div style={{
+        <div className="unified-record-modal" role="dialog" aria-modal="true" style={{
             position: 'fixed',
             inset: 0,
             zIndex: 9999,

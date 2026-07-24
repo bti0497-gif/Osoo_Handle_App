@@ -12,9 +12,9 @@ const {
 } = require('../services/dailyWorkLogService.cjs');
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
 const {
-  buildBatchDailyWorkLogHwpx,
+  buildBatchDailyWorkLogHwp,
   buildBatchDailyWorkLogPdf,
-} = require('../services/dailyWorkLogHwpxService.cjs');
+} = require('../services/dailyWorkLogHwpService.cjs');
 const { syncCertificateCacheForSiteMonth } = require('../services/certificateCacheSyncService.cjs');
 const { acquireDailyLogDatabase } = require('../services/bidirectionalDailyLogService.cjs');
 
@@ -30,11 +30,11 @@ function buildMissingTemplateResponse() {
   };
 }
 
-function buildMissingHwpxTemplateResponse() {
+function buildMissingHwpTemplateResponse() {
   return {
-    code: 'REPORT_HWPX_TEMPLATE_MISSING',
-    error: `${TEMPLATE_NAME} HWPX 양식을 찾을 수 없습니다.`,
-    userMessage: `설정에서 ${TEMPLATE_NAME}(A2O).hwpx 및 ${TEMPLATE_NAME}(MBR).hwpx 양식을 업로드해 주세요.`,
+    code: 'REPORT_HWP_TEMPLATE_MISSING',
+    error: `${TEMPLATE_NAME} HWP 양식을 찾을 수 없습니다.`,
+    userMessage: `설정에서 ${TEMPLATE_NAME}(A2O).hwp 및 ${TEMPLATE_NAME}(MBR).hwp 양식을 업로드해 주세요.`,
   };
 }
 
@@ -61,18 +61,23 @@ function getMonthKeys(startDate, endDate) {
 }
 
 module.exports = function (db, baseDir, appDataPath) {
-  const getCurrentMethod = () => (
-    db.prepare('SELECT method FROM app_settings WHERE id = 1').get()?.method || ''
+  const getCurrentMethod = (siteId = '') => (
+    (siteId ? db.prepare('SELECT method FROM sites WHERE id = ?').get(siteId)?.method : '')
+    || db.prepare('SELECT method FROM app_settings WHERE id = 1').get()?.method
+    || ''
   );
 
-  const getRequestContext = (req) => ({
-    siteId: req.query.siteId || req.query.site_id || '',
-    siteName: req.query.siteName || req.query.site_name || '',
+  const getRequestContext = (req) => {
+    const siteId = req.query.siteId || req.query.site_id || req.siteContext?.siteId || '';
+    return ({
+    siteId,
+    siteName: req.query.siteName || req.query.site_name || req.siteContext?.siteName || '',
     author: req.query.author || '',
-    method: req.query.method || getCurrentMethod(),
+    method: req.query.method || getCurrentMethod(siteId),
     dataSource: req.query.dataSource || req.query.data_source || 'local',
     localSiteName: req.query.localSiteName || req.query.local_site_name || '',
   });
+  };
 
   const syncCertificateCacheForRange = async (range, context) => {
     const siteName = String(context.siteName || db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get()?.site_name || '').trim();
@@ -236,11 +241,11 @@ module.exports = function (db, baseDir, appDataPath) {
     const resolvedTemplateName = templateName || TEMPLATE_NAME;
     const context = getRequestContext(req);
     const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, resolvedTemplateName, {
-      hwpxOnly: true,
+      hwpOnly: true,
       method: context.method,
     });
     if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
-      return res.status(404).json(buildMissingHwpxTemplateResponse());
+      return res.status(404).json(buildMissingHwpTemplateResponse());
     }
 
     try {
@@ -284,16 +289,16 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
-  router.get('/api/daily-work-log/export-hwpx', async (req, res) => {
+  router.get(['/api/daily-work-log/export-hwp', '/api/daily-work-log/export-hwpx'], async (req, res) => {
     const { startDate, endDate, date, templateName } = req.query;
     const resolvedTemplateName = templateName || TEMPLATE_NAME;
     const context = getRequestContext(req);
     const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, resolvedTemplateName, {
-      hwpxOnly: true,
+      hwpOnly: true,
       method: context.method,
     });
     if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
-      return res.status(404).json(buildMissingHwpxTemplateResponse());
+      return res.status(404).json(buildMissingHwpTemplateResponse());
     }
 
     try {
@@ -304,7 +309,7 @@ module.exports = function (db, baseDir, appDataPath) {
       let results;
       try {
         if (!acquired.isRemote) await syncCertificateCacheForRange(range, acquired.context);
-        results = await buildBatchDailyWorkLogHwpx({
+        results = await buildBatchDailyWorkLogHwp({
           db: acquired.db,
           appDataPath,
           templateInfo,
@@ -322,15 +327,15 @@ module.exports = function (db, baseDir, appDataPath) {
 
       return res.json({
         success: true,
-        message: `${results.length}개의 HWPX 일지를 열었습니다.`,
+        message: `${results.length}개의 HWP 일지를 열었습니다.`,
         files: results.map((result) => path.basename(result.outputPath)),
         bookmarkCount: results.reduce((sum, result) => sum + result.replacedCount, 0),
       });
     } catch (err) {
-      console.error('[Daily Work Log HWPX Export Error]', err);
+      console.error('[Daily Work Log HWP Export Error]', err);
       return res.status(500).json({
         success: false,
-        error: `HWPX 생성에 실패했습니다: ${err.message}`,
+        error: `HWP 생성에 실패했습니다: ${err.message}`,
       });
     }
   });

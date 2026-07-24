@@ -111,8 +111,11 @@ function normalizeExcelJsValue(value) {
   return null;
 }
 
-function getExcelOriginalPath(db, appDataPath) {
-  const row = db.prepare('SELECT excel_template_path FROM app_settings WHERE id = 1').get();
+function getExcelOriginalPath(db, appDataPath, siteId = '') {
+  const normalizedSiteId = String(siteId || '').trim();
+  const row = normalizedSiteId
+    ? db.prepare('SELECT excel_template_path FROM site_settings WHERE site_id = ?').get(normalizedSiteId)
+    : db.prepare('SELECT excel_template_path FROM app_settings WHERE id = 1').get();
   const storedPath = String(row?.excel_template_path || '').trim();
   if (!storedPath) return null;
 
@@ -319,7 +322,7 @@ async function readRowsFromWorkbookStream(filePath, sheetName, startRow, endRow,
   return rows;
 }
 
-async function parseAndStoreExcel(db, filePath) {
+async function parseAndStoreExcel(db, filePath, siteId = '') {
   const startMs = Date.now();
   const fileName = path.basename(filePath);
   console.log(`[Excel] 원본 시트 목록 읽기 시작: ${fileName}`);
@@ -328,25 +331,28 @@ async function parseAndStoreExcel(db, filePath) {
   const sheets = await getSheetEntries(zip);
   const sheetsToStore = sheets.slice(0, OPERATIONAL_SHEET_COUNT);
 
-  db.prepare('DELETE FROM excel_raw_data').run();
-  db.prepare('DELETE FROM excel_sheets').run();
+  const normalizedSiteId = String(siteId || '').trim();
+  if (!normalizedSiteId) throw new Error('엑셀 원본을 저장할 현장이 선택되지 않았습니다.');
+  db.prepare('DELETE FROM site_excel_raw_data WHERE site_id = ?').run(normalizedSiteId);
+  db.prepare('DELETE FROM site_excel_sheets WHERE site_id = ?').run(normalizedSiteId);
 
-  const insertSheet = db.prepare('INSERT INTO excel_sheets (sheet_name, max_row, imported_at) VALUES (?, ?, ?)');
+  const insertSheet = db.prepare('INSERT INTO site_excel_sheets (site_id, sheet_name, max_row, imported_at) VALUES (?, ?, ?, ?)');
   const now = new Date().toISOString();
   for (const sheet of sheetsToStore) {
-    insertSheet.run(sheet.name, 0, now);
+    insertSheet.run(normalizedSiteId, sheet.name, 0, now);
   }
 
   console.log(`[Excel] 매핑용 시트 목록 저장 완료: ${sheetsToStore.length}/${sheets.length}개, ${Date.now() - startMs}ms`);
   return sheetsToStore.map((sheet) => sheet.name);
 }
 
-function getStoredSheets(db) {
-  return db.prepare('SELECT sheet_name, max_row, imported_at FROM excel_sheets ORDER BY id').all();
+function getStoredSheets(db, siteId = '') {
+  const normalizedSiteId = String(siteId || '').trim();
+  return db.prepare('SELECT sheet_name, max_row, imported_at FROM site_excel_sheets WHERE site_id = ? ORDER BY rowid').all(normalizedSiteId);
 }
 
-async function readExcelRange(db, appDataPath, sheetName, startRow, endRow, columns = []) {
-  const filePath = getExcelOriginalPath(db, appDataPath);
+async function readExcelRange(db, appDataPath, sheetName, startRow, endRow, columns = [], siteId = '') {
+  const filePath = getExcelOriginalPath(db, appDataPath, siteId);
   try {
     return await readRowsFromWorkbookStream(filePath, sheetName, startRow, endRow, columns);
   } catch (streamError) {
@@ -362,9 +368,9 @@ async function readExcelRange(db, appDataPath, sheetName, startRow, endRow, colu
   return readRowsFromSheetXml(sheetXml, sharedStrings, startRow, endRow, columns);
 }
 
-async function readExcelRow(db, appDataPath, sheetName, rowNum, maxColumn = 52) {
+async function readExcelRow(db, appDataPath, sheetName, rowNum, maxColumn = 52, siteId = '') {
   const columns = buildColumnNames(maxColumn);
-  const rows = await readExcelRange(db, appDataPath, sheetName, rowNum, rowNum, columns);
+  const rows = await readExcelRange(db, appDataPath, sheetName, rowNum, rowNum, columns, siteId);
   const values = rows.get(normalizeRowNumber(rowNum)) || {};
   const result = {};
   for (const col of columns) {
@@ -385,8 +391,8 @@ function getRangeCell(rangeRows, rowNum, col) {
   return value === undefined || value === '' ? null : value;
 }
 
-function getStoredRow(db, sheetName, rowNum) {
-  const rows = db.prepare('SELECT col, value FROM excel_raw_data WHERE sheet_name = ? AND row_num = ?').all(sheetName, rowNum);
+function getStoredRow(db, sheetName, rowNum, siteId = '') {
+  const rows = db.prepare('SELECT col, value FROM site_excel_raw_data WHERE site_id = ? AND sheet_name = ? AND row_num = ?').all(siteId, sheetName, rowNum);
   const result = {};
   for (const { col, value } of rows) {
     const rounded = roundIfNumeric(value);
@@ -395,13 +401,13 @@ function getStoredRow(db, sheetName, rowNum) {
   return result;
 }
 
-function getCellValue(db, sheetName, rowNum, col) {
-  const row = db.prepare('SELECT value FROM excel_raw_data WHERE sheet_name = ? AND row_num = ? AND col = ?').get(sheetName, rowNum, col);
+function getCellValue(db, sheetName, rowNum, col, siteId = '') {
+  const row = db.prepare('SELECT value FROM site_excel_raw_data WHERE site_id = ? AND sheet_name = ? AND row_num = ? AND col = ?').get(siteId, sheetName, rowNum, col);
   return row ? roundIfNumeric(row.value) : null;
 }
 
-function hasStoredData(db) {
-  const count = db.prepare('SELECT COUNT(*) as cnt FROM excel_sheets').get();
+function hasStoredData(db, siteId = '') {
+  const count = db.prepare('SELECT COUNT(*) as cnt FROM site_excel_sheets WHERE site_id = ?').get(siteId);
   return count.cnt > 0;
 }
 

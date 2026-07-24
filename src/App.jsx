@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef, useMemo } from 'react';
 import { TAB_LABELS, DEFAULT_TAB } from './core/constants';
 import { useAuthViewModel, LoginView, SyncService } from './features/auth';
 import SplashLoadingView from './components/SplashLoadingView';
@@ -73,14 +73,53 @@ const PlaceholderView = ({ title }) => (
 );
 
 function App() {
-    const { user, loginHintName, isAuthenticated, isLoading, locationStatus, login, logout } = useAuthViewModel();
+    const { user: authenticatedUser, loginHintName, isAuthenticated, isLoading, locationStatus, login, logout } = useAuthViewModel();
+    const windowSiteId = new URLSearchParams(window.location.search).get('siteId') || '';
+    const user = useMemo(() => {
+        if (!authenticatedUser || !windowSiteId) return authenticatedUser;
+        const site = (authenticatedUser.managed_sites || []).find((item) => String(item.id) === String(windowSiteId));
+        return site ? {
+            ...authenticatedUser,
+            site_id: site.id,
+            site_name1: site.site_name,
+            target_lat: site.target_lat,
+            target_lng: site.target_lng,
+            radius_m: site.radius_m,
+        } : authenticatedUser;
+    }, [authenticatedUser, windowSiteId]);
     const [activeTab, setActiveTab] = useState(DEFAULT_TAB);
     const [isRoadworkMounted, setIsRoadworkMounted] = useState(false);
     const [preloadedUserId, setPreloadedUserId] = useState(null);
     const [forcedUpdateNotice, setForcedUpdateNotice] = useState(null);
+    const [directionToast, setDirectionToast] = useState('');
+    const directionToastTimerRef = useRef(null);
     const updateCheckKeyRef = useRef(null);
     const forcedUpdateActiveRef = useRef(false);
     const recordGridSessionsRef = useRef({ flow: {}, medicine: {}, kit: {}, water: {} });
+
+    useEffect(() => {
+        if (!isAuthenticated || !user?.multi_site_enabled || !user?.site_name1) return undefined;
+        const direction = String(user.site_name1).match(/([가-힣A-Za-z0-9]+방향)/)?.[1] || String(user.site_name1);
+        const showDirection = () => {
+            setDirectionToast(`${direction}입니다`);
+            clearTimeout(directionToastTimerRef.current);
+            directionToastTimerRef.current = setTimeout(() => setDirectionToast(''), 1500);
+        };
+        showDirection();
+        const unsubscribe = window.electronAPI?.onWindowRestored?.((info) => {
+            if (info?.reason === 'site-window-focus' || info?.reason === 'tray-menu' || info?.reason === 'tray-double-click') {
+                showDirection();
+            }
+        });
+        const unsubscribeNative = window.electronAPI?.onNativeFocusEvent?.((info) => {
+            if (info?.event === 'browser-window-focus') showDirection();
+        });
+        return () => {
+            clearTimeout(directionToastTimerRef.current);
+            unsubscribe?.();
+            unsubscribeNative?.();
+        };
+    }, [isAuthenticated, user?.multi_site_enabled, user?.site_name1]);
 
     const resetRecordGridSessions = () => {
         recordGridSessionsRef.current = { flow: {}, medicine: {}, kit: {}, water: {} };
@@ -390,6 +429,27 @@ function App() {
                 helpText={getHelpText()}
                 locationStatus={locationStatus}
             />
+
+            {directionToast ? (
+                <div style={{
+                    position: 'fixed',
+                    left: '50%',
+                    top: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    zIndex: 10020,
+                    padding: '1rem 2rem',
+                    borderRadius: '14px',
+                    backgroundColor: 'rgba(15, 23, 42, 0.76)',
+                    color: '#fff',
+                    fontSize: '2rem',
+                    fontWeight: 900,
+                    letterSpacing: '-0.03em',
+                    pointerEvents: 'none',
+                    boxShadow: '0 16px 40px rgba(15, 23, 42, 0.25)',
+                }}>
+                    {directionToast}
+                </div>
+            ) : null}
 
             <Suspense fallback={null}>
                 <BoardPopupNotice currentUser={user} activeTab={activeTab} onOpenBoard={() => setActiveTab('board')} />

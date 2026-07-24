@@ -27,6 +27,8 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
     const [availableSites, setAvailableSites] = useState([]);
     const [selectedSiteId, setSelectedSiteId] = useState('');
     const [isSiteListLoading, setIsSiteListLoading] = useState(false);
+    const [multiSiteEnabled, setMultiSiteEnabled] = useState(false);
+    const [isSavingMultiSiteMode, setIsSavingMultiSiteMode] = useState(false);
     // flowOption state: 'single1' | 'single2' | 'combined' (2계열 기본은 combined)
     const [flowOption, setFlowOption] = useState('single1');
     const [sludgeExportSettings, setSludgeExportSettings] = useState({
@@ -298,6 +300,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
             setAvailableSites(siteList);
 
             if (data?.success && data.settings) {
+                setMultiSiteEnabled(Number(data.settings.multi_site_enabled || 0) === 1);
                 const hasSavedSiteIdentity = Boolean(
                     String(data.settings.site_id || '').trim() || String(data.settings.site_name || '').trim()
                 );
@@ -481,6 +484,37 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         }
     };
 
+    const handleMultiSiteModeChange = async (nextEnabled) => {
+        if (isSavingMultiSiteMode) return;
+        if (!selectedSiteId || !siteInfo.siteName) {
+            showAlert?.('양방향 통합관리를 설정하려면 먼저 기본 현장을 저장해주세요.');
+            return;
+        }
+
+        const confirmed = await showConfirm?.(
+            nextEnabled
+                ? '양방향 통합관리 기능을 사용하도록 설정하시겠습니까?\n이 단계에서는 데이터 합치기나 보조 창 실행은 시작되지 않습니다.'
+                : '양방향 통합관리 기능을 사용하지 않도록 설정하시겠습니까?\n저장된 현장 데이터는 삭제되지 않습니다.'
+        );
+        if (!confirmed) return;
+
+        setIsSavingMultiSiteMode(true);
+        try {
+            const response = await SettingsModel.saveMultiSiteMode(nextEnabled);
+            if (!response?.success) {
+                throw new Error(response?.message || '양방향 통합관리 설정 저장 실패');
+            }
+            await loadSettings({ force: true });
+            showAlert?.(nextEnabled
+                ? '양방향 통합관리 사용 설정이 저장되었습니다.'
+                : '양방향 통합관리 사용 설정이 해제되었습니다.');
+        } catch (err) {
+            showAlert?.('양방향 통합관리 설정 저장 중 오류: ' + err.message);
+        } finally {
+            setIsSavingMultiSiteMode(false);
+        }
+    };
+
     // --- Flow Option Save ---
     const handleSaveFlowOption = async (option) => {
         try {
@@ -537,6 +571,9 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
         isSiteListLoading,
         handleSiteSelection,
         handleApply,
+        multiSiteEnabled,
+        isSavingMultiSiteMode,
+        handleMultiSiteModeChange,
     };
 
     const itemState = {

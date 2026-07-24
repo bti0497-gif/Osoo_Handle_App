@@ -278,16 +278,18 @@ async function reconcileConfiguredQntechSiteId(db, hints = {}) {
         WHERE site_name = ?
       `).run(qntechSiteId, resolvedSiteName);
     }
-    db.prepare(`
-      UPDATE app_settings
-      SET site_id = COALESCE(NULLIF(?, ''), site_id),
-          site_name = COALESCE(NULLIF(?, ''), site_name),
-          qntech_site_id = ?
-      WHERE id = 1
-    `).run(resolvedSiteId, resolvedSiteName, qntechSiteId);
+    if (String(settings.site_id || '').trim() === resolvedSiteId) {
+      db.prepare(`
+        UPDATE app_settings
+        SET qntech_site_id = ?
+        WHERE id = 1
+      `).run(qntechSiteId);
+    }
   })();
 
-  const verifiedSiteId = getConfiguredQntechSiteId(db);
+  const verifiedSiteId = String(
+    db.prepare('SELECT qntech_site_id FROM sites WHERE id = ?').get(resolvedSiteId)?.qntech_site_id || ''
+  ).trim();
   if (verifiedSiteId !== qntechSiteId) {
     throw new Error('QnTECH 현장 설정을 저장한 뒤 검증하지 못했습니다.');
   }
@@ -385,9 +387,9 @@ function isAuthenticationError(error) {
   ].some((token) => message.includes(token));
 }
 
-async function createAuthenticatedClient(db) {
+async function createAuthenticatedClient(db, siteHints = {}) {
   const { credential, session } = await ensureAuthenticatedSession(db);
-  const qntechConfig = await reconcileConfiguredQntechSiteId(db);
+  const qntechConfig = await reconcileConfiguredQntechSiteId(db, siteHints);
 
   return {
     baseUrl: credential.baseUrl,

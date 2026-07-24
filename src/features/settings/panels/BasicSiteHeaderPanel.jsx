@@ -16,6 +16,12 @@ export default function BasicSiteHeaderPanel({
     isSiteListLoading,
     handleSiteSelection,
     siteInfo,
+    showHistoryRestore = false,
+    onOpenHistoryRestore,
+    showMultiSiteToggle = false,
+    multiSiteEnabled = false,
+    isSavingMultiSiteMode = false,
+    onMultiSiteModeChange,
 }) {
     const labelStyle = {
         display: 'block',
@@ -48,8 +54,8 @@ export default function BasicSiteHeaderPanel({
         <div
             style={{
                 display: 'grid',
-                gridTemplateColumns: 'minmax(260px, 360px) 140px 110px 110px',
-                gap: '0.75rem',
+                gridTemplateColumns: `minmax(230px, 1fr) 120px 88px 88px${showHistoryRestore || showMultiSiteToggle ? ' minmax(300px, auto)' : ''}`,
+                gap: '0.6rem',
                 alignItems: 'end',
                 justifyContent: 'start',
                 backgroundColor: '#f8fafc',
@@ -94,6 +100,81 @@ export default function BasicSiteHeaderPanel({
                     />
                 </div>
             ))}
+
+            {showHistoryRestore || showMultiSiteToggle ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minHeight: '34px' }}>
+                    {showHistoryRestore ? (
+                        <button
+                            type="button"
+                            onClick={onOpenHistoryRestore}
+                            style={{
+                                ...controlStyle,
+                                width: 'auto',
+                                minWidth: '112px',
+                                borderColor: '#1e3a8a',
+                                color: 'white',
+                                backgroundColor: '#1e3a8a',
+                                cursor: 'pointer',
+                            }}
+                        >
+                            과거자료 복원
+                        </button>
+                    ) : null}
+                    {showMultiSiteToggle ? (
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={multiSiteEnabled}
+                            disabled={isSavingMultiSiteMode}
+                            onClick={() => onMultiSiteModeChange?.(!multiSiteEnabled)}
+                            title="한 PC에서 두 방향 현장을 통합 관리하도록 설정"
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.45rem',
+                                height: '34px',
+                                padding: '0 8px',
+                                borderRadius: '7px',
+                                border: `1.5px solid ${multiSiteEnabled ? '#2563eb' : '#cbd5e1'}`,
+                                backgroundColor: multiSiteEnabled ? '#eff6ff' : '#fff',
+                                color: multiSiteEnabled ? '#1d4ed8' : '#475569',
+                                cursor: isSavingMultiSiteMode ? 'wait' : 'pointer',
+                                fontSize: '0.68rem',
+                                fontWeight: 800,
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            <span
+                                aria-hidden="true"
+                                style={{
+                                    position: 'relative',
+                                    display: 'inline-block',
+                                    width: '30px',
+                                    height: '17px',
+                                    borderRadius: '999px',
+                                    backgroundColor: multiSiteEnabled ? '#2563eb' : '#cbd5e1',
+                                    transition: 'background-color 160ms ease',
+                                }}
+                            >
+                                <span
+                                    style={{
+                                        position: 'absolute',
+                                        top: '2px',
+                                        left: multiSiteEnabled ? '15px' : '2px',
+                                        width: '13px',
+                                        height: '13px',
+                                        borderRadius: '50%',
+                                        backgroundColor: '#fff',
+                                        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.28)',
+                                        transition: 'left 160ms ease',
+                                    }}
+                                />
+                            </span>
+                            {isSavingMultiSiteMode ? '저장 중...' : '양방향 통합관리'}
+                        </button>
+                    ) : null}
+                </div>
+            ) : null}
         </div>
     );
 }

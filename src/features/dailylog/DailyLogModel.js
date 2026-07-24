@@ -100,7 +100,7 @@ export const DailyLogModel = {
         }
         return apiClient.get('/api/daily-work-log/export-pdf', params, { timeout: 300000 });
     },
-    fetchExportHwpx: async (dateString, templateName, siteName, context = {}) => {
+    fetchExportHwp: async (dateString, templateName, siteName, context = {}) => {
         const ranges = dateString.split(',');
         const params = {
             templateName,
@@ -113,6 +113,6 @@ export const DailyLogModel = {
             params.startDate = ranges[0].trim();
             params.endDate = ranges[1].trim();
         }
-        return apiClient.get('/api/daily-work-log/export-hwpx', params, { timeout: 300000 });
+        return apiClient.get('/api/daily-work-log/export-hwp', params, { timeout: 300000 });
     },
 };

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 135,
-  "digest": "cc4c70d267a9dab0f165d0340658db56c26696dbe40b19e9f2c67427fe9e2c47",
+  "endpointCount": 137,
+  "digest": "d6849f1c084274bfab13ffafa431bafffa2e0eda4a9c54cb4ff1167eadce934f",
   "endpoints": [
     {
       "method": "GET",
@@ -246,14 +246,6 @@
     {
       "method": "GET",
       "path": "/api/daily-work-log/export",
-      "module": "./routes/dailyWorkLogRoutes.cjs",
-      "tier": 2,
-      "mutation": false,
-      "syncWatch": false
-    },
-    {
-      "method": "GET",
-      "path": "/api/daily-work-log/export-hwpx",
       "module": "./routes/dailyWorkLogRoutes.cjs",
       "tier": 2,
       "mutation": false,
@@ -692,6 +684,22 @@
       "syncWatch": false
     },
     {
+      "method": "POST",
+      "path": "/api/settings/history-restore/apply",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/history-restore/inspect",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
       "method": "GET",
       "path": "/api/settings/import-progress",
       "module": "./routes/settingsRoutes.cjs",
@@ -726,6 +734,14 @@
     {
       "method": "POST",
       "path": "/api/settings/medicine-defaults",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/multi-site-mode",
       "module": "./routes/settingsRoutes.cjs",
       "tier": 2,
       "mutation": true,

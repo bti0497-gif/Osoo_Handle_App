@@ -79,6 +79,7 @@ const apiSpec = {
       { method: 'GET', path: '/api/settings', description: '기본 설정 조회' },
       { method: 'GET', path: '/api/settings/sites', description: '현장 목록 (구글시트 또는 로컬DB)' },
       { method: 'POST', path: '/api/settings/select-site', description: '현장 선택' },
+      { method: 'POST', path: '/api/settings/multi-site-mode', description: '양방향 통합관리 사용 여부 저장' },
       { method: 'GET', path: '/api/settings/current-site', description: '현재 선택된 현장' },
       { method: 'GET', path: '/api/settings/members', description: '직원 목록' },
       { method: 'GET', path: '/api/settings/roles', description: '역할 목록' },
@@ -174,8 +175,8 @@ const apiSpec = {
       { method: 'GET', path: '', description: '일일 작업 로그 조회' },
       { method: 'POST', path: '', description: '일일 작업 로그 저장' },
       { method: 'GET', path: '/export', description: '로그 내보내기' },
-      { method: 'GET', path: '/export-pdf', description: 'HWPX 기반 일일업무일지 다중 날짜 PDF 병합 내보내기' },
-      { method: 'GET', path: '/export-hwpx', description: '책갈피 기반 일일업무일지 HWPX 내보내기' },
+      { method: 'GET', path: '/export-pdf', description: 'HWP 기반 일일업무일지 다중 날짜 PDF 병합 내보내기' },
+      { method: 'GET', path: '/export-hwp', description: '책갈피 기반 일일업무일지 HWP 내보내기' },
     ],
   },
 

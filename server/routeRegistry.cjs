@@ -22,7 +22,7 @@ const routeRegistry = [
   // ==================================================================
   // Tier 0: 즉시 등록
   // ==================================================================
-  { tier: 0, path: '/api/auth',          module: './routes/authRoutes.cjs',           args: ['db'] },
+  { tier: 0, path: '/api/auth',          module: './routes/authRoutes.cjs',           args: ['db', 'appDataPath'] },
 
   // ==================================================================
   // Tier 1: 로그인 성공 시 (preload-trigger) 200ms 간격으로 프리로드

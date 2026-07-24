@@ -121,6 +121,7 @@ async function ensureHwpSecurityModule() {
 async function runHwpToPdfConversion(sourcePath, outputPath) {
   const sourceAbsolutePath = path.resolve(sourcePath);
   const outputAbsolutePath = path.resolve(outputPath);
+  const sourceFormat = path.extname(sourceAbsolutePath).toLowerCase() === '.hwp' ? 'HWP' : 'HWPX';
   fs.mkdirSync(path.dirname(outputAbsolutePath), { recursive: true });
   await ensureHwpSecurityModule();
 
@@ -128,7 +129,7 @@ async function runHwpToPdfConversion(sourcePath, outputPath) {
     "$ErrorActionPreference = 'Stop'",
     `$sourcePath = ${toPowerShellLiteral(sourceAbsolutePath)}`,
     `$outputPath = ${toPowerShellLiteral(outputAbsolutePath)}`,
-    "if (-not (Test-Path -LiteralPath $sourcePath)) { throw \"HWPX file not found: $sourcePath\" }",
+    "if (-not (Test-Path -LiteralPath $sourcePath)) { throw \"HWP/HWPX file not found: $sourcePath\" }",
     "if (Test-Path -LiteralPath $outputPath) { Remove-Item -LiteralPath $outputPath -Force }",
     "$hwp = $null",
     "try {",
@@ -136,8 +137,8 @@ async function runHwpToPdfConversion(sourcePath, outputPath) {
     `  $securityRegistered = $hwp.RegisterModule('FilePathCheckDLL', '${SECURITY_MODULE_NAME}')`,
     "  if (-not $securityRegistered) { throw '한글 파일 접근 보안 모듈 등록에 실패했습니다.' }",
     "  try { $hwp.SetMessageBoxMode(0x00020000) } catch { }",
-    "  $opened = $hwp.Open($sourcePath, 'HWPX', 'forceopen:true')",
-    "  if (-not $opened) { throw '한글에서 HWPX 파일을 열지 못했습니다.' }",
+    `  $opened = $hwp.Open($sourcePath, '${sourceFormat}', 'forceopen:true')`,
+    "  if (-not $opened) { throw '한글에서 HWP/HWPX 파일을 열지 못했습니다.' }",
     "  $saved = $hwp.SaveAs($outputPath, 'PDF', '')",
     "  if (-not $saved) { throw '한글에서 PDF 저장을 완료하지 못했습니다.' }",
     "} finally {",
@@ -181,5 +182,7 @@ function convertHwpxToPdf(sourcePath, outputPath) {
 }
 
 module.exports = {
+  convertHwpToPdf: convertHwpxToPdf,
   convertHwpxToPdf,
+  ensureHwpSecurityModule,
 };

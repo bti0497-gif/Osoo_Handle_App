@@ -8,31 +8,32 @@ module.exports = function (db) {
       ? dbConn.prepare(`
           SELECT date, raw_value, reading_unit
           FROM flow_readings
-          WHERE type = ? AND date < ? AND raw_value IS NOT NULL
+          WHERE site_id = ? AND type = ? AND date < ? AND raw_value IS NOT NULL
           ORDER BY date DESC, id DESC
           LIMIT 1
-        `).get(type, startDate)
+        `).get(metadata.siteId, type, startDate)
       : null;
     const startYear = String(startDate || '').slice(0, 4);
     const previousSludge = startDate && type === '슬러지'
       ? dbConn.prepare(`
           SELECT date, calculated_flow
           FROM flow_readings
-          WHERE type = ?
+          WHERE site_id = ?
+            AND type = ?
             AND date < ?
             AND date >= ?
             AND calculated_flow IS NOT NULL
           ORDER BY date DESC, id DESC
           LIMIT 1
-        `).get(type, startDate, `${startYear}-01-01`)
+        `).get(metadata.siteId, type, startDate, `${startYear}-01-01`)
       : null;
     const rows = dbConn.prepare(`
       SELECT id, date, raw_value, reading_unit, sludge_export, calculated_flow,
              is_reset, is_manual, is_synced, last_modified, input_status
       FROM flow_readings
-      WHERE type = ? AND (? IS NULL OR date >= ?)
+      WHERE site_id = ? AND type = ? AND (? IS NULL OR date >= ?)
       ORDER BY date ASC, id ASC
-    `).all(type, startDate || null, startDate || null);
+    `).all(metadata.siteId, type, startDate || null, startDate || null);
 
     const updateStmt = dbConn.prepare(`
       UPDATE flow_readings
@@ -180,7 +181,7 @@ module.exports = function (db) {
           date, type, raw_value, calculated_flow, reading_unit, is_reset, is_manual, sludge_export,
           input_status, site_id, site_name, author, created_at, last_modified, is_synced
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(date, type) DO UPDATE SET
+        ON CONFLICT(site_id, date, type) DO UPDATE SET
           raw_value = excluded.raw_value,
           calculated_flow = excluded.calculated_flow,
           reading_unit = excluded.reading_unit,
@@ -249,7 +250,7 @@ module.exports = function (db) {
     const { date, type, raw_value, reading_unit, is_reset, is_manual, manual_flow, sludge_export } = req.body;
     try {
       const metadata = getCurrentRecordMetadata(db, req.body);
-      const prevReading = db.prepare('SELECT raw_value, reading_unit, calculated_flow, date FROM flow_readings WHERE type = ? AND date < ? ORDER BY date DESC LIMIT 1').get(type, date);
+      const prevReading = db.prepare('SELECT raw_value, reading_unit, calculated_flow, date FROM flow_readings WHERE site_id = ? AND type = ? AND date < ? ORDER BY date DESC LIMIT 1').get(metadata.siteId, type, date);
 
       // 보정 로직 동일 적용
       const effectivePrevRaw = (prevReading?.raw_value === null && prevReading?.calculated_flow > 10000)
@@ -283,7 +284,7 @@ module.exports = function (db) {
           date, type, raw_value, calculated_flow, reading_unit, is_reset, is_manual, sludge_export,
           input_status, site_id, site_name, author, created_at, last_modified, is_synced
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(date, type) DO UPDATE SET
+        ON CONFLICT(site_id, date, type) DO UPDATE SET
           raw_value = excluded.raw_value,
           calculated_flow = excluded.calculated_flow,
           reading_unit = excluded.reading_unit,

@@ -66,10 +66,11 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
 
   router.get('/api/work-records', (req, res) => {
     const query = String(req.query?.q || '').trim();
-    let sql = selectWorkRecords;
-    const params = [];
+    const siteId = String(req.siteContext?.siteId || '').trim();
+    let sql = `${selectWorkRecords} WHERE wr.site_id = ?`;
+    const params = [siteId];
     if (query) {
-      sql += ' WHERE (wr.location LIKE ? OR wr.title LIKE ? OR wr.content LIKE ? OR wr.notes LIKE ?)';
+      sql += ' AND (wr.location LIKE ? OR wr.title LIKE ? OR wr.content LIKE ? OR wr.notes LIKE ?)';
       const like = `%${query}%`;
       params.push(like, like, like, like);
     }
@@ -84,14 +85,15 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
       const metadata = getCurrentRecordMetadata(db, req.body);
       const info = db.prepare(`
         INSERT INTO work_records
-          (date, location, title, content, notes, site_name, author, created_at, last_modified)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (date, location, title, content, notes, site_id, site_name, author, created_at, last_modified)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         date,
         String(location || '').trim(),
         String(title || '').trim(),
         String(content || '').trim(),
         String(notes || '').trim(),
+        metadata.siteId,
         metadata.siteName || '',
         metadata.author || '',
         metadata.createdAt,
@@ -107,11 +109,12 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
     try {
       const id = normalizeRecordId(req.params.id);
       if (!id) return res.status(400).json({ success: false, message: '기록 번호가 올바르지 않습니다.' });
+      const siteId = String(req.siteContext?.siteId || '').trim();
       const { date, location, title, content, notes } = req.body || {};
       db.prepare(`
         UPDATE work_records
         SET date = ?, location = ?, title = ?, content = ?, notes = ?, last_modified = ?
-        WHERE id = ?
+        WHERE id = ? AND site_id = ?
       `).run(
         date,
         String(location || '').trim(),
@@ -119,7 +122,8 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
         String(content || '').trim(),
         String(notes || '').trim(),
         new Date().toISOString(),
-        id
+        id,
+        siteId
       );
       res.json({ success: true });
     } catch (error) {
@@ -131,6 +135,9 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
     try {
       const id = normalizeRecordId(req.params.id);
       if (!id) return res.status(400).json({ success: false, message: '기록 번호가 올바르지 않습니다.' });
+      const siteId = String(req.siteContext?.siteId || '').trim();
+      const record = db.prepare('SELECT id FROM work_records WHERE id = ? AND site_id = ?').get(id, siteId);
+      if (!record) return res.status(404).json({ success: false, message: '현재 현장의 업무 기록을 찾을 수 없습니다.' });
       db.transaction(() => {
         db.prepare('DELETE FROM work_record_photos WHERE work_record_id = ?').run(id);
         db.prepare('DELETE FROM work_records WHERE id = ?').run(id);
@@ -146,7 +153,7 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
   router.post('/api/work-records/:id/photos', photoUpload.array('photos', 10), (req, res) => {
     try {
       const id = normalizeRecordId(req.params.id);
-      const record = id ? db.prepare('SELECT id, date FROM work_records WHERE id = ?').get(id) : null;
+      const record = id ? db.prepare('SELECT id, date FROM work_records WHERE id = ? AND site_id = ?').get(id, req.siteContext?.siteId) : null;
       if (!record) return res.status(404).json({ success: false, message: '업무 기록을 찾을 수 없습니다.' });
       if (!req.files?.length) return res.status(400).json({ success: false, message: '선택한 사진이 없습니다.' });
 
@@ -179,7 +186,7 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
   router.post('/api/work-records/:id/open-photo-folder', (req, res) => {
     try {
       const id = normalizeRecordId(req.params.id);
-      const record = id ? db.prepare('SELECT id FROM work_records WHERE id = ?').get(id) : null;
+      const record = id ? db.prepare('SELECT id FROM work_records WHERE id = ? AND site_id = ?').get(id, req.siteContext?.siteId) : null;
       if (!record) return res.status(404).json({ success: false, message: '업무 기록을 찾을 수 없습니다.' });
       const photoDir = getRecordPhotoDir(appDataPath, id);
       fs.mkdirSync(photoDir, { recursive: true });

@@ -221,16 +221,16 @@ async function restoreMedicinePhotoFromDrive(db, appDataPath, date, medicineName
   };
 }
 
-function updateMedicinePhotoUrl(db, tab, date, itemName, localUrl) {
+function updateMedicinePhotoUrl(db, tab, date, itemName, localUrl, siteId) {
   if (!localUrl || !itemName || !date) return;
   if (tab === 'medicine') {
-    db.prepare('UPDATE medicine_logs SET photo_url = ?, is_synced = 0 WHERE medicine_name = ? AND date = ?')
-      .run(localUrl, itemName, date);
+    db.prepare('UPDATE medicine_logs SET photo_url = ?, is_synced = 0 WHERE medicine_name = ? AND date = ? AND site_id = ?')
+      .run(localUrl, itemName, date, siteId);
     return;
   }
   if (tab === 'kit') {
-    db.prepare('UPDATE kit_logs SET photo_url = ?, is_synced = 0 WHERE kit_name = ? AND date = ?')
-      .run(localUrl, itemName, date);
+    db.prepare('UPDATE kit_logs SET photo_url = ?, is_synced = 0 WHERE kit_name = ? AND date = ? AND site_id = ?')
+      .run(localUrl, itemName, date, siteId);
   }
 }
 
@@ -394,7 +394,7 @@ module.exports = function (db, baseDir, appDataPath) {
             (medicine_name, date, purchase_amount, usage_amount, current_inventory,
              input_status, site_id, site_name, author, created_at, last_modified, is_synced)
           VALUES (?, ?, ?, 0, 0, 'manual', ?, ?, ?, ?, ?, 0)
-          ON CONFLICT(medicine_name, date) DO UPDATE SET
+          ON CONFLICT(site_id, medicine_name, date) DO UPDATE SET
             purchase_amount = excluded.purchase_amount,
             input_status    = excluded.input_status,
             site_id         = excluded.site_id,
@@ -415,7 +415,7 @@ module.exports = function (db, baseDir, appDataPath) {
             (kit_name, date, purchase_amount, usage_amount, current_inventory,
              input_status, site_id, site_name, author, created_at, last_modified, is_synced)
           VALUES (?, ?, ?, 0, 0, 'manual', ?, ?, ?, ?, ?, 0)
-          ON CONFLICT(kit_name, date) DO UPDATE SET
+          ON CONFLICT(site_id, kit_name, date) DO UPDATE SET
             purchase_amount = excluded.purchase_amount,
             input_status    = excluded.input_status,
             site_id         = excluded.site_id,
@@ -460,7 +460,7 @@ module.exports = function (db, baseDir, appDataPath) {
             if (localPath) {
               const fileName = path.basename(localPath);
               const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(`${yearStr}/${fileName}`)}`;
-              updateMedicinePhotoUrl(db, tab, date, medicineName, localUrl);
+              updateMedicinePhotoUrl(db, tab, date, medicineName, localUrl, metadata.siteId);
               const driveFile = await uploadMedicinePhotoToDrive(db, date, medicineName, localPath);
               drivePhotoResults.push({ medicineName, uploaded: Boolean(driveFile?.id) });
             }
@@ -514,8 +514,8 @@ module.exports = function (db, baseDir, appDataPath) {
         await sharp(srcBuf, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate().jpeg({ quality: 90 }).toFile(destPath);
       }
       const url = `/api/medicine-in/photo?p=${encodeURIComponent(`${yearStr}/${fileName}`)}`;
-      updateMedicinePhotoUrl(db, 'medicine', date, medicineName, url);
-      updateMedicinePhotoUrl(db, 'kit', date, medicineName, url);
+      updateMedicinePhotoUrl(db, 'medicine', date, medicineName, url, req.siteContext?.siteId);
+      updateMedicinePhotoUrl(db, 'kit', date, medicineName, url, req.siteContext?.siteId);
       const driveFile = await uploadMedicinePhotoToDrive(db, date, medicineName, destPath);
       res.json({
         success: true,
@@ -559,7 +559,7 @@ module.exports = function (db, baseDir, appDataPath) {
       for (const name of itemNames) {
         const result = await restoreMedicinePhotoFromDrive(db, appDataPath, date, name);
         if (result?.url) {
-          updateMedicinePhotoUrl(db, tab === 'kit' ? 'kit' : 'medicine', date, name, result.url);
+          updateMedicinePhotoUrl(db, tab === 'kit' ? 'kit' : 'medicine', date, name, result.url, req.siteContext?.siteId);
           restored.push({ name, url: result.url });
         }
       }
@@ -649,7 +649,7 @@ module.exports = function (db, baseDir, appDataPath) {
                 if (localPath) {
                   const fileName = path.basename(localPath);
                   const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(`${String(useDate).slice(0, 4)}/${fileName}`)}`;
-                  updateMedicinePhotoUrl(db, isKit ? 'kit' : 'medicine', useDate, medicineName, localUrl);
+                  updateMedicinePhotoUrl(db, isKit ? 'kit' : 'medicine', useDate, medicineName, localUrl, req.siteContext?.siteId);
                   await uploadMedicinePhotoToDrive(db, useDate, medicineName, localPath);
                 }
               } catch (e) {

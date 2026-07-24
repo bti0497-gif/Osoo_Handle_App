@@ -207,6 +207,8 @@ function registerLazyApplication() {
     sanitize,
   } = require('./services/diagnosticLogService.cjs');
   const ctx = { db, appDataPath, BASE_DIR };
+  const { createSiteContextMiddleware } = require('./middleware/siteContext.cjs');
+  app.use(createSiteContextMiddleware(db));
   // Stable releases keep high-volume successful read diagnostics off by default.
   // Set DIAGNOSTIC_VERBOSE_INITIAL=true temporarily when a field investigation
   // needs every successful API read. Failures and mutation/sync routes are

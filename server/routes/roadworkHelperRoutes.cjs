@@ -21,23 +21,28 @@ function yearStart(date) {
   return `${date.slice(0, 4)}-01-01`;
 }
 
-function buildScope(db) {
+function buildScope(db, source = {}) {
   const row = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get() || {};
-  const siteId = String(row.site_id || '').trim();
-  const siteName = String(row.site_name || '').trim();
+  const siteId = String(source.siteId || source.site_id || row.site_id || '').trim();
+  const siteName = String(source.siteName || source.site_name || row.site_name || '').trim();
+  const settings = siteId ? db.prepare(`
+    SELECT s.method, s.series, ss.flow_option
+    FROM sites s LEFT JOIN site_settings ss ON ss.site_id = s.id
+    WHERE s.id = ?
+  `).get(siteId) || {} : {};
   const params = [];
   const clauses = [];
   if (siteId) {
     clauses.push('site_id = ?');
     params.push(siteId);
-  }
-  if (siteName) {
+  } else if (siteName) {
     clauses.push('site_name = ?');
     params.push(siteName);
   }
   return {
     siteId,
     siteName,
+    settings,
     clause: clauses.length ? ` AND (${clauses.join(' OR ')})` : '',
     params,
   };
@@ -55,7 +60,15 @@ function round1(value) {
 }
 
 function getActiveNames(db, category, nameColumn, tableName, scope) {
-  const configured = db.prepare(`
+  const configured = scope.siteId ? db.prepare(`
+    SELECT item_name
+    FROM site_config_items
+    WHERE site_id = ? AND category = ? AND is_active = 1
+      AND item_name NOT LIKE '%\_purchase' ESCAPE '\'
+      AND item_name NOT LIKE '%\_usage' ESCAPE '\'
+      AND item_name NOT LIKE '%\_inventory' ESCAPE '\'
+    ORDER BY display_order ASC, item_name ASC
+  `).all(scope.siteId, category).map((row) => row.item_name).filter(Boolean) : db.prepare(`
     SELECT item_name
     FROM config_items
     WHERE category = ?
@@ -88,7 +101,9 @@ function getFlowRows(db, date, scope) {
   const startYear = yearStart(date);
 
   // app_settings 정보 가져오기
-  const settings = db.prepare('SELECT method, series, flow_option FROM app_settings WHERE id = 1').get() || {};
+  const settings = Object.keys(scope.settings || {}).length
+    ? scope.settings
+    : db.prepare('SELECT method, series, flow_option FROM app_settings WHERE id = 1').get() || {};
   const method = String(settings.method || '').trim().toUpperCase(); // 'MBR', 'A2O'
   const series = String(settings.series || '').trim();
   const flowOption = settings.flow_option ? String(settings.flow_option).trim() : (series === '2계열' ? 'combined' : 'single1');
@@ -273,7 +288,7 @@ module.exports = function (db) {
   router.get('/api/roadwork-helper/all', async (req, res) => {
     try {
       const date = normalizeDate(req.query.date);
-      const scope = buildScope(db);
+      const scope = buildScope(db, req.siteContext);
       return res.json({
         success: true,
         date,
@@ -291,7 +306,7 @@ module.exports = function (db) {
   router.get('/api/roadwork-helper/flow', async (req, res) => {
     try {
       const date = normalizeDate(req.query.date);
-      const scope = buildScope(db);
+      const scope = buildScope(db, req.siteContext);
       await restoreForDate(db, date, scope);
       return res.json({ success: true, date, rows: getFlowRows(db, date, scope) });
     } catch (err) {
@@ -303,7 +318,7 @@ module.exports = function (db) {
   router.get('/api/roadwork-helper/electricity', async (req, res) => {
     try {
       const date = normalizeDate(req.query.date);
-      const scope = buildScope(db);
+      const scope = buildScope(db, req.siteContext);
       await restoreForDate(db, date, scope);
       return res.json({ success: true, date, rows: getElectricityRows(db, date, scope) });
     } catch (err) {
@@ -315,7 +330,7 @@ module.exports = function (db) {
   router.get('/api/roadwork-helper/medicine', async (req, res) => {
     try {
       const date = normalizeDate(req.query.date);
-      const scope = buildScope(db);
+      const scope = buildScope(db, req.siteContext);
       await restoreForDate(db, date, scope);
       return res.json({ success: true, date, rows: getInventoryRows(db, date, 'medicine', 'medicine_logs', 'medicine_name', scope) });
     } catch (err) {
@@ -327,7 +342,7 @@ module.exports = function (db) {
   router.get('/api/roadwork-helper/kit', async (req, res) => {
     try {
       const date = normalizeDate(req.query.date);
-      const scope = buildScope(db);
+      const scope = buildScope(db, req.siteContext);
       await restoreForDate(db, date, scope);
       return res.json({ success: true, date, rows: getInventoryRows(db, date, 'kit', 'kit_logs', 'kit_name', scope) });
     } catch (err) {

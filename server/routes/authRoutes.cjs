@@ -39,8 +39,11 @@ function setActiveUser(...args) {
 function clearActiveUser(...args) {
   return require('../services/activeUserSessionService.cjs').clearActiveUser(...args);
 }
+function recordDiagnostic(...args) {
+  return require('../services/diagnosticLogService.cjs').recordDiagnostic(...args);
+}
 
-module.exports = (db) => {
+module.exports = (db, appDataPath) => {
     const router = express.Router();
 
     const pad2 = (value) => String(value).padStart(2, '0');
@@ -311,7 +314,30 @@ module.exports = (db) => {
         if (managedSites.length === 0 && String(member?.role || 'user') === 'user') {
             managedSites = getManagedSitesByManagerName(member);
         }
-        const currentSiteId = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || null;
+        const multiSiteSettings = db.prepare(`
+            SELECT site_id, multi_site_enabled, primary_site_id, secondary_site_id
+            FROM app_settings WHERE id = 1
+        `).get() || {};
+        if (Number(multiSiteSettings.multi_site_enabled || 0) === 1) {
+            const pairIds = [multiSiteSettings.primary_site_id, multiSiteSettings.secondary_site_id]
+                .map((value) => String(value || '').trim())
+                .filter(Boolean);
+            for (const pairId of pairIds) {
+                if (managedSites.some((site) => String(site.id) === pairId)) continue;
+                const pairSite = db.prepare(`
+                    SELECT id, site_name, manager_name, target_lat, target_lng, radius_m
+                    FROM sites WHERE id = ? AND COALESCE(is_active, 1) = 1
+                `).get(pairId);
+                if (pairSite) {
+                    managedSites.push({
+                        ...pairSite,
+                        manager_name: pairSite.manager_name || '',
+                        is_primary: pairId === String(multiSiteSettings.primary_site_id || ''),
+                    });
+                }
+            }
+        }
+        const currentSiteId = multiSiteSettings.site_id || null;
 
         let activeSite = null;
         if (currentSiteId) {
@@ -328,7 +354,10 @@ module.exports = (db) => {
             target_lat: activeSite?.target_lat ?? member?.target_lat ?? null,
             target_lng: activeSite?.target_lng ?? member?.target_lng ?? null,
             radius_m: activeSite?.radius_m ?? member?.radius_m ?? 500,
-            managed_sites: managedSites
+            managed_sites: managedSites,
+            multi_site_enabled: Number(multiSiteSettings.multi_site_enabled || 0) === 1,
+            primary_site_id: multiSiteSettings.primary_site_id || null,
+            secondary_site_id: multiSiteSettings.secondary_site_id || null
         };
     };
 
@@ -466,7 +495,18 @@ module.exports = (db) => {
         if (!event) {
             return res.status(400).json({ success: false, message: '진단 이벤트가 필요합니다.' });
         }
-        return res.json({ success: true });
+        const details = req.body?.details && typeof req.body.details === 'object'
+            ? req.body.details
+            : {};
+        const id = recordDiagnostic(db, appDataPath, {
+            level: 'info',
+            area: 'focus',
+            action: event,
+            result: String(details.result || 'observed').slice(0, 40),
+            message: '입력 및 창 포커스 상태 진단',
+            details,
+        });
+        return res.json({ success: true, id });
     });
 
     // 2. Sync member data downloaded by admin into the local DB.
@@ -544,7 +584,10 @@ module.exports = (db) => {
         const loginTime = getLocalTime();
 
         try {
-            const site = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get() || {};
+            const site = {
+                site_id: req.siteContext?.siteId || null,
+                site_name: req.siteContext?.siteName || '',
+            };
             const remote = detectRemoteSession();
             const effectiveRemoteDetected = Boolean(remote.detected);
             const effectiveRemoteType = remote.sessionType || 'local';
@@ -571,6 +614,26 @@ module.exports = (db) => {
                 );
 
                 activeSession = db.prepare('SELECT * FROM attendance WHERE id = ?').get(result.lastInsertRowid);
+            } else {
+                db.prepare(`
+                    UPDATE attendance
+                    SET site_id = ?,
+                        site_name = ?,
+                        remote_session_detected = ?,
+                        remote_session_type = ?,
+                        remote_session_evidence = ?,
+                        is_synced = 0,
+                        last_modified = datetime('now', 'localtime')
+                    WHERE id = ?
+                `).run(
+                    site.site_id,
+                    site.site_name,
+                    effectiveRemoteDetected ? 1 : 0,
+                    effectiveRemoteType,
+                    effectiveEvidence,
+                    activeSession.id
+                );
+                activeSession = db.prepare('SELECT * FROM attendance WHERE id = ?').get(activeSession.id);
             }
 
             res.json({ success: true, session: activeSession });

@@ -6,6 +6,8 @@ const {
   protectDatabaseBeforeMigration,
   recordSchemaBaseline,
 } = require('./services/sqliteProtectionService.cjs');
+const { ensureMultiSiteFoundation } = require('./services/multiSiteSchemaService.cjs');
+const { ensureSiteDataIsolation } = require('./services/siteDataIsolationMigrationService.cjs');
 
 const DEFAULT_ROAD_WEB_URL = 'https://nwpo.ex.co.kr:5002//security/login.do';
 const DEFAULT_WATER_ANALYSIS_URL = 'https://eco.qntech.co.kr';
@@ -90,12 +92,13 @@ db.exec(`
     is_manual BOOLEAN DEFAULT 0,
     input_status TEXT DEFAULT 'manual',
     sludge_export REAL,
+    site_id TEXT,
     site_name TEXT,
     author TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
     is_synced INTEGER DEFAULT 0,
-    UNIQUE(date, type)
+    UNIQUE(site_id, date, type)
   );
   CREATE TABLE IF NOT EXISTS medicine_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,12 +108,13 @@ db.exec(`
     usage_amount REAL,
     current_inventory REAL,
     input_status TEXT DEFAULT 'manual',
+    site_id TEXT,
     site_name TEXT,
     author TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
     is_synced INTEGER DEFAULT 0,
-    UNIQUE(medicine_name, date)
+    UNIQUE(site_id, medicine_name, date)
   );
   CREATE TABLE IF NOT EXISTS water_quality (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,7 +156,7 @@ db.exec(`
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
     is_synced INTEGER DEFAULT 0,
-    UNIQUE(date, measurement_group, location, item_code)
+    UNIQUE(site_id, date, measurement_group, location, item_code)
   );
   CREATE TABLE IF NOT EXISTS operation_status_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,12 +174,13 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS sludge_photo_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT NOT NULL UNIQUE,
+    date TEXT NOT NULL,
     sludge_amount REAL,
     sludge_photo_path TEXT,
     sludge_photo_taken_at TEXT,
     certificate_photo_path TEXT,
     note TEXT,
+    site_id TEXT,
     site_name TEXT,
     author TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -195,12 +200,13 @@ db.exec(`
     usage_amount REAL,
     current_inventory REAL,
     input_status TEXT DEFAULT 'manual',
+    site_id TEXT,
     site_name TEXT,
     author TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
     is_synced INTEGER DEFAULT 0,
-    UNIQUE(kit_name, date)
+    UNIQUE(site_id, kit_name, date)
   );
   CREATE TABLE IF NOT EXISTS facility_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -223,10 +229,12 @@ db.exec(`
     title TEXT,
     content TEXT,
     notes TEXT,
+    site_id TEXT,
     site_name TEXT,
     author TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    last_modified TEXT DEFAULT CURRENT_TIMESTAMP
+    last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(site_id, date)
   );
   CREATE TABLE IF NOT EXISTS work_record_photos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -557,7 +565,7 @@ if (hasOperationalWaterColumns) {
         qntech_project_id, location, item_name, item_code, result_value, result_numeric, unit,
         author, created_at, last_modified, is_synced
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET
+      ON CONFLICT(site_id, date, measurement_group, location, item_code) DO UPDATE SET
         measurement_order = excluded.measurement_order,
         source_type = excluded.source_type,
         source_label = excluded.source_label,
@@ -921,6 +929,21 @@ if (!attendanceSyncCols.includes('last_modified')) {
   db.prepare("UPDATE attendance SET last_modified = datetime('now', 'localtime') WHERE last_modified IS NULL").run();
 }
 
+// 과거 버전이 트레이에 상주한 원격 도구만으로 남긴 오탐을 로컬로 정정한다.
+// RDP/client/SSH처럼 확정 가능한 세션 근거가 있는 기록은 보존한다.
+db.prepare(`
+  UPDATE attendance
+  SET remote_session_detected = 0,
+      remote_session_type = 'local',
+      remote_session_evidence = '',
+      is_synced = 0,
+      last_modified = datetime('now', 'localtime')
+  WHERE COALESCE(remote_session_evidence, '') LIKE '%tool_running:%'
+    AND COALESCE(remote_session_evidence, '') NOT LIKE '%session:%'
+    AND COALESCE(remote_session_evidence, '') NOT LIKE '%client:%'
+    AND COALESCE(remote_session_evidence, '') NOT LIKE '%ssh_connection%'
+`).run();
+
 const obsoleteAttendanceLocationCols = ['login_lat', 'login_lng', 'logout_lat', 'logout_lng'];
 const currentAttendanceCols = db.prepare("PRAGMA table_info(attendance)").all().map(c => c.name);
 if (obsoleteAttendanceLocationCols.some((column) => currentAttendanceCols.includes(column))) {
@@ -994,6 +1017,15 @@ const appSettingsCols = db.prepare("PRAGMA table_info(app_settings)").all().map(
 if (!appSettingsCols.includes('site_id')) {
   db.prepare('ALTER TABLE app_settings ADD COLUMN site_id TEXT').run();
 }
+if (!appSettingsCols.includes('multi_site_enabled')) {
+  db.prepare('ALTER TABLE app_settings ADD COLUMN multi_site_enabled INTEGER NOT NULL DEFAULT 0').run();
+}
+if (!appSettingsCols.includes('primary_site_id')) {
+  db.prepare('ALTER TABLE app_settings ADD COLUMN primary_site_id TEXT').run();
+}
+if (!appSettingsCols.includes('secondary_site_id')) {
+  db.prepare('ALTER TABLE app_settings ADD COLUMN secondary_site_id TEXT').run();
+}
 // 신규 설치 시 site_id는 빈 상태(NULL)로 유지한다.
 // 실제 현장이 설정된 기존 DB에서만 빈 site_id에 UUID를 부여한다.
 const siteNameForIdCheck = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
@@ -1005,6 +1037,12 @@ const hasRealSiteName = Boolean(
 if (hasRealSiteName) {
   db.prepare("UPDATE app_settings SET site_id = ? WHERE id = 1 AND (site_id IS NULL OR TRIM(site_id) = '')").run(crypto.randomUUID());
 }
+db.prepare(`
+  UPDATE app_settings
+  SET multi_site_enabled = CASE WHEN COALESCE(multi_site_enabled, 0) = 1 THEN 1 ELSE 0 END,
+      primary_site_id = COALESCE(NULLIF(primary_site_id, ''), NULLIF(site_id, ''))
+  WHERE id = 1
+`).run();
 
 // app_settings의 기본 현장 정보 → sites 테이블 마이그레이션 (실제 현장 설정이 있는 경우만)
 const settingsSeed = db.prepare('SELECT site_id, site_name, manager_name, method, series FROM app_settings WHERE id = 1').get();
@@ -1059,6 +1097,16 @@ if (currentSiteId) {
   db.prepare('UPDATE operation_status_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE sludge_photo_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE attendance SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
+}
+
+const siteDataIsolation = ensureSiteDataIsolation(db);
+if (siteDataIsolation.applied) {
+  console.log(`Site data isolation migration complete: ${siteDataIsolation.rebuilt.join(', ')}`);
+}
+
+const multiSiteFoundation = ensureMultiSiteFoundation(db);
+if (multiSiteFoundation.applied) {
+  console.log(`Multi-site foundation migration complete for site: ${multiSiteFoundation.siteId}`);
 }
 
 recordSchemaBaseline(db);

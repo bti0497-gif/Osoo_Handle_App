@@ -12,6 +12,7 @@ const siteSettingsService = require('../services/settings/siteSettingsService.cj
 const templateSettingsService = require('../services/settings/templateSettingsService.cjs');
 const { reconcileConfiguredQntechSiteId } = require('../services/qntechAuthService.cjs');
 const { requireAdminSession } = require('../services/activeUserSessionService.cjs');
+const { applyRestore, inspectRestore } = require('../services/settings/roadworkHistoryRestoreService.cjs');
 const {
   getCustomReportTemplatesDir,
   syncBundledTemplatesToAppData,
@@ -102,7 +103,14 @@ module.exports = function (db, baseDir, appDataPath) {
   syncBundledTemplatesToAppData(baseDir, appDataPath);
 
   const reportStorage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, file.fieldname === 'excel_original' ? excelOriginalsDir : reportsDir),
+    destination: (req, file, cb) => {
+      if (file.fieldname !== 'excel_original') return cb(null, reportsDir);
+      const siteId = String(req.siteContext?.siteId || '').trim();
+      if (!siteId) return cb(new Error('엑셀 원본을 저장할 현장이 선택되지 않았습니다.'));
+      const siteExcelDir = path.join(excelOriginalsDir, siteId);
+      fs.mkdirSync(siteExcelDir, { recursive: true });
+      return cb(null, siteExcelDir);
+    },
     filename: (req, file, cb) => {
       try {
         const decoded = Buffer.from(file.originalname, 'latin1').toString('utf8');
@@ -147,7 +155,7 @@ module.exports = function (db, baseDir, appDataPath) {
       }
       const qntechIntegrity = await verifyQntechSettingsIntegrity();
       templateSettingsService.cleanupDisallowedReportTemplates(reportsDir);
-      const result = appSettingsService.getSettingsOverview(db, baseDir, appDataPath);
+      const result = appSettingsService.getSettingsOverview(db, baseDir, appDataPath, req.siteContext?.siteId);
       res.json({ success: true, ...result, integrity: { qntech: qntechIntegrity } });
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
@@ -155,7 +163,12 @@ module.exports = function (db, baseDir, appDataPath) {
   // 설정 업데이트 API
   router.post('/api/settings', async (req, res) => {
     try {
-      const storageResult = await appSettingsService.saveSettings(db, req.body || {}, siteStorageRoot);
+      const storageResult = await appSettingsService.saveSettings(
+        db,
+        req.body || {},
+        siteStorageRoot,
+        req.siteContext?.siteId
+      );
       const savedSettings = req.body?.settings || {};
       const qntechIntegrity = await verifyQntechSettingsIntegrity({
         siteId: savedSettings.siteId || savedSettings.site_id,
@@ -175,6 +188,15 @@ module.exports = function (db, baseDir, appDataPath) {
     const { targetLat, targetLng } = req.body || {};
     try {
       const result = appSettingsService.saveSiteLocation(db, targetLat, targetLng);
+      res.json({ success: true, ...result });
+    } catch (e) {
+      res.status(e.statusCode || 500).json({ success: false, message: e.message });
+    }
+  });
+
+  router.post('/api/settings/multi-site-mode', (req, res) => {
+    try {
+      const result = appSettingsService.saveMultiSiteMode(db, req.body?.enabled);
       res.json({ success: true, ...result });
     } catch (e) {
       res.status(e.statusCode || 500).json({ success: false, message: e.message });
@@ -222,6 +244,33 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   });
 
+  router.post('/api/settings/history-restore/inspect', (req, res) => {
+    try {
+      const result = inspectRestore(db, req.body || {});
+      return res.json(result);
+    } catch (error) {
+      console.error('[Settings] 과거자료 복원 미리보기 점검 실패:', error);
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  router.post('/api/settings/history-restore/apply', async (req, res) => {
+    try {
+      const result = await applyRestore(db, appDataPath, req.body || {});
+      // 과거자료도 일반 현장 입력과 동일한 기존 BigQuery 대기열을 사용한다.
+      // 현재 admin 세션에서는 전송하지 않고, 이후 현장관리자 로그인/유휴 동기화 때 처리한다.
+      triggerBigQuerySync('settings:history-restore-apply');
+      return res.json(result);
+    } catch (error) {
+      console.error('[Settings] 과거자료 로컬 복원 실패:', error);
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message,
+        details: error.details || null,
+      });
+    }
+  });
+
   // 사이트/사원 부트스트랩(로컬 + BigQuery 이중 동기화)
   router.post('/api/settings/bootstrap-site-member', async (req, res) => {
     try {
@@ -238,7 +287,7 @@ module.exports = function (db, baseDir, appDataPath) {
   // 흐름 매핑 종류 입력 API
   router.post('/api/settings/save-flow-option', (req, res) => {
     try {
-      appSettingsService.saveFlowOption(db, req.body?.flowOption);
+      appSettingsService.saveFlowOption(db, req.body?.flowOption, req.siteContext?.siteId);
       res.json({ success: true, message: '흐름 매핑 종류 정보 저장되었습니다.' });
     } catch (e) { res.status(e.statusCode || 500).json({ success: false, message: e.message }); }
   });
@@ -264,7 +313,7 @@ module.exports = function (db, baseDir, appDataPath) {
   // 설정 항목 임시 추가 API
   router.post('/api/settings/add-item', (req, res) => {
     try {
-      const item = appSettingsService.addConfigItem(db, req.body || {});
+      const item = appSettingsService.addConfigItem(db, req.body || {}, req.siteContext?.siteId);
       res.json({ success: true, item });
     } catch (e) { res.status(e.statusCode || 500).json({ success: false, message: e.message }); }
   });
@@ -272,7 +321,7 @@ module.exports = function (db, baseDir, appDataPath) {
   // 설정 항목 활성/비활성화 토글 API
   router.post('/api/settings/toggle-item', (req, res) => {
     try {
-      appSettingsService.toggleConfigItem(db, req.body || {});
+      appSettingsService.toggleConfigItem(db, req.body || {}, req.siteContext?.siteId);
       res.json({ success: true });
     } catch (e) { res.status(e.statusCode || 500).json({ success: false, message: e.message }); }
   });
@@ -280,14 +329,14 @@ module.exports = function (db, baseDir, appDataPath) {
   // 엑셀 상태 조회(DB에 저장되어 있는지 임시 체인) API
   router.get('/api/settings/excel-status', (req, res) => {
     try {
-      res.json(appSettingsService.getExcelStatus(db));
+      res.json(appSettingsService.getExcelStatus(db, req.siteContext?.siteId));
     } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
   });
 
   // 엑셀 미리보기(DB에서 임시 조회) API
   router.post('/api/settings/excel-preview', async (req, res) => {
     try {
-      res.json(await appSettingsService.getExcelPreview(db, appDataPath, req.body || {}));
+      res.json(await appSettingsService.getExcelPreview(db, appDataPath, req.body || {}, req.siteContext?.siteId));
     } catch (e) { res.status(500).json({ success: false, message: e.message }); }
   });
 
@@ -296,7 +345,8 @@ module.exports = function (db, baseDir, appDataPath) {
 
   // 흐름 매핑 설정 + DB에서 임포트 수행
   router.post('/api/settings/save-flow-mapping', async (req, res) => {
-    const { config, mapping } = req.body;
+    const { config: requestedConfig, mapping } = req.body;
+    const config = { ...(requestedConfig || {}), siteId: req.siteContext?.siteId };
     const importProgress = setImportProgress('flow', mappingSettingsService.createProgress(config));
     try {
       const result = await mappingSettingsService.saveFlowMapping(db, appDataPath, config, mapping, importProgress);
@@ -313,7 +363,8 @@ module.exports = function (db, baseDir, appDataPath) {
   // 킷 매핑 설정 + DB에서 임포트 수행
   // mapping 형식: "킷명_purchase", "킷명_usage", "킷명_inventory"
   router.post('/api/settings/save-kit-mapping', async (req, res) => {
-    const { config, mapping } = req.body;
+    const { config: requestedConfig, mapping } = req.body;
+    const config = { ...(requestedConfig || {}), siteId: req.siteContext?.siteId };
     const importProgress = setImportProgress('kit', mappingSettingsService.createProgress(config));
     try {
       const result = await mappingSettingsService.saveKitMapping(db, appDataPath, config, mapping, importProgress);
@@ -330,7 +381,8 @@ module.exports = function (db, baseDir, appDataPath) {
   // 약품 매핑 설정 + DB에서 임포트 수행
   // mapping 형식: "약품명_purchase", "약품명_usage", "약품명_inventory"
   router.post('/api/settings/save-medicine-mapping', async (req, res) => {
-    const { config, mapping } = req.body;
+    const { config: requestedConfig, mapping } = req.body;
+    const config = { ...(requestedConfig || {}), siteId: req.siteContext?.siteId };
     const importProgress = setImportProgress('medicine', mappingSettingsService.createProgress(config));
     try {
       const result = await mappingSettingsService.saveMedicineMapping(db, appDataPath, config, mapping, importProgress);
@@ -346,7 +398,8 @@ module.exports = function (db, baseDir, appDataPath) {
 
   // 수질 매핑 설정 + DB에서 임포트 수행
   router.post('/api/settings/save-water-mapping', async (req, res) => {
-    const { config, mapping } = req.body;
+    const { config: requestedConfig, mapping } = req.body;
+    const config = { ...(requestedConfig || {}), siteId: req.siteContext?.siteId };
     const importProgress = setImportProgress('water', mappingSettingsService.createProgress(config));
     try {
       const result = await mappingSettingsService.saveWaterMapping(db, appDataPath, config, mapping, importProgress);
@@ -371,6 +424,7 @@ module.exports = function (db, baseDir, appDataPath) {
         appDataPath,
         reportsDir,
         excelOriginalsDir,
+        siteId: req.siteContext?.siteId,
       });
       res.json({ success: true, message: '파일 업로드 및 데이터 정보 수집 완료', ...result });
     } catch (err) {
@@ -406,7 +460,7 @@ module.exports = function (db, baseDir, appDataPath) {
   // 약품 기본 보관량 조회 API
   router.get('/api/settings/medicine-defaults', (req, res) => {
     try {
-      const items = defaultSettingsService.getMedicineDefaults(db);
+      const items = defaultSettingsService.getMedicineDefaults(db, req.siteContext?.siteId);
       res.json({ success: true, items });
     } catch (e) {
       res.status(500).json({ success: false, message: e.message });
@@ -417,7 +471,7 @@ module.exports = function (db, baseDir, appDataPath) {
   router.post('/api/settings/medicine-defaults', (req, res) => {
     const { items } = req.body;
     try {
-      const { rows, matchedCount, changedCount, skipped } = defaultSettingsService.saveItemDefaults(db, 'medicine', items);
+      const { rows, matchedCount, changedCount, skipped } = defaultSettingsService.saveItemDefaults(db, req.siteContext?.siteId, 'medicine', items);
 
       if (rows.length > 0 && matchedCount === 0) {
         return res.json({
@@ -446,7 +500,7 @@ module.exports = function (db, baseDir, appDataPath) {
   // 킷 기본 보관량 조회 API
   router.get('/api/settings/kit-defaults', (req, res) => {
     try {
-      const items = defaultSettingsService.getKitDefaults(db);
+      const items = defaultSettingsService.getKitDefaults(db, req.siteContext?.siteId);
       res.json({ success: true, items });
     } catch (e) {
       res.status(500).json({ success: false, message: e.message });
@@ -457,7 +511,7 @@ module.exports = function (db, baseDir, appDataPath) {
   router.post('/api/settings/kit-defaults', (req, res) => {
     const { items } = req.body;
     try {
-      const { rows, matchedCount, changedCount, skipped } = defaultSettingsService.saveItemDefaults(db, 'kit', items);
+      const { rows, matchedCount, changedCount, skipped } = defaultSettingsService.saveItemDefaults(db, req.siteContext?.siteId, 'kit', items);
 
       if (rows.length > 0 && matchedCount === 0) {
         return res.json({
@@ -486,7 +540,7 @@ module.exports = function (db, baseDir, appDataPath) {
   // 슬러지 반출 관리용 기본설정 조회/업데이트
   router.get('/api/settings/sludge-export-settings', (req, res) => {
     try {
-      const settings = defaultSettingsService.getSludgeExportSettings(db);
+      const settings = defaultSettingsService.getSludgeExportSettings(db, req.siteContext?.siteId);
       res.json({ success: true, settings });
     } catch (e) {
       res.status(e.statusCode || 500).json({ success: false, message: e.message });
@@ -495,7 +549,7 @@ module.exports = function (db, baseDir, appDataPath) {
 
   router.post('/api/settings/sludge-export-settings', (req, res) => {
     try {
-      const settings = defaultSettingsService.saveSludgeExportSettings(db, req.body || {});
+      const settings = defaultSettingsService.saveSludgeExportSettings(db, req.siteContext?.siteId, req.body || {});
       res.json({ success: true, settings });
     } catch (e) {
       res.status(e.statusCode || 500).json({ success: false, message: e.message });

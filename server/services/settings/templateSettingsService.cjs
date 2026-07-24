@@ -41,17 +41,31 @@ async function handleSettingsUpload(db, files, {
   appDataPath,
   reportsDir,
   excelOriginalsDir,
+  siteId,
 }) {
   const uploadFiles = files || {};
   const result = { originalPath: null, sheets: [] };
 
   if (uploadFiles.excel_original) {
     const original = uploadFiles.excel_original[0];
-    const filePath = path.join(excelOriginalsDir, original.filename);
-    const sheets = await parseAndStoreExcel(db, filePath);
-    const originalPath = `appdata/templates/excel-originals/${original.filename}`;
-    db.prepare('UPDATE app_settings SET excel_template_path = ? WHERE id = 1').run(originalPath);
-    cleanupInactiveExcelOriginals(excelOriginalsDir, original.filename);
+    const normalizedSiteId = String(siteId || '').trim();
+    if (!normalizedSiteId) throw new Error('엑셀 원본을 저장할 현장이 선택되지 않았습니다.');
+    const siteExcelDir = path.join(excelOriginalsDir, normalizedSiteId);
+    const filePath = original.path || path.join(siteExcelDir, original.filename);
+    const sheets = await parseAndStoreExcel(db, filePath, normalizedSiteId);
+    const originalPath = `appdata/templates/excel-originals/${normalizedSiteId}/${original.filename}`;
+    db.prepare(`
+      INSERT INTO site_settings (site_id, excel_template_path, updated_at)
+      VALUES (?, ?, datetime('now', 'localtime'))
+      ON CONFLICT(site_id) DO UPDATE SET
+        excel_template_path = excluded.excel_template_path,
+        updated_at = excluded.updated_at
+    `).run(normalizedSiteId, originalPath);
+    const legacySiteId = String(db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || '').trim();
+    if (legacySiteId === normalizedSiteId) {
+      db.prepare('UPDATE app_settings SET excel_template_path = ? WHERE id = 1').run(originalPath);
+    }
+    cleanupInactiveExcelOriginals(siteExcelDir, original.filename);
     result.originalPath = originalPath;
     result.sheets = sheets;
   }

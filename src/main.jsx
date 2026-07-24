@@ -6,6 +6,7 @@ import { initServerConfig } from './core/api/serverConfig.js'
 import SplashLoadingView from './components/SplashLoadingView.jsx'
 
 import { DialogProvider } from './components/common/DialogProvider.jsx'
+import { FocusDiagnostics } from './features/diagnostics/FocusDiagnostics.jsx'
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 
@@ -17,6 +18,7 @@ initServerConfig().then(() => {
   root.render(
     <React.StrictMode>
       <DialogProvider>
+        <FocusDiagnostics />
         <App />
       </DialogProvider>
     </React.StrictMode>

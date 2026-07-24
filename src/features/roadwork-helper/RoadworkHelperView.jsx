@@ -100,6 +100,129 @@ const ROADWORK_STATUS_SCRIPT = `
 })()
 `;
 
+const ROADWORK_STRUCTURE_SCRIPT = `
+(() => {
+  const clean = (value, max = 120) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
+  const safePath = (target) => {
+    try { return new URL(target.location.href).pathname; } catch { return ''; }
+  };
+  const describe = (element, includeText = true) => ({
+    tag: String(element?.tagName || '').toLowerCase(),
+    id: clean(element?.id, 100),
+    name: clean(element?.getAttribute?.('name'), 100),
+    role: clean(element?.getAttribute?.('role'), 60),
+    type: clean(element?.getAttribute?.('type'), 40),
+    className: clean(element?.className, 140),
+    ariaLabel: clean(element?.getAttribute?.('aria-label'), 100),
+    text: includeText ? clean(element?.innerText || element?.textContent, 100) : '',
+  });
+  const methodNames = (target, pattern) => {
+    if (!target) return [];
+    const names = new Set();
+    let current = target;
+    for (let depth = 0; current && depth < 5; depth += 1) {
+      for (const name of Object.getOwnPropertyNames(current)) {
+        try {
+          if (pattern.test(name) && typeof target[name] === 'function') names.add(name);
+        } catch {}
+      }
+      current = Object.getPrototypeOf(current);
+    }
+    return Array.from(names).sort().slice(0, 100);
+  };
+  const componentById = (target, id) => {
+    try {
+      return target[id]
+        || target.WebSquare?.util?.getComponentById?.(id)
+        || null;
+    } catch {
+      return null;
+    }
+  };
+  const getDataList = (target, grid) => {
+    try {
+      const candidate = grid?.getDataList?.();
+      if (!candidate) return null;
+      return typeof candidate === 'string' ? componentById(target, candidate) : candidate;
+    } catch {
+      return null;
+    }
+  };
+  const rowKeys = (dataList) => {
+    try {
+      const row = dataList?.getRowJSON?.(0) || dataList?.getRowData?.(0);
+      return row && typeof row === 'object' ? Object.keys(row).sort().slice(0, 100) : [];
+    } catch {
+      return [];
+    }
+  };
+  const componentProbe = (target, id) => {
+    const component = componentById(target, id);
+    const dataList = getDataList(target, component);
+    const count = (source) => {
+      try { return Number(source?.getRowCount?.() ?? source?.getTotalRow?.() ?? 0) || 0; } catch { return 0; }
+    };
+    return {
+      id,
+      found: Boolean(component),
+      dataListFound: Boolean(dataList),
+      componentMethods: methodNames(component, /row|cell|select|click|data|event|focus/i),
+      dataListMethods: methodNames(dataList, /row|cell|column|data|value|filter/i),
+      componentRowCount: count(component),
+      dataListRowCount: count(dataList),
+      firstRowKeys: rowKeys(dataList),
+    };
+  };
+  const pages = [];
+  const visited = [];
+  const visit = (target, depth = 0) => {
+    if (!target || visited.includes(target) || depth > 5) return;
+    visited.push(target);
+    let doc;
+    try { doc = target.document; } catch { return; }
+    if (!doc) return;
+    const tables = Array.from(doc.querySelectorAll('table')).slice(0, 40).map((table) => ({
+      id: clean(table.id, 100),
+      className: clean(table.className, 140),
+      rowCount: table.querySelectorAll('tbody tr').length,
+      headers: Array.from(table.querySelectorAll('thead th, thead td, tr:first-child th'))
+        .slice(0, 30).map((cell) => clean(cell.innerText || cell.textContent, 80)).filter(Boolean),
+    }));
+    const controls = Array.from(doc.querySelectorAll('button, a, input, select, textarea, [role="button"], [role="grid"], [role="row"]'))
+      .filter((element) => element.id || element.getAttribute('name') || element.getAttribute('role') || element.tagName === 'BUTTON')
+      .slice(0, 500)
+      .map(describe);
+    const likelyComponents = Array.from(doc.querySelectorAll('[id]'))
+      .filter((element) => /(grid|list|search|select|detail|date|day|daly|opdllg|pros|chmc|regdate)/i.test(element.id))
+      .slice(0, 500)
+      .map((element) => describe(element, false));
+    const frames = Array.from(doc.querySelectorAll('iframe, frame')).map((frame) => describe(frame));
+    const apiProbe = [
+      'grd_01',
+      'regDate',
+      'DalyOpDllgPros',
+      'DalyOpDllgChmc',
+    ].map((id) => componentProbe(target, id)).filter((item) => item.found);
+    pages.push({
+      depth,
+      path: safePath(target),
+      title: clean(doc.title, 120),
+      bodyId: clean(doc.body?.id, 100),
+      tables,
+      controls,
+      likelyComponents,
+      apiProbe,
+      frames,
+    });
+    for (const frame of doc.querySelectorAll('iframe, frame')) {
+      try { visit(frame.contentWindow, depth + 1); } catch {}
+    }
+  };
+  visit(window);
+  return { pages };
+})()
+`;
+
 function buildRoadworkAutoFillScriptV2(payload) {
   return `
 (() => {
@@ -623,6 +746,7 @@ export default function RoadworkHelperView() {
   const [roadworkStatus, setRoadworkStatus] = useState({ isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false });
   const [statusMessage, setStatusMessage] = useState('');
   const [isFilling, setIsFilling] = useState(false);
+  const [isDumpingStructure, setIsDumpingStructure] = useState(false);
 
   const fetchConfig = React.useCallback(async () => {
     if (!window.electronAPI?.invokeRoadwork) {
@@ -827,6 +951,26 @@ export default function RoadworkHelperView() {
     }
   }, [isFilling, roadworkStatus.canAutoFill, roadworkStatus.date, vm]);
 
+  const handleStructureDiagnostic = React.useCallback(async () => {
+    const webview = webviewRef.current;
+    if (!import.meta.env.DEV || !webview || isDumpingStructure) return;
+    try {
+      setIsDumpingStructure(true);
+      const structure = await webview.executeJavaScript(ROADWORK_STRUCTURE_SCRIPT);
+      const result = await window.electronAPI.invokeRoadwork('roadwork:dumpStructure', {
+        label: roadworkStatus.isDailyLog ? 'daily-detail' : 'list-or-menu',
+        pages: structure?.pages || [],
+      });
+      setStatusMessage(result?.success
+        ? `구조 진단 저장 완료: ${result.fileName}`
+        : `구조 진단 저장 실패: ${result?.error || '알 수 없는 오류'}`);
+    } catch (error) {
+      setStatusMessage(`구조 진단 저장 실패: ${error?.message || error}`);
+    } finally {
+      setIsDumpingStructure(false);
+    }
+  }, [isDumpingStructure, roadworkStatus.isDailyLog]);
+
   const showAutoFill = Boolean(webviewUrl);
   const disableAutoFill = !roadworkStatus.canAutoFill || roadworkStatus.date !== vm.date || vm.loading || isFilling || !vm.hasFillData;
   const autoFillLabel = vm.loading
@@ -860,6 +1004,7 @@ export default function RoadworkHelperView() {
           key={`${webviewUrl}-${preloadPath}-${webviewGeneration}`}
           ref={webviewRef}
           src={webviewUrl}
+          partition="persist:osoo-roadwork"
           className="roadwork-webview"
           nodeintegration="false"
           enableremotemodule="false"
@@ -902,6 +1047,17 @@ export default function RoadworkHelperView() {
           새로고침 (F5)
         </button>
         </div>
+      ) : null}
+      {import.meta.env.DEV && webviewUrl ? (
+        <button
+          type="button"
+          className="roadwork-structure-diagnostic-button"
+          onClick={handleStructureDiagnostic}
+          disabled={isDumpingStructure}
+          title="개발용: 도로공사 목록/상세 구조만 저장합니다."
+        >
+          {isDumpingStructure ? '구조 읽는 중…' : '구조 진단 저장'}
+        </button>
       ) : null}
     </div>
   );

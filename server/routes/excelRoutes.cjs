@@ -65,7 +65,7 @@ module.exports = function(db, baseDir, appDataPath) {
       }
 
       const range = normalizeDateRange(startDate, endDate);
-      const { siteName } = req.query;
+      const siteName = req.query.siteName || req.siteContext?.siteName || '';
       const activeDates = getActiveDates(db, range.startDate, range.endDate, siteName);
       console.log(`[Active Dates API] Range: ${range.startDate} ~ ${range.endDate}, Site: ${siteName || 'ALL'}, Found: ${activeDates.length}`);
       if (activeDates.length > 0) {
@@ -86,7 +86,7 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
-      const { siteName } = req.query;
+      const siteName = req.query.siteName || req.siteContext?.siteName || '';
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
 
@@ -105,7 +105,7 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
-      const { siteName } = req.query;
+      const siteName = req.query.siteName || req.siteContext?.siteName || '';
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       const targetPage = findPageInManifest(manifest, pageKey);
@@ -147,7 +147,7 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
-      const { siteName } = req.query;
+      const siteName = req.query.siteName || req.siteContext?.siteName || '';
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       const targetPage = findPageInManifest(manifest, pageKey);
@@ -193,7 +193,7 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
-      const { siteName } = req.query;
+      const siteName = req.query.siteName || req.siteContext?.siteName || '';
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       const parsedPageKey = pageKey ? parsePageKey(pageKey) : null;
@@ -226,7 +226,7 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
-      const { siteName } = req.query;
+      const siteName = req.query.siteName || req.siteContext?.siteName || '';
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
       const pdfPath = await buildBatchPreviewPdf({
@@ -262,7 +262,7 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
-      const { siteName } = req.query;
+      const siteName = req.query.siteName || req.siteContext?.siteName || '';
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
       console.log(`[Excel Export] Request Range: ${range.startDate} ~ ${range.endDate}, Site: ${siteName || 'ALL'}`);
       const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
@@ -317,8 +317,9 @@ module.exports = function(db, baseDir, appDataPath) {
       await workbook.xlsx.readFile(templateInfo.absolutePath);
       const worksheet = workbook.worksheets[0];
 
-      const flows = db.prepare('SELECT * FROM flow_readings WHERE date = ?').all(date);
-      const medicines = db.prepare('SELECT * FROM medicine_logs WHERE date = ?').all(date);
+      const siteId = String(req.siteContext?.siteId || '').trim();
+      const flows = db.prepare('SELECT * FROM flow_readings WHERE date = ? AND site_id = ?').all(date, siteId);
+      const medicines = db.prepare('SELECT * FROM medicine_logs WHERE date = ? AND site_id = ?').all(date, siteId);
 
       const getDataValue = (fieldName) => {
         if (fieldName === 'date') return date;

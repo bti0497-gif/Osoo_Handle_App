@@ -2,7 +2,9 @@
 const path = require('path');
 
 const EXCEL_TEMPLATE_EXTENSIONS = new Set(['.xlsx', '.xls', '.xlsm']);
+const HWP_TEMPLATE_EXTENSIONS = new Set(['.hwp']);
 const HWPX_TEMPLATE_EXTENSIONS = new Set(['.hwpx']);
+const DAILY_WORK_LOG_HWP_MIGRATION_MARKER = '.daily-work-log-hwp-v1';
 const ALLOWED_REPORT_TEMPLATE_NAMES = [
   '일일업무일지',
   '일일업무일지(A2O)',
@@ -135,6 +137,10 @@ function isHwpxReportTemplate(fileName) {
   return HWPX_TEMPLATE_EXTENSIONS.has(path.extname(String(fileName || '')).toLowerCase());
 }
 
+function isHwpReportTemplate(fileName) {
+  return HWP_TEMPLATE_EXTENSIONS.has(path.extname(String(fileName || '')).toLowerCase());
+}
+
 function isTemplateMatched(fileName, templateName) {
   const normalizedTarget = normalizeTemplateKey(templateName);
   if (!normalizedTarget) {
@@ -154,6 +160,28 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
   const customDir = getCustomReportTemplatesDir(appDataPath);
   removeDisallowedTemplates(customDir);
   const bundledDirs = getBundledReportTemplateDirs(baseDir);
+  const migrationMarker = path.join(path.dirname(customDir), DAILY_WORK_LOG_HWP_MIGRATION_MARKER);
+
+  if (!fs.existsSync(migrationMarker)) {
+    const hwpNames = ['일일업무일지(A2O).hwp', '일일업무일지(MBR).hwp'];
+    const backupDir = path.join(path.dirname(customDir), 'backup-before-hwp-migration');
+    let migrated = 0;
+    for (const fileName of hwpNames) {
+      const sourceDir = bundledDirs.find((dirPath) => fs.existsSync(path.join(dirPath, fileName)));
+      if (!sourceDir) continue;
+      const sourcePath = path.join(sourceDir, fileName);
+      const targetPath = path.join(customDir, fileName);
+      if (fs.existsSync(targetPath)) {
+        ensureDirectory(backupDir);
+        fs.copyFileSync(targetPath, path.join(backupDir, fileName));
+      }
+      fs.copyFileSync(sourcePath, targetPath);
+      migrated += 1;
+    }
+    if (migrated === hwpNames.length) {
+      fs.writeFileSync(migrationMarker, new Date().toISOString(), 'utf8');
+    }
+  }
 
   const existingFiles = listFiles(customDir);
   const existingNames = new Set(existingFiles.map((fileName) => normalizeTemplateKey(fileName)));
@@ -177,7 +205,7 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
         }
       })();
 
-      // 같은 일지의 Excel/HWPX 양식을 함께 유지한다.
+      // 같은 일지의 Excel/HWP/HWPX 양식을 함께 유지한다.
       if (existingNames.has(normalizeTemplateKey(fileName)) && !shouldReplacePlaceholder) {
         return;
       }
@@ -201,17 +229,19 @@ function listReportTemplates(baseDir, appDataPath) {
       fileName,
       relativePath: path.posix.join('templates', 'reports', fileName),
       isExcelTemplate: isExcelReportTemplate(fileName),
+      isHwpTemplate: isHwpReportTemplate(fileName),
       isHwpxTemplate: isHwpxReportTemplate(fileName),
     }));
 }
 
 function resolveReportTemplatePath(baseDir, appDataPath, templateName, options = {}) {
   const customDir = syncBundledTemplatesToAppData(baseDir, appDataPath);
-  const { excelOnly = false, hwpxOnly = false, method = '' } = options;
+  const { excelOnly = false, hwpOnly = false, hwpxOnly = false, method = '' } = options;
   const availableTemplates = listFiles(customDir)
     .filter((fileName) => !isOfficeLockFile(fileName))
     .filter((fileName) => isAllowedReportTemplateName(fileName))
     .filter((fileName) => !excelOnly || isExcelReportTemplate(fileName))
+    .filter((fileName) => !hwpOnly || isHwpReportTemplate(fileName))
     .filter((fileName) => !hwpxOnly || isHwpxReportTemplate(fileName));
 
   let targetName = String(templateName || '').trim();
@@ -252,6 +282,7 @@ module.exports = {
   getCustomReportTemplatesDir,
   isAllowedReportTemplateName,
   isExcelReportTemplate,
+  isHwpReportTemplate,
   isHwpxReportTemplate,
   listReportTemplates,
   resolveReportTemplatePath,

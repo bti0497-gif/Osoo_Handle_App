@@ -44,10 +44,10 @@ function seedInventoryRows(db, { tableName, nameColumn, itemName }) {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  insert.run(itemName, '2026-06-30', 10, 0, 10, '', '', '', '', 1);
-  insert.run(itemName, '2026-07-01', 0, 12, -2, '', '', '', '', 1);
-  insert.run(itemName, '2026-07-02', 5, 2, 3, '', '', '', '', 1);
-  insert.run(itemName, '2026-07-03', 0, 1, 2, '', '', '', '', 1);
+  insert.run(itemName, '2026-06-30', 10, 0, 10, metadata.siteId, metadata.siteName, metadata.author, '', 1);
+  insert.run(itemName, '2026-07-01', 0, 12, -2, metadata.siteId, metadata.siteName, metadata.author, '', 1);
+  insert.run(itemName, '2026-07-02', 5, 2, 3, metadata.siteId, metadata.siteName, metadata.author, '', 1);
+  insert.run(itemName, '2026-07-03', 0, 1, 2, metadata.siteId, metadata.siteName, metadata.author, '', 1);
 }
 
 function readInventory(db, { tableName, nameColumn, itemName }) {

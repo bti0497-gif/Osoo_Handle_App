@@ -73,7 +73,6 @@ function tryReadTasklistProcessNames() {
 
 function detectRemoteSession() {
   const confirmedIndicators = [];
-  const observedIndicators = [];
   const sessionName = String(process.env.SESSIONNAME || '').trim();
   const clientName = String(process.env.CLIENTNAME || '').trim();
   const sshConnection = String(process.env.SSH_CONNECTION || '').trim();
@@ -98,10 +97,11 @@ function detectRemoteSession() {
   const observedTools = [...new Set(
     [...matchedRemoteProcesses, ...matchedByKeyword].map(getRemoteToolLabel)
   )];
-  observedTools.forEach((tool) => observedIndicators.push(`tool_running:${tool}`));
 
   // A tray/service process only means that remote access is available. It is
-  // not proof that a remote operator is currently controlling this PC.
+  // not proof that a remote operator is currently controlling this PC. Keep
+  // the list out of attendance evidence so central monitoring cannot mistake
+  // an installed tray tool for an active remote session.
   const detected = confirmedIndicators.length > 0;
   let sessionType = 'local';
   if (sessionName.toUpperCase().startsWith('RDP-') || (clientName && clientName.toUpperCase() !== 'CONSOLE')) {
@@ -113,7 +113,7 @@ function detectRemoteSession() {
   return {
     detected,
     sessionType,
-    evidence: [...confirmedIndicators, ...observedIndicators].join('; '),
+    evidence: confirmedIndicators.join('; '),
     observedTools
   };
 }

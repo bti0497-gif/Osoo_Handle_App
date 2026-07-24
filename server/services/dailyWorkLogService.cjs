@@ -205,16 +205,21 @@ function getSiteSettings(db) {
 
 function resolveSiteScope(db, overrides = {}) {
   const settings = getSiteSettings(db);
+  const requestedSiteId = String(overrides.siteId || overrides.site_id || '').trim();
+  const scopedSettings = requestedSiteId ? db.prepare(`
+    SELECT s.id AS site_id, s.site_name, s.manager_name, s.method, s.series, ss.flow_option
+    FROM sites s LEFT JOIN site_settings ss ON ss.site_id = s.id
+    WHERE s.id = ?
+  `).get(requestedSiteId) || {} : settings;
   return {
-    siteId: String(overrides.siteId || overrides.site_id || settings.site_id || '').trim(),
-    siteName: String(overrides.siteName || overrides.site_name || settings.site_name || '').trim(),
-    author: String(overrides.author || settings.manager_name || '').trim(),
-    settings,
+    siteId: String(requestedSiteId || scopedSettings.site_id || '').trim(),
+    siteName: String(overrides.siteName || overrides.site_name || scopedSettings.site_name || '').trim(),
+    author: String(overrides.author || scopedSettings.manager_name || '').trim(),
+    settings: scopedSettings,
   };
 }
 
 function siteWhere(scope) {
-  if (scope?.siteId && scope?.siteName) return { clause: ' AND (site_id = ? OR site_name = ?)', params: [scope.siteId, scope.siteName] };
   if (scope?.siteId) return { clause: ' AND site_id = ?', params: [scope.siteId] };
   if (scope?.siteName) return { clause: ' AND site_name = ?', params: [scope.siteName] };
   return { clause: '', params: [] };
@@ -229,7 +234,11 @@ function resolveFlowOption(settings) {
   return 'single1';
 }
 
-function getActiveConfigItems(db, category) {
+function getActiveConfigItems(db, category, scope = resolveSiteScope(db)) {
+  if (scope?.siteId) {
+    return db.prepare("SELECT * FROM site_config_items WHERE site_id = ? AND category = ? AND is_active = 1 ORDER BY display_order ASC")
+      .all(scope.siteId, category);
+  }
   return db.prepare("SELECT * FROM config_items WHERE category = ? AND is_active = 1 ORDER BY display_order ASC").all(category);
 }
 
@@ -404,8 +413,8 @@ function findKitByKeyword(logs, keyword) {
   });
 }
 
-function findFlowTypeNameByKeyword(db, keyword) {
-  const items = getActiveConfigItems(db, 'flow');
+function findFlowTypeNameByKeyword(db, keyword, scope) {
+  const items = getActiveConfigItems(db, 'flow', scope);
   const normalizedItems = items
     .map((item) => ({
       ...item,
@@ -422,8 +431,8 @@ function findFlowTypeNameByKeyword(db, keyword) {
   return partialMatch?.normalizedName || keyword;
 }
 
-function getActiveBaseFlowNames(db) {
-  return getActiveConfigItems(db, 'flow')
+function getActiveBaseFlowNames(db, scope) {
+  return getActiveConfigItems(db, 'flow', scope)
     .map((item) => String(item.item_name || '').replace(/_(flow|raw)$/i, '').trim())
     .filter((name, index, names) => name && names.indexOf(name) === index);
 }
@@ -512,12 +521,12 @@ function buildBindingsForDate(db, date, context = {}) {
   //   파샬플롬 = 전체 유입량, 유입유량계 = 공정 유입량
   // 파샬플롬이 없는 현장:
   //   유입유량계 = 전체 유입량, 공정 유입량은 비움
-  const activeFlowNames = getActiveBaseFlowNames(db);
+  const activeFlowNames = getActiveBaseFlowNames(db, scope);
   const parshallType = activeFlowNames.find((name) => name.includes('파샬')) || '';
   const processInType = activeFlowNames.find((name) => name === '유입유량계')
     || activeFlowNames.find((name) => name.includes('유입')) || '';
   const hasParshall = Boolean(parshallType);
-  const flowInType = hasParshall ? parshallType : (processInType || findFlowTypeNameByKeyword(db, '유입'));
+  const flowInType = hasParshall ? parshallType : (processInType || findFlowTypeNameByKeyword(db, '유입', scope));
   const flowIn = findFlowByType(flows, flowInType);
   const prevFlowIn = findFlowByType(prevFlows, flowInType);
   bindings['유입전일'] = prevFlowIn?.raw_value ?? '';
@@ -535,7 +544,7 @@ function buildBindingsForDate(db, date, context = {}) {
   // 방류유량계
   const flowOut = findFlowByKeyword(flows, '방류');
   const prevFlowOut = findFlowByKeyword(prevFlows, '방류');
-  const flowOutType = findFlowTypeNameByKeyword(db, '방류');
+  const flowOutType = findFlowTypeNameByKeyword(db, '방류', scope);
   bindings['방류전일'] = prevFlowOut?.raw_value ?? '';
   bindings['방류금일'] = flowOut?.raw_value ?? '';
   bindings['방류누계'] = flowOut?.calculated_flow ?? '';
@@ -563,13 +572,13 @@ function buildBindingsForDate(db, date, context = {}) {
   // 슬러지 처리량은 총 누계(calculated_flow)가 아니라 반출량(sludge_export) 기준이다.
   // 반출이 없는 날이 많으므로 값이 없으면 빈 칸으로 유지하고, 월간/연간도 반출량만 누적한다.
   const flowSludge = findFlowByKeyword(flows, '슬러지');
-  const sludgeType = findFlowTypeNameByKeyword(db, '슬러지');
+  const sludgeType = findFlowTypeNameByKeyword(db, '슬러지', scope);
   bindings['슬러지'] = flowSludge?.sludge_export ?? flowSludge?.raw_value ?? '';
   bindings['월간슬러지'] = sumFlowField(db, sludgeType, 'COALESCE(sludge_export, raw_value)', monthStart, date, scope);
   bindings['연간슬러지'] = sumFlowField(db, sludgeType, 'COALESCE(sludge_export, raw_value)', yearStart, date, scope);
 
   // --- 약품 데이터 ---
-  let allMedicineItems = getActiveConfigItems(db, 'medicine');
+  let allMedicineItems = getActiveConfigItems(db, 'medicine', scope);
   
   // 과거 매핑 찌꺼기(DB 칼럼명 형태) 제외
   allMedicineItems = allMedicineItems.filter(item => {
@@ -648,7 +657,7 @@ function buildBindingsForDate(db, date, context = {}) {
   });
 
   // --- 키트 데이터 ---
-  let allKitItems = getActiveConfigItems(db, 'kit');
+  let allKitItems = getActiveConfigItems(db, 'kit', scope);
   allKitItems = allKitItems.filter(item => {
     const name = item.item_name || '';
     return !name.includes('_purchase') && !name.includes('_usage') && !name.includes('_inventory');

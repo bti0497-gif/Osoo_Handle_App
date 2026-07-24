@@ -24,9 +24,9 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchProjectsForDate(db, date) {
+async function fetchProjectsForDate(db, date, siteContext = {}) {
   const normalizedDate = normalizeDateInput(date);
-  const client = await createAuthenticatedClient(db);
+  const client = await createAuthenticatedClient(db, siteContext);
   return fetchProjectsForDateWithClient(client, normalizedDate);
 }
 
@@ -103,7 +103,7 @@ function waterRowsMatchExisting(db, importedRows, metadata = {}) {
   return true;
 }
 
-function persistWaterRows(db, importedRows) {
+function persistWaterRows(db, importedRows, siteContext = {}) {
   if (!Array.isArray(importedRows) || importedRows.length === 0) {
     return {
       insertedRowCount: 0,
@@ -113,7 +113,7 @@ function persistWaterRows(db, importedRows) {
     };
   }
 
-  const metadata = getCurrentRecordMetadata(db);
+  const metadata = getCurrentRecordMetadata(db, siteContext);
   if (waterRowsMatchExisting(db, importedRows, metadata)) {
     return {
       insertedRowCount: 0,
@@ -126,7 +126,7 @@ function persistWaterRows(db, importedRows) {
   const existingRowStmt = db.prepare(`
     SELECT 1
     FROM qntech_water_quality
-    WHERE date = ? AND measurement_group = ? AND location = ? AND item_code = ?
+    WHERE site_id = ? AND date = ? AND measurement_group = ? AND location = ? AND item_code = ?
     LIMIT 1
   `);
 
@@ -136,7 +136,7 @@ function persistWaterRows(db, importedRows) {
       location, item_name, item_code, result_value, result_numeric, unit,
       input_status, site_id, site_name, author, created_at, last_modified, is_synced
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET
+    ON CONFLICT(site_id, date, measurement_group, location, item_code) DO UPDATE SET
       measurement_order = excluded.measurement_order,
       source_type = excluded.source_type,
       input_status = excluded.input_status,
@@ -157,7 +157,7 @@ function persistWaterRows(db, importedRows) {
   const runInsert = db.transaction((rows) => {
     rows.forEach((item) => {
       const measurementGroup = item.measurement_group || `manual:${item.date}`;
-      if (!existingRowStmt.get(item.date, measurementGroup, item.location || '유입수', item.item_code || '')) {
+      if (!existingRowStmt.get(metadata.siteId, item.date, measurementGroup, item.location || '유입수', item.item_code || '')) {
         insertedRowCount += 1;
       }
 
@@ -220,8 +220,8 @@ async function fetchProjectsForDateWithClient(client, normalizedDate) {
   };
 }
 
-async function importQntechWaterValues(db, date) {
-  const context = await fetchProjectsForDate(db, date);
+async function importQntechWaterValues(db, date, siteContext = {}) {
+  const context = await fetchProjectsForDate(db, date, siteContext);
   const activeLocations = getActiveLocations(db);
   const configuredSampleMappings = getConfiguredSampleMappings(db);
   const mapped = mapProjectsToWaterRows(context.projects, activeLocations, configuredSampleMappings, {
@@ -239,8 +239,8 @@ async function importQntechWaterValues(db, date) {
   };
 }
 
-async function importQntechWaterPhotos(db, baseDir, date) {
-  const context = await fetchProjectsForDate(db, date);
+async function importQntechWaterPhotos(db, baseDir, date, siteContext = {}) {
+  const context = await fetchProjectsForDate(db, date, siteContext);
   const photoSetting = db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
   const photoResult = await saveProjectPhotos({
     db,
@@ -261,15 +261,15 @@ async function importQntechWaterPhotos(db, baseDir, date) {
   };
 }
 
-async function importQntechWaterAll(db, baseDir, date) {
-  const context = await fetchProjectsForDate(db, date);
+async function importQntechWaterAll(db, baseDir, date, siteContext = {}) {
+  const context = await fetchProjectsForDate(db, date, siteContext);
   const activeLocations = getActiveLocations(db);
   const configuredSampleMappings = getConfiguredSampleMappings(db);
   const photoSetting = db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
   const mapped = mapProjectsToWaterRows(context.projects, activeLocations, configuredSampleMappings, {
     fallbackDate: context.date
   });
-  const persistResult = persistWaterRows(db, mapped.importedRows);
+  const persistResult = persistWaterRows(db, mapped.importedRows, siteContext);
   const photoResult = await saveProjectPhotos({
     db,
     baseUrl: context.client.baseUrl,
@@ -311,9 +311,9 @@ async function importQntechWaterAll(db, baseDir, date) {
 }
 
 async function importQntechWaterRange(db, baseDir, startDate, endDate, options = {}) {
-  const { onProgress } = options;
+  const { onProgress, siteContext = {} } = options;
   const dates = enumerateDates(startDate, endDate);
-  const client = await createAuthenticatedClient(db);
+  const client = await createAuthenticatedClient(db, siteContext);
   const activeLocations = getActiveLocations(db);
   const configuredSampleMappings = getConfiguredSampleMappings(db);
   const photoSetting = db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
@@ -350,7 +350,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
     const mapped = mapProjectsToWaterRows(context.projects, activeLocations, configuredSampleMappings, {
       fallbackDate: context.date
     });
-    const persistResult = persistWaterRows(db, mapped.importedRows);
+    const persistResult = persistWaterRows(db, mapped.importedRows, siteContext);
     const insertedRowCount = persistResult.insertedRowCount;
     const hadExistingValues = persistResult.matchedExistingData
       || persistResult.upsertedRowCount > insertedRowCount;
