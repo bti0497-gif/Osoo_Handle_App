@@ -26,14 +26,16 @@ function recalculateInventoryCascade(db, {
   const normalizedExplicitDates = explicitDates instanceof Set
     ? explicitDates
     : new Set(explicitDates || []);
+  const siteId = String(metadata?.siteId || '').trim();
+  if (!siteId) throw new Error('재고 연쇄 계산에 site_id가 필요합니다.');
   const previous = startDate
     ? db.prepare(`
         SELECT current_inventory
         FROM ${tableName}
-        WHERE ${nameColumn} = ? AND date < ?
+        WHERE site_id = ? AND ${nameColumn} = ? AND date < ?
         ORDER BY date DESC, id DESC
         LIMIT 1
-      `).get(itemName, startDate)
+      `).get(siteId, itemName, startDate)
     : null;
   const rows = db.prepare(`
     SELECT id, date,
@@ -41,9 +43,9 @@ function recalculateInventoryCascade(db, {
            COALESCE(usage_amount, 0) AS usage_amount,
            current_inventory, is_synced, last_modified
     FROM ${tableName}
-    WHERE ${nameColumn} = ? AND (? IS NULL OR date >= ?)
+    WHERE site_id = ? AND ${nameColumn} = ? AND (? IS NULL OR date >= ?)
     ORDER BY date ASC, id ASC
-  `).all(itemName, startDate || null, startDate || null);
+  `).all(siteId, itemName, startDate || null, startDate || null);
 
   const updateStmt = db.prepare(`
     UPDATE ${tableName}

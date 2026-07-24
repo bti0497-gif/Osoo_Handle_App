@@ -101,6 +101,26 @@ function formatTimestamp(date = new Date()) {
 }
 
 function registerDevHandlers(ipcMain, app) {
+  ipcMain.handle('roadwork:dumpStructure', async (_event, payload = {}) => {
+    try {
+      const timestamp = formatTimestamp();
+      const label = sanitizeLabel(payload.label || 'structure');
+      const targetDir = path.join(getCanonicalAppDataPath(app), 'roadwork-debug');
+      fs.mkdirSync(targetDir, { recursive: true });
+      const targetPath = path.join(targetDir, `${timestamp}-${label}.structure.json`);
+      fs.writeFileSync(targetPath, JSON.stringify({
+        label,
+        savedAt: new Date().toISOString(),
+        pages: Array.isArray(payload.pages) ? payload.pages : [],
+      }, null, 2), 'utf8');
+      console.log('[Roadwork] Structure dump saved to:', targetPath);
+      return { success: true, path: targetPath, label, fileName: path.basename(targetPath) };
+    } catch (err) {
+      console.error('[Roadwork] Failed to dump structure:', err.message);
+      return { success: false, error: err.message };
+    }
+  });
+
   ipcMain.handle('roadwork:dumpHtml', async (_event, payload) => {
     try {
       const options = typeof payload === 'string' ? { html: payload } : (payload || {});

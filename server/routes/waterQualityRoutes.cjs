@@ -108,7 +108,7 @@ function createUpsertStatement(db) {
       location, item_name, item_code, result_value, result_numeric, unit,
       input_status, site_id, site_name, author, created_at, last_modified, is_synced
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET
+    ON CONFLICT(site_id, date, measurement_group, location, item_code) DO UPDATE SET
       measurement_order = excluded.measurement_order,
       source_type = excluded.source_type,
       input_status = excluded.input_status,
@@ -253,7 +253,7 @@ module.exports = function (db, baseDir) {
   router.post('/api/water-quality/import-values-from-qntech', async (req, res) => {
     const { date } = req.body || {};
     try {
-      const result = await importQntechWaterValues(db, date);
+      const result = await importQntechWaterValues(db, date, req.siteContext);
       res.json({ success: true, ...result });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message, error: err.message });
@@ -263,7 +263,7 @@ module.exports = function (db, baseDir) {
   router.post('/api/water-quality/import-photos-from-qntech', async (req, res) => {
     const { date } = req.body || {};
     try {
-      const result = await importQntechWaterPhotos(db, baseDir, date);
+      const result = await importQntechWaterPhotos(db, baseDir, date, req.siteContext);
       res.json({ success: true, ...result });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message, error: err.message });
@@ -273,7 +273,7 @@ module.exports = function (db, baseDir) {
   router.post('/api/water-quality/import-from-qntech', async (req, res) => {
     const { date } = req.body || {};
     try {
-      const result = await importQntechWaterAll(db, baseDir, date);
+      const result = await importQntechWaterAll(db, baseDir, date, req.siteContext);
       const metadata = getCurrentRecordMetadata(db, req.body);
       const kitUsageSync = result?.date && !result?.summary?.matchedExistingData
         ? maybeSyncAnalysisKitUsageForRange(db, result.date, result.date, metadata, req.body)
@@ -323,6 +323,7 @@ module.exports = function (db, baseDir) {
     void (async () => {
       try {
         const result = await importQntechWaterRange(db, baseDir, startDate, endDate, {
+          siteContext: payload,
           onProgress: (progress) => {
             rangeImportProgress = { ...rangeImportProgress, ...progress, jobId };
           }

@@ -87,7 +87,7 @@ module.exports = function (db) {
                     kit_name, date, purchase_amount, usage_amount, current_inventory,
                     input_status, site_id, site_name, author, created_at, last_modified, is_synced
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(kit_name, date) DO UPDATE SET
+                ON CONFLICT(site_id, kit_name, date) DO UPDATE SET
                     purchase_amount = excluded.purchase_amount,
                     usage_amount = excluded.usage_amount,
                     current_inventory = excluded.current_inventory,
@@ -168,7 +168,7 @@ module.exports = function (db) {
                     kit_name, date, purchase_amount, usage_amount, current_inventory,
                     input_status, site_id, site_name, author, created_at, last_modified, is_synced
                 ) VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(kit_name, date) DO UPDATE SET
+                    ON CONFLICT(site_id, kit_name, date) DO UPDATE SET
                     purchase_amount = excluded.purchase_amount,
                     input_status = excluded.input_status,
                     site_id = excluded.site_id,
@@ -228,13 +228,13 @@ module.exports = function (db) {
             let updatedCellCount = 0;
             let alreadyMatchedCellCount = 0;
 
-            const selectUsageStmt = db.prepare('SELECT COALESCE(usage_amount, 0) AS usage_amount FROM kit_logs WHERE kit_name = ? AND date = ?');
+            const selectUsageStmt = db.prepare('SELECT COALESCE(usage_amount, 0) AS usage_amount FROM kit_logs WHERE site_id = ? AND kit_name = ? AND date = ?');
             const upsertUsageStmt = db.prepare(`
                 INSERT INTO kit_logs (
                     kit_name, date, purchase_amount, usage_amount, current_inventory,
                     input_status, site_id, site_name, author, created_at, last_modified, is_synced
                 ) VALUES (?, ?, 0, ?, 0, 'imported', ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(kit_name, date) DO UPDATE SET
+                    ON CONFLICT(site_id, kit_name, date) DO UPDATE SET
                     usage_amount = excluded.usage_amount,
                     input_status = excluded.input_status,
                     site_id = excluded.site_id,
@@ -248,7 +248,7 @@ module.exports = function (db) {
                 for (const [date, expected] of expectedByDate.entries()) {
                     for (const { kitName } of KIT_FIELD_MAP) {
                         const analysisUsage = Number(expected[kitName] || 0);
-                        const currentUsage = Number(selectUsageStmt.get(kitName, date)?.usage_amount || 0);
+                        const currentUsage = Number(selectUsageStmt.get(metadata.siteId, kitName, date)?.usage_amount || 0);
                         const targetUsage = Math.max(currentUsage, analysisUsage);
                         if (currentUsage === targetUsage) {
                             alreadyMatchedCellCount += 1;

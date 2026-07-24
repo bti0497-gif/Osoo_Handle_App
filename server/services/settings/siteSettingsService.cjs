@@ -112,6 +112,16 @@ async function listSites(db) {
     source = 'local';
   }
 
+  const koreanSiteNameCollator = new Intl.Collator('ko-KR', {
+    usage: 'sort',
+    sensitivity: 'base',
+    numeric: true,
+  });
+  sites.sort((left, right) => koreanSiteNameCollator.compare(
+    String(left?.site_name || '').trim(),
+    String(right?.site_name || '').trim()
+  ));
+
   const current = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get();
   const currentSiteId = String(current?.site_id || '').trim();
 

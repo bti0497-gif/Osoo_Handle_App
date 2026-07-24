@@ -44,6 +44,7 @@ const sessionRestoreText = read('src/features/auth/sessionRestoreFlow.js');
 const activeUserText = read('server/services/activeUserSessionService.cjs');
 const attendanceBqText = read('server/services/attendanceBigQueryService.cjs');
 const remoteSessionDetectText = read('server/services/remoteSessionDetectService.cjs');
+const databaseText = read('server/database.cjs');
 const appText = read('src/App.jsx');
 const mainText = read('src/main.jsx');
 const statusBarText = read('src/components/StatusBar.jsx');
@@ -69,6 +70,17 @@ check(
   ]),
   'contract document covers login/session/attendance invariants',
   'AUTH_SESSION_CONTRACT.md is missing required invariants'
+);
+
+check(
+  containsAll(databaseText, [
+    "remote_session_evidence, '') LIKE '%tool_running:%'",
+    "remote_session_detected = 0",
+    "remote_session_type = 'local'",
+    'is_synced = 0',
+  ]),
+  'legacy tray-process attendance false positives are queued for correction',
+  'legacy tray-process attendance false positives may remain visible in central monitoring'
 );
 
 check(
@@ -103,9 +115,11 @@ check(
     "sessionType = 'Windows RDP'",
     "sessionType = 'SSH'",
     'const detected = confirmedIndicators.length > 0',
-    'tool_running:',
+    'evidence: confirmedIndicators.join',
     'observedTools',
-  ]) && !remoteSessionDetectText.includes('const detected = indicators.length > 0'),
+  ]) &&
+    !remoteSessionDetectText.includes('const detected = indicators.length > 0') &&
+    !remoteSessionDetectText.includes('observedIndicators.push'),
   'remote detector separates confirmed sessions from running tray tools',
   'a running remote-control tray process may be misclassified as an active remote session'
 );

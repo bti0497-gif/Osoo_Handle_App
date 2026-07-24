@@ -20,6 +20,7 @@ function dbStub() {
           throw new Error(`Unexpected get query: ${sql} / ${args}`);
         },
         all() {
+          if (sql.includes('FROM site_config_items')) sql = sql.replace('FROM site_config_items', 'FROM config_items');
           if (sql.includes('FROM config_items')) return [{ item_name: '포도당' }, { item_name: '중탄산나트륨' }, { item_name: '팩(PAC)' }];
           if (sql.includes('FROM flow_readings')) return [
             { date: '2026-07-01', type: '유입유량계', calculated_flow: 12.5, sludge_export: null },

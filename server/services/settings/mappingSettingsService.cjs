@@ -1,8 +1,8 @@
 const { getCurrentRecordMetadata } = require('../syncMetadataService.cjs');
 const { getRangeCell, hasStoredData, formatDate, readExcelRange } = require('../excelService.cjs');
 
-function ensureExcelReady(db) {
-  if (!hasStoredData(db)) {
+function ensureExcelReady(db, siteId) {
+  if (!hasStoredData(db, siteId)) {
     throw new Error('엑셀 원본 데이터가 아직 준비되지 않았습니다. 먼저 파일을 업로드해주세요.');
   }
 }
@@ -94,9 +94,40 @@ function collectMappedDates(rows, startRow, endRow, dateCol, label) {
   return dates;
 }
 
-function saveMappingSettings(db, sql, config) {
+function saveMappingSettings(db, prefix, config, siteId) {
   const { sheet, startRow, endRow, dateCol } = config;
-  db.prepare(sql).run(sheet, startRow, endRow, dateCol);
+  db.prepare(`
+    INSERT INTO site_settings (
+      site_id, ${prefix}_sheet, ${prefix}_start_row, ${prefix}_end_row, ${prefix}_date_col, updated_at
+    ) VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))
+    ON CONFLICT(site_id) DO UPDATE SET
+      ${prefix}_sheet = excluded.${prefix}_sheet,
+      ${prefix}_start_row = excluded.${prefix}_start_row,
+      ${prefix}_end_row = excluded.${prefix}_end_row,
+      ${prefix}_date_col = excluded.${prefix}_date_col,
+      updated_at = excluded.updated_at
+  `).run(siteId, sheet, startRow, endRow, dateCol);
+  const legacySiteId = String(db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || '').trim();
+  if (legacySiteId === String(siteId)) {
+    db.prepare(`
+      UPDATE app_settings
+      SET ${prefix}_sheet = ?, ${prefix}_start_row = ?, ${prefix}_end_row = ?, ${prefix}_date_col = ?
+      WHERE id = 1
+    `).run(sheet, startRow, endRow, dateCol);
+  }
+}
+
+function isLegacyActiveSite(db, siteId) {
+  const legacySiteId = String(db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || '').trim();
+  return legacySiteId === String(siteId || '').trim();
+}
+
+function mirrorMappingItemToLegacy(db, category, itemName, excelCell) {
+  db.prepare(`
+    INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order)
+    VALUES (?, ?, ?, 1, 0)
+    ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell
+  `).run(category, itemName, excelCell);
 }
 
 function groupInventoryMappings(mapping) {
@@ -112,10 +143,10 @@ function groupInventoryMappings(mapping) {
   return grouped;
 }
 
-function filterInventoryMappingByActiveItems(db, category, mapping) {
+function filterInventoryMappingByActiveItems(db, siteId, category, mapping) {
   const activeItems = db.prepare(
-    "SELECT item_name FROM config_items WHERE category = ? AND is_active = 1 AND item_name NOT LIKE '%\\_purchase' ESCAPE '\\' AND item_name NOT LIKE '%\\_usage' ESCAPE '\\' AND item_name NOT LIKE '%\\_inventory' ESCAPE '\\'"
-  ).all(category);
+    "SELECT item_name FROM site_config_items WHERE site_id = ? AND category = ? AND is_active = 1 AND item_name NOT LIKE '%\\_purchase' ESCAPE '\\' AND item_name NOT LIKE '%\\_usage' ESCAPE '\\' AND item_name NOT LIKE '%\\_inventory' ESCAPE '\\'"
+  ).all(siteId, category);
   if (activeItems.length === 0) return mapping;
 
   const allowedNames = new Set(activeItems.map((row) => row.item_name));
@@ -130,19 +161,20 @@ function filterInventoryMappingByActiveItems(db, category, mapping) {
 
 async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
   const { sheet, startRow, endRow, dateCol } = config;
+  const metadata = getCurrentRecordMetadata(db, config || {});
+  if (!metadata.siteId) throw new Error('엑셀 매핑을 저장할 현장이 선택되지 않았습니다.');
 
-  saveMappingSettings(
-    db,
-    'UPDATE app_settings SET flow_sheet = ?, flow_start_row = ?, flow_end_row = ?, flow_date_col = ? WHERE id = 1',
-    config
-  );
+  saveMappingSettings(db, 'flow', config, metadata.siteId);
 
-  const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('flow', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
+  const upsertStmt = db.prepare("INSERT INTO site_config_items (site_id, category, item_name, excel_cell, is_active, display_order) VALUES (?, 'flow', ?, ?, 1, 0) ON CONFLICT(site_id, category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell, updated_at = datetime('now', 'localtime')");
   Object.entries(mapping || {}).forEach(([name, col]) => {
-    if (name.endsWith('_raw') || name.endsWith('_flow')) upsertStmt.run(name, col);
+    if (name.endsWith('_raw') || name.endsWith('_flow')) {
+      upsertStmt.run(metadata.siteId, name, col);
+      if (isLegacyActiveSite(db, metadata.siteId)) mirrorMappingItemToLegacy(db, 'flow', name, col);
+    }
   });
 
-  ensureExcelReady(db);
+  ensureExcelReady(db, metadata.siteId);
 
   const flows = {};
   Object.keys(mapping || {}).forEach((key) => {
@@ -156,14 +188,13 @@ async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
 
   const scanStartRow = Math.max(1, Number(startRow) - 30);
   const scanEndRow = Math.max(Number(endRow) + 30, Number(startRow) + 30);
-  const rows = await readExcelRange(db, appDataPath, sheet, scanStartRow, scanEndRow, collectColumns(dateCol, flows));
+  const rows = await readExcelRange(db, appDataPath, sheet, scanStartRow, scanEndRow, collectColumns(dateCol, flows), metadata.siteId);
   const mappedDates = collectMappedDates(rows, startRow, endRow, dateCol, '유량 데이터');
-  const metadata = getCurrentRecordMetadata(db, config || {});
   const insertReading = db.prepare(`
     INSERT INTO flow_readings (
       date, type, raw_value, calculated_flow, input_status, site_id, site_name, author, created_at, last_modified, is_synced
     ) VALUES (?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(date, type) DO UPDATE SET
+    ON CONFLICT(site_id, date, type) DO UPDATE SET
       raw_value = excluded.raw_value,
       calculated_flow = excluded.calculated_flow,
       input_status = excluded.input_status,
@@ -177,12 +208,12 @@ async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
 
   db.transaction(() => {
     const flowNames = Object.keys(flows).filter(Boolean);
-    db.prepare("DELETE FROM flow_readings WHERE input_status = 'imported'").run();
+    db.prepare("DELETE FROM flow_readings WHERE input_status = 'imported' AND site_id = ?").run(metadata.siteId);
     if (flowNames.length > 0 && mappedDates.length > 0) {
       const placeholders = flowNames.map(() => '?').join(',');
       const datePlaceholders = mappedDates.map(() => '?').join(',');
-      db.prepare(`DELETE FROM flow_readings WHERE date IN (${datePlaceholders}) AND type IN (${placeholders})`)
-        .run(...mappedDates, ...flowNames);
+      db.prepare(`DELETE FROM flow_readings WHERE site_id = ? AND date IN (${datePlaceholders}) AND type IN (${placeholders})`)
+        .run(metadata.siteId, ...mappedDates, ...flowNames);
     }
 
     for (let r = startRow; r <= endRow; r += 1) {
@@ -221,35 +252,39 @@ async function saveFlowMapping(db, appDataPath, config, mapping, progress) {
 
 async function saveInventoryMapping(db, appDataPath, config, mapping, progress, options) {
   const { sheet, startRow, endRow, dateCol } = config;
+  const metadata = getCurrentRecordMetadata(db, config || {});
+  if (!metadata.siteId) throw new Error('엑셀 매핑을 저장할 현장이 선택되지 않았습니다.');
   const scopedMapping = options.category
-    ? filterInventoryMappingByActiveItems(db, options.category, mapping)
+    ? filterInventoryMappingByActiveItems(db, metadata.siteId, options.category, mapping)
     : mapping;
 
-  saveMappingSettings(db, options.updateSettingsSql, config);
+  saveMappingSettings(db, options.settingsPrefix, config, metadata.siteId);
   const upsertStmt = db.prepare(options.upsertConfigSql);
-  Object.entries(scopedMapping || {}).forEach(([key, col]) => upsertStmt.run(key, col));
+  Object.entries(scopedMapping || {}).forEach(([key, col]) => {
+    upsertStmt.run(metadata.siteId, key, col);
+    if (isLegacyActiveSite(db, metadata.siteId)) mirrorMappingItemToLegacy(db, options.category, key, col);
+  });
 
-  ensureExcelReady(db);
+  ensureExcelReady(db, metadata.siteId);
 
   const grouped = groupInventoryMappings(scopedMapping);
   const scanStartRow = Math.max(1, Number(startRow) - 30);
   const scanEndRow = Math.max(Number(endRow) + 30, Number(startRow) + 30);
-  const rows = await readExcelRange(db, appDataPath, sheet, scanStartRow, scanEndRow, collectColumns(dateCol, grouped));
+  const rows = await readExcelRange(db, appDataPath, sheet, scanStartRow, scanEndRow, collectColumns(dateCol, grouped), metadata.siteId);
   const mappedDates = collectMappedDates(rows, startRow, endRow, dateCol, options.label || '재고 데이터');
-  const metadata = getCurrentRecordMetadata(db, config || {});
   const insertStmt = db.prepare(options.insertSql);
   const importedData = [];
 
   db.transaction(() => {
     const itemNames = Object.keys(grouped).filter(Boolean);
     if (options.tableName) {
-      db.prepare(`DELETE FROM ${options.tableName} WHERE input_status = 'imported'`).run();
+      db.prepare(`DELETE FROM ${options.tableName} WHERE input_status = 'imported' AND site_id = ?`).run(metadata.siteId);
     }
     if (itemNames.length > 0 && mappedDates.length > 0 && options.deleteSqlPrefix) {
       const placeholders = itemNames.map(() => '?').join(',');
       const datePlaceholders = mappedDates.map(() => '?').join(',');
-      db.prepare(`${options.deleteSqlPrefix} date IN (${datePlaceholders}) AND ${options.nameColumn} IN (${placeholders})`)
-        .run(...mappedDates, ...itemNames);
+      db.prepare(`${options.deleteSqlPrefix} site_id = ? AND date IN (${datePlaceholders}) AND ${options.nameColumn} IN (${placeholders})`)
+        .run(metadata.siteId, ...mappedDates, ...itemNames);
     }
 
     for (let r = startRow; r <= endRow; r += 1) {
@@ -296,13 +331,13 @@ function saveKitMapping(db, appDataPath, config, mapping, progress) {
     label: '키트 데이터',
     nameColumn: 'kit_name',
     deleteSqlPrefix: 'DELETE FROM kit_logs WHERE',
-    updateSettingsSql: 'UPDATE app_settings SET kit_sheet = ?, kit_start_row = ?, kit_end_row = ?, kit_date_col = ? WHERE id = 1',
-    upsertConfigSql: "INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('kit', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell",
+    settingsPrefix: 'kit',
+    upsertConfigSql: "INSERT INTO site_config_items (site_id, category, item_name, excel_cell, is_active, display_order) VALUES (?, 'kit', ?, ?, 1, 0) ON CONFLICT(site_id, category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell, updated_at = datetime('now', 'localtime')",
     insertSql: `
     INSERT INTO kit_logs (
         kit_name, date, purchase_amount, usage_amount, current_inventory, input_status, site_id, site_name, author, created_at, last_modified, is_synced
       ) VALUES (?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(kit_name, date) DO UPDATE SET
+      ON CONFLICT(site_id, kit_name, date) DO UPDATE SET
         purchase_amount = excluded.purchase_amount,
         usage_amount = excluded.usage_amount,
         current_inventory = excluded.current_inventory,
@@ -324,13 +359,13 @@ function saveMedicineMapping(db, appDataPath, config, mapping, progress) {
     label: '약품 데이터',
     nameColumn: 'medicine_name',
     deleteSqlPrefix: 'DELETE FROM medicine_logs WHERE',
-    updateSettingsSql: 'UPDATE app_settings SET med_sheet = ?, med_start_row = ?, med_end_row = ?, med_date_col = ? WHERE id = 1',
-    upsertConfigSql: "INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('medicine', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell",
+    settingsPrefix: 'med',
+    upsertConfigSql: "INSERT INTO site_config_items (site_id, category, item_name, excel_cell, is_active, display_order) VALUES (?, 'medicine', ?, ?, 1, 0) ON CONFLICT(site_id, category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell, updated_at = datetime('now', 'localtime')",
     insertSql: `
     INSERT INTO medicine_logs (
         medicine_name, date, purchase_amount, usage_amount, current_inventory, input_status, site_id, site_name, author, created_at, last_modified, is_synced
       ) VALUES (?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(medicine_name, date) DO UPDATE SET
+      ON CONFLICT(site_id, medicine_name, date) DO UPDATE SET
         purchase_amount = excluded.purchase_amount,
         usage_amount = excluded.usage_amount,
         current_inventory = excluded.current_inventory,
@@ -347,12 +382,10 @@ function saveMedicineMapping(db, appDataPath, config, mapping, progress) {
 
 async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
   const { sheet, startRow, endRow, dateCol } = config;
+  const metadata = getCurrentRecordMetadata(db, config || {});
+  if (!metadata.siteId) throw new Error('엑셀 매핑을 저장할 현장이 선택되지 않았습니다.');
 
-  saveMappingSettings(
-    db,
-    'UPDATE app_settings SET water_sheet = ?, water_start_row = ?, water_end_row = ?, water_date_col = ? WHERE id = 1',
-    config
-  );
+  saveMappingSettings(db, 'water', config, metadata.siteId);
 
   const itemDefinitions = [
     { aliases: ['암모니아성질소', '암모니아 질소', 'NH3-N'], itemCode: 'nh3_n', itemName: '암모니아성질소(NH3-N)', unit: 'mg/L' },
@@ -364,9 +397,9 @@ async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
   const resolveDefinition = (name) => itemDefinitions.find((definition) => (
     definition.aliases.some((alias) => normalize(name).includes(normalize(alias)) || normalize(alias).includes(normalize(name)))
   ));
-  const activeLocationRows = db.prepare("SELECT item_name FROM config_items WHERE category = 'location' AND is_active = 1").all();
+  const activeLocationRows = db.prepare("SELECT item_name FROM site_config_items WHERE site_id = ? AND category = 'location' AND is_active = 1").all(metadata.siteId);
   const activeLocations = new Set(activeLocationRows.map((row) => row.item_name));
-  const method = db.prepare('SELECT method FROM app_settings WHERE id = 1').get()?.method || 'A2O';
+  const method = db.prepare('SELECT method FROM sites WHERE id = ?').get(metadata.siteId)?.method || 'A2O';
   const isMbr = String(method).trim().toUpperCase() === 'MBR';
   const po4pLocations = new Set(isMbr
     ? ['유량조정조', '포기조', '방류조']
@@ -386,10 +419,13 @@ async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
     if (activeLocations.size > 0 && !activeLocations.has(locName)) return false;
     return true;
   });
-  const upsertStmt = db.prepare("INSERT INTO config_items (category, item_name, excel_cell, is_active, display_order) VALUES ('water_mapping', ?, ?, 1, 0) ON CONFLICT(category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell");
-  scopedEntries.forEach(([key, col]) => upsertStmt.run(key, col));
+  const upsertStmt = db.prepare("INSERT INTO site_config_items (site_id, category, item_name, excel_cell, is_active, display_order) VALUES (?, 'water_mapping', ?, ?, 1, 0) ON CONFLICT(site_id, category, item_name) DO UPDATE SET excel_cell = excluded.excel_cell, updated_at = datetime('now', 'localtime')");
+  scopedEntries.forEach(([key, col]) => {
+    upsertStmt.run(metadata.siteId, key, col);
+    if (isLegacyActiveSite(db, metadata.siteId)) mirrorMappingItemToLegacy(db, 'water_mapping', key, col);
+  });
 
-  ensureExcelReady(db);
+  ensureExcelReady(db, metadata.siteId);
 
   scopedEntries.forEach(([key, col]) => {
     const lastUnderscore = key.lastIndexOf('_');
@@ -408,7 +444,8 @@ async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
     sheet,
     scanStartRow,
     scanEndRow,
-    collectColumns(dateCol, scopedEntries.map(([, col]) => col))
+    collectColumns(dateCol, scopedEntries.map(([, col]) => col)),
+    metadata.siteId
   );
   const mappedDates = collectMappedDates(rows, startRow, endRow, dateCol, '수질 데이터');
   const insertWater = db.prepare(`
@@ -417,7 +454,7 @@ async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
       location, item_name, item_code, result_value, result_numeric, unit,
       input_status, site_id, site_name, author, created_at, last_modified, is_synced
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'imported', ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET
+    ON CONFLICT(site_id, date, measurement_group, location, item_code) DO UPDATE SET
       measurement_order = excluded.measurement_order,
       source_type = excluded.source_type,
       source_label = excluded.source_label,
@@ -437,11 +474,11 @@ async function saveWaterMapping(db, appDataPath, config, mapping, progress) {
 
   db.transaction(() => {
     const metadata = getCurrentRecordMetadata(db, config || {});
-    db.prepare("DELETE FROM qntech_water_quality WHERE source_type = 'excel' OR measurement_group LIKE 'excel:%' OR measurement_group = ''").run();
+    db.prepare("DELETE FROM qntech_water_quality WHERE site_id = ? AND (source_type = 'excel' OR measurement_group LIKE 'excel:%' OR measurement_group = '')").run(metadata.siteId);
     if (mappedDates.length > 0) {
       const datePlaceholders = mappedDates.map(() => '?').join(',');
-      db.prepare(`DELETE FROM qntech_water_quality WHERE date IN (${datePlaceholders}) AND (source_type = 'excel' OR measurement_group LIKE 'excel:%' OR measurement_group = '')`)
-        .run(...mappedDates);
+      db.prepare(`DELETE FROM qntech_water_quality WHERE site_id = ? AND date IN (${datePlaceholders}) AND (source_type = 'excel' OR measurement_group LIKE 'excel:%' OR measurement_group = '')`)
+        .run(metadata.siteId, ...mappedDates);
     }
     const cleanedDates = new Set();
     const dateOrderCounter = new Map();

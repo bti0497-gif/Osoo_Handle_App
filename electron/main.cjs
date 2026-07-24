@@ -39,6 +39,7 @@ function setupSafeConsole() {
 setupSafeConsole();
 
 let mainWindow = null;
+const siteWindows = new Map();
 let serverProcess = null;
 let tray = null;
 let isQuitting = false;
@@ -359,6 +360,81 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  const emitNativeFocusEvent = (eventName, details = {}) => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+    mainWindow.webContents.send('app:native-focus-event', {
+      event: eventName,
+      at: new Date().toISOString(),
+      windowFocused: mainWindow.isFocused(),
+      webContentsFocused: mainWindow.webContents.isFocused(),
+      visible: mainWindow.isVisible(),
+      minimized: mainWindow.isMinimized(),
+      ...details,
+    });
+  };
+  mainWindow.on('focus', () => emitNativeFocusEvent('browser-window-focus'));
+  mainWindow.on('blur', () => emitNativeFocusEvent('browser-window-blur'));
+  mainWindow.on('show', () => emitNativeFocusEvent('browser-window-show'));
+  mainWindow.on('hide', () => emitNativeFocusEvent('browser-window-hide'));
+  mainWindow.webContents.on('focus', () => emitNativeFocusEvent('web-contents-focus'));
+  mainWindow.webContents.on('blur', () => emitNativeFocusEvent('web-contents-blur'));
+}
+
+function createSiteWindow(siteId, siteName) {
+  const normalizedSiteId = String(siteId || '').trim();
+  if (!normalizedSiteId) throw new Error('siteId is required');
+
+  const existing = siteWindows.get(normalizedSiteId);
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.maximize();
+    existing.focus();
+    return existing;
+  }
+
+  const iconPath = isDev
+    ? path.join(__dirname, '..', 'public', 'icon.ico')
+    : path.join(process.resourcesPath, 'app.asar.unpacked', 'public', 'icon.ico');
+  const child = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 1024,
+    minHeight: 700,
+    title: String(siteName || 'Osoo Handle App'),
+    icon: iconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      webviewTag: true,
+    },
+    show: false,
+    autoHideMenuBar: true,
+  });
+  siteWindows.set(normalizedSiteId, child);
+
+  child.once('ready-to-show', () => {
+    child.maximize();
+    child.show();
+  });
+  if (isDev) {
+    child.loadURL(`http://localhost:18735/?siteId=${encodeURIComponent(normalizedSiteId)}`);
+  } else {
+    child.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), {
+      query: { siteId: normalizedSiteId },
+    });
+  }
+  child.on('focus', () => {
+    if (!child.webContents.isDestroyed()) {
+      child.webContents.send('app:window-restored', { reason: 'site-window-focus' });
+    }
+  });
+  child.on('closed', () => {
+    siteWindows.delete(normalizedSiteId);
+  });
+  return child;
 }
 
 function setupRoadworkSafeUsePopupGuard() {
@@ -585,6 +661,48 @@ app.on('before-quit', () => {
 });
 
 ipcMain.handle('app:getVersion', () => app.getVersion());
+ipcMain.handle('app:getWindowFocusState', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return {
+      available: false,
+      windowFocused: false,
+      webContentsFocused: false,
+      visible: false,
+      minimized: false,
+    };
+  }
+  return {
+    available: true,
+    windowFocused: mainWindow.isFocused(),
+    webContentsFocused: mainWindow.webContents.isFocused(),
+    visible: mainWindow.isVisible(),
+    minimized: mainWindow.isMinimized(),
+  };
+});
+ipcMain.handle('app:recoverWindowFocus', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { recovered: false, reason: 'window-unavailable' };
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  // Chromium can lose document focus while Electron still reports the
+  // BrowserWindow/webContents as focused. A plain focus() is then a no-op.
+  // Only the renderer's anomaly detector calls this handler, so force a real
+  // native focus transition to rebuild the Windows/Chromium focus chain.
+  mainWindow.blur();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { recovered: false, reason: 'window-destroyed-during-recovery' };
+  }
+  mainWindow.focus();
+  mainWindow.webContents.focus();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  return {
+    recovered: true,
+    windowFocused: mainWindow.isFocused(),
+    webContentsFocused: mainWindow.webContents.isFocused(),
+  };
+});
 ipcMain.handle('server:getToken', () => serverInstanceToken || '');
 ipcMain.handle('app:checkVersionChanged', async () => {
   const userDataPath = app.getPath('userData');
@@ -658,6 +776,10 @@ ipcMain.handle('app:hideToTray', () => {
     mainWindow.hide();
   }
   return { ok: true };
+});
+ipcMain.handle('app:openSiteWindow', (_event, site = {}) => {
+  const child = createSiteWindow(site.siteId, site.siteName);
+  return { success: true, siteId: String(site.siteId || ''), focused: child.isFocused() };
 });
 
 ipcMain.handle('pdf:save', async (_event, options = {}) => {

@@ -55,8 +55,8 @@ function validateReportTemplateFiles(rootDir, description) {
   const reportsDir = path.join(rootDir, 'templates', 'reports');
   const requiredTemplates = [
     '일일업무일지.xlsx',
-    '일일업무일지(A2O).hwpx',
-    '일일업무일지(MBR).hwpx',
+    '일일업무일지(A2O).hwp',
+    '일일업무일지(MBR).hwp',
     '수질분석일지.xlsx',
     '약품관리대장.xlsx',
     '약품입고일지.xlsx',
@@ -451,6 +451,7 @@ function validateRegressionContracts() {
   const dailyWorkLogRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'dailyWorkLogRoutes.cjs');
   const dailyWorkLogServicePath = path.join(BASE_DIR, 'server', 'services', 'dailyWorkLogService.cjs');
   const dailyWorkLogHwpxServicePath = path.join(BASE_DIR, 'server', 'services', 'dailyWorkLogHwpxService.cjs');
+  const dailyWorkLogHwpServicePath = path.join(BASE_DIR, 'server', 'services', 'dailyWorkLogHwpService.cjs');
   const reportTemplateServicePath = path.join(BASE_DIR, 'server', 'services', 'reportTemplateService.cjs');
   const flowRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'flowRoutes.cjs');
   const medicineRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineRoutes.cjs');
@@ -459,6 +460,7 @@ function validateRegressionContracts() {
   const settingsViewModelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'useSettingsViewModel.js');
   const settingsViewPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'SettingsView.jsx');
   const basicSitePanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'BasicSitePanel.jsx');
+  const basicSiteHeaderPanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'BasicSiteHeaderPanel.jsx');
   const settingsRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'settingsRoutes.cjs');
   const mappingServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'mappingSettingsService.cjs');
   const inventoryMappingPanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'InventoryMappingPanel.jsx');
@@ -527,6 +529,7 @@ function validateRegressionContracts() {
   const authRoutesSecurityPath = path.join(BASE_DIR, 'server', 'routes', 'authRoutes.cjs');
   const databasePath = path.join(BASE_DIR, 'server', 'database.cjs');
   const sqliteProtectionServicePath = path.join(BASE_DIR, 'server', 'services', 'sqliteProtectionService.cjs');
+  const multiSiteSchemaServicePath = path.join(BASE_DIR, 'server', 'services', 'multiSiteSchemaService.cjs');
   const facilityRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'facilityRoutes.cjs');
   const facilityModelPath = path.join(BASE_DIR, 'src', 'features', 'facility', 'FacilityModel.js');
   const facilityViewPath = path.join(BASE_DIR, 'src', 'features', 'facility', 'FacilityManagementView.jsx');
@@ -560,10 +563,13 @@ function validateRegressionContracts() {
   const useTemplateSettingsText = readText(useTemplateSettingsPath);
   const appSettingsServiceText = readText(appSettingsServicePath);
   const basicSitePanelText = readText(basicSitePanelPath);
+  const basicSiteHeaderPanelText = readText(basicSiteHeaderPanelPath);
   const databaseText = readText(databasePath);
   const sqliteProtectionServiceText = readText(sqliteProtectionServicePath);
+  const multiSiteSchemaServiceText = readText(multiSiteSchemaServicePath);
   const dailyWorkLogServiceText = readText(dailyWorkLogServicePath);
   const dailyWorkLogHwpxServiceText = readText(dailyWorkLogHwpxServicePath);
+  const dailyWorkLogHwpServiceText = readText(dailyWorkLogHwpServicePath);
   const facilityRoutesText = readText(facilityRoutesPath);
   const facilityModelText = readText(facilityModelPath);
   const facilityViewText = readText(facilityViewPath);
@@ -672,6 +678,34 @@ function validateRegressionContracts() {
       packageText.includes('validate-settings-persistence.cjs'),
     '관리자 환경설정 원자 저장·DB 재검증·재조회 계약 유지',
     '환경설정이 일부만 저장되거나 저장 성공 후 실제 DB 값을 재확인하지 않을 수 있습니다'
+  );
+
+  checkSource(
+    databaseText.includes("require('./services/multiSiteSchemaService.cjs')") &&
+      databaseText.includes('ensureMultiSiteFoundation(db)') &&
+      multiSiteSchemaServiceText.includes("MULTI_SITE_FOUNDATION_VERSION = 'multi-site-foundation-v2-site-excel'") &&
+      multiSiteSchemaServiceText.includes('CREATE TABLE IF NOT EXISTS site_settings') &&
+      multiSiteSchemaServiceText.includes('CREATE TABLE IF NOT EXISTS site_config_items') &&
+      multiSiteSchemaServiceText.includes('UNIQUE(site_id, category, item_name)') &&
+      multiSiteSchemaServiceText.includes('CREATE TABLE IF NOT EXISTS site_excel_sheets') &&
+      multiSiteSchemaServiceText.includes('PRIMARY KEY (site_id, sheet_name)') &&
+      multiSiteSchemaServiceText.includes('CREATE TABLE IF NOT EXISTS site_excel_raw_data') &&
+      multiSiteSchemaServiceText.includes('PRIMARY KEY (site_id, sheet_name, row_num, col)') &&
+      multiSiteSchemaServiceText.includes('CREATE TABLE IF NOT EXISTS site_sludge_export_settings') &&
+      multiSiteSchemaServiceText.includes('const migrate = db.transaction') &&
+      multiSiteSchemaServiceText.includes('backfillDefaultSite(db, siteId)') &&
+      databaseText.includes("ALTER TABLE app_settings ADD COLUMN multi_site_enabled INTEGER NOT NULL DEFAULT 0") &&
+      databaseText.includes('ALTER TABLE app_settings ADD COLUMN primary_site_id TEXT') &&
+      appSettingsServiceText.includes('function saveMultiSiteMode(db, enabled)') &&
+      appSettingsServiceText.includes('양방향 통합관리 설정 저장 검증에 실패했습니다.') &&
+      settingsRoutesText.includes("router.post('/api/settings/multi-site-mode'") &&
+      settingsModelText.includes('async saveMultiSiteMode(enabled)') &&
+      settingsViewModelText.includes('handleMultiSiteModeChange') &&
+      basicSiteHeaderPanelText.includes('role="switch"') &&
+      basicSiteHeaderPanelText.includes('양방향 통합관리') &&
+      fs.existsSync(path.join(BASE_DIR, 'scripts', 'validate-multi-site-foundation.cjs')),
+    '양방향 현장별 설정 기반·기존 단일현장 호환 백필·기본 OFF 토글 계약 유지',
+    '현장별 설정 기반, 트랜잭션 백필 또는 관리자 양방향 토글 보호가 빠졌습니다'
   );
 
   checkSource(
@@ -908,18 +942,18 @@ function validateRegressionContracts() {
 
   checkSource(
     flowRoutesText.includes("router.post('/api/flows/bulk'") &&
-      flowRoutesText.includes('ON CONFLICT(date, type) DO UPDATE SET') &&
+      flowRoutesText.includes('ON CONFLICT(site_id, date, type) DO UPDATE SET') &&
       flowRoutesText.includes('raw_value = excluded.raw_value') &&
       flowRoutesText.includes('calculated_flow = excluded.calculated_flow') &&
       medicineRoutesText.includes("router.post('/api/medicines/bulk'") &&
-      medicineRoutesText.includes('ON CONFLICT(medicine_name, date) DO UPDATE SET') &&
+      medicineRoutesText.includes('ON CONFLICT(site_id, medicine_name, date) DO UPDATE SET') &&
       medicineRoutesText.includes('purchase_amount = excluded.purchase_amount') &&
       medicineRoutesText.includes('usage_amount = excluded.usage_amount') &&
       kitRoutesText.includes("router.post('/api/kits/bulk'") &&
-      kitRoutesText.includes('ON CONFLICT(kit_name, date) DO UPDATE SET') &&
+      kitRoutesText.includes('ON CONFLICT(site_id, kit_name, date) DO UPDATE SET') &&
       kitRoutesText.includes('current_inventory = excluded.current_inventory') &&
       waterQualityRoutesText.includes("router.post('/api/water-quality/bulk'") &&
-      waterQualityRoutesText.includes('ON CONFLICT(date, measurement_group, location, item_code) DO UPDATE SET') &&
+      waterQualityRoutesText.includes('ON CONFLICT(site_id, date, measurement_group, location, item_code) DO UPDATE SET') &&
       waterQualityRoutesText.includes('result_numeric = excluded.result_numeric'),
     '통합 모달 서버 upsert 수정 저장 계약 유지',
     '통합 모달 서버 저장이 같은 날짜/항목을 수정 저장하는 upsert 계약에서 벗어났습니다'
@@ -930,9 +964,12 @@ function validateRegressionContracts() {
       dailyWorkLogText.includes('method: context.method') &&
       reportTemplateText.includes("'일일업무일지(A2O)'") &&
       reportTemplateText.includes("'일일업무일지(MBR)'") &&
-      reportTemplateText.includes('getDailyWorkLogTemplateCandidates'),
-    '공법별 일일업무일지 HWPX 양식 선택 계약 유지',
-    '공법별 일일업무일지 HWPX 양식 선택 로직이 빠졌습니다'
+      reportTemplateText.includes('getDailyWorkLogTemplateCandidates') &&
+      reportTemplateText.includes('hwpOnly') &&
+      dailyWorkLogText.includes('hwpOnly: true') &&
+      dailyWorkLogText.includes('buildBatchDailyWorkLogHwp'),
+    '공법별 일일업무일지 HWP 양식 선택 계약 유지',
+    '공법별 일일업무일지 HWP 양식 선택 로직이 빠졌습니다'
   );
 
   checkSource(
@@ -971,6 +1008,9 @@ function validateRegressionContracts() {
       !excelRoutesText.includes('restoreOperationalData') &&
       !roadworkHelperRoutesText.includes('restoreOperationalData') &&
       bigQueryRestoreServiceText.includes('Disaster-recovery service only') &&
+      bigQueryRestoreServiceText.includes('ON CONFLICT(site_id, date, type) DO UPDATE SET') &&
+      bigQueryRestoreServiceText.includes('ON CONFLICT(site_id, ${localNameColumn}, date) DO UPDATE SET') &&
+      bigQueryRestoreServiceText.includes('ON CONFLICT(site_id, date, measurement_group, location, item_code) DO UPDATE SET') &&
       bigQueryRestoreServiceText.includes('WHERE flow_readings.is_synced = 1') &&
       bigQueryRestoreServiceText.includes('WHERE qntech_water_quality.is_synced = 1') &&
       localDataBackupContractText.includes('local SQLite database is the operational source of truth') &&
@@ -991,7 +1031,8 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    sludgePhotoRoutesText.includes("SELECT site_id, site_name FROM app_settings WHERE id = 1") &&
+    sludgePhotoRoutesText.includes('if (!siteId) throw new Error') &&
+      sludgePhotoRoutesText.includes('AND site_id = ?') &&
       sludgePhotoRoutesText.includes('amount <= 0') &&
       sludgePhotoRoutesText.includes('hasPositiveAmount || hasAttachedRecord'),
     '슬러지사진대지 현장 범위 및 실제 반출행 계약 유지',
@@ -1196,9 +1237,9 @@ function validateRegressionContracts() {
   checkSource(
     templateUploadCardText.includes("e.target.value = '';") &&
       templateSettingsServiceText.includes('function cleanupInactiveExcelOriginals') &&
-      templateSettingsServiceText.includes('cleanupInactiveExcelOriginals(excelOriginalsDir, original.filename)') &&
-      templateSettingsServiceText.indexOf('const sheets = await parseAndStoreExcel(db, filePath);') <
-        templateSettingsServiceText.indexOf("db.prepare('UPDATE app_settings SET excel_template_path = ? WHERE id = 1')"),
+      templateSettingsServiceText.includes('cleanupInactiveExcelOriginals(siteExcelDir, original.filename)') &&
+      templateSettingsServiceText.includes('const sheets = await parseAndStoreExcel(db, filePath, normalizedSiteId);') &&
+      templateSettingsServiceText.includes('INSERT INTO site_settings (site_id, excel_template_path, updated_at)'),
     '현장 엑셀 AppData 단일 원본 및 동일 파일 재업로드 계약 유지',
     '현장 엑셀 재업로드 또는 AppData 단일 원본 정리 계약이 깨졌습니다'
   );
@@ -1259,14 +1300,14 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    basicSitePanelText.includes('BasicSiteHeaderPanel') &&
+      basicSitePanelText.includes('BasicSiteHeaderPanel') &&
       basicSitePanelText.includes('ItemManagementPanel') &&
       basicSitePanelText.includes('MeasurementPlacePanel') &&
       basicSitePanelText.includes('TemplateFilePanel') &&
-      appSettingsServiceText.includes('UPDATE app_settings') &&
-      appSettingsServiceText.includes('SET site_id = COALESCE(NULLIF(?, \'\'), site_id)') &&
-      appSettingsServiceText.includes('UPDATE config_items SET is_active = ?, display_order = ?') &&
-      appSettingsServiceText.includes('INSERT OR IGNORE INTO config_items'),
+      appSettingsServiceText.includes('INSERT INTO sites (id, site_name, manager_name, method, series') &&
+      appSettingsServiceText.includes('UPDATE site_config_items SET is_active = ?, display_order = ?') &&
+      appSettingsServiceText.includes('INSERT OR IGNORE INTO site_config_items') &&
+      appSettingsServiceText.includes('WHERE site_id = ? AND category = ? AND item_name = ?'),
     '기본정보 저장 위젯 및 설정 저장 계약 유지',
     '기본정보 저장 위젯 구성 또는 설정 저장 계약이 바뀌었습니다'
   );
@@ -1274,15 +1315,19 @@ function validateRegressionContracts() {
   checkSource(
     !electronBuilderConfigText.includes("'templates/**/*'") &&
       !electronBuilderConfigText.includes("{ from: 'templates', to: 'templates' }") &&
+      electronBuilderConfigText.includes("templates/reports/일일업무일지(A2O).hwp") &&
+      electronBuilderConfigText.includes("templates/reports/일일업무일지(MBR).hwp") &&
       integratedInstallerScriptText.includes("'templates/**/*'") &&
       integratedInstallerScriptText.includes("{ from: 'templates', to: 'templates' }") &&
       reportTemplateText.includes("'일일업무일지(A2O)'") &&
       reportTemplateText.includes("'일일업무일지(MBR)'") &&
       reportTemplateText.includes('process.resourcesPath') &&
       reportTemplateText.includes('syncBundledTemplatesToAppData') &&
-      reportTemplateText.includes('shouldReplacePlaceholder'),
-    '업데이트 양식 제외·통합 설치 양식 포함 계약 유지',
-    '자동업데이트와 통합 설치본의 일지 양식 분리 계약이 깨졌습니다'
+      reportTemplateText.includes('shouldReplacePlaceholder') &&
+      reportTemplateText.includes('DAILY_WORK_LOG_HWP_MIGRATION_MARKER') &&
+      reportTemplateText.includes('backup-before-hwp-migration'),
+    '업데이트 HWP 2종 일회성 전환·기타 양식 제외·통합 설치 양식 포함 계약 유지',
+    'HWP 전환 양식의 제한적 포함/백업 또는 기타 현장 양식 보호 계약이 깨졌습니다'
   );
 
   checkSource(
@@ -1512,13 +1557,13 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    dailyWorkLogHwpxServiceText.includes('replaceVisibleTextInXml') &&
-      dailyWorkLogHwpxServiceText.includes("context.dataSource === 'bigquery'") &&
-      dailyWorkLogHwpxServiceText.includes('replaceVisibleTextInXml(xml, context.localSiteName, context.siteName)') &&
-      bidirectionalDailyLogContractText.includes('only the generated in-memory/output copy may replace') &&
-      bidirectionalDailyLogContractText.includes('`죽암휴게소(부산방향)` must become `죽암휴게소(서울방향)`'),
-    '양방향 HWPX 임시 출력본 현장명 교체·원본 양식 보호 계약 유지',
-    '서울방향 HWPX 문구 교체 또는 원본 양식 비수정 계약이 깨졌습니다.'
+    dailyWorkLogHwpServiceText.includes('bookmarkValues.현장명') &&
+      dailyWorkLogHwpServiceText.includes('context.siteName') &&
+      dailyWorkLogHwpServiceText.includes("GetTextFile('HWPML2X'") &&
+      dailyWorkLogHwpServiceText.includes("SaveAs($outputPath, 'HWP'") &&
+      dailyWorkLogHwpServiceText.includes('templateInfo.absolutePath'),
+    'HWP 출력본 창별 현장명 책갈피 바인딩·원본 양식 보호 계약 유지',
+    'HWP 출력본의 현장명 책갈피 바인딩 또는 원본 양식 보호가 깨졌습니다.'
   );
 
   checkSource(
@@ -1876,6 +1921,7 @@ function validateEncodingAndKorean() {
       if (!isGarbled && garbledPattern.test(line)) {
         // 허용하는 유니코드 특수문자들(화살표, 대쉬, 이모지, 한자 등)을 제거한 후 깨짐 판단 진행 (오진 방지)
         const cleanLine = line
+          .replace(/[−–—]/g, '')
           .replace(/[가-힣]\?/g, '')
           .replace(/[\u4e00-\u9fa5]/g, '') // 한자(Hanja) 허용
           .replace(/[\u0370-\u03FF]/g, '') // 그리스 문자(φ, Δ, λ 등) 허용

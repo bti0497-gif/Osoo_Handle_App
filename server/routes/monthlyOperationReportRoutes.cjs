@@ -8,7 +8,7 @@ const { TEMPLATE_NAME, getMonthlyData, exportMonthlyOperationReport } = require(
 module.exports = function monthlyOperationReportRoutes(db, baseDir, appDataPath) {
   const router = express.Router();
   router.get('/api/monthly-operation-report', (req, res) => {
-    try { return res.json({ success: true, ...getMonthlyData(db, req.query) }); }
+    try { return res.json({ success: true, ...getMonthlyData(db, { ...req.query, ...req.siteContext }) }); }
     catch (error) { return res.status(400).json({ success: false, error: error.message }); }
   });
   router.post('/api/monthly-operation-report/export', async (req, res) => {
@@ -18,7 +18,7 @@ module.exports = function monthlyOperationReportRoutes(db, baseDir, appDataPath)
       const year = Number(req.body?.year);
       const month = Number(req.body?.month);
       const outputPath = buildExcelTempPath('osoo-monthly-operation-report', `월운영보고서_${year}_${String(month).padStart(2, '0')}_${Date.now()}.xlsx`);
-      const data = await exportMonthlyOperationReport({ db, templatePath: template.absolutePath, outputPath, year, month, ...req.body });
+      const data = await exportMonthlyOperationReport({ db, templatePath: template.absolutePath, outputPath, year, month, ...req.body, ...req.siteContext });
       await openExcelFile(outputPath);
       return res.json({ success: true, file: path.basename(outputPath), siteName: data.siteName });
     } catch (error) {

@@ -33,6 +33,12 @@ export default function BasicSitePanel({
   handleOpenLocalFolder,
   excelStatus,
   handleApply,
+  showHistoryRestore,
+  onOpenHistoryRestore,
+  showMultiSiteToggle,
+  multiSiteEnabled,
+  isSavingMultiSiteMode,
+  onMultiSiteModeChange,
 }) {
     const renderBasicSettings = () => (
         <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
@@ -44,6 +50,12 @@ export default function BasicSitePanel({
                 handleSiteSelection={handleSiteSelection}
                 siteInfo={siteInfo}
                 isSiteSelected={isSiteSelected}
+                showHistoryRestore={showHistoryRestore}
+                onOpenHistoryRestore={onOpenHistoryRestore}
+                showMultiSiteToggle={showMultiSiteToggle}
+                multiSiteEnabled={multiSiteEnabled}
+                isSavingMultiSiteMode={isSavingMultiSiteMode}
+                onMultiSiteModeChange={onMultiSiteModeChange}
             />
 
             {/* 중간 섹션: 항목 관리 위젯 */}

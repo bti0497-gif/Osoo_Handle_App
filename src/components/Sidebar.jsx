@@ -1,22 +1,24 @@
 import React from 'react';
 import { MENUS, ADMIN_MENUS, ADMIN_ROLES } from '../core/constants';
 
-const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword, onSiteChange }) => {
+const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword }) => {
 
     // 성(Surname) 추출 (아이콘용)
     const surname = user?.name?.charAt(0) || 'U';
 
     const [expandedMenus, setExpandedMenus] = React.useState(['log', 'water_group']);
     const managedSites = Array.isArray(user?.managed_sites) ? user.managed_sites : [];
-    const isBidirectionalUser = String(user?.site_name1 || '').trim() === '양방향';
-    const managerOwnedSites = managedSites.filter((site) => String(site?.manager_name || '').trim() === String(user?.name || '').trim());
-    const visibleManagedSites = isBidirectionalUser ? managerOwnedSites : [];
-    const showSiteDropdown = visibleManagedSites.length > 0;
-    const siteSelectValue = showSiteDropdown
-        ? (visibleManagedSites.some((site) => String(site.id) === String(user?.site_id || ''))
-            ? String(user?.site_id || '')
-            : String(visibleManagedSites[0]?.id || ''))
-        : '';
+    const multiSiteEnabled = user?.multi_site_enabled === true;
+    const pairedSiteIds = [user?.primary_site_id, user?.secondary_site_id].map(String).filter(Boolean);
+    const pairedSites = multiSiteEnabled
+        ? pairedSiteIds.map((id) => managedSites.find((site) => String(site.id) === id)).filter(Boolean)
+        : [];
+    const directionLabel = (siteName) => String(siteName || '').match(/([가-힣A-Za-z0-9]+방향)/)?.[1] || String(siteName || '');
+
+    const handleSiteWindow = async (site) => {
+        if (!site || String(site.id) === String(user?.site_id || '')) return;
+        await window.electronAPI?.openSiteWindow?.({ siteId: site.id, siteName: site.site_name });
+    };
 
     const toggleMenu = (menuId) => {
         setExpandedMenus(prev =>
@@ -44,32 +46,40 @@ const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword, onS
                     </div>
                 </div>
                 <div style={{ display: 'grid', gap: '0.5rem' }}>
-                    {showSiteDropdown ? (
-                        <div>
-                            <select
-                                value={siteSelectValue}
-                                onChange={(e) => onSiteChange?.(e.target.value)}
-                                style={{
-                                    height: '32px',
-                                    borderRadius: '8px',
-                                    border: '1px solid #cbd5e1',
-                                    padding: '0 10px',
-                                    backgroundColor: '#fff',
-                                    color: '#1e293b',
-                                    fontSize: '0.75rem',
-                                    fontWeight: 700
-                                }}
-                            >
-                                {visibleManagedSites.map((site) => (
-                                    <option key={site.id} value={site.id}>{site.site_name}</option>
-                                ))}
-                            </select>
-                        </div>
-                    ) : null}
                     <button className="btn-small" onClick={onLogout}>
                         <span className="material-icons" style={{ fontSize: '14px' }}>logout</span>
                         로그아웃
                     </button>
+                    {pairedSites.length === 2 ? (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.35rem' }}>
+                            {pairedSites.map((site) => {
+                                const active = String(site.id) === String(user?.site_id || '');
+                                return (
+                                    <button
+                                        key={site.id}
+                                        type="button"
+                                        onClick={() => handleSiteWindow(site)}
+                                        aria-pressed={active}
+                                        title={active ? `${site.site_name} - 현재 창` : `${site.site_name} 창 열기`}
+                                        style={{
+                                            minWidth: 0,
+                                            height: '30px',
+                                            padding: '0 5px',
+                                            borderRadius: '7px',
+                                            border: `1px solid ${active ? '#2563eb' : '#cbd5e1'}`,
+                                            backgroundColor: active ? '#2563eb' : '#fff',
+                                            color: active ? '#fff' : '#334155',
+                                            fontSize: '0.68rem',
+                                            fontWeight: 800,
+                                            cursor: active ? 'default' : 'pointer',
+                                        }}
+                                    >
+                                        {directionLabel(site.site_name)}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    ) : null}
                 </div>
             </div>
 

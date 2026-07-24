@@ -11,10 +11,12 @@ import WaterMappingPanel from './panels/WaterMappingPanel';
 import WebAppPanel from './panels/WebAppPanel';
 import LogMappingPanel from './panels/LogMappingPanel';
 import BasicSitePanel from './panels/BasicSitePanel';
+import HistoryRestoreModal from './historyRestore/HistoryRestoreModal';
 
 const SettingsView = ({ currentUser }) => {
     const { showAlert, showConfirm } = useDialog();
     const vm = useSettingsViewModel(currentUser, { showAlert, showConfirm });
+    const [showHistoryRestore, setShowHistoryRestore] = React.useState(false);
     const {
         shellState,
         basicSiteState,
@@ -32,7 +34,7 @@ const SettingsView = ({ currentUser }) => {
     } = shellState;
     const {
         siteInfo, availableSites, selectedSiteId, isSiteListLoading, handleSiteSelection,
-        handleApply,
+        handleApply, multiSiteEnabled, isSavingMultiSiteMode, handleMultiSiteModeChange,
     } = basicSiteState;
     const {
         flowItems, medicineItems, kitItems, locationItems,
@@ -77,6 +79,7 @@ const SettingsView = ({ currentUser }) => {
     const { config: waterConfig, setConfig: setWaterConfig, mapping: waterMapping, setMapping: setWaterMapping, onSave: handleSaveWaterMapping } = waterMappingSettings;
 
     const isSiteSelected = Boolean(selectedSiteId && siteInfo?.siteName);
+    const isPrimaryAdmin = String(currentUser?.name || '').trim().toLowerCase() === 'admin';
 
     React.useEffect(() => {
         if (!isAppSiteConfigured && activeTab !== 'basic') {
@@ -254,6 +257,12 @@ const SettingsView = ({ currentUser }) => {
             handleOpenLocalFolder={handleOpenLocalFolder}
             excelStatus={excelStatus}
             handleApply={handleApply}
+            showHistoryRestore={isPrimaryAdmin}
+            onOpenHistoryRestore={() => setShowHistoryRestore(true)}
+            showMultiSiteToggle={isPrimaryAdmin}
+            multiSiteEnabled={multiSiteEnabled}
+            isSavingMultiSiteMode={isSavingMultiSiteMode}
+            onMultiSiteModeChange={handleMultiSiteModeChange}
         />
     );
 
@@ -283,6 +292,10 @@ const SettingsView = ({ currentUser }) => {
             setShowDataModal={setShowDataModal}
         >
             {renderActivePanel()}
+            <HistoryRestoreModal
+                open={showHistoryRestore}
+                onClose={() => setShowHistoryRestore(false)}
+            />
             {/* 키트 기본 입고량 모달 */}
             <DefaultAmountModal
                 isOpen={showKitDefaultModal}

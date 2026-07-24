@@ -29,13 +29,16 @@ function buildNamedRangeMap(workbook) {
 function siteScope(db, source = {}) {
   const settings = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get() || {};
   return {
+    siteId: String(source.siteId || source.site_id || settings.site_id || '').trim(),
     siteName: String(source.siteName || source.site_name || settings.site_name || '').trim(),
   };
 }
 
-function siteWhere() {
+function siteWhere(scope) {
   // 로컬 DB는 현장별로 분리되어 있고 과거 레코드에는 site_name이 비어 있을 수 있다.
   // 월보고서에서 현장명 필터를 걸면 정상적인 기존 자료가 누락되므로 로컬 전체를 사용한다.
+  if (scope.siteId) return { clause: ' AND site_id = ?', params: [scope.siteId] };
+  if (scope.siteName) return { clause: ' AND site_name = ?', params: [scope.siteName] };
   return { clause: '', params: [] };
 }
 
@@ -48,8 +51,13 @@ function monthRange(year, month) {
   return { year: y, month: m, days, startDate: `${y}-${mm}-01`, endDate: `${y}-${mm}-${String(days).padStart(2, '0')}` };
 }
 
-function resolveMedicineNames(db) {
-  const names = db.prepare(`
+function resolveMedicineNames(db, scope) {
+  const names = scope.siteId ? db.prepare(`
+    SELECT item_name FROM site_config_items
+    WHERE site_id = ? AND category = 'medicine' AND is_active = 1
+      AND item_name NOT GLOB '*_purchase' AND item_name NOT GLOB '*_usage' AND item_name NOT GLOB '*_inventory'
+    ORDER BY display_order ASC
+  `).all(scope.siteId).map((row) => String(row.item_name || '').trim()).filter(Boolean) : db.prepare(`
     SELECT item_name FROM config_items
     WHERE category = 'medicine' AND is_active = 1
       AND item_name NOT GLOB '*_purchase' AND item_name NOT GLOB '*_usage' AND item_name NOT GLOB '*_inventory'
@@ -71,7 +79,7 @@ function getMonthlyData(db, source = {}) {
     SELECT date, type, calculated_flow, sludge_export FROM flow_readings
     WHERE date BETWEEN ? AND ?${filter.clause} ORDER BY date, type
   `).all(range.startDate, range.endDate, ...filter.params);
-  const medicineNames = resolveMedicineNames(db);
+  const medicineNames = resolveMedicineNames(db, scope);
   const medicines = db.prepare(`
     SELECT date, medicine_name, purchase_amount, usage_amount, current_inventory FROM medicine_logs
     WHERE date BETWEEN ? AND ?${filter.clause} ORDER BY date, medicine_name

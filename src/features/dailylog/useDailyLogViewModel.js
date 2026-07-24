@@ -424,12 +424,12 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         try {
             setIsOutputProcessing(true);
             const effectiveOutputFormat = isDailyWorkLog
-                ? (outputFormat === 'hwpx' ? 'hwpx' : 'pdf')
+                ? (outputFormat === 'hwp' ? 'hwp' : 'pdf')
                 : 'excel';
             const result = effectiveOutputFormat === 'pdf'
                 ? await DailyLogModel.fetchExportPdf(dateRangeStr, templateName, siteName, requestContext)
-                : effectiveOutputFormat === 'hwpx'
-                    ? await DailyLogModel.fetchExportHwpx(dateRangeStr, templateName, siteName, requestContext)
+                : effectiveOutputFormat === 'hwp'
+                    ? await DailyLogModel.fetchExportHwp(dateRangeStr, templateName, siteName, requestContext)
                     : await DailyLogModel.fetchExportExcel(dateRangeStr, templateName, siteName, requestContext);
             if (result && result.success) {
                 const fileList = Array.isArray(result.files) && result.files.length
@@ -446,9 +446,9 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         } catch (error) {
             alertTitle = '내보내기 실패';
             const effectiveOutputFormat = isDailyWorkLog
-                ? (outputFormat === 'hwpx' ? 'hwpx' : 'pdf')
+                ? (outputFormat === 'hwp' ? 'hwp' : 'pdf')
                 : 'excel';
-            const formatLabel = effectiveOutputFormat === 'pdf' ? 'PDF' : effectiveOutputFormat === 'hwpx' ? '한글' : '엑셀';
+            const formatLabel = effectiveOutputFormat === 'pdf' ? 'PDF' : effectiveOutputFormat === 'hwp' ? '한글(HWP)' : '엑셀';
             alertMessage = error?.data?.userMessage || error?.message || `${formatLabel} 내보내기를 시작하지 못했습니다.`;
         } finally {
             setIsOutputProcessing(false);

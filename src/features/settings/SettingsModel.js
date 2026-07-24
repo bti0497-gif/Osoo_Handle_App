@@ -47,12 +47,24 @@ export const SettingsModel = {
         return mutateSettings(() => apiClient.post('/api/settings/select-site', { siteId }));
     },
 
+    async inspectRoadworkHistoryRestore(documents) {
+        return apiClient.post('/api/settings/history-restore/inspect', { documents });
+    },
+
+    async applyRoadworkHistoryRestore(documents) {
+        return apiClient.post('/api/settings/history-restore/apply', { documents });
+    },
+
     async saveSettings(settingsData) {
         return mutateSettings(() => apiClient.post('/api/settings', settingsData));
     },
 
     async saveSiteLocation(targetLat, targetLng) {
         return mutateSettings(() => apiClient.post('/api/settings/site-location', { targetLat, targetLng }));
+    },
+
+    async saveMultiSiteMode(enabled) {
+        return mutateSettings(() => apiClient.post('/api/settings/multi-site-mode', { enabled }));
     },
 
     async getCurrentLocation() {

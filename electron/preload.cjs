@@ -18,7 +18,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFolder: (target) => ipcRenderer.invoke('shell:openFolder', target),
   checkVersionChanged: () => ipcRenderer.invoke('app:checkVersionChanged'),
   clearVersionMarker: () => ipcRenderer.invoke('app:clearVersionMarker'),
+  getWindowFocusState: () => ipcRenderer.invoke('app:getWindowFocusState'),
+  recoverWindowFocus: () => ipcRenderer.invoke('app:recoverWindowFocus'),
+  onNativeFocusEvent: (callback) => {
+    const listener = (_event, info) => callback(info || {});
+    ipcRenderer.on('app:native-focus-event', listener);
+    return () => ipcRenderer.removeListener('app:native-focus-event', listener);
+  },
   hideToTray: () => ipcRenderer.invoke('app:hideToTray'),
+  openSiteWindow: (site) => ipcRenderer.invoke('app:openSiteWindow', site),
   onSessionReset: (callback) => {
     const listener = () => callback();
     ipcRenderer.on('app:session-reset', listener);
@@ -37,7 +45,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'roadwork:confirmPasswordChange',
       'roadwork:getRoadworkUrl',
       'roadwork:getCredentials',
-      'roadwork:getCredentialStatus'
+      'roadwork:getCredentialStatus',
+      'roadwork:dumpStructure',
     ];
     if (allowed.includes(channel)) {
       return ipcRenderer.invoke(channel, ...args);

@@ -25,6 +25,8 @@ async function request(endpoint, options = {}) {
     const serverToken = await window.electronAPI?.getServerToken?.();
     const headers = new Headers(fetchOptions.headers || {});
     if (serverToken) headers.set('x-osoo-server-token', serverToken);
+    const windowSiteId = new URLSearchParams(window.location.search).get('siteId');
+    if (windowSiteId) headers.set('x-osoo-site-id', windowSiteId);
     const response = await fetch(url, {
       ...fetchOptions,
       headers,

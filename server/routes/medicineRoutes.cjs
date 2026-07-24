@@ -43,7 +43,7 @@ module.exports = function (db) {
           medicine_name, date, purchase_amount, usage_amount, current_inventory,
           input_status, site_id, site_name, author, created_at, last_modified, is_synced
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(medicine_name, date) DO UPDATE SET
+        ON CONFLICT(site_id, medicine_name, date) DO UPDATE SET
           purchase_amount = excluded.purchase_amount,
           usage_amount = excluded.usage_amount,
           current_inventory = excluded.current_inventory,
@@ -124,7 +124,7 @@ module.exports = function (db) {
           medicine_name, date, purchase_amount, usage_amount, current_inventory,
           input_status, site_id, site_name, author, created_at, last_modified, is_synced
         ) VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(medicine_name, date) DO UPDATE SET
+          ON CONFLICT(site_id, medicine_name, date) DO UPDATE SET
           purchase_amount = excluded.purchase_amount,
           input_status = excluded.input_status,
           site_id = excluded.site_id,
@@ -175,7 +175,7 @@ module.exports = function (db) {
     const { medicine_name, date, purchase_amount, usage_amount } = req.body;
     try {
       const metadata = getCurrentRecordMetadata(db, req.body);
-      const prevLog = db.prepare('SELECT current_inventory FROM medicine_logs WHERE medicine_name = ? AND date < ? ORDER BY date DESC LIMIT 1').get(medicine_name, date);
+      const prevLog = db.prepare('SELECT current_inventory FROM medicine_logs WHERE site_id = ? AND medicine_name = ? AND date < ? ORDER BY date DESC LIMIT 1').get(metadata.siteId, medicine_name, date);
       const startInventory = Number(prevLog?.current_inventory || 0);
       const current_inventory = startInventory
         + Number(purchase_amount || 0)
@@ -186,7 +186,7 @@ module.exports = function (db) {
           medicine_name, date, purchase_amount, usage_amount, current_inventory,
           input_status, site_id, site_name, author, created_at, last_modified, is_synced
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(medicine_name, date) DO UPDATE SET
+          ON CONFLICT(site_id, medicine_name, date) DO UPDATE SET
           purchase_amount = excluded.purchase_amount,
           usage_amount = excluded.usage_amount,
           current_inventory = excluded.current_inventory,
