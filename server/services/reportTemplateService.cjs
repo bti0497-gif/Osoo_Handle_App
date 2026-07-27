@@ -4,7 +4,6 @@ const path = require('path');
 const EXCEL_TEMPLATE_EXTENSIONS = new Set(['.xlsx', '.xls', '.xlsm']);
 const HWP_TEMPLATE_EXTENSIONS = new Set(['.hwp']);
 const HWPX_TEMPLATE_EXTENSIONS = new Set(['.hwpx']);
-const DAILY_WORK_LOG_HWP_MIGRATION_MARKER = '.daily-work-log-hwp-v1';
 const ALLOWED_REPORT_TEMPLATE_NAMES = [
   '일일업무일지',
   '일일업무일지(A2O)',
@@ -79,6 +78,11 @@ function getBundledReportTemplateDirs(baseDir) {
   }
 
   if (process.resourcesPath) {
+    const packagedDefaultsDir = path.join(process.resourcesPath, 'defaults', 'report-templates');
+    if (fs.existsSync(packagedDefaultsDir)) {
+      candidates.push(packagedDefaultsDir);
+    }
+
     const packagedDir = path.join(process.resourcesPath, 'templates', 'reports');
     if (fs.existsSync(packagedDir)) {
       candidates.push(packagedDir);
@@ -160,28 +164,6 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
   const customDir = getCustomReportTemplatesDir(appDataPath);
   removeDisallowedTemplates(customDir);
   const bundledDirs = getBundledReportTemplateDirs(baseDir);
-  const migrationMarker = path.join(path.dirname(customDir), DAILY_WORK_LOG_HWP_MIGRATION_MARKER);
-
-  if (!fs.existsSync(migrationMarker)) {
-    const hwpNames = ['일일업무일지(A2O).hwp', '일일업무일지(MBR).hwp'];
-    const backupDir = path.join(path.dirname(customDir), 'backup-before-hwp-migration');
-    let migrated = 0;
-    for (const fileName of hwpNames) {
-      const sourceDir = bundledDirs.find((dirPath) => fs.existsSync(path.join(dirPath, fileName)));
-      if (!sourceDir) continue;
-      const sourcePath = path.join(sourceDir, fileName);
-      const targetPath = path.join(customDir, fileName);
-      if (fs.existsSync(targetPath)) {
-        ensureDirectory(backupDir);
-        fs.copyFileSync(targetPath, path.join(backupDir, fileName));
-      }
-      fs.copyFileSync(sourcePath, targetPath);
-      migrated += 1;
-    }
-    if (migrated === hwpNames.length) {
-      fs.writeFileSync(migrationMarker, new Date().toISOString(), 'utf8');
-    }
-  }
 
   const existingFiles = listFiles(customDir);
   const existingNames = new Set(existingFiles.map((fileName) => normalizeTemplateKey(fileName)));
@@ -194,23 +176,14 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
 
       const sourcePath = path.join(bundledDir, fileName);
       const targetPath = path.join(customDir, fileName);
-      const shouldReplacePlaceholder = (() => {
-        if (!fs.existsSync(targetPath)) return false;
-        try {
-          const sourceStat = fs.statSync(sourcePath);
-          const targetStat = fs.statSync(targetPath);
-          return targetStat.size > 0 && targetStat.size < 10000 && sourceStat.size > targetStat.size;
-        } catch {
-          return false;
-        }
-      })();
 
       // 같은 일지의 Excel/HWP/HWPX 양식을 함께 유지한다.
-      if (existingNames.has(normalizeTemplateKey(fileName)) && !shouldReplacePlaceholder) {
+      // 현장에서 수정한 양식은 크기나 내용과 관계없이 절대 덮어쓰지 않는다.
+      if (existingNames.has(normalizeTemplateKey(fileName))) {
         return;
       }
 
-      if (!fs.existsSync(targetPath) || shouldReplacePlaceholder) {
+      if (!fs.existsSync(targetPath)) {
         fs.copyFileSync(sourcePath, targetPath);
         existingNames.add(normalizeTemplateKey(fileName));
       }
