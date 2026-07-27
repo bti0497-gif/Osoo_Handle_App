@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert');
+const http = require('http');
 const express = require('express');
 const Database = require('better-sqlite3');
 const { ensureSiteDataIsolation } = require('../server/services/siteDataIsolationMigrationService.cjs');
@@ -79,18 +80,38 @@ async function main() {
     });
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
     const request = async (siteId, path, body) => {
-      const response = await fetch(`${baseUrl}${path}`, {
-        method: body ? 'POST' : 'GET',
-        headers: {
-          'content-type': 'application/json',
-          'x-osoo-site-id': siteId,
-        },
-        body: body ? JSON.stringify(body) : undefined,
+      const payload = body ? JSON.stringify(body) : '';
+      const response = await new Promise((resolve, reject) => {
+        const req = http.request(`${baseUrl}${path}`, {
+          method: body ? 'POST' : 'GET',
+          headers: {
+            'content-type': 'application/json',
+            'content-length': Buffer.byteLength(payload),
+            'x-osoo-site-id': siteId,
+          },
+        }, (res) => {
+          let raw = '';
+          res.setEncoding('utf8');
+          res.on('data', (chunk) => { raw += chunk; });
+          res.on('end', () => resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, raw }));
+        });
+        req.on('error', reject);
+        if (payload) req.write(payload);
+        req.end();
       });
-      const data = await response.json();
+      const data = JSON.parse(response.raw || 'null');
       assert.ok(response.ok, JSON.stringify(data));
       return data;
     };
+    const requestStatus = (siteId, path) => new Promise((resolve, reject) => {
+      const req = http.get(`${baseUrl}${path}`, {
+        headers: { 'x-osoo-site-id': siteId },
+      }, (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode));
+      });
+      req.on('error', reject);
+    });
 
     for (const [siteId, raw] of [['site-a', 100], ['site-b', 900]]) {
       await request(siteId, '/api/flows/bulk', {
@@ -126,18 +147,14 @@ async function main() {
     assert.ok(!roadworkA.kit.some((row) => row.item === '질산성질소'));
     assert.ok(!roadworkA.medicine.some((row) => row.item.endsWith('_purchase')));
 
-    const denied = await fetch(`${baseUrl}/api/flows?date=2026-07-24`, {
-      headers: { 'x-osoo-site-id': 'site-c' },
-    });
-    assert.strictEqual(denied.status, 403);
+    const deniedStatus = await requestStatus('site-c', '/api/flows?date=2026-07-24');
+    assert.strictEqual(deniedStatus, 403);
 
     db.prepare('UPDATE app_settings SET multi_site_enabled = 0 WHERE id = 1').run();
     const singleSitePrimary = await request('site-a', '/api/roadwork-helper/all?date=2026-07-24');
     assert.strictEqual(singleSitePrimary.success, true);
-    const singleSiteSecondary = await fetch(`${baseUrl}/api/roadwork-helper/all?date=2026-07-24`, {
-      headers: { 'x-osoo-site-id': 'site-b' },
-    });
-    assert.strictEqual(singleSiteSecondary.status, 403);
+    const singleSiteSecondaryStatus = await requestStatus('site-b', '/api/roadwork-helper/all?date=2026-07-24');
+    assert.strictEqual(singleSiteSecondaryStatus, 403);
     console.log('✓ 양방향 창별 유량·약품·키트 HTTP 저장 및 조회 분리 검증 통과');
     console.log('✓ 공사입력도우미 현장별 초기 조회·설정 보조항목 제외 검증 통과');
     console.log('✓ 허용되지 않은 site_id 요청 차단 검증 통과');
