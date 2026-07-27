@@ -1333,8 +1333,9 @@ function validateRegressionContracts() {
   checkSource(
     !electronBuilderConfigText.includes("'templates/**/*'") &&
       !electronBuilderConfigText.includes("{ from: 'templates', to: 'templates' }") &&
-      electronBuilderConfigText.includes("templates/reports/일일업무일지(A2O).hwp") &&
-      electronBuilderConfigText.includes("templates/reports/일일업무일지(MBR).hwp") &&
+      !electronBuilderConfigText.includes("templates/reports/일일업무일지(A2O).hwp") &&
+      !electronBuilderConfigText.includes("templates/reports/일일업무일지(MBR).hwp") &&
+      electronBuilderConfigText.includes("templates/reports/월운영보고서.xlsx") &&
       integratedInstallerScriptText.includes("'templates/**/*'") &&
       integratedInstallerScriptText.includes("{ from: 'templates', to: 'templates' }") &&
       reportTemplateText.includes("'일일업무일지(A2O)'") &&
@@ -1344,8 +1345,8 @@ function validateRegressionContracts() {
       reportTemplateText.includes('shouldReplacePlaceholder') &&
       reportTemplateText.includes('DAILY_WORK_LOG_HWP_MIGRATION_MARKER') &&
       reportTemplateText.includes('backup-before-hwp-migration'),
-    '업데이트 HWP 2종 일회성 전환·기타 양식 제외·통합 설치 양식 포함 계약 유지',
-    'HWP 전환 양식의 제한적 포함/백업 또는 기타 현장 양식 보호 계약이 깨졌습니다'
+    '자동업데이트 현장 HWP 제외·월운영보고서 신규양식·통합 설치 전체양식 계약 유지',
+    '자동업데이트의 현장 HWP 보호 또는 신규/통합 설치 양식 계약이 깨졌습니다'
   );
 
   checkSource(
