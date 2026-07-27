@@ -320,7 +320,7 @@ const BoardView = ({ currentUser }) => {
                                 </div>
                             ) : (
                                 <div>
-                                    {posts.map((p, index) => {
+                                    {posts.map((p) => {
                                         const attachments = getAttachments(p.attachments);
                                         return (
                                             <div
@@ -338,7 +338,7 @@ const BoardView = ({ currentUser }) => {
                                                 onMouseLeave={e => e.currentTarget.style.backgroundColor = p.is_notice ? '#fffbeb' : 'transparent'}
                                             >
                                                 <span style={{ width: '40px', textAlign: 'center', color: '#94a3b8', fontSize: '0.75rem', fontWeight: 500 }}>
-                                                    {p.is_notice ? '📌' : (p.parent_id ? '' : (currentPage - 1) * 10 + index + 1)}
+                                                    {p.is_notice ? '📌' : (p.parent_id ? '' : p.board_number)}
                                                 </span>
                                                 <div style={{
                                                     flex: 1, display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden',

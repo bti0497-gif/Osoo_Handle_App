@@ -64,11 +64,20 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
 
     const sortThreadedPosts = (data) => {
         const isNotice = (post) => post.is_notice === 1 || post.is_notice === true;
+        const numberedPosts = [...data]
+            .sort((a, b) => {
+                const timeDiff = toTimestampMs(a.created_at) - toTimestampMs(b.created_at);
+                if (timeDiff !== 0) return timeDiff;
+                return String(a.id || '').localeCompare(String(b.id || ''));
+            })
+            .map((post, index) => ({ ...post, board_number: index + 1 }));
+        const numberedPostMap = new Map(numberedPosts.map((post) => [post.id, post]));
         const notices = data
+            .map((post) => numberedPostMap.get(post.id) || post)
             .filter(isNotice)
             .map(p => ({ ...p, depth: 0 }))
             .sort((a, b) => toTimestampMs(b.created_at) - toTimestampMs(a.created_at));
-        const regulars = data.filter(p => !isNotice(p));
+        const regulars = numberedPosts.filter(p => !isNotice(p));
 
         const postMap = {};
         regulars.forEach(p => { postMap[p.id] = p; });
