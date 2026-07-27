@@ -91,7 +91,7 @@ const CertificateView = ({ currentUser }) => {
                             전체 선택
                         </label>
                     )}
-                    {[['list', 'view_list', '목록형'], ['card', 'grid_view', '카드형']].map(([mode, icon, label]) => (
+                    {[['list', 'view_list', '목록'], ['card', 'grid_view', '미리보기']].map(([mode, icon, label]) => (
                         <button
                             key={mode}
                             type="button"
@@ -204,7 +204,7 @@ const CertificateView = ({ currentUser }) => {
                     ) : (
                         <div style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
                             gap: '14px',
                             padding: '14px',
                             alignItems: 'start',
@@ -250,7 +250,7 @@ const CertificateView = ({ currentUser }) => {
                                             title={`${item.fileName} 크게 보기`}
                                             style={{
                                                 width: '100%',
-                                                height: '280px',
+                                                height: '340px',
                                                 padding: 0,
                                                 border: 0,
                                                 background: '#e2e8f0',

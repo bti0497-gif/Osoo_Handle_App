@@ -73,7 +73,7 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
     const [selectedMonth, setSelectedMonth] = useState(currentMonth);
     const [errorMessage, setErrorMessage] = useState('');
     const [viewMode, setViewModeState] = useState(() => (
-        localStorage.getItem(VIEW_MODE_STORAGE_KEY) === 'card' ? 'card' : 'list'
+        localStorage.getItem(VIEW_MODE_STORAGE_KEY) === 'list' ? 'list' : 'card'
     ));
 
     const role = String(currentUser?.role || '').trim().toLowerCase();

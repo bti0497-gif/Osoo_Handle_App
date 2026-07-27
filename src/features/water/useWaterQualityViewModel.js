@@ -287,7 +287,11 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
             });
             setLastRangeImportSummary(null);
 
-            await loadReadings();
+            // 가져오기 도중 화면 조회가 이전 이력을 다시 캐시할 수 있다.
+            // 서버 저장 완료 후 캐시를 다시 비우고 DB 원본을 강제 조회해야
+            // 같은 날짜의 모든 측정 회차가 즉시 화면에 반영된다.
+            WaterQualityModel.clearHistoryCache();
+            await loadReadings({ force: true });
             const importedRowCount = result.summary?.importedRowCount || 0;
             const savedPhotoCount = result.summary?.savedPhotoCount || 0;
             const driveUploadErrorCount = result.summary?.driveUploadErrorCount || 0;
@@ -362,7 +366,11 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
         });
         setLastImportSummary(null);
 
-        await loadReadings();
+        // 기간 작업 중 만들어진 이전 이력 캐시를 완료 시점에 폐기한다.
+        // force 조회를 생략하면 서버에는 여러 회차가 저장돼도 화면에는
+        // 작업 전 한 회차만 남아 보일 수 있다.
+        WaterQualityModel.clearHistoryCache();
+        await loadReadings({ force: true });
         return result;
     };
 
