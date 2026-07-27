@@ -209,6 +209,17 @@ function validateReportTemplatesExcluded(rootDir, description) {
   if (disallowed.length === 0 && packagedFiles.includes(permittedNewDefault)) success(`${description} 신규 월운영보고서 기본양식만 포함됨`);
   else if (disallowed.length > 0) error(`${description}에 현장 양식을 덮어쓸 수 있는 파일이 포함됨: ${disallowed.join(', ')}`);
   else error(`${description}에 신규 월운영보고서 기본양식이 누락됨`);
+
+  const safeDefaultsDir = path.join(rootDir, 'defaults', 'report-templates');
+  const safeDefaults = fs.existsSync(safeDefaultsDir)
+    ? fs.readdirSync(safeDefaultsDir).filter((name) => !name.startsWith('.')).sort()
+    : [];
+  const expectedDefaults = ['일일업무일지(A2O).hwp', '일일업무일지(MBR).hwp'].sort();
+  if (JSON.stringify(safeDefaults) === JSON.stringify(expectedDefaults)) {
+    success(`${description} HWP 누락현장 전용 기본양식 2종 확인`);
+  } else {
+    error(`${description} HWP 누락현장 전용 기본양식 구성이 잘못됨: ${safeDefaults.join(', ')}`);
+  }
 }
 
 function validateMonthlyOperationReportContract() {
@@ -1344,19 +1355,21 @@ function validateRegressionContracts() {
   checkSource(
     !electronBuilderConfigText.includes("'templates/**/*'") &&
       !electronBuilderConfigText.includes("{ from: 'templates', to: 'templates' }") &&
-      electronBuilderConfigText.includes("templates/reports/일일업무일지(A2O).hwp") &&
-      electronBuilderConfigText.includes("templates/reports/일일업무일지(MBR).hwp") &&
+      electronBuilderConfigText.includes("to: 'defaults/report-templates/일일업무일지(A2O).hwp'") &&
+      electronBuilderConfigText.includes("to: 'defaults/report-templates/일일업무일지(MBR).hwp'") &&
+      electronBuilderConfigText.includes("templates/reports/월운영보고서.xlsx") &&
       integratedInstallerScriptText.includes("'templates/**/*'") &&
       integratedInstallerScriptText.includes("{ from: 'templates', to: 'templates' }") &&
       reportTemplateText.includes("'일일업무일지(A2O)'") &&
       reportTemplateText.includes("'일일업무일지(MBR)'") &&
       reportTemplateText.includes('process.resourcesPath') &&
       reportTemplateText.includes('syncBundledTemplatesToAppData') &&
-      reportTemplateText.includes('shouldReplacePlaceholder') &&
-      reportTemplateText.includes('DAILY_WORK_LOG_HWP_MIGRATION_MARKER') &&
-      reportTemplateText.includes('backup-before-hwp-migration'),
-    '업데이트 HWP 2종 일회성 전환·기타 양식 제외·통합 설치 양식 포함 계약 유지',
-    'HWP 전환 양식의 제한적 포함/백업 또는 기타 현장 양식 보호 계약이 깨졌습니다'
+      reportTemplateText.includes("'defaults', 'report-templates'") &&
+      reportTemplateText.includes('if (existingNames.has(normalizeTemplateKey(fileName)))') &&
+      !reportTemplateText.includes('shouldReplacePlaceholder') &&
+      !reportTemplateText.includes('DAILY_WORK_LOG_HWP_MIGRATION_MARKER'),
+    '자동업데이트 HWP 누락시만 복사·기존 현장양식 무조건 보호·통합 설치 전체양식 계약 유지',
+    '자동업데이트 HWP 최초복사 또는 기존 현장양식 보호 계약이 깨졌습니다'
   );
 
   checkSource(
