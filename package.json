@@ -1,7 +1,7 @@
 {
   "name": "wastewater-treatment-plant",
   "private": true,
-  "version": "1.1.10",
+  "version": "1.1.11",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -17,7 +17,7 @@
     "electron:dev": "npm run build && electron .",
     "electron:build": "npx @electron/rebuild --force --arch=x64 --version=40.6.0 && npm run build && electron-builder --config electron-builder.config.cjs && npm run validate:native",
     "electron:publish": "npx @electron/rebuild --force --arch=x64 --version=40.6.0 && npm run build && electron-builder --config electron-builder.config.cjs --publish always",
-    "validate": "node scripts/validate-release.cjs && node scripts/validate-qntech-location-mapping.cjs && node scripts/validate-clean-server-boot.cjs && node scripts/validate-settings-persistence.cjs && node scripts/validate-board-html-security.cjs && node scripts/validate-local-api-security.cjs && node scripts/validate-credential-security.cjs && node scripts/validate-sqlite-protection.cjs && node scripts/validate-upload-security.cjs && node scripts/validate-api-route-inventory.cjs",
+    "validate": "node scripts/validate-release.cjs && node scripts/validate-qntech-location-mapping.cjs && node scripts/validate-qntech-multi-round-refresh.cjs && node scripts/validate-clean-server-boot.cjs && node scripts/validate-settings-persistence.cjs && node scripts/validate-board-html-security.cjs && node scripts/validate-local-api-security.cjs && node scripts/validate-credential-security.cjs && node scripts/validate-sqlite-protection.cjs && node scripts/validate-upload-security.cjs && node scripts/validate-api-route-inventory.cjs",
     "validate:asar": "node scripts/validate-release.cjs --asar-path ./release/win-unpacked/resources/app.asar",
     "validate:api": "node scripts/validate-release.cjs --api-test",
     "validate:native": "node scripts/validate-packaged-native.cjs ./release/win-unpacked",
