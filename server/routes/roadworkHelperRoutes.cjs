@@ -64,9 +64,9 @@ function getActiveNames(db, category, nameColumn, tableName, scope) {
     SELECT item_name
     FROM site_config_items
     WHERE site_id = ? AND category = ? AND is_active = 1
-      AND item_name NOT LIKE '%\_purchase' ESCAPE '\'
-      AND item_name NOT LIKE '%\_usage' ESCAPE '\'
-      AND item_name NOT LIKE '%\_inventory' ESCAPE '\'
+      AND item_name NOT LIKE '%\\_purchase' ESCAPE '\\'
+      AND item_name NOT LIKE '%\\_usage' ESCAPE '\\'
+      AND item_name NOT LIKE '%\\_inventory' ESCAPE '\\'
     ORDER BY display_order ASC, item_name ASC
   `).all(scope.siteId, category).map((row) => row.item_name).filter(Boolean) : db.prepare(`
     SELECT item_name

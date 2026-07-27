@@ -482,7 +482,10 @@ module.exports = function (db, baseDir, appDataPath) {
         last_modified: r.last_modified,
       }));
 
-      const ledgerSettings = db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
+      const ledgerSettings = db.prepare(
+        'SELECT company_name, default_amount FROM site_sludge_export_settings WHERE site_id = ?'
+      ).get(req.siteContext?.siteId)
+        || db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
 
       const totalAmount = rows.reduce((sum, row) => {
         const n = Number(row?.sludge_amount);
@@ -785,8 +788,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const start   = `${year}-${mm}-01`;
       const lastDay = new Date(year, month, 0).getDate();
       const end     = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
-      const rows = getMergedSludgeRows(db, start, end);
-      const settings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
+      const rows = getMergedSludgeRows(db, start, end, req.siteContext);
 
       const items = rows.map(r => {
         const sl = resolveLocalSludgePhotoPath(appDataPath, r, '반출');
@@ -812,7 +814,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const outputFileName = `슬러지사진대지_${year}_${mm}_${Date.now()}.xlsx`;
       const outputPath = buildExcelTempPath('osoo-sludge-photo', outputFileName);
       await exportSludgePhotoXlsx({
-        templatePath, outputPath, year, month, items, siteName: settings?.site_name || ''
+        templatePath, outputPath, year, month, items, siteName: req.siteContext?.siteName || ''
       });
       await openExcelFile(outputPath);
       res.json({ success: true, itemCount: items.length });
@@ -846,10 +848,12 @@ module.exports = function (db, baseDir, appDataPath) {
       const start = `${year}-${mm}-01`;
       const lastDay = new Date(year, month, 0).getDate();
       const end = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
-      const rows = getMergedSludgeRows(db, start, end);
+      const rows = getMergedSludgeRows(db, start, end, req.siteContext);
 
-      const settings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
-      const ledgerSettings = db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
+      const ledgerSettings = db.prepare(
+        'SELECT company_name, default_amount FROM site_sludge_export_settings WHERE site_id = ?'
+      ).get(req.siteContext?.siteId)
+        || db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
       const outputFileName = `슬러지반출관리대장_${year}_${mm}_${Date.now()}.xlsx`;
       const outputPath = buildExcelTempPath('osoo-sludge-ledger', outputFileName);
 
@@ -859,7 +863,7 @@ module.exports = function (db, baseDir, appDataPath) {
         year,
         month,
         items: rows,
-        siteName: settings?.site_name || '',
+        siteName: req.siteContext?.siteName || '',
         companyName: ledgerSettings?.company_name || '',
         defaultAmount: Number(ledgerSettings?.default_amount) || 0,
       });

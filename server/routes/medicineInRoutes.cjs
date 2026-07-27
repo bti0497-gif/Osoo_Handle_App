@@ -143,11 +143,13 @@ async function savePhotoToLocal(appDataPath, year, mm, date, medicineName, srcPa
   return destPath;
 }
 
-async function uploadMedicinePhotoToDrive(db, date, medicineName, localPath) {
+async function uploadMedicinePhotoToDrive(db, date, medicineName, localPath, siteNameOverride = '') {
   if (!localPath || !fs.existsSync(localPath) || !isDriveConfigured()) return null;
   try {
-    const settings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get() || {};
-    const siteName = settings.site_name || 'Unknown Site';
+    const settings = siteNameOverride
+      ? {}
+      : (db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get() || {});
+    const siteName = siteNameOverride || settings.site_name || 'Unknown Site';
     const folder = await getOrCreateFolderPath(
       getDriveRootFolderId(),
       managementPhotoSegments(date)
@@ -164,11 +166,13 @@ async function uploadMedicinePhotoToDrive(db, date, medicineName, localPath) {
   }
 }
 
-async function findRemoteMedicinePhoto(db, date, medicineName) {
+async function findRemoteMedicinePhoto(db, date, medicineName, siteNameOverride = '') {
   if (!date || !medicineName || !isDriveConfigured()) return null;
   try {
-    const settings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get() || {};
-    const siteName = settings.site_name || 'Unknown Site';
+    const settings = siteNameOverride
+      ? {}
+      : (db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get() || {});
+    const siteName = siteNameOverride || settings.site_name || 'Unknown Site';
     const managementFolder = await getOrCreateFolderPath(
       getDriveRootFolderId(),
       managementPhotoSegments(date)
@@ -202,8 +206,8 @@ async function downloadDriveFileBuffer(fileId) {
   return Buffer.from(response.data);
 }
 
-async function restoreMedicinePhotoFromDrive(db, appDataPath, date, medicineName) {
-  const remote = await findRemoteMedicinePhoto(db, date, medicineName);
+async function restoreMedicinePhotoFromDrive(db, appDataPath, date, medicineName, siteNameOverride = '') {
+  const remote = await findRemoteMedicinePhoto(db, date, medicineName, siteNameOverride);
   if (!remote?.id) return null;
   const buffer = await downloadDriveFileBuffer(remote.id);
   if (!buffer) return null;
@@ -266,23 +270,26 @@ module.exports = function (db, baseDir, appDataPath) {
       const siteName = scope.siteName || '';
       const siteFilter = siteWhere(scope);
 
+      const itemTable = scope.siteId ? 'site_config_items' : 'config_items';
+      const siteClause = scope.siteId ? 'site_id = ? AND ' : '';
+      const itemParams = scope.siteId ? [scope.siteId] : [];
       const activeMedicineRows = db.prepare(
-        `SELECT item_name FROM config_items
-         WHERE category = 'medicine' AND is_active = 1
+        `SELECT item_name FROM ${itemTable}
+         WHERE ${siteClause}category = 'medicine' AND is_active = 1
            AND item_name NOT LIKE '%\\_purchase' ESCAPE '\\'
            AND item_name NOT LIKE '%\\_usage' ESCAPE '\\'
            AND item_name NOT LIKE '%\\_inventory' ESCAPE '\\'
          ORDER BY display_order ASC
         `
-      ).all();
+      ).all(...itemParams);
       const activeKitRows = db.prepare(
-        `SELECT item_name FROM config_items
-         WHERE category = 'kit' AND is_active = 1
+        `SELECT item_name FROM ${itemTable}
+         WHERE ${siteClause}category = 'kit' AND is_active = 1
            AND item_name NOT LIKE '%\\_purchase' ESCAPE '\\'
            AND item_name NOT LIKE '%\\_usage' ESCAPE '\\'
            AND item_name NOT LIKE '%\\_inventory' ESCAPE '\\'
          ORDER BY display_order ASC`
-      ).all();
+      ).all(...itemParams);
       const medicineNames = activeMedicineRows.length > 0
         ? activeMedicineRows.map((row) => row.item_name)
         : BASE_MEDICINES;
@@ -461,7 +468,13 @@ module.exports = function (db, baseDir, appDataPath) {
               const fileName = path.basename(localPath);
               const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(`${yearStr}/${fileName}`)}`;
               updateMedicinePhotoUrl(db, tab, date, medicineName, localUrl, metadata.siteId);
-              const driveFile = await uploadMedicinePhotoToDrive(db, date, medicineName, localPath);
+              const driveFile = await uploadMedicinePhotoToDrive(
+                db,
+                date,
+                medicineName,
+                localPath,
+                req.siteContext?.siteName
+              );
               drivePhotoResults.push({ medicineName, uploaded: Boolean(driveFile?.id) });
             }
           } catch (e) {
@@ -516,7 +529,13 @@ module.exports = function (db, baseDir, appDataPath) {
       const url = `/api/medicine-in/photo?p=${encodeURIComponent(`${yearStr}/${fileName}`)}`;
       updateMedicinePhotoUrl(db, 'medicine', date, medicineName, url, req.siteContext?.siteId);
       updateMedicinePhotoUrl(db, 'kit', date, medicineName, url, req.siteContext?.siteId);
-      const driveFile = await uploadMedicinePhotoToDrive(db, date, medicineName, destPath);
+      const driveFile = await uploadMedicinePhotoToDrive(
+        db,
+        date,
+        medicineName,
+        destPath,
+        req.siteContext?.siteName
+      );
       res.json({
         success: true,
         url,
@@ -537,7 +556,7 @@ module.exports = function (db, baseDir, appDataPath) {
       }
       const items = [];
       for (const name of itemNames) {
-        const remote = await findRemoteMedicinePhoto(db, date, name);
+        const remote = await findRemoteMedicinePhoto(db, date, name, req.siteContext?.siteName);
         if (remote) {
           items.push({ name, fileName: remote.fileName, driveFileId: remote.id });
         }
@@ -557,7 +576,13 @@ module.exports = function (db, baseDir, appDataPath) {
       }
       const restored = [];
       for (const name of itemNames) {
-        const result = await restoreMedicinePhotoFromDrive(db, appDataPath, date, name);
+        const result = await restoreMedicinePhotoFromDrive(
+          db,
+          appDataPath,
+          date,
+          name,
+          req.siteContext?.siteName
+        );
         if (result?.url) {
           updateMedicinePhotoUrl(db, tab === 'kit' ? 'kit' : 'medicine', date, name, result.url, req.siteContext?.siteId);
           restored.push({ name, url: result.url });
@@ -650,7 +675,13 @@ module.exports = function (db, baseDir, appDataPath) {
                   const fileName = path.basename(localPath);
                   const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(`${String(useDate).slice(0, 4)}/${fileName}`)}`;
                   updateMedicinePhotoUrl(db, isKit ? 'kit' : 'medicine', useDate, medicineName, localUrl, req.siteContext?.siteId);
-                  await uploadMedicinePhotoToDrive(db, useDate, medicineName, localPath);
+                  await uploadMedicinePhotoToDrive(
+                    db,
+                    useDate,
+                    medicineName,
+                    localPath,
+                    req.siteContext?.siteName
+                  );
                 }
               } catch (e) {
                 console.warn('[medicine-in export] 로컬 사진 저장 실패:', e.message);

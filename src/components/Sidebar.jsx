@@ -1,5 +1,10 @@
 import React from 'react';
 import { MENUS, ADMIN_MENUS, ADMIN_ROLES } from '../core/constants';
+import {
+    clearBoardNewBadge,
+    hasBoardNewBadge,
+    subscribeBoardNewBadge,
+} from '../features/board/boardNewBadge';
 
 const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword }) => {
 
@@ -7,6 +12,10 @@ const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword }) =
     const surname = user?.name?.charAt(0) || 'U';
 
     const [expandedMenus, setExpandedMenus] = React.useState(['log', 'water_group']);
+    const boardUserKey = `${user?.id || user?.name || 'unknown'}::${user?.site_id || user?.site_name1 || 'site'}`;
+    const [showBoardNewBadge, setShowBoardNewBadge] = React.useState(
+        () => hasBoardNewBadge(boardUserKey)
+    );
     const managedSites = Array.isArray(user?.managed_sites) ? user.managed_sites : [];
     const multiSiteEnabled = user?.multi_site_enabled === true;
     const pairedSiteIds = [user?.primary_site_id, user?.secondary_site_id].map(String).filter(Boolean);
@@ -30,9 +39,27 @@ const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword }) =
         if (menu.children) {
             toggleMenu(menu.id);
         } else {
+            if (menu.id === 'board') {
+                clearBoardNewBadge(boardUserKey);
+                setShowBoardNewBadge(false);
+            }
             onTabChange(menu.id);
         }
     };
+
+    React.useEffect(() => {
+        setShowBoardNewBadge(hasBoardNewBadge(boardUserKey));
+        const unsubscribe = subscribeBoardNewBadge(({ userKey, visible }) => {
+            if (userKey === boardUserKey) setShowBoardNewBadge(Boolean(visible));
+        });
+        const timer = window.setInterval(() => {
+            setShowBoardNewBadge(hasBoardNewBadge(boardUserKey));
+        }, 60000);
+        return () => {
+            unsubscribe();
+            window.clearInterval(timer);
+        };
+    }, [boardUserKey]);
 
     return (
         <aside className="sidebar">
@@ -93,6 +120,29 @@ const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword }) =
                         >
                             <span className="material-icons nav-text-icon">{menu.icon}</span>
                             <span>{menu.label}</span>
+                            {menu.id === 'board' && showBoardNewBadge && (
+                                <span
+                                    aria-label="새 글"
+                                    title="24시간 이내 새 글"
+                                    style={{
+                                        marginLeft: '6px',
+                                        minWidth: '17px',
+                                        height: '17px',
+                                        padding: '0 4px',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: '999px',
+                                        background: '#ef4444',
+                                        color: '#fff',
+                                        fontSize: '10px',
+                                        fontWeight: 900,
+                                        lineHeight: 1,
+                                    }}
+                                >
+                                    N
+                                </span>
+                            )}
                             {menu.children && (
                                 <span className={`material-icons nav-text-expand-icon ${expandedMenus.includes(menu.id) ? 'expanded' : ''}`}>
                                     chevron_right

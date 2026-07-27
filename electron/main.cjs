@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -780,6 +780,48 @@ ipcMain.handle('app:hideToTray', () => {
 ipcMain.handle('app:openSiteWindow', (_event, site = {}) => {
   const child = createSiteWindow(site.siteId, site.siteName);
   return { success: true, siteId: String(site.siteId || ''), focused: child.isFocused() };
+});
+
+ipcMain.handle('notification:showPopupNotice', (event, rawNotice = {}) => {
+  const noticeId = String(rawNotice?.id || '').trim().slice(0, 160);
+  if (!noticeId || !Notification.isSupported()) {
+    return { shown: false, reason: noticeId ? 'unsupported' : 'invalid-notice' };
+  }
+
+  const sourceWindow = BrowserWindow.fromWebContents(event.sender);
+  if (sourceWindow && !sourceWindow.isDestroyed()
+    && sourceWindow.isVisible() && !sourceWindow.isMinimized() && sourceWindow.isFocused()) {
+    return { shown: false, reason: 'window-active' };
+  }
+  const title = String(rawNotice?.title || '🚨 [중앙 긴급 공지]').trim().slice(0, 120);
+  const body = String(
+    rawNotice?.body || '새 중요 메시지가 등록되었습니다'
+  ).trim().slice(0, 240);
+  const notification = new Notification({
+    title,
+    body,
+    silent: false,
+    timeoutType: 'default',
+  });
+
+  notification.on('click', () => {
+    const targetWindow = sourceWindow && !sourceWindow.isDestroyed()
+      ? sourceWindow
+      : mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) return;
+    if (targetWindow.isMinimized()) targetWindow.restore();
+    targetWindow.show();
+    targetWindow.setAlwaysOnTop(true);
+    targetWindow.focus();
+    targetWindow.webContents.focus();
+    targetWindow.webContents.send('notification:openPopupModal', { noticeId });
+    setTimeout(() => {
+      if (!targetWindow.isDestroyed()) targetWindow.setAlwaysOnTop(false);
+    }, 1200);
+  });
+
+  notification.show();
+  return { shown: true };
 });
 
 ipcMain.handle('pdf:save', async (_event, options = {}) => {
