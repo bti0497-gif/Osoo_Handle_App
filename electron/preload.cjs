@@ -27,6 +27,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   hideToTray: () => ipcRenderer.invoke('app:hideToTray'),
   openSiteWindow: (site) => ipcRenderer.invoke('app:openSiteWindow', site),
+  showPopupNotification: (notice) => ipcRenderer.invoke('notification:showPopupNotice', notice),
+  onOpenPopupModal: (callback) => {
+    const listener = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('notification:openPopupModal', listener);
+    return () => ipcRenderer.removeListener('notification:openPopupModal', listener);
+  },
   onSessionReset: (callback) => {
     const listener = () => callback();
     ipcRenderer.on('app:session-reset', listener);

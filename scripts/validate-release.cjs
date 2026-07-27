@@ -15,7 +15,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync, spawn } = require('child_process');
+const { execSync, spawn, spawnSync } = require('child_process');
 const { runUnifiedRecordModalRegressionTests } = require('./validate-unified-record-modal.cjs');
 
 const BASE_DIR = path.join(__dirname, '..');
@@ -530,8 +530,12 @@ function validateRegressionContracts() {
   const boardModelPath = path.join(BASE_DIR, 'src', 'features', 'board', 'BoardModel.js');
   const boardViewModelPath = path.join(BASE_DIR, 'src', 'features', 'board', 'useBoardViewModel.js');
   const boardViewPath = path.join(BASE_DIR, 'src', 'features', 'board', 'BoardView.jsx');
+  const sidebarPath = path.join(BASE_DIR, 'src', 'components', 'Sidebar.jsx');
   const boardPopupNoticePath = path.join(BASE_DIR, 'src', 'features', 'board', 'BoardPopupNotice.jsx');
+  const boardPopupWatcherPath = path.join(BASE_DIR, 'src', 'features', 'board', 'usePopupNoticeWatcher.js');
+  const boardNewBadgePath = path.join(BASE_DIR, 'src', 'features', 'board', 'boardNewBadge.js');
   const boardPopupContractPath = path.join(BASE_DIR, 'docs', 'BOARD_POPUP_NOTICE_CONTRACT.md');
+  const boardPopupTraySpecPath = path.join(BASE_DIR, 'docs', 'FIELD_APP_POPUP_TRAY_NOTIFICATION_SPEC.md');
   const boardHtmlSanitizerPath = path.join(BASE_DIR, 'server', 'services', 'boardHtmlSanitizer.cjs');
   const boardClientSanitizerPath = path.join(BASE_DIR, 'src', 'features', 'board', 'sanitizeBoardHtml.js');
   const indexHtmlPath = path.join(BASE_DIR, 'index.html');
@@ -634,8 +638,12 @@ function validateRegressionContracts() {
   const boardModelText = readText(boardModelPath);
   const boardViewModelText = readText(boardViewModelPath);
   const boardViewText = readText(boardViewPath);
+  const sidebarText = readText(sidebarPath);
   const boardPopupNoticeText = readText(boardPopupNoticePath);
+  const boardPopupWatcherText = readText(boardPopupWatcherPath);
+  const boardNewBadgeText = readText(boardNewBadgePath);
   const boardPopupContractText = readText(boardPopupContractPath);
+  const boardPopupTraySpecText = readText(boardPopupTraySpecPath);
   const boardHtmlSanitizerText = readText(boardHtmlSanitizerPath);
   const boardClientSanitizerText = readText(boardClientSanitizerPath);
   const indexHtmlText = readText(indexHtmlPath);
@@ -759,14 +767,24 @@ function validateRegressionContracts() {
       boardRoutesText.includes('Math.min(7, Math.max(1') &&
       boardFirebaseServiceText.includes('isPopupActive(data)') &&
       boardPopupNoticeText.includes("activeTab !== 'dashboard'") &&
-      boardPopupNoticeText.includes('osoo.board-popup.dismissed.') &&
-      boardPopupNoticeText.includes('다시 보지 않기') &&
+      boardPopupWatcherText.includes('osoo.board-popup.dismissed.') &&
+      boardPopupNoticeText.includes('오늘 하루 보지 않기') &&
       boardPopupNoticeText.includes("transform: 'translate(-50%, -50%)'") &&
       boardPopupNoticeText.includes('role="alertdialog"') &&
-      boardPopupNoticeText.includes('attempt < 2') &&
+      boardPopupWatcherText.includes('attempt < 2') &&
+      boardPopupWatcherText.includes('3 * 60 * 1000') &&
+      boardPopupWatcherText.includes('Date.now() + DAY_MS') &&
+      electronMainText.includes("ipcMain.handle('notification:showPopupNotice'") &&
+      electronMainText.includes("targetWindow.webContents.send('notification:openPopupModal'") &&
+      electronPreloadText.includes('showPopupNotification') &&
+      electronPreloadText.includes('onOpenPopupModal') &&
+      boardNewBadgeText.includes('createdAt + DAY_MS') &&
+      boardNewBadgeText.includes('clearBoardNewBadge') &&
+      sidebarText.includes("menu.id === 'board' && showBoardNewBadge") &&
+      boardPopupTraySpecText.includes('알림을 발생시킨 창의 현장 문맥') &&
       boardPopupContractText.includes('1일 이상 7일 이하'),
-    '소통게시판 대상별 팝업·만료·다시보지않기 계약 유지',
-    '팝업 공지 권한, 최대 7일 만료 또는 사용자별 다시보지않기 보호가 깨졌습니다'
+    '소통게시판 대상별 팝업·만료·24시간 숨김·트레이 알림 계약 유지',
+    '팝업 공지 권한, 최대 7일 만료, 24시간 숨김 또는 트레이 복원 보호가 깨졌습니다'
   );
 
   checkSource(
@@ -1985,6 +2003,24 @@ function printSummary() {
   }
 }
 
+function validateSiteRouteRuntimeContract() {
+  const scriptPath = path.join(BASE_DIR, 'scripts', 'validate-site-route-isolation.cjs');
+  const result = spawnSync(process.execPath, [scriptPath], {
+    cwd: BASE_DIR,
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 30000,
+  });
+
+  if (result.status === 0) {
+    success('공사입력도우미 SQL 실제 실행·양방향 ON/OFF·현장별 저장 격리 검증 통과');
+    return;
+  }
+
+  const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+  error(`공사입력도우미/현장 분리 실제 실행 검증 실패${output ? `\n${output}` : ''}`);
+}
+
 // ===== 실행 =====
 (async function() {
   console.log(`\n${colors.cyan}🔍 배포 전 검증 스크립트${colors.reset}`);
@@ -2000,6 +2036,7 @@ function printSummary() {
   validateNativeModuleReleaseContract();
   validateInstallerNamingPolicy();
   validateRegressionContracts();
+  validateSiteRouteRuntimeContract();
   validateMonthlyOperationReportContract();
   validateAuthSessionContract();
   validateRouteRegistry();

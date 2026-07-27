@@ -1013,8 +1013,7 @@ module.exports = function () {
   router.get('/api/certificates', async (req, res) => {
     try {
       const role = resolveUserRole(req);
-      const appSettings = db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get();
-      const currentSiteName = String(appSettings?.site_name || '').trim();
+      const currentSiteName = String(req.siteContext?.siteName || '').trim();
       if (!currentSiteName) {
         return res.status(400).json({ success: false, code: 'SITE_NOT_CONFIGURED', message: '설정에서 현장을 먼저 확정해 주세요.' });
       }

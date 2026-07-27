@@ -13,17 +13,34 @@ async function main() {
     db.exec(`
       CREATE TABLE sites (
         id TEXT PRIMARY KEY, site_name TEXT NOT NULL, manager_name TEXT,
-        is_active INTEGER DEFAULT 1
+        method TEXT, series TEXT, is_active INTEGER DEFAULT 1
       );
-      INSERT INTO sites VALUES ('site-a', '테스트휴게소(동쪽방향)', '관리자', 1);
-      INSERT INTO sites VALUES ('site-b', '테스트휴게소(서쪽방향)', '관리자', 1);
+      INSERT INTO sites VALUES ('site-a', '테스트휴게소(동쪽방향)', '관리자', 'A2O', '1계열', 1);
+      INSERT INTO sites VALUES ('site-b', '테스트휴게소(서쪽방향)', '관리자', 'A2O', '1계열', 1);
       CREATE TABLE app_settings (
         id INTEGER PRIMARY KEY, site_id TEXT, site_name TEXT, manager_name TEXT,
+        method TEXT, series TEXT, flow_option TEXT,
         multi_site_enabled INTEGER, primary_site_id TEXT, secondary_site_id TEXT
       );
       INSERT INTO app_settings VALUES (
-        1, 'site-a', '테스트휴게소(동쪽방향)', '관리자', 1, 'site-a', 'site-b'
+        1, 'site-a', '테스트휴게소(동쪽방향)', '관리자', 'A2O', '1계열', 'single1',
+        1, 'site-a', 'site-b'
       );
+      CREATE TABLE site_settings (
+        site_id TEXT PRIMARY KEY, flow_option TEXT
+      );
+      INSERT INTO site_settings VALUES ('site-a', 'single1');
+      INSERT INTO site_settings VALUES ('site-b', 'single1');
+      CREATE TABLE site_config_items (
+        site_id TEXT NOT NULL, category TEXT NOT NULL, item_name TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1, display_order INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (site_id, category, item_name)
+      );
+      INSERT INTO site_config_items VALUES ('site-a', 'medicine', '포도당', 1, 1);
+      INSERT INTO site_config_items VALUES ('site-a', 'medicine', '포도당_purchase', 1, 2);
+      INSERT INTO site_config_items VALUES ('site-a', 'kit', '암모니아', 1, 1);
+      INSERT INTO site_config_items VALUES ('site-b', 'medicine', '응집제', 1, 1);
+      INSERT INTO site_config_items VALUES ('site-b', 'kit', '질산성질소', 1, 1);
       CREATE TABLE flow_readings (
         id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, type TEXT NOT NULL,
         raw_value REAL, calculated_flow REAL, site_id TEXT, UNIQUE(date, type)
@@ -56,6 +73,7 @@ async function main() {
     app.use(require('../server/routes/flowRoutes.cjs')(db));
     app.use(require('../server/routes/medicineRoutes.cjs')(db));
     app.use(require('../server/routes/kitRoutes.cjs')(db));
+    app.use(require('../server/routes/roadworkHelperRoutes.cjs')(db));
     server = await new Promise((resolve) => {
       const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
     });
@@ -96,11 +114,32 @@ async function main() {
     assert.strictEqual(db.prepare("SELECT COUNT(*) count FROM medicine_logs WHERE date='2026-07-24'").get().count, 2);
     assert.strictEqual(db.prepare("SELECT COUNT(*) count FROM kit_logs WHERE date='2026-07-24'").get().count, 2);
 
+    const roadworkA = await request('site-a', '/api/roadwork-helper/all?date=2026-07-24');
+    const roadworkB = await request('site-b', '/api/roadwork-helper/all?date=2026-07-24');
+    assert.strictEqual(roadworkA.success, true);
+    assert.strictEqual(roadworkB.success, true);
+    assert.deepStrictEqual(roadworkA.medicine.map((row) => row.item), ['포도당']);
+    assert.deepStrictEqual(roadworkA.kit.map((row) => row.item), ['암모니아']);
+    assert.deepStrictEqual(roadworkB.medicine.map((row) => row.item), ['응집제', '포도당']);
+    assert.deepStrictEqual(roadworkB.kit.map((row) => row.item), ['질산성질소', '암모니아']);
+    assert.ok(!roadworkA.medicine.some((row) => row.item === '응집제'));
+    assert.ok(!roadworkA.kit.some((row) => row.item === '질산성질소'));
+    assert.ok(!roadworkA.medicine.some((row) => row.item.endsWith('_purchase')));
+
     const denied = await fetch(`${baseUrl}/api/flows?date=2026-07-24`, {
       headers: { 'x-osoo-site-id': 'site-c' },
     });
     assert.strictEqual(denied.status, 403);
+
+    db.prepare('UPDATE app_settings SET multi_site_enabled = 0 WHERE id = 1').run();
+    const singleSitePrimary = await request('site-a', '/api/roadwork-helper/all?date=2026-07-24');
+    assert.strictEqual(singleSitePrimary.success, true);
+    const singleSiteSecondary = await fetch(`${baseUrl}/api/roadwork-helper/all?date=2026-07-24`, {
+      headers: { 'x-osoo-site-id': 'site-b' },
+    });
+    assert.strictEqual(singleSiteSecondary.status, 403);
     console.log('✓ 양방향 창별 유량·약품·키트 HTTP 저장 및 조회 분리 검증 통과');
+    console.log('✓ 공사입력도우미 현장별 초기 조회·설정 보조항목 제외 검증 통과');
     console.log('✓ 허용되지 않은 site_id 요청 차단 검증 통과');
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
