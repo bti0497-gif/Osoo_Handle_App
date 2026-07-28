@@ -1069,6 +1069,15 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    dailyWorkLogHwpxServiceText.includes('getSludgeDetails(db, date, amount, monthlyTotal, context = {})') &&
+      dailyWorkLogHwpxServiceText.includes('WHERE date = ?${filter.clause}') &&
+      dailyWorkLogHwpxServiceText.includes('FROM site_sludge_export_settings WHERE site_id = ?') &&
+      dailyWorkLogHwpxServiceText.includes('values.반출량, values.월간누계, context'),
+    '일일업무일지 슬러지 현장 범위 계약 유지',
+    '양방향 공유 DB에서 다른 현장의 슬러지 반출정보가 일지에 섞일 수 있습니다'
+  );
+
+  checkSource(
     diagnosticLogServiceText.includes('async function cleanupOldDiagnosticsOnVersionStart') &&
       diagnosticLogServiceText.includes("findFolderPath(getDriveRootFolderId(), ['앱진단로그'])") &&
       diagnosticLogServiceText.includes("entry.name.slice(0, 10) >= todayKst") &&

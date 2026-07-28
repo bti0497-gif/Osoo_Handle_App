@@ -227,9 +227,9 @@ function getSiteFilter(db, context = {}) {
   `).get() || {};
   const siteId = String(context.siteId || settings.site_id || '').trim();
   const siteName = String(context.siteName || settings.site_name || '').trim();
-  if (siteId) return { clause: ' AND site_id = ?', params: [siteId], settings };
-  if (siteName) return { clause: ' AND site_name = ?', params: [siteName], settings };
-  return { clause: '', params: [], settings };
+  if (siteId) return { clause: ' AND site_id = ?', params: [siteId], siteId, siteName, settings };
+  if (siteName) return { clause: ' AND site_name = ?', params: [siteName], siteId, siteName, settings };
+  return { clause: '', params: [], siteId, siteName, settings };
 }
 
 function findLocationPrefix(location) {
@@ -293,7 +293,7 @@ function formatSludgeTime(value) {
   return `${String(match[1]).padStart(2, '0')}:${match[2]}`;
 }
 
-function getSludgeDetails(db, date, amount, monthlyTotal) {
+function getSludgeDetails(db, date, amount, monthlyTotal, context = {}) {
   const numericAmount = Number(amount);
   if (amount === null || amount === undefined || amount === '' || !Number.isFinite(numericAmount) || numericAmount <= 0) {
     return {
@@ -307,13 +307,19 @@ function getSludgeDetails(db, date, amount, monthlyTotal) {
       월간누계: '',
     };
   }
+  const filter = getSiteFilter(db, context);
   const log = db.prepare(`
     SELECT sludge_amount, sludge_photo_taken_at, last_modified
     FROM sludge_photo_logs
-    WHERE date = ?
+    WHERE date = ?${filter.clause}
+    ORDER BY last_modified DESC, id DESC
     LIMIT 1
-  `).get(date) || {};
-  const settings = db.prepare('SELECT company_name FROM sludge_export_settings WHERE id = 1').get() || {};
+  `).get(date, ...filter.params) || {};
+  const settings = filter.siteId
+    ? (db.prepare('SELECT company_name FROM site_sludge_export_settings WHERE site_id = ?').get(filter.siteId)
+      || db.prepare('SELECT company_name FROM sludge_export_settings WHERE id = 1').get()
+      || {})
+    : (db.prepare('SELECT company_name FROM sludge_export_settings WHERE id = 1').get() || {});
   const resolvedAmount = log.sludge_amount ?? amount;
   const companyName = settings.company_name || '';
   const timeText = formatSludgeTime(log.sludge_photo_taken_at || log.last_modified);
@@ -403,7 +409,7 @@ async function buildHwpxBookmarkValues(db, appDataPath, date, context = {}) {
   Object.assign(values, getQntechBindings(db, date, context));
   Object.assign(values, getProcessFlowBindings(db, date, context));
   Object.assign(values, getChecklistBindings(context.method || filter.settings.method));
-  Object.assign(values, getSludgeDetails(db, date, values.반출량, values.월간누계));
+  Object.assign(values, getSludgeDetails(db, date, values.반출량, values.월간누계, context));
 
   const powerUsage = Number(values['전력량']);
   const inflowUsage = Number(values['유입량']);
