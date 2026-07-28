@@ -24,7 +24,12 @@ for (const relativePath of removableDirectories) {
     throw new Error(`Refusing to remove path outside project: ${target}`);
   }
   if (fs.existsSync(target)) {
-    fs.rmSync(target, { recursive: true, force: true });
+    fs.rmSync(target, {
+      recursive: true,
+      force: true,
+      maxRetries: 30,
+      retryDelay: 200,
+    });
     console.log(`[clean] ${relativePath}`);
   }
 }
