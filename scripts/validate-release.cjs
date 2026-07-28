@@ -474,6 +474,8 @@ function validateRegressionContracts() {
   const basicSiteHeaderPanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'BasicSiteHeaderPanel.jsx');
   const settingsRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'settingsRoutes.cjs');
   const historyRestoreModalPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'historyRestore', 'HistoryRestoreModal.jsx');
+  const historyRestoreScriptsPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'historyRestore', 'roadworkHistoryScripts.js');
+  const roadworkSessionBridgePath = path.join(BASE_DIR, 'src', 'features', 'roadwork-helper', 'roadworkSessionBridge.js');
   const historyRestoreServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'roadworkHistoryRestoreService.cjs');
   const mappingServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'mappingSettingsService.cjs');
   const inventoryMappingPanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'InventoryMappingPanel.jsx');
@@ -644,6 +646,8 @@ function validateRegressionContracts() {
   const boardViewText = readText(boardViewPath);
   const sidebarText = readText(sidebarPath);
   const historyRestoreModalText = readText(historyRestoreModalPath);
+  const historyRestoreScriptsText = readText(historyRestoreScriptsPath);
+  const roadworkSessionBridgeText = readText(roadworkSessionBridgePath);
   const historyRestoreServiceText = readText(historyRestoreServicePath);
   const appText = readText(appPath);
   const authViewModelText = readText(authViewModelPath);
@@ -695,6 +699,13 @@ function validateRegressionContracts() {
 
   checkSource(
     historyRestoreModalText.includes('persist:osoo-roadwork-${windowSiteId') &&
+      historyRestoreModalText.includes('getRememberedRoadworkSessionUrl(roadworkPartition)') &&
+      /setInspectionResult\(null\);\s*setApplyResult\(null\);\s*setShowPreviewGrid\(false\);/.test(historyRestoreModalText) &&
+      historyRestoreModalText.includes("setStatus({ authenticated: false, dailyScreenReady: false, reason: 'loading' })") &&
+      historyRestoreScriptsText.includes('const dateMatches = !target.registeredAt || nextDate === target.registeredAt') &&
+      historyRestoreScriptsText.includes('if (dateMatches && keyMatches && hasBoundIdentity)') &&
+      roadworkSessionBridgeText.includes("window.sessionStorage.setItem(storageKey(partition), normalizedUrl)") &&
+      roadworkSessionBridgeText.includes('LOGIN_PATH_PATTERN.test(normalizedUrl)') &&
       historyRestoreModalText.includes('누락자료 재요청') &&
       historyRestoreServiceText.includes('FROM site_config_items') &&
       historyRestoreServiceText.includes("normalizeDocuments(db, payload.documents, metadata.siteId)") &&
@@ -867,6 +878,10 @@ function validateRegressionContracts() {
     unifiedRecordModalContractText.includes('If a user selects a date and clicks the open-input button') &&
       unifiedRecordModalContractText.includes('The modal body must not use a blanket `pointer-events: none`') &&
       unifiedRecordModalContractText.includes('Editing inventory marks that date as a manual inventory baseline') &&
+      unifiedRecordModalContractText.includes('flow save includes only flow items the administrator actually edited') &&
+      unifiedRecordModalContractText.includes('Untouched flow items must not block an admin baseline save') &&
+      modalText.includes("const isDrafted = hasDraftForItem('flow', item)") &&
+      modalText.includes("if (effectiveSaveStatusMode === 'baseline' && !isDrafted)") &&
       unifiedRecordModalContractText.includes('inventory must be clamped at zero') &&
       unifiedRecordModalContractText.includes('Flow server save must upsert by `(date, type)`') &&
       unifiedRecordModalContractText.includes('After a successful save, the modal must force reload only the saved tabs') &&

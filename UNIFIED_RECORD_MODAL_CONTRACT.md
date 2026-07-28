@@ -50,6 +50,9 @@ This document protects the integrated input modal used by flow, water, medicine,
 - Editing inventory marks that date as a manual inventory baseline.
 - Saving a past medicine or kit date triggers server-side recalculation of later inventory values.
 - Water quality values have no formula cascade and only the edited date/round/location is saved.
+- In admin baseline mode, flow save includes only flow items the administrator actually edited.
+- Untouched flow items must not block an admin baseline save or be defaulted as a side effect.
+- A successful baseline save returns the modal to normal automatic-calculation mode.
 
 ## Power MWh Rules
 

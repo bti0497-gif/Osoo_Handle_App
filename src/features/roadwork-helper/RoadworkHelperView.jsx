@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { rememberRoadworkSessionUrl } from './roadworkSessionBridge';
 import { useRoadworkHelperViewModel } from './useRoadworkHelperViewModel';
 import { RoadworkHelperModel } from './RoadworkHelperModel';
 import './components/RoadworkHelperModal.css';
@@ -876,6 +877,7 @@ export default function RoadworkHelperView() {
 
     const handleDidFinishLoad = () => {
       const currentUrl = webview.getURL();
+      rememberRoadworkSessionUrl(roadworkPartition, currentUrl);
       let pageOrigin = '';
       try {
         pageOrigin = new URL(currentUrl).origin;
@@ -893,6 +895,7 @@ export default function RoadworkHelperView() {
 
     const handleNavigate = (event) => {
       const currentUrl = String(event.url || '');
+      rememberRoadworkSessionUrl(roadworkPartition, currentUrl);
       const isLoginPage = /\/security\/login\.do(?:[?#]|$)/i.test(currentUrl);
       setShowRefreshToast(isLoginPage);
       if (wasLoginPageRef.current && !isLoginPage) {
@@ -926,7 +929,7 @@ export default function RoadworkHelperView() {
       webview.removeEventListener('did-navigate-in-page', handleNavigate);
       webview.removeEventListener('before-input-event', handleBeforeInput);
     };
-  }, [handleRefresh, recordRoadworkDiagnostic, webviewGeneration]);
+  }, [handleRefresh, recordRoadworkDiagnostic, roadworkPartition, webviewGeneration]);
 
   const handleAutoFill = React.useCallback(async () => {
     const webview = webviewRef.current;
