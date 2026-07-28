@@ -153,7 +153,7 @@ module.exports = function (db, baseDir, appDataPath) {
       } catch (sheetErr) {
         console.warn('[Settings] App settings sheets lookup failed, keeping local credentials:', sheetErr.message);
       }
-      const qntechIntegrity = await verifyQntechSettingsIntegrity();
+      const qntechIntegrity = await verifyQntechSettingsIntegrity(req.siteContext || {});
       templateSettingsService.cleanupDisallowedReportTemplates(reportsDir);
       const result = appSettingsService.getSettingsOverview(db, baseDir, appDataPath, req.siteContext?.siteId);
       res.json({ success: true, ...result, integrity: { qntech: qntechIntegrity } });
@@ -236,7 +236,16 @@ module.exports = function (db, baseDir, appDataPath) {
   // 현재 로컬 사이트 선택 API
   router.post('/api/settings/select-site', async (req, res) => {
     try {
-      const site = await siteSettingsService.selectSite(db, req.body?.siteId);
+      const multiSite = db.prepare(`
+        SELECT multi_site_enabled, primary_site_id, secondary_site_id
+        FROM app_settings
+        WHERE id = 1
+      `).get() || {};
+      const isScopedSiteWindow = Number(multiSite.multi_site_enabled || 0) === 1
+        && Boolean(String(req.get('x-osoo-site-id') || '').trim());
+      const site = isScopedSiteWindow
+        ? await siteSettingsService.resolveSiteSelection(db, req.siteContext?.siteId)
+        : await siteSettingsService.selectSite(db, req.body?.siteId);
       const qntechIntegrity = await verifyQntechSettingsIntegrity({ siteId: site.id, siteName: site.site_name });
       res.json({ success: true, site, integrity: { qntech: qntechIntegrity } });
     } catch (e) {

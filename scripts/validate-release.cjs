@@ -1461,6 +1461,9 @@ function validateRegressionContracts() {
   checkSource(
     roadworkViewText.includes('nodeintegration="false"') &&
       roadworkViewText.includes('enableremotemodule="false"') &&
+      roadworkViewText.includes("const roadworkPartition = windowSiteId") &&
+      roadworkViewText.includes("partition={roadworkPartition}") &&
+      roadworkViewText.includes("'persist:osoo-roadwork'") &&
       roadworkViewText.includes('roadworkStatus.date !== vm.date') &&
       roadworkViewText.includes('RoadworkHelperModel.fetchAll(roadworkStatus.date)') &&
       roadworkViewText.includes("document.getElementById('btn_Save')") &&
@@ -1615,6 +1618,22 @@ function validateAuthSessionContract() {
   console.log(`\n${colors.blue}▶ Auth/session/attendance contract validation${colors.reset}`);
   try {
     execSync('node scripts/validate-auth-contract.cjs', {
+      cwd: BASE_DIR,
+      stdio: 'inherit',
+    });
+    execSync('node scripts/validate-multi-site-attendance.cjs', {
+      cwd: BASE_DIR,
+      stdio: 'inherit',
+    });
+    execSync('node scripts/validate-qntech-site-settings-isolation.cjs', {
+      cwd: BASE_DIR,
+      stdio: 'inherit',
+    });
+    execSync('node scripts/validate-management-photo-isolation.cjs', {
+      cwd: BASE_DIR,
+      stdio: 'inherit',
+    });
+    execSync('node scripts/validate-unified-photo-tab.cjs', {
       cwd: BASE_DIR,
       stdio: 'inherit',
     });

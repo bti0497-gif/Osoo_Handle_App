@@ -5,14 +5,19 @@ export const MedicineInModel = {
     return apiClient.get('/api/medicine-in/defaults', { year, month, ...context });
   },
 
+  async fetchMonthly(year, month) {
+    return apiClient.get('/api/medicine-in/monthly', { year, month });
+  },
+
   async saveItems(payload) {
     return apiClient.post('/api/medicine-in/save', payload);
   },
 
-  async uploadPhoto(date, medicineName, file) {
+  async uploadPhoto(date, medicineName, file, photoIndex = 0) {
     const formData = new FormData();
     formData.append('date', date);
     formData.append('medicineName', medicineName);
+    formData.append('photoIndex', String(photoIndex));
     formData.append('photo', file);
     return apiClient.post('/api/medicine-in/upload-photo', formData);
   },

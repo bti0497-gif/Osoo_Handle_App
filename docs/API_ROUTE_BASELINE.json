@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 137,
-  "digest": "d6849f1c084274bfab13ffafa431bafffa2e0eda4a9c54cb4ff1167eadce934f",
+  "endpointCount": 138,
+  "digest": "b3da066b8de97f9e1ac717a061f134e0542ed08d12845f70eef14ba6d4d22d6b",
   "endpoints": [
     {
       "method": "GET",
@@ -441,6 +441,14 @@
       "module": "./routes/medicineInRoutes.cjs",
       "tier": 2,
       "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/medicine-in/monthly",
+      "module": "./routes/medicineInRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
       "syncWatch": true
     },
     {

@@ -3,6 +3,8 @@ import { useUnifiedRecordViewModel } from './useUnifiedRecordViewModel';
 import { WaterQualityModel } from '../water/WaterQualityModel';
 import { SludgePhotoModel } from '../sludge/SludgePhotoModel';
 import SludgePhotoButton from '../sludge/SludgePhotoButton';
+import PhotoManagementTab from './photo-management/PhotoManagementTab';
+import './photo-management/PhotoManagementTab.css';
 import { getTodayKST } from '../../core/constants';
 import { BatchProgressDialog } from '../../components/common';
 
@@ -11,6 +13,7 @@ const TAB_META = [
     { id: 'water', label: '수질분석' },
     { id: 'medicine', label: '약품관리' },
     { id: 'kit', label: '키트관리' },
+    { id: 'photos', label: '사진관리' },
 ];
 
 const TAB_LABEL_BY_ID = TAB_META.reduce((acc, tab) => {
@@ -1397,6 +1400,9 @@ export default function UnifiedRecordModal({
     };
 
     const renderFields = () => {
+        if (activeTab === 'photos') {
+            return <PhotoManagementTab date={date} onError={notifyValidation} />;
+        }
         if (activeTab !== 'water' && !selectedItem) {
             return (
                 <div style={{ padding: 24, color: '#94a3b8', fontWeight: 700, fontSize: 15 }}>
@@ -1863,8 +1869,8 @@ export default function UnifiedRecordModal({
                     </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: (activeTab === 'medicine' || activeTab === 'kit') ? '1fr' : '210px 1fr', gap: 0, minHeight: 0, flex: 1 }}>
-                    {activeTab !== 'medicine' && activeTab !== 'kit' && (
+                <div style={{ display: 'grid', gridTemplateColumns: (activeTab === 'medicine' || activeTab === 'kit' || activeTab === 'photos') ? '1fr' : '210px 1fr', gap: 0, minHeight: 0, flex: 1 }}>
+                    {activeTab !== 'medicine' && activeTab !== 'kit' && activeTab !== 'photos' && (
                     <aside style={{ borderRight: '1px solid #e2e8f0', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                         {activeTab === 'water' ? renderWaterSidebar() : (
                             <div style={{ overflowY: 'auto', padding: 10, display: 'grid', alignContent: 'start', gap: 6 }}>
@@ -1902,7 +1908,7 @@ export default function UnifiedRecordModal({
                     )}
 
                     <main style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                        <div style={{ padding: '14px 18px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+                        {activeTab !== 'photos' && <div style={{ padding: '14px 18px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
                             <div style={{ fontSize: 17, fontWeight: 900, color: '#0f172a' }}>
                                 {activeTab === 'water'
                                     ? `수질분석 ${selectedRound?.label || ''}`
@@ -1928,10 +1934,10 @@ export default function UnifiedRecordModal({
                                     </div>
                                 ))}
                             </div>
-                        </div>
+                        </div>}
 
                         <div className="unified-record-scroll-area" style={{
-                            padding: 18,
+                            padding: activeTab === 'photos' ? 0 : 18,
                             flex: 1,
                             overflowY: 'auto',
                             scrollbarGutter: 'stable',
@@ -1947,7 +1953,7 @@ export default function UnifiedRecordModal({
                     <button type="button" onClick={handleClose} style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', fontWeight: 800, color: '#475569' }}>
                         닫기
                     </button>
-                    <button
+                    {activeTab !== 'photos' && <button
                         type="button"
                         onClick={handleSave}
                         disabled={isDateContextPending || isSaving || isUploadingSludgePhotos}
@@ -1963,7 +1969,7 @@ export default function UnifiedRecordModal({
                         }}
                     >
                         {isDateContextPending ? '데이터 확인 중...' : isSaving ? '저장 중...' : isUploadingSludgePhotos ? '사진 저장 중...' : `${TAB_LABEL_BY_ID[activeTab] || '현재 탭'} 저장하기`}
-                    </button>
+                    </button>}
                 </div>
             </div>
         </div>

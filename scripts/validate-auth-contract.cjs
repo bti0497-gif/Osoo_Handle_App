@@ -43,6 +43,7 @@ const authVmText = read('src/features/auth/useAuthViewModel.js');
 const sessionRestoreText = read('src/features/auth/sessionRestoreFlow.js');
 const activeUserText = read('server/services/activeUserSessionService.cjs');
 const attendanceBqText = read('server/services/attendanceBigQueryService.cjs');
+const attendanceSessionText = read('server/services/attendanceSessionService.cjs');
 const remoteSessionDetectText = read('server/services/remoteSessionDetectService.cjs');
 const databaseText = read('server/database.cjs');
 const appText = read('src/App.jsx');
@@ -102,9 +103,9 @@ check(
     'const isRemote = Boolean(attendance?.remote_session_detected)',
   ]) && containsAll(sessionRestoreText, [
     'const attendance = await AuthModel.recordAttendance(freshData)',
-  ]) && !authVmText.includes("'/api/location/current'") && containsAll(authRoutesText, [
-    'const effectiveRemoteDetected = Boolean(remote.detected)',
-    "const effectiveRemoteType = remote.sessionType || 'local'",
+  ]) && !authVmText.includes("'/api/location/current'") && containsAll(attendanceSessionText, [
+    'const remoteDetected = Boolean(remote.detected)',
+    "const remoteType = remote.sessionType || 'local'",
   ]) && !authRoutesText.includes('effectiveRemoteDetected = remote.detected || !effectiveLocationMatched'),
   'field attendance uses confirmed remote-session evidence without geolocation',
   'field attendance may request coordinates or infer remote access from location failure'
@@ -162,13 +163,11 @@ check(
 check(
   containsAll(authRoutesText, [
     "router.post('/attendance'",
-    'SELECT * FROM attendance WHERE member_id = ? AND date = ? AND logout_time IS NULL',
-    'if (!activeSession) {',
-    'INSERT INTO attendance',
-    'res.json({ success: true, session: activeSession })',
+    'recordAttendanceSessions(db, {',
+    'res.json({ success: true, session: activeSession, sessions })',
   ]),
-  'attendance login reuses open same-day session before inserting',
-  'attendance duplicate-session prevention was changed'
+  'attendance login creates or reuses site-isolated same-day sessions',
+  'attendance site isolation or duplicate-session prevention was changed'
 );
 
 check(

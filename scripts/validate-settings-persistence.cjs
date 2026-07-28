@@ -5,12 +5,14 @@ const fs = require('fs');
 const path = require('path');
 
 const PROJECT_ROOT = path.join(__dirname, '..');
-const TEMP_ROOT = path.join(PROJECT_ROOT, '.tmp-validation', 'settings-persistence');
+const TEMP_BASE = path.join(PROJECT_ROOT, '.tmp-validation');
+const TEMP_ROOT = path.join(TEMP_BASE, `settings-persistence-${process.pid}-${Date.now()}`);
 const APP_ROOT = path.join(TEMP_ROOT, 'Osoo_Handle_App');
+const TEMP_REMOVE_OPTIONS = { recursive: true, force: true, maxRetries: 20, retryDelay: 100 };
 
 async function run() {
-  assert.ok(TEMP_ROOT.startsWith(path.join(PROJECT_ROOT, '.tmp-validation')), 'unsafe temporary path');
-  fs.rmSync(TEMP_ROOT, { recursive: true, force: true });
+  assert.ok(TEMP_ROOT.startsWith(TEMP_BASE), 'unsafe temporary path');
+  fs.rmSync(TEMP_ROOT, TEMP_REMOVE_OPTIONS);
   fs.mkdirSync(APP_ROOT, { recursive: true });
 
   process.env.APPDATA = TEMP_ROOT;
@@ -94,5 +96,9 @@ run()
     process.exitCode = 1;
   })
   .finally(() => {
-    fs.rmSync(TEMP_ROOT, { recursive: true, force: true });
+    try {
+      fs.rmSync(TEMP_ROOT, TEMP_REMOVE_OPTIONS);
+    } catch (error) {
+      console.warn(`[SETTINGS CLEANUP WARN] ${error.code || error.message}: ${TEMP_ROOT}`);
+    }
   });

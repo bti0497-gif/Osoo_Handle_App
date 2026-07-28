@@ -75,32 +75,90 @@ function parseMedicinePhotoFileName(fileName) {
  * 파일명 패턴: {YYYYMMDD}+{약품명}.ext
  * 같은 약품명이 여러 날짜에 있으면 가장 최근 것을 사용
  */
-function scanMedicinePhotos(appDataPath, year, mm) {
-  const yearDir = path.join(appDataPath, '사진관리', '약품입고', String(year));
+function getMedicinePhotoScope(db, requestedSiteId = '') {
+  const settings = db.prepare(`
+    SELECT site_id, multi_site_enabled, primary_site_id
+    FROM app_settings
+    WHERE id = 1
+  `).get() || {};
+  const siteId = String(requestedSiteId || settings.site_id || '').trim();
+  const multiSiteEnabled = Number(settings.multi_site_enabled || 0) === 1;
+  return {
+    siteId,
+    multiSiteEnabled,
+    isPrimary: !multiSiteEnabled || siteId === String(settings.primary_site_id || settings.site_id || '').trim(),
+  };
+}
+
+function getMedicinePhotoYearDir(appDataPath, year, scope) {
+  const root = path.join(appDataPath, '사진관리', '약품입고');
+  return scope?.multiSiteEnabled && scope.siteId
+    ? path.join(root, sanitizeName(scope.siteId), String(year))
+    : path.join(root, String(year));
+}
+
+function getMedicinePhotoRelativePath(year, fileName, scope) {
+  return scope?.multiSiteEnabled && scope.siteId
+    ? `${sanitizeName(scope.siteId)}/${year}/${fileName}`
+    : `${year}/${fileName}`;
+}
+
+function scanMedicinePhotos(appDataPath, year, mm, scope = {}) {
+  const yearDir = getMedicinePhotoYearDir(appDataPath, year, scope);
   const map = {}; // sanitizedName ??{ url, localPath, date }
-  if (!fs.existsSync(yearDir)) return map;
+  const scanDirs = [yearDir];
+  // 양방향 전환 전의 기본 현장 사진만 레거시 폴더에서 보완한다.
+  // 보조 현장은 레거시 폴더를 절대 읽지 않아 방향 간 사진 혼선을 막는다.
+  if (scope.multiSiteEnabled && scope.isPrimary) {
+    scanDirs.push(path.join(appDataPath, '사진관리', '약품입고', String(year)));
+  }
 
-  let files;
-  try { files = fs.readdirSync(yearDir); } catch { return map; }
-
-  const mmPrefix = mm + '-'; // '04-'
-
-  for (const file of files) {
-    const parsed = parseMedicinePhotoFileName(file);
-    if (!parsed) continue;
-    const { y, m, d, rawName } = parsed;
-    // 해당 연월 파일만 (mm가 null이면 전체)
-    if (mm && m !== mm) continue;
-    const date = `${y}-${m}-${d}`;
-    const nameKey = sanitizeName(rawName);
-    const localPath = path.join(yearDir, file);
-    const url = `/api/medicine-in/photo?p=${encodeURIComponent(`${year}/${file}`)}`;
-    // 같은 약품명이면 더 최근 날짜 우선
-    if (!map[nameKey] || date > map[nameKey].date) {
-      map[nameKey] = { url, localPath, date };
+  for (const dir of scanDirs) {
+    if (!fs.existsSync(dir)) continue;
+    let files;
+    try { files = fs.readdirSync(dir); } catch { continue; }
+    for (const file of files) {
+      const parsed = parseMedicinePhotoFileName(file);
+      if (!parsed) continue;
+      const { y, m, d, rawName } = parsed;
+      if (mm && m !== mm) continue;
+      const date = `${y}-${m}-${d}`;
+      const nameKey = sanitizeName(rawName).replace(/-\d+$/, '');
+      const localPath = path.join(dir, file);
+      const relativePath = path.relative(
+        path.join(appDataPath, '사진관리', '약품입고'),
+        localPath
+      ).split(path.sep).join('/');
+      const url = `/api/medicine-in/photo?p=${encodeURIComponent(relativePath)}`;
+      if (!map[nameKey] || date > map[nameKey].date) {
+        map[nameKey] = { url, localPath, date };
+      }
     }
   }
   return map;
+}
+
+function scanMedicinePhotoDates(appDataPath, year, mm, scope, targetName) {
+  const dates = new Set();
+  const scopedDir = getMedicinePhotoYearDir(appDataPath, year, scope);
+  const scanDirs = [scopedDir];
+  if (scope.multiSiteEnabled && scope.isPrimary) {
+    scanDirs.push(path.join(appDataPath, '사진관리', '약품입고', String(year)));
+  }
+  for (const dir of scanDirs) {
+    if (!fs.existsSync(dir)) continue;
+    let files;
+    try { files = fs.readdirSync(dir); } catch { continue; }
+    for (const file of files) {
+      const parsed = parseMedicinePhotoFileName(file);
+      if (!parsed || (mm && parsed.m !== mm)) continue;
+      const normalizedName = sanitizeName(parsed.rawName).replace(/-\d+$/, '');
+      if (normalizedName === sanitizeName(targetName)) {
+        dates.add(`${parsed.y}-${parsed.m}-${parsed.d}`);
+      }
+    }
+  }
+  return [...dates];
 }
 
 function resolveSiteScope(db, source = {}) {
@@ -122,13 +180,14 @@ function siteWhere(scope) {
  * 사진 파일을 로컬 디렉토리에 JPG로 변환 저장
  * {appDataPath}/사진관리/약품입고/{year}/{yyyymmdd}+{약품명}.jpg
  */
-async function savePhotoToLocal(appDataPath, year, mm, date, medicineName, srcPath) {
+async function savePhotoToLocal(appDataPath, year, mm, date, medicineName, srcPath, scope = {}, photoIndex = 0) {
   if (!srcPath || !fs.existsSync(srcPath)) return null;
   const sharp = require('sharp');
   const srcBuf = fs.readFileSync(srcPath);
   const yyyymmdd = String(date || '').replace(/-/g, '').slice(0, 8);
-  const fileName = `${yyyymmdd}+${sanitizeName(medicineName)}.jpg`;
-  const destDir = path.join(appDataPath, '사진관리', '약품입고', String(year));
+  const suffix = Number(photoIndex) > 0 ? `-${Number(photoIndex) + 1}` : '';
+  const fileName = `${yyyymmdd}+${sanitizeName(medicineName)}${suffix}.jpg`;
+  const destDir = getMedicinePhotoYearDir(appDataPath, year, scope);
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   const destPath = path.join(destDir, fileName);
   // BMP는 raw 픽셀로 디코딩 후 변환
@@ -143,7 +202,7 @@ async function savePhotoToLocal(appDataPath, year, mm, date, medicineName, srcPa
   return destPath;
 }
 
-async function uploadMedicinePhotoToDrive(db, date, medicineName, localPath, siteNameOverride = '') {
+async function uploadMedicinePhotoToDrive(db, date, medicineName, localPath, siteNameOverride = '', photoIndex = 0) {
   if (!localPath || !fs.existsSync(localPath) || !isDriveConfigured()) return null;
   try {
     const settings = siteNameOverride
@@ -156,7 +215,7 @@ async function uploadMedicinePhotoToDrive(db, date, medicineName, localPath, sit
     );
     return await uploadBufferToFolder({
       folderId: folder.id,
-      fileName: managementPhotoName(date, siteName, medicineName, 0, '.jpg'),
+      fileName: managementPhotoName(date, siteName, medicineName, Number(photoIndex) || 0, '.jpg'),
       buffer: fs.readFileSync(localPath),
       mimeType: 'image/jpeg',
     });
@@ -206,7 +265,7 @@ async function downloadDriveFileBuffer(fileId) {
   return Buffer.from(response.data);
 }
 
-async function restoreMedicinePhotoFromDrive(db, appDataPath, date, medicineName, siteNameOverride = '') {
+async function restoreMedicinePhotoFromDrive(db, appDataPath, date, medicineName, siteNameOverride = '', siteId = '') {
   const remote = await findRemoteMedicinePhoto(db, date, medicineName, siteNameOverride);
   if (!remote?.id) return null;
   const buffer = await downloadDriveFileBuffer(remote.id);
@@ -214,13 +273,14 @@ async function restoreMedicinePhotoFromDrive(db, appDataPath, date, medicineName
   const yearStr = String(date).slice(0, 4);
   const stamp = String(date || '').replace(/-/g, '').slice(0, 8);
   const fileName = `${stamp}+${sanitizeName(medicineName)}.jpg`;
-  const destDir = path.join(appDataPath, '사진관리', '약품입고', yearStr);
+  const scope = getMedicinePhotoScope(db, siteId);
+  const destDir = getMedicinePhotoYearDir(appDataPath, yearStr, scope);
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   const destPath = path.join(destDir, fileName);
   fs.writeFileSync(destPath, buffer);
   return {
     localPath: destPath,
-    url: `/api/medicine-in/photo?p=${encodeURIComponent(`${yearStr}/${fileName}`)}`,
+    url: `/api/medicine-in/photo?p=${encodeURIComponent(getMedicinePhotoRelativePath(yearStr, fileName, scope))}`,
     remote,
   };
 }
@@ -266,7 +326,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const prevStart = `${prevYear}-${prevMm}-01`;
       const prevEnd = `${prevYear}-${prevMm}-${String(prevLastDay).padStart(2, '0')}`;
 
-      const scope = resolveSiteScope(db, req.query);
+      const scope = resolveSiteScope(db, req.siteContext || {});
       const siteName = scope.siteName || '';
       const siteFilter = siteWhere(scope);
 
@@ -346,7 +406,8 @@ module.exports = function (db, baseDir, appDataPath) {
       }));
 
       // 구매량 조회 헬퍼
-      const photoMap = scanMedicinePhotos(appDataPath, year, mm);
+      const photoScope = getMedicinePhotoScope(db, scope.siteId);
+      const photoMap = scanMedicinePhotos(appDataPath, year, mm, photoScope);
 
       const medicinesWithPhotos = allMedicines.map(m => {
         const key = sanitizeName(m.name);
@@ -374,6 +435,71 @@ module.exports = function (db, baseDir, appDataPath) {
       });
     } catch (err) {
       console.error('[medicine-in defaults]', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/medicine-in/monthly?year=2026&month=7
+   * 통합 입력창 사진관리 탭용 월 입고 내역. 사진 기능만 모아 보여주며
+   * 기존 약품/키트 저장 로직과 드라이브 파일명 계약은 변경하지 않는다.
+   */
+  router.get('/api/medicine-in/monthly', (req, res) => {
+    try {
+      const year = Number.parseInt(req.query.year, 10);
+      const month = Number.parseInt(req.query.month, 10);
+      if (!year || month < 1 || month > 12) {
+        return res.status(400).json({ success: false, error: '유효하지 않은 연월입니다.' });
+      }
+      const mm = String(month).padStart(2, '0');
+      const start = `${year}-${mm}-01`;
+      const end = `${year}-${mm}-31`;
+      const scope = resolveSiteScope(db, req.siteContext || {});
+      const filter = siteWhere(scope);
+      const medicineRows = db.prepare(`
+        SELECT date, medicine_name AS name, purchase_amount AS purchase, photo_url
+        FROM medicine_logs
+        WHERE date >= ? AND date <= ? AND COALESCE(purchase_amount, 0) > 0${filter.clause}
+        ORDER BY date ASC, medicine_name ASC
+      `).all(start, end, ...filter.params);
+      const kitRows = db.prepare(`
+        SELECT date, kit_name AS name, purchase_amount AS purchase, photo_url
+        FROM kit_logs
+        WHERE date >= ? AND date <= ? AND COALESCE(purchase_amount, 0) > 0${filter.clause}
+        ORDER BY date ASC, kit_name ASC
+      `).all(start, end, ...filter.params);
+      const photoMap = scanMedicinePhotos(
+        appDataPath,
+        year,
+        mm,
+        getMedicinePhotoScope(db, scope.siteId)
+      );
+      const tradePhotoDates = scanMedicinePhotoDates(
+        appDataPath,
+        year,
+        mm,
+        getMedicinePhotoScope(db, scope.siteId),
+        '거래명세서'
+      );
+      const withPhoto = (row) => {
+        const found = photoMap[sanitizeName(row.name)];
+        return {
+          ...row,
+          photoUrl: row.photo_url || (found?.date === row.date ? found.url : null),
+          photoDate: found?.date === row.date ? found.date : null,
+        };
+      };
+      const trade = photoMap[sanitizeName('거래명세서')] || null;
+      res.json({
+        success: true,
+        medicines: medicineRows.map(withPhoto),
+        kits: kitRows.map(withPhoto),
+        tradePhotoUrl: trade?.url || null,
+        tradePhotoDate: trade?.date || null,
+        tradePhotoDates,
+      });
+    } catch (err) {
+      console.error('[medicine-in monthly]', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -463,10 +589,11 @@ module.exports = function (db, baseDir, appDataPath) {
         const mmStr = dateParts[1];
         for (const [medicineName, filePath] of Object.entries(photoPaths)) {
           try {
-            const localPath = await savePhotoToLocal(appDataPath, yearStr, mmStr, date, medicineName, filePath);
+            const photoScope = getMedicinePhotoScope(db, metadata.siteId);
+            const localPath = await savePhotoToLocal(appDataPath, yearStr, mmStr, date, medicineName, filePath, photoScope);
             if (localPath) {
               const fileName = path.basename(localPath);
-              const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(`${yearStr}/${fileName}`)}`;
+              const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(getMedicinePhotoRelativePath(yearStr, fileName, photoScope))}`;
               updateMedicinePhotoUrl(db, tab, date, medicineName, localUrl, metadata.siteId);
               const driveFile = await uploadMedicinePhotoToDrive(
                 db,
@@ -507,14 +634,17 @@ module.exports = function (db, baseDir, appDataPath) {
   router.post('/api/medicine-in/upload-photo', photoUpload.single('photo'), async (req, res) => {
     try {
       const { date, medicineName } = req.body;
+      const photoIndex = Math.max(0, Number.parseInt(req.body.photoIndex, 10) || 0);
       if (!date || !medicineName || !req.file) {
         return res.status(400).json({ success: false, error: 'date, medicineName, photo 필드가 필요합니다.' });
       }
       const yearStr = date.split('-')[0];
       const sharp = require('sharp');
       const yyyymmdd = String(date || '').replace(/-/g, '').slice(0, 8);
-      const fileName = `${yyyymmdd}+${sanitizeName(medicineName)}.jpg`;
-      const destDir = path.join(appDataPath, '사진관리', '약품입고', yearStr);
+      const suffix = photoIndex > 0 ? `-${photoIndex + 1}` : '';
+      const fileName = `${yyyymmdd}+${sanitizeName(medicineName)}${suffix}.jpg`;
+      const photoScope = getMedicinePhotoScope(db, req.siteContext?.siteId);
+      const destDir = getMedicinePhotoYearDir(appDataPath, yearStr, photoScope);
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       const destPath = path.join(destDir, fileName);
       const srcBuf = req.file.buffer;
@@ -526,7 +656,7 @@ module.exports = function (db, baseDir, appDataPath) {
       } else {
         await sharp(srcBuf, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate().jpeg({ quality: 90 }).toFile(destPath);
       }
-      const url = `/api/medicine-in/photo?p=${encodeURIComponent(`${yearStr}/${fileName}`)}`;
+      const url = `/api/medicine-in/photo?p=${encodeURIComponent(getMedicinePhotoRelativePath(yearStr, fileName, photoScope))}`;
       updateMedicinePhotoUrl(db, 'medicine', date, medicineName, url, req.siteContext?.siteId);
       updateMedicinePhotoUrl(db, 'kit', date, medicineName, url, req.siteContext?.siteId);
       const driveFile = await uploadMedicinePhotoToDrive(
@@ -534,7 +664,8 @@ module.exports = function (db, baseDir, appDataPath) {
         date,
         medicineName,
         destPath,
-        req.siteContext?.siteName
+        req.siteContext?.siteName,
+        photoIndex
       );
       res.json({
         success: true,
@@ -581,7 +712,8 @@ module.exports = function (db, baseDir, appDataPath) {
           appDataPath,
           date,
           name,
-          req.siteContext?.siteName
+          req.siteContext?.siteName,
+          req.siteContext?.siteId
         );
         if (result?.url) {
           updateMedicinePhotoUrl(db, tab === 'kit' ? 'kit' : 'medicine', date, name, result.url, req.siteContext?.siteId);
@@ -670,10 +802,11 @@ module.exports = function (db, baseDir, appDataPath) {
               const isKit = placeholder.startsWith('{{키트');
               const useDate = isKit ? (kitDate || `${y}-${mm}-01`) : (medicineDate || `${y}-${mm}-01`);
               try {
-                const localPath = await savePhotoToLocal(appDataPath, y, mm, useDate, medicineName, filePath);
+                const photoScope = getMedicinePhotoScope(db, req.siteContext?.siteId);
+                const localPath = await savePhotoToLocal(appDataPath, y, mm, useDate, medicineName, filePath, photoScope);
                 if (localPath) {
                   const fileName = path.basename(localPath);
-                  const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(`${String(useDate).slice(0, 4)}/${fileName}`)}`;
+                  const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(getMedicinePhotoRelativePath(String(useDate).slice(0, 4), fileName, photoScope))}`;
                   updateMedicinePhotoUrl(db, isKit ? 'kit' : 'medicine', useDate, medicineName, localUrl, req.siteContext?.siteId);
                   await uploadMedicinePhotoToDrive(
                     db,
@@ -694,7 +827,12 @@ module.exports = function (db, baseDir, appDataPath) {
       }
 
       // Fallback: photoPaths로 전달되지 않은 사진은 로컬 스캔에서 자동 보완
-      const photoMap = scanMedicinePhotos(appDataPath, y, mm);
+      const photoMap = scanMedicinePhotos(
+        appDataPath,
+        y,
+        mm,
+        getMedicinePhotoScope(db, req.siteContext?.siteId)
+      );
       for (const [placeholder, medicineName] of Object.entries(placeholderToName)) {
         if (imageMap[placeholder]) continue; // 이미 처리됨
         const key = sanitizeName(medicineName);
@@ -742,6 +880,16 @@ module.exports = function (db, baseDir, appDataPath) {
       return res.status(403).send('Forbidden');
     }
     const segments = relPath.split('/').filter(Boolean);
+    const photoScope = getMedicinePhotoScope(db, req.siteContext?.siteId);
+    if (photoScope.multiSiteEnabled) {
+      const requestedScope = String(segments[0] || '');
+      const ownScope = sanitizeName(photoScope.siteId);
+      const isOwnScopedPath = requestedScope === ownScope;
+      const isPrimaryLegacyPath = photoScope.isPrimary && /^\d{4}$/.test(requestedScope);
+      if (!isOwnScopedPath && !isPrimaryLegacyPath) {
+        return res.status(403).send('Forbidden');
+      }
+    }
     const filePath = path.join(appDataPath, '사진관리', '약품입고', ...segments);
     const resolved = path.resolve(filePath);
     const root = path.resolve(path.join(appDataPath, '사진관리', '약품입고'));
@@ -973,3 +1121,10 @@ function decodeBmpToRgb(buf) {
   }
   return { data: out, width, height };
 }
+
+module.exports.__photoIsolationTest = {
+  getMedicinePhotoYearDir,
+  getMedicinePhotoRelativePath,
+  scanMedicinePhotos,
+  scanMedicinePhotoDates,
+};

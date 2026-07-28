@@ -75,20 +75,31 @@ function normalizeSampleName(value) {
   return String(value || '').replace(/\s+/g, '').trim();
 }
 
-function getActiveLocations(db) {
-  const rows = db.prepare(`
-    SELECT item_name
-    FROM config_items
-    WHERE category = 'location' AND is_active = 1
-    ORDER BY display_order, id
-  `).all();
+function getActiveLocations(db, siteId = '') {
+  const normalizedSiteId = String(siteId || '').trim();
+  const rows = normalizedSiteId
+    ? db.prepare(`
+        SELECT item_name
+        FROM site_config_items
+        WHERE site_id = ? AND category = 'location' AND is_active = 1
+        ORDER BY display_order, id
+      `).all(normalizedSiteId)
+    : db.prepare(`
+        SELECT item_name
+        FROM config_items
+        WHERE category = 'location' AND is_active = 1
+        ORDER BY display_order, id
+      `).all();
 
   if (!rows.length) return [...DEFAULT_LOCATION_ORDER];
   return rows.map((row) => row.item_name);
 }
 
-function getConfiguredSampleMappings(db) {
-  const row = db.prepare('SELECT qntech_sample_mappings FROM app_settings WHERE id = 1').get();
+function getConfiguredSampleMappings(db, siteId = '') {
+  const normalizedSiteId = String(siteId || '').trim();
+  const row = normalizedSiteId
+    ? db.prepare('SELECT qntech_sample_mappings FROM site_settings WHERE site_id = ?').get(normalizedSiteId)
+    : db.prepare('SELECT qntech_sample_mappings FROM app_settings WHERE id = 1').get();
   if (!row?.qntech_sample_mappings) return [];
 
   try {

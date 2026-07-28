@@ -5,6 +5,15 @@ const { getCurrentRecordMetadata } = require('./syncMetadataService.cjs');
 
 const RANGE_IMPORT_DELAY_MS = 250;
 
+function getConfiguredPhotoRoot(db, siteId = '') {
+  const normalizedSiteId = String(siteId || '').trim();
+  if (normalizedSiteId) {
+    const scoped = db.prepare('SELECT qntech_photo_root FROM site_settings WHERE site_id = ?').get(normalizedSiteId);
+    if (scoped?.qntech_photo_root) return scoped.qntech_photo_root;
+  }
+  return db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get()?.qntech_photo_root || '';
+}
+
 function normalizeDateInput(date) {
   const normalized = String(date || '').trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
@@ -222,8 +231,8 @@ async function fetchProjectsForDateWithClient(client, normalizedDate) {
 
 async function importQntechWaterValues(db, date, siteContext = {}) {
   const context = await fetchProjectsForDate(db, date, siteContext);
-  const activeLocations = getActiveLocations(db);
-  const configuredSampleMappings = getConfiguredSampleMappings(db);
+  const activeLocations = getActiveLocations(db, siteContext.siteId);
+  const configuredSampleMappings = getConfiguredSampleMappings(db, siteContext.siteId);
   const mapped = mapProjectsToWaterRows(context.projects, activeLocations, configuredSampleMappings, {
     fallbackDate: context.date
   });
@@ -241,7 +250,6 @@ async function importQntechWaterValues(db, date, siteContext = {}) {
 
 async function importQntechWaterPhotos(db, baseDir, date, siteContext = {}) {
   const context = await fetchProjectsForDate(db, date, siteContext);
-  const photoSetting = db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
   const photoResult = await saveProjectPhotos({
     db,
     baseUrl: context.client.baseUrl,
@@ -249,7 +257,7 @@ async function importQntechWaterPhotos(db, baseDir, date, siteContext = {}) {
     projects: context.projects,
     date: context.date,
     baseDir,
-    configuredPhotoRoot: photoSetting?.qntech_photo_root,
+    configuredPhotoRoot: getConfiguredPhotoRoot(db, siteContext.siteId),
     siteName: context.site?.name
   });
 
@@ -263,9 +271,8 @@ async function importQntechWaterPhotos(db, baseDir, date, siteContext = {}) {
 
 async function importQntechWaterAll(db, baseDir, date, siteContext = {}) {
   const context = await fetchProjectsForDate(db, date, siteContext);
-  const activeLocations = getActiveLocations(db);
-  const configuredSampleMappings = getConfiguredSampleMappings(db);
-  const photoSetting = db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
+  const activeLocations = getActiveLocations(db, siteContext.siteId);
+  const configuredSampleMappings = getConfiguredSampleMappings(db, siteContext.siteId);
   const mapped = mapProjectsToWaterRows(context.projects, activeLocations, configuredSampleMappings, {
     fallbackDate: context.date
   });
@@ -277,7 +284,7 @@ async function importQntechWaterAll(db, baseDir, date, siteContext = {}) {
     projects: context.projects,
     date: context.date,
     baseDir,
-    configuredPhotoRoot: photoSetting?.qntech_photo_root,
+    configuredPhotoRoot: getConfiguredPhotoRoot(db, siteContext.siteId),
     siteName: context.site?.name
   });
 
@@ -314,9 +321,8 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
   const { onProgress, siteContext = {} } = options;
   const dates = enumerateDates(startDate, endDate);
   const client = await createAuthenticatedClient(db, siteContext);
-  const activeLocations = getActiveLocations(db);
-  const configuredSampleMappings = getConfiguredSampleMappings(db);
-  const photoSetting = db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
+  const activeLocations = getActiveLocations(db, siteContext.siteId);
+  const configuredSampleMappings = getConfiguredSampleMappings(db, siteContext.siteId);
 
   const summaryRows = [];
   let totalSavedPhotos = 0;
@@ -362,7 +368,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
       projects: context.projects,
       date: context.date,
       baseDir,
-      configuredPhotoRoot: photoSetting?.qntech_photo_root,
+      configuredPhotoRoot: getConfiguredPhotoRoot(db, siteContext.siteId),
       siteName: context.site?.name
     });
 

@@ -22,14 +22,15 @@ This file protects login, session restore, and attendance behavior. Do not chang
 
 ## Attendance Rules
 
-- Field worker login creates or reuses one open attendance row for the same member and date.
+- A single-site field worker login creates or reuses one open attendance row for the same member, date, and site.
+- When bidirectional integrated management is enabled, one login creates or reuses one open attendance row for each configured direction. The rows must remain distinguished by `site_id`.
 - Field worker attendance must not request or compare PC coordinates. Site identity already comes from the locally selected site.
 - Remote attendance classification must depend only on confirmed remote-session evidence, never on missing or mismatched coordinates.
 - A running tray/service process is recorded as supporting evidence only and must not by itself classify the login as remote.
 - Confirmed remote sessions store the connection method or program name in `remote_session_type`.
 - Attendance write failure must not block a successful field worker login.
 - Location lookup and attendance recording run in the background after workspace entry, and their state must be shown in the existing status bar.
-- Logout closes only the current open attendance row and marks it unsynced.
+- Logout closes all open attendance rows created for that member on the same day and marks them unsynced, including both configured directions in integrated management mode.
 - End-of-day auto logout closes stale field worker sessions and marks them unsynced.
 - Attendance BigQuery sync may mark local rows synced only after BigQuery succeeds.
 

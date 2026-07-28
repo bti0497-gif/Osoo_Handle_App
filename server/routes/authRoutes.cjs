@@ -27,6 +27,9 @@ function syncMembersBackupToDrive(...args) {
 function detectRemoteSession(...args) {
   return require('../services/remoteSessionDetectService.cjs').detectRemoteSession(...args);
 }
+function recordAttendanceSessions(...args) {
+  return require('../services/attendanceSessionService.cjs').recordAttendanceSessions(...args);
+}
 function triggerBigQuerySync(...args) {
   return require('../services/bigQueryTriggerService.cjs').triggerSync(...args);
 }
@@ -550,7 +553,10 @@ module.exports = (db, appDataPath) => {
         const { memberId } = req.body;
         const dateKST = getTodayLocal();
         try {
-            const activeSession = db.prepare('SELECT * FROM attendance WHERE member_id = ? AND date = ? AND logout_time IS NULL').get(memberId, dateKST);
+            const siteId = String(req.siteContext?.siteId || '').trim();
+            const activeSession = siteId
+                ? db.prepare('SELECT * FROM attendance WHERE member_id = ? AND date = ? AND site_id = ? AND logout_time IS NULL').get(memberId, dateKST, siteId)
+                : db.prepare('SELECT * FROM attendance WHERE member_id = ? AND date = ? AND logout_time IS NULL').get(memberId, dateKST);
             if (activeSession) {
                 const member = db.prepare('SELECT * FROM members WHERE id = ? LIMIT 1').get(memberId);
                 if (member) setActiveUser(member, 'session-restore');
@@ -584,59 +590,24 @@ module.exports = (db, appDataPath) => {
         const loginTime = getLocalTime();
 
         try {
-            const site = {
+            const requestedSite = {
                 site_id: req.siteContext?.siteId || null,
                 site_name: req.siteContext?.siteName || '',
             };
             const remote = detectRemoteSession();
-            const effectiveRemoteDetected = Boolean(remote.detected);
-            const effectiveRemoteType = remote.sessionType || 'local';
-            const effectiveEvidence = remote.evidence || '';
-            // Reuse an existing active session if one already exists.
-            let activeSession = db.prepare('SELECT * FROM attendance WHERE member_id = ? AND date = ? AND logout_time IS NULL').get(memberId, dateKST);
+            const sessions = recordAttendanceSessions(db, {
+                memberId,
+                memberName,
+                date: dateKST,
+                loginTime,
+                requestedSite,
+                remote,
+            });
+            const activeSession = sessions.find((session) => String(session.site_id || '') === String(requestedSite.site_id || ''))
+                || sessions[0]
+                || null;
 
-            if (!activeSession) {
-                const result = db.prepare(`
-          INSERT INTO attendance 
-                    (member_id, member_name, site_id, site_name, date, login_time, location_matched, remote_session_detected, remote_session_type, remote_session_evidence) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `).run(
-                    memberId,
-                    memberName,
-                    site.site_id || null,
-                    site.site_name || '',
-                    dateKST,
-                    loginTime,
-                    1,
-                    effectiveRemoteDetected ? 1 : 0,
-                    effectiveRemoteType,
-                    effectiveEvidence
-                );
-
-                activeSession = db.prepare('SELECT * FROM attendance WHERE id = ?').get(result.lastInsertRowid);
-            } else {
-                db.prepare(`
-                    UPDATE attendance
-                    SET site_id = ?,
-                        site_name = ?,
-                        remote_session_detected = ?,
-                        remote_session_type = ?,
-                        remote_session_evidence = ?,
-                        is_synced = 0,
-                        last_modified = datetime('now', 'localtime')
-                    WHERE id = ?
-                `).run(
-                    site.site_id,
-                    site.site_name,
-                    effectiveRemoteDetected ? 1 : 0,
-                    effectiveRemoteType,
-                    effectiveEvidence,
-                    activeSession.id
-                );
-                activeSession = db.prepare('SELECT * FROM attendance WHERE id = ?').get(activeSession.id);
-            }
-
-            res.json({ success: true, session: activeSession });
+            res.json({ success: true, session: activeSession, sessions });
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });
         }

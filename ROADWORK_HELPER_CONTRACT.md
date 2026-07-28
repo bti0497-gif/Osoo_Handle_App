@@ -18,6 +18,7 @@ This file protects the working roadwork input helper. Do not change these rules 
 ## Auto-fill Safety Rules
 
 - The embedded page must keep `nodeintegration` and `enableremotemodule` disabled.
+- The primary/single-site window must retain the existing `persist:osoo-roadwork` session partition. A secondary bidirectional site window must use a site-specific persistent partition so its roadwork login session cannot overwrite or reuse the other direction's session.
 - Auto-fill is enabled only when the roadwork daily-log screen is visible, its date is editable, the page date equals the helper date, and there is local data to fill.
 - Immediately before auto-fill, the helper must reload the latest payload through `RoadworkHelperModel.fetchAll(roadworkStatus.date)`.
 - The user must review the populated roadwork form and save it directly in the roadwork site.

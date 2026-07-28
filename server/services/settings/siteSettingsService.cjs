@@ -241,7 +241,7 @@ async function deleteSite(db, siteId) {
   return normalizedSiteId;
 }
 
-async function selectSite(db, siteId) {
+async function resolveSiteSelection(db, siteId) {
   const normalizedSiteId = String(siteId || '').trim();
   if (!normalizedSiteId) {
     const err = new Error('siteId가 필요합니다');
@@ -304,6 +304,18 @@ async function selectSite(db, siteId) {
     throw err;
   }
 
+  const localSite = db.prepare(`
+    SELECT id, site_name, manager_name, method, series, target_lat, target_lng, radius_m, qntech_site_id
+    FROM sites
+    WHERE id = ?
+    LIMIT 1
+  `).get(site.id);
+
+  return localSite || site;
+}
+
+async function selectSite(db, siteId) {
+  const site = await resolveSiteSelection(db, siteId);
   const series = String(site.series || '').trim() || '1계열';
   const flowOption = getFlowOptionForSite(db, series);
 
@@ -321,14 +333,7 @@ async function selectSite(db, siteId) {
     String(site.qntech_site_id || '').trim() || null
   );
 
-  const localSite = db.prepare(`
-    SELECT id, site_name, manager_name, method, series, target_lat, target_lng, radius_m, qntech_site_id
-    FROM sites
-    WHERE id = ?
-    LIMIT 1
-  `).get(site.id);
-
-  return localSite || site;
+  return site;
 }
 
 async function bootstrapSiteMember(db, {
@@ -480,6 +485,7 @@ module.exports = {
   listSites,
   saveSite,
   deleteSite,
+  resolveSiteSelection,
   selectSite,
   bootstrapSiteMember,
 };

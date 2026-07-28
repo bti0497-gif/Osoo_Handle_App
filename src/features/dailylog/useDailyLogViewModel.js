@@ -97,7 +97,9 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
                 setLocalSite(nextLocalSite);
 
                 const managedSites = Array.isArray(currentUser?.managed_sites) ? currentUser.managed_sites : [];
-                const pairedSites = isDailyWorkLog && String(currentUser?.name || '').trim() === '손규복'
+                const pairedSites = isDailyWorkLog
+                    && currentUser?.multi_site_enabled !== true
+                    && String(currentUser?.name || '').trim() === '손규복'
                     ? managedSites.filter((site) => (
                         String(site?.manager_name || currentUser?.name || '').trim() === '손규복'
                         && String(site?.site_name || '').includes('죽암휴게소')

@@ -276,8 +276,19 @@ function findPageInManifest(manifest, pageKey) {
   return manifest.pages.find((page) => page.pageKey === pageKey) || null;
 }
 
-function getConfiguredPhotoRoot(db) {
-  const row = db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
+function resolveSiteIdByName(db, siteName = '') {
+  const normalizedSiteName = String(siteName || '').trim();
+  if (!normalizedSiteName) return '';
+  return String(
+    db.prepare('SELECT id FROM sites WHERE site_name = ? AND COALESCE(is_active, 1) = 1').get(normalizedSiteName)?.id || ''
+  ).trim();
+}
+
+function getConfiguredPhotoRoot(db, siteId = '') {
+  const normalizedSiteId = String(siteId || '').trim();
+  const row = normalizedSiteId
+    ? db.prepare('SELECT qntech_photo_root FROM site_settings WHERE site_id = ?').get(normalizedSiteId)
+    : db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
   return row?.qntech_photo_root || '';
 }
 
@@ -417,7 +428,8 @@ function getTemplateSignature(templatePath) {
 }
 
 function buildPageContext(db, baseDir, page, siteName) {
-  const activeLocations = getActiveLocations(db);
+  const siteId = resolveSiteIdByName(db, siteName);
+  const activeLocations = getActiveLocations(db, siteId);
   
   // 1. 해당 측정 그룹의 모든 데이터 조회
   let query = 'SELECT * FROM qntech_water_quality WHERE date = ? AND measurement_group = ?';
@@ -430,7 +442,7 @@ function buildPageContext(db, baseDir, page, siteName) {
 
   const baseRows = pivotQntechWaterRows(db.prepare(query).all(...params));
   const rows = sortRowsByLocation(baseRows, activeLocations);
-  const photoFiles = listPhotoFiles(baseDir, getConfiguredPhotoRoot(db), page.date);
+  const photoFiles = listPhotoFiles(baseDir, getConfiguredPhotoRoot(db, siteId), page.date);
   const photoSelection = buildPhotoSelection(photoFiles, page);
 
   return {
