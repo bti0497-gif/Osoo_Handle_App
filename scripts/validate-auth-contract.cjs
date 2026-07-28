@@ -142,10 +142,10 @@ check(
     'const isAdmin = role ===',
     'if (isAdmin) {',
     'setActiveUser(member, `discovery-login:${source}`)',
-    'return res.json({ success: true, member, source })',
+    'return res.json({ success: true, member: enrichMemberWithSites(member), source })',
   ]),
-  'admin discovery-login remains remote-only',
-  'admin discovery-login remote-only contract was changed'
+  'admin discovery-login remains remote-only and receives local multi-site metadata',
+  'admin discovery-login remote-only or multi-site metadata contract was changed'
 );
 
 check(

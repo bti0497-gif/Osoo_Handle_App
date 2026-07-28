@@ -687,9 +687,10 @@ function validateRegressionContracts() {
       electronPreloadText.includes('setSharedAuthenticatedUser') &&
       electronPreloadText.includes('getSharedAuthenticatedUser') &&
       authViewModelText.includes('getSharedAuthenticatedUser') &&
-      authViewModelText.includes('setSharedAuthenticatedUser'),
+      authViewModelText.includes('setSharedAuthenticatedUser') &&
+      authRoutesSecurityText.includes('member: enrichMemberWithSites(member), source'),
     '양방향 토글 즉시 방향 버튼·보조 창 로그인 승계 계약 유지',
-    '토글 직후 방향 버튼 갱신 또는 보조 현장 창의 인증 승계 연결이 빠졌습니다.'
+    '토글 직후 방향 버튼 갱신, admin 현장목록 보강 또는 보조 현장 창의 인증 승계 연결이 빠졌습니다.'
   );
 
   checkSource(

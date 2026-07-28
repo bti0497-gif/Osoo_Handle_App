@@ -462,7 +462,7 @@ module.exports = (db, appDataPath) => {
             const isAdmin = role === 'admin' || role === 'group_admin' || name === 'admin';
             if (isAdmin) {
                 setActiveUser(member, `discovery-login:${source}`);
-                return res.json({ success: true, member, source });
+                return res.json({ success: true, member: enrichMemberWithSites(member), source });
             }
 
             syncLocalMembers([member]);
