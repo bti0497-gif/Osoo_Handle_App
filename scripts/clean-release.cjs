@@ -24,13 +24,23 @@ for (const relativePath of removableDirectories) {
     throw new Error(`Refusing to remove path outside project: ${target}`);
   }
   if (fs.existsSync(target)) {
-    fs.rmSync(target, {
-      recursive: true,
-      force: true,
-      maxRetries: 30,
-      retryDelay: 200,
-    });
-    console.log(`[clean] ${relativePath}`);
+    try {
+      fs.rmSync(target, {
+        recursive: true,
+        force: true,
+        maxRetries: 30,
+        retryDelay: 200,
+      });
+      console.log(`[clean] ${relativePath}`);
+    } catch (error) {
+      if (relativePath !== 'release') throw error;
+      const staleTarget = path.resolve(rootDir, `.stale-release-${Date.now()}`);
+      if (!staleTarget.startsWith(`${rootDir}${path.sep}`)) {
+        throw new Error(`Refusing to move release path outside project: ${staleTarget}`);
+      }
+      fs.renameSync(target, staleTarget);
+      console.warn(`[clean] locked release moved aside: ${path.basename(staleTarget)}`);
+    }
   }
 }
 
