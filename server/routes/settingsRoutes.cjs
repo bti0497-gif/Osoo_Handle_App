@@ -19,6 +19,17 @@ const {
 } = require('../services/reportTemplateService.cjs');
 const router = express.Router();
 
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} 시간 초과`)), timeoutMs);
+      timer.unref?.();
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function triggerBigQuerySync(reason) {
   try {
     require('../services/bigQueryTriggerService.cjs').triggerSync(reason);
@@ -149,11 +160,27 @@ module.exports = function (db, baseDir, appDataPath) {
   router.get('/api/settings', async (req, res) => {
     try {
       try {
-        await externalCredentialService.syncCommonAppSettingsToLocal(db);
+        if (process.env.OSOO_API_VALIDATION === '1') throw new Error('API 검증에서는 외부 설정 동기화를 생략합니다.');
+        await withTimeout(
+          externalCredentialService.syncCommonAppSettingsToLocal(db),
+          1500,
+          '공통 설정 동기화'
+        );
       } catch (sheetErr) {
         console.warn('[Settings] App settings sheets lookup failed, keeping local credentials:', sheetErr.message);
       }
-      const qntechIntegrity = await verifyQntechSettingsIntegrity(req.siteContext || {});
+      const qntechIntegrity = process.env.OSOO_API_VALIDATION === '1'
+        ? { qntechSiteId: '', repaired: false, source: 'local-validation' }
+        : await withTimeout(
+          verifyQntechSettingsIntegrity(req.siteContext || {}),
+          2000,
+          '자동실험 설정 점검'
+        ).catch((error) => ({
+          qntechSiteId: '',
+          repaired: false,
+          source: 'local-timeout',
+          error: error.message,
+        }));
       templateSettingsService.cleanupDisallowedReportTemplates(reportsDir);
       const result = appSettingsService.getSettingsOverview(db, baseDir, appDataPath, req.siteContext?.siteId);
       res.json({ success: true, ...result, integrity: { qntech: qntechIntegrity } });

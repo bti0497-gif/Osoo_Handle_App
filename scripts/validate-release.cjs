@@ -1892,6 +1892,7 @@ async function startApiValidationServer(devServerUrl) {
       ...process.env,
       OSOO_APP_DATA_PATH: tempAppDataPath,
       OSOO_MINIMAL_BUILD: '0',
+      OSOO_API_VALIDATION: '1',
       OSOO_API_PORT_MIN: new URL(devServerUrl).port,
       BIGQUERY_SYNC_ENABLED: 'false',
       BIGQUERY_SYNC_SCHEDULER: 'false',

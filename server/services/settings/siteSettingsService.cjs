@@ -8,6 +8,17 @@ const {
 const { ensureSiteMemberTables, upsertSiteMemberSnapshot } = require('../siteMemberBigQueryService.cjs');
 const { syncSiteCredentialsToLocal } = require('./externalCredentialService.cjs');
 
+function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} 시간 초과`)), timeoutMs);
+      timer.unref?.();
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function upsertLocalSite(db, site) {
   if (!site?.id || !site?.site_name) {
     return;
@@ -79,9 +90,9 @@ async function listSites(db) {
   let sites = [];
   let source = 'local';
 
-  if (isSheetsConfigured()) {
+  if (isSheetsConfigured() && process.env.OSOO_API_VALIDATION !== '1') {
     try {
-      const sheetSites = await getSitesFromSheets();
+      const sheetSites = await withTimeout(getSitesFromSheets(), 3000, '현장 목록 조회');
       const activeSheetSites = sheetSites
         .filter((site) => site.is_active !== 0)
         .map((site) => ({
