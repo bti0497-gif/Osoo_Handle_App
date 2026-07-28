@@ -717,6 +717,8 @@ function validateRegressionContracts() {
       historyRestoreServiceText.includes("['응집제', 'pac', '팩']") &&
       historyRestoreServiceText.includes("const isSludge = normalizeName(type) === normalizeName('슬러지')") &&
       historyRestoreServiceText.includes('sludge_export = excluded.sludge_export') &&
+      historyRestoreScriptsText.includes('target.operationalDate || selected.date || target.registeredAt') &&
+      historyRestoreServiceText.includes('extractOperationalDate(source?.documentKey) || normalizeDate(source?.date)') &&
       settingsRoutesText.includes('siteId: req.siteContext?.siteId || req.body?.siteId || null') &&
       historyRestoreModalText.includes('누락자료 재요청') &&
       historyRestoreServiceText.includes('FROM site_config_items') &&

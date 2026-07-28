@@ -9,6 +9,11 @@ function normalizeDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '';
 }
 
+function extractOperationalDate(documentKey) {
+  const match = String(documentKey || '').match(/(?:19|20)\d{6}(?!\d)/);
+  return match ? normalizeDate(match[0]) : '';
+}
+
 function toNullableNumber(value) {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const normalized = String(value).replace(/,/g, '').trim();
@@ -190,7 +195,9 @@ function normalizeDocuments(db, documents = [], siteId = '') {
   const rejected = [];
 
   for (const source of Array.isArray(documents) ? documents : []) {
-    const date = normalizeDate(source?.date);
+    // Registration timestamps may be a day later than the actual operation
+    // log. The document key (e.g. daily-log_20260723) is authoritative.
+    const date = extractOperationalDate(source?.documentKey) || normalizeDate(source?.date);
     if (!date) {
       rejected.push({ documentKey: String(source?.documentKey || ''), reason: 'date-missing' });
       continue;

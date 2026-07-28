@@ -157,6 +157,32 @@ async function main() {
       FROM flow_readings
       WHERE site_id = ? AND date = ? AND type = '슬러지'
     `).get(secondarySiteId, '2098-03-10');
+    const operationalDateRestore = await applyRestore(db, testRoot, {
+      documents: [{
+        date: '2098-04-24',
+        documentKey: 'daily-log_20980423',
+        flow: [{
+          insrIdntIdText: flowName,
+          prvdDrwtMsrmVal: 200,
+          tdayDrwtMsrmVal: 210,
+          drwtProsAmnt: 10,
+        }],
+        chemicals: [],
+      }],
+      startDate: '2098-04-23',
+      endDate: '2098-04-23',
+      siteId: secondarySiteId,
+    });
+    const operationalDateRow = db.prepare(`
+      SELECT raw_value, calculated_flow
+      FROM flow_readings
+      WHERE site_id = ? AND date = ? AND type = ?
+    `).get(secondarySiteId, '2098-04-23', flowName);
+    const registrationDateRow = db.prepare(`
+      SELECT raw_value, calculated_flow
+      FROM flow_readings
+      WHERE site_id = ? AND date = ? AND type = ?
+    `).get(secondarySiteId, '2098-04-24', flowName);
     const isolatedRows = {
       primary: db.prepare('SELECT COUNT(*) AS count FROM flow_readings WHERE site_id = ? AND date BETWEEN ? AND ?')
         .get(primarySiteId, '2098-02-01', '2098-02-02')?.count || 0,
@@ -206,7 +232,11 @@ async function main() {
       && sludgeRestore.verification?.complete
       && sludgeRow?.raw_value === 48
       && sludgeRow?.sludge_export === 48
-      && sludgeRow?.calculated_flow === 144;
+      && sludgeRow?.calculated_flow === 144
+      && operationalDateRestore.verification?.complete
+      && operationalDateRow?.raw_value === 210
+      && operationalDateRow?.calculated_flow === 10
+      && !registrationDateRow;
 
     console.log(JSON.stringify({
       passed,
@@ -221,6 +251,11 @@ async function main() {
         verification: coagulantOverwrite.verification,
       },
       sludge: { row: sludgeRow, verification: sludgeRestore.verification },
+      operationalDate: {
+        row: operationalDateRow,
+        registrationDateRow,
+        verification: operationalDateRestore.verification,
+      },
       complemented,
     }, null, 2));
     if (!passed) process.exitCode = 1;

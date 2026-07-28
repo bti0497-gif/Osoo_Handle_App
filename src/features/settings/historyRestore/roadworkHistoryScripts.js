@@ -153,6 +153,11 @@ export function buildRoadworkHistoryPreviewScript(rows) {
     index: Number(row.index),
     documentKey: String(row.documentKey || ''),
     registeredAt: String(row.registeredAt || ''),
+    operationalDate: (() => {
+      const match = String(row.documentKey || '').match(/(?:19|20)\d{6}(?!\d)/);
+      if (!match) return '';
+      return match[0].replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3');
+    })(),
   }));
   return `
 (async () => {
@@ -267,7 +272,9 @@ export function buildRoadworkHistoryPreviewScript(rows) {
       return { success: documents.length > 0, count: documents.length, documents, errors, fatal: selected.code || 'DETAIL_READ_FAILED' };
     }
     documents.push({
-      date: selected.date || target.registeredAt,
+      // The list registration timestamp can be one day later than the
+      // operation-log date. Prefer the date embedded in the document key.
+      date: target.operationalDate || selected.date || target.registeredAt,
       documentKey: selected.documentKey || target.documentKey,
       flow: readRows('DalyOpDllgPros'),
       chemicals: readRows('DalyOpDllgChmc'),
