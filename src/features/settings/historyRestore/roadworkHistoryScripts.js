@@ -223,9 +223,10 @@ export function buildRoadworkHistoryPreviewScript(rows) {
       await sleep(200);
       const nextKey = detailKey();
       const nextDate = detailDate();
-      if ((target.registeredAt && nextDate === target.registeredAt)
-        || (target.documentKey && nextKey && nextKey === target.documentKey)
-        || (!target.documentKey && !target.registeredAt && nextDate && (nextDate !== beforeDate || nextKey !== beforeKey))) {
+      const dateMatches = !target.registeredAt || nextDate === target.registeredAt;
+      const keyMatches = !target.documentKey || !nextKey || nextKey === target.documentKey;
+      const hasBoundIdentity = Boolean(nextDate || nextKey);
+      if (dateMatches && keyMatches && hasBoundIdentity) {
         return { success: true, date: nextDate, documentKey: nextKey };
       }
     }

@@ -931,6 +931,10 @@ export default function UnifiedRecordModal({
 
         if (targetTabs.has('flow')) {
             (resolvedContexts.flow?.items || []).forEach((item) => {
+                const isDrafted = hasDraftForItem('flow', item);
+                if (effectiveSaveStatusMode === 'baseline' && !isDrafted) {
+                    return;
+                }
                 const values = getDraftForItem('flow', item);
                 const reading = toNumberOrNull(values.reading);
                 const calculatedFlow = toNumberOrNull(values.calculatedFlow);

@@ -9,6 +9,7 @@ import { SettingsModel } from '../SettingsModel';
 import { FlowModel } from '../../flow/FlowModel';
 import { MedicineModel } from '../../medicine/MedicineModel';
 import { KitModel } from '../../kit/KitModel';
+import { getRememberedRoadworkSessionUrl } from '../../roadwork-helper/roadworkSessionBridge';
 
 const DEFAULT_ROADWORK_URL = 'https://nwpo.ex.co.kr:5002/security/login.do';
 
@@ -33,6 +34,22 @@ export default function HistoryRestoreModal({ open, onClose }) {
 
     useEffect(() => {
         if (!open) return;
+        previewCancelledRef.current = false;
+        setStatus({ authenticated: false, dailyScreenReady: false, reason: 'loading' });
+        setIsChecking(false);
+        setIsQuerying(false);
+        setIsBuildingPreview(false);
+        setListResult(null);
+        setPreviewResult(null);
+        setInspectionResult(null);
+        setIsInspecting(false);
+        setIsApplying(false);
+        setApplyResult(null);
+        setShowPreviewGrid(false);
+        setDetailProgress({ current: 0, total: 0 });
+        setRetryRows([]);
+        setIsRetrying(false);
+        setMessage('');
         let cancelled = false;
         (async () => {
             try {
@@ -40,13 +57,15 @@ export default function HistoryRestoreModal({ open, onClose }) {
                 const urlResult = await window.electronAPI?.invokeRoadwork?.('roadwork:getRoadworkUrl');
                 if (cancelled) return;
                 setPreloadPath(resolvedPreload || '');
-                setWebviewUrl(String(urlResult?.url || DEFAULT_ROADWORK_URL).replace(':5002//security', ':5002/security'));
+                const configuredUrl = String(urlResult?.url || DEFAULT_ROADWORK_URL)
+                    .replace(':5002//security', ':5002/security');
+                setWebviewUrl(getRememberedRoadworkSessionUrl(roadworkPartition) || configuredUrl);
             } catch {
                 if (!cancelled) setWebviewUrl(DEFAULT_ROADWORK_URL);
             }
         })();
         return () => { cancelled = true; };
-    }, [open]);
+    }, [open, roadworkPartition]);
 
     const checkScreen = useCallback(async () => {
         const webview = webviewRef.current;
@@ -76,6 +95,7 @@ export default function HistoryRestoreModal({ open, onClose }) {
         setListResult(null);
         setPreviewResult(null);
         setInspectionResult(null);
+        setApplyResult(null);
         setShowPreviewGrid(false);
         setMessage('도로공사 기간 목록을 조회하는 중입니다.');
         try {
