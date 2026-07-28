@@ -282,7 +282,11 @@ module.exports = function (db, baseDir, appDataPath) {
 
   router.post('/api/settings/history-restore/inspect', (req, res) => {
     try {
-      const result = inspectRestore(db, req.body || {});
+      const payload = {
+        ...(req.body || {}),
+        siteId: req.siteContext?.siteId || req.body?.siteId || null,
+      };
+      const result = inspectRestore(db, payload);
       return res.json(result);
     } catch (error) {
       console.error('[Settings] 과거자료 복원 미리보기 점검 실패:', error);
@@ -292,7 +296,11 @@ module.exports = function (db, baseDir, appDataPath) {
 
   router.post('/api/settings/history-restore/apply', async (req, res) => {
     try {
-      const result = await applyRestore(db, appDataPath, req.body || {});
+      const payload = {
+        ...(req.body || {}),
+        siteId: req.siteContext?.siteId || req.body?.siteId || null,
+      };
+      const result = await applyRestore(db, appDataPath, payload);
       // 과거자료도 일반 현장 입력과 동일한 기존 BigQuery 대기열을 사용한다.
       // 현재 admin 세션에서는 전송하지 않고, 이후 현장관리자 로그인/유휴 동기화 때 처리한다.
       triggerBigQuerySync('settings:history-restore-apply');

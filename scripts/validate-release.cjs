@@ -714,6 +714,7 @@ function validateRegressionContracts() {
       historyRestoreServiceText.includes('function firstNumber(row, explicitKeys, fallbackKeyPattern)') &&
       historyRestoreServiceText.includes("firstNumber(row, ['chmcUseAmnt', 'usage']") &&
       historyRestoreServiceText.includes("['응집제', 'pac', '팩']") &&
+      settingsRoutesText.includes('siteId: req.siteContext?.siteId || req.body?.siteId || null') &&
       historyRestoreModalText.includes('누락자료 재요청') &&
       historyRestoreServiceText.includes('FROM site_config_items') &&
       historyRestoreServiceText.includes("normalizeDocuments(db, payload.documents, metadata.siteId)") &&
