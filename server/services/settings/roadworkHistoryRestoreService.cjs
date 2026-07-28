@@ -16,6 +16,19 @@ function toNullableNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function firstNumber(row, explicitKeys, fallbackKeyPattern) {
+  for (const key of explicitKeys) {
+    const value = toNullableNumber(row?.[key]);
+    if (value !== null) return value;
+  }
+  for (const [key, rawValue] of Object.entries(row || {})) {
+    if (!fallbackKeyPattern.test(String(key)) || /cmtl|month|anul|year/i.test(String(key))) continue;
+    const value = toNullableNumber(rawValue);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
 function normalizeName(value) {
   return String(value || '')
     .normalize('NFKC')
@@ -60,6 +73,18 @@ function resolveFlowName(rawName, configuredNames) {
   const direct = resolveConfiguredName(rawName, configuredNames);
   if (configuredNames.includes(direct)) return direct;
   const normalized = normalizeName(rawName);
+  const returnFlowAliases = [
+    ['내부반송', '내부반송슬러지'],
+    ['외부반송', '외부반송슬러지'],
+  ];
+  const returnFlowAlias = returnFlowAliases.find((aliases) =>
+    aliases.some((alias) => normalized.includes(normalizeName(alias)))
+  );
+  if (returnFlowAlias) {
+    const direction = normalizeName(returnFlowAlias[0]);
+    const configured = configuredNames.find((name) => normalizeName(name).includes(direction));
+    if (configured) return configured;
+  }
   const keywordGroups = [
     ['유입'],
     ['방류'],
@@ -76,14 +101,41 @@ function resolveFlowName(rawName, configuredNames) {
   }) || '';
 }
 
+function extractConfiguredFlowName(row, configuredNames) {
+  const explicitCandidates = [
+    row?.insrIdntIdText,
+    row?.dwrmWeihgInsrCdText,
+    row?.dwrmWeihgInsrText,
+    row?.insrIdntNm,
+    row?.insrNm,
+    row?.itemName,
+    row?.itemText,
+    row?.column0,
+    row?.column1,
+  ];
+  const fallbackCandidates = Object.values(row || {}).filter(
+    (value) => typeof value === 'string' && /유입|방류|반송|전력|슬러지/.test(value)
+  );
+  for (const candidate of [...explicitCandidates, ...fallbackCandidates]) {
+    const resolved = resolveFlowName(candidate, configuredNames);
+    if (resolved) return resolved;
+  }
+  return '';
+}
+
 function classifyInventoryRow(row, medicineNames, kitNames) {
-  const rawName = String(
-    row?.chmcText
-    || row?.chmcClssNmText
-    || row?.column29
-    || ''
-  ).trim();
-  const normalized = normalizeName(rawName);
+  const candidates = [
+    row?.chmcText,
+    row?.chmcClssNmText,
+    row?.chmcNmText,
+    row?.chmcNm,
+    row?.dwrmChmcClssCdText,
+    row?.dwrmChmcClssNm,
+    row?.itemName,
+    row?.itemText,
+    row?.column29,
+    ...Object.values(row || {}).filter((value) => typeof value === 'string'),
+  ].map((value) => String(value || '').trim()).filter(Boolean);
   const classText = normalizeName(row?.dwrmChmcClssCd || '');
   const formulaAliases = [
     { source: 'nh3', target: 'nh3' },
@@ -91,23 +143,42 @@ function classifyInventoryRow(row, medicineNames, kitNames) {
     { source: 'po4', target: 'po4' },
     { source: 'alk', target: 'alk' },
   ];
-  const formulaAlias = formulaAliases.find(({ source }) => normalized.includes(source));
-  const formulaKit = formulaAlias
-    ? kitNames.find((name) => normalizeName(name).includes(formulaAlias.target))
-    : '';
-  if (formulaKit) return { kind: 'kit', name: formulaKit };
-  const medicine = medicineNames.find((name) => {
-    const candidate = normalizeName(name);
-    return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
-  });
-  const kit = kitNames.find((name) => {
-    const candidate = normalizeName(name);
-    return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
-  });
-  if (kit && !medicine) return { kind: 'kit', name: kit };
-  if (medicine && !kit) return { kind: 'medicine', name: medicine };
-  if (/kit|키트|시약/.test(classText)) return { kind: 'kit', name: kit || rawName };
-  return { kind: 'medicine', name: medicine || rawName };
+  const medicineAliasGroups = [
+    ['응집제', 'pac', '팩'],
+    ['중탄산', '탄산수소나트륨', 'nahco3'],
+    ['포도당', '글루코스', 'glucose'],
+  ];
+  for (const rawName of candidates) {
+    const normalized = normalizeName(rawName);
+    const formulaAlias = formulaAliases.find(({ source }) => normalized.includes(source));
+    const formulaKit = formulaAlias
+      ? kitNames.find((name) => normalizeName(name).includes(formulaAlias.target))
+      : '';
+    if (formulaKit) return { kind: 'kit', name: formulaKit };
+    const medicineAliasGroup = medicineAliasGroups.find(
+      (group) => group.some((alias) => normalized.includes(normalizeName(alias)))
+    );
+    const aliasedMedicine = medicineAliasGroup
+      ? medicineNames.find((name) => {
+          const candidate = normalizeName(name);
+          return medicineAliasGroup.some((alias) => candidate.includes(normalizeName(alias)));
+        })
+      : '';
+    if (aliasedMedicine) return { kind: 'medicine', name: aliasedMedicine };
+    const medicine = medicineNames.find((name) => {
+      const candidate = normalizeName(name);
+      return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
+    });
+    const kit = kitNames.find((name) => {
+      const candidate = normalizeName(name);
+      return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
+    });
+    if (kit && !medicine) return { kind: 'kit', name: kit };
+    if (medicine && !kit) return { kind: 'medicine', name: medicine };
+  }
+  const fallbackName = candidates[0] || '';
+  if (/kit|키트|시약/.test(classText)) return { kind: 'kit', name: fallbackName };
+  return { kind: 'medicine', name: fallbackName };
 }
 
 function normalizeDocuments(db, documents = [], siteId = '') {
@@ -125,10 +196,10 @@ function normalizeDocuments(db, documents = [], siteId = '') {
     }
 
     const flows = (Array.isArray(source.flow) ? source.flow : []).map((row) => ({
-      type: resolveFlowName(row?.insrIdntIdText || row?.dwrmWeihgInsrCd, flowNames),
-      previousReading: toNullableNumber(row?.prvdDrwtMsrmVal),
-      rawValue: toNullableNumber(row?.tdayDrwtMsrmVal),
-      usage: toNullableNumber(row?.drwtProsAmnt),
+      type: extractConfiguredFlowName(row, flowNames),
+      previousReading: firstNumber(row, ['prvdDrwtMsrmVal', 'previousReading'], /prvd.*(drwt|msrm)|previous.*read/i),
+      rawValue: firstNumber(row, ['tdayDrwtMsrmVal', 'todayReading'], /tday.*(drwt|msrm)|today.*read/i),
+      usage: firstNumber(row, ['drwtProsAmnt', 'usage'], /drwt.*(pros|use)|(^|_)usage($|_)/i),
     })).filter((row) => row.type);
 
     const electricityRaw = source?.electricity || {};
@@ -149,9 +220,9 @@ function normalizeDocuments(db, documents = [], siteId = '') {
       if (!classified.name) continue;
       const normalizedRow = {
         name: classified.name,
-        purchase: toNullableNumber(row?.chmcPuchAmnt) ?? 0,
-        usage: toNullableNumber(row?.chmcUseAmnt) ?? 0,
-        inventory: toNullableNumber(row?.chmcRsqnVal),
+        purchase: firstNumber(row, ['chmcPuchAmnt', 'purchase'], /chmc.*puch|purchase|inbound/i) ?? 0,
+        usage: firstNumber(row, ['chmcUseAmnt', 'usage'], /chmc.*use|(^|_)usage($|_)/i) ?? 0,
+        inventory: firstNumber(row, ['chmcRsqnVal', 'inventory'], /chmc.*rsqn|inventory|stock|balance/i),
       };
       (classified.kind === 'kit' ? kit : medicine).push(normalizedRow);
     }

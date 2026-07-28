@@ -2,7 +2,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
-const { applyRestore } = require('../server/services/settings/roadworkHistoryRestoreService.cjs');
+const {
+  applyRestore,
+  normalizeDocuments,
+} = require('../server/services/settings/roadworkHistoryRestoreService.cjs');
 
 async function main() {
   const sourcePath = process.argv[2];
@@ -78,6 +81,57 @@ async function main() {
       endDate: '2098-02-02',
       siteId: secondarySiteId,
     });
+    db.prepare(`
+      INSERT OR IGNORE INTO site_config_items (
+        site_id, category, item_name, is_active, display_order, excel_cell, default_amount
+      ) VALUES (?, 'medicine', '팩(PAC)', 1, 999, NULL, 0)
+    `).run(secondarySiteId);
+    for (const [index, name] of ['내부반송유량계', '외부반송유량계'].entries()) {
+      db.prepare(`
+        INSERT OR IGNORE INTO site_config_items (
+          site_id, category, item_name, is_active, display_order, excel_cell, default_amount
+        ) VALUES (?, 'flow', ?, 1, ?, NULL, 0)
+      `).run(secondarySiteId, name, 990 + index);
+    }
+    const returnFlowNormalization = normalizeDocuments(db, [{
+      date: '2098-02-20',
+      documentKey: 'validation-return-flow-aliases',
+      flow: [
+        { dwrmWeihgInsrCdText: '내부반송슬러지', tdayDrwtMsrmVal: 101, drwtProsAmnt: 1 },
+        { dwrmWeihgInsrCdText: '외부반송슬러지', tdayDrwtMsrmVal: 202, drwtProsAmnt: 2 },
+      ],
+      chemicals: [],
+    }], secondarySiteId);
+    const returnFlowTypes = returnFlowNormalization.documents[0]?.flows.map((row) => row.type) || [];
+    const coagulantRange = {
+      startDate: '2098-03-01',
+      endDate: '2098-03-01',
+      siteId: secondarySiteId,
+    };
+    const coagulantDocument = (usage, inventory) => [{
+      date: '2098-03-01',
+      documentKey: `validation-coagulant-${usage}`,
+      flow: [{ insrIdntIdText: flowName, prvdDrwtMsrmVal: 900, tdayDrwtMsrmVal: 910, drwtProsAmnt: 10 }],
+      chemicals: [{
+        dwrmChmcClssCdText: '응집제',
+        chmcPuchAmnt: 0,
+        chmcUseAmnt: usage,
+        chmcRsqnVal: inventory,
+      }],
+    }];
+    await applyRestore(db, testRoot, {
+      documents: coagulantDocument(4, 96),
+      ...coagulantRange,
+    });
+    const coagulantOverwrite = await applyRestore(db, testRoot, {
+      documents: coagulantDocument(7, 93),
+      ...coagulantRange,
+    });
+    const coagulantRows = db.prepare(`
+      SELECT medicine_name, purchase_amount, usage_amount, current_inventory
+      FROM medicine_logs
+      WHERE site_id = ? AND date = ? AND medicine_name = ?
+    `).all(secondarySiteId, '2098-03-01', '팩(PAC)');
     const isolatedRows = {
       primary: db.prepare('SELECT COUNT(*) AS count FROM flow_readings WHERE site_id = ? AND date BETWEEN ? AND ?')
         .get(primarySiteId, '2098-02-01', '2098-02-02')?.count || 0,
@@ -116,7 +170,14 @@ async function main() {
       && isolatedRows.primary === 0
       && isolatedRows.secondary?.raw_value === 900
       && isolatedRows.secondaryGap?.raw_value === 900
-      && isolatedRows.secondaryGap?.calculated_flow === 0;
+      && isolatedRows.secondaryGap?.calculated_flow === 0
+      && returnFlowTypes.includes('내부반송유량계')
+      && returnFlowTypes.includes('외부반송유량계')
+      && coagulantRows.length === 1
+      && coagulantRows[0]?.purchase_amount === 0
+      && coagulantRows[0]?.usage_amount === 7
+      && coagulantRows[0]?.current_inventory === 93
+      && coagulantOverwrite.stats.sourceRowsOverwritten >= 1;
 
     console.log(JSON.stringify({
       passed,
@@ -124,6 +185,12 @@ async function main() {
       first,
       second: { stats: second.stats, verification: second.verification },
       secondary: { stats: secondary.stats, verification: secondary.verification, isolatedRows },
+      returnFlowTypes,
+      coagulant: {
+        rows: coagulantRows,
+        overwriteStats: coagulantOverwrite.stats,
+        verification: coagulantOverwrite.verification,
+      },
       complemented,
     }, null, 2));
     if (!passed) process.exitCode = 1;

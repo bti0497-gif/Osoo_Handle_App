@@ -706,6 +706,14 @@ function validateRegressionContracts() {
       historyRestoreScriptsText.includes('if (dateMatches && keyMatches && hasBoundIdentity)') &&
       roadworkSessionBridgeText.includes("window.sessionStorage.setItem(storageKey(partition), normalizedUrl)") &&
       roadworkSessionBridgeText.includes('LOGIN_PATH_PATTERN.test(normalizedUrl)') &&
+      historyRestoreServiceText.includes('function extractConfiguredFlowName(row, configuredNames)') &&
+      historyRestoreServiceText.includes("['외부반송', '외부반송슬러지']") &&
+      historyRestoreServiceText.includes('/유입|방류|반송|전력|슬러지/.test(value)') &&
+      historyRestoreServiceText.includes('row?.dwrmChmcClssCdText') &&
+      historyRestoreServiceText.includes("...Object.values(row || {}).filter((value) => typeof value === 'string')") &&
+      historyRestoreServiceText.includes('function firstNumber(row, explicitKeys, fallbackKeyPattern)') &&
+      historyRestoreServiceText.includes("firstNumber(row, ['chmcUseAmnt', 'usage']") &&
+      historyRestoreServiceText.includes("['응집제', 'pac', '팩']") &&
       historyRestoreModalText.includes('누락자료 재요청') &&
       historyRestoreServiceText.includes('FROM site_config_items') &&
       historyRestoreServiceText.includes("normalizeDocuments(db, payload.documents, metadata.siteId)") &&
