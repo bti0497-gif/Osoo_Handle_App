@@ -47,12 +47,12 @@ export const SettingsModel = {
         return mutateSettings(() => apiClient.post('/api/settings/select-site', { siteId }));
     },
 
-    async inspectRoadworkHistoryRestore(documents) {
-        return apiClient.post('/api/settings/history-restore/inspect', { documents });
+    async inspectRoadworkHistoryRestore(documents, range = {}) {
+        return apiClient.post('/api/settings/history-restore/inspect', { documents, ...range });
     },
 
-    async applyRoadworkHistoryRestore(documents) {
-        return apiClient.post('/api/settings/history-restore/apply', { documents });
+    async applyRoadworkHistoryRestore(documents, range = {}) {
+        return apiClient.post('/api/settings/history-restore/apply', { documents, ...range });
     },
 
     async saveSettings(settingsData) {
