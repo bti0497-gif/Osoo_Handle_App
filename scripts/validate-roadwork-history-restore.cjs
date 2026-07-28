@@ -93,6 +93,11 @@ async function main() {
         ) VALUES (?, 'flow', ?, 1, ?, NULL, 0)
       `).run(secondarySiteId, name, 990 + index);
     }
+    db.prepare(`
+      INSERT OR IGNORE INTO site_config_items (
+        site_id, category, item_name, is_active, display_order, excel_cell, default_amount
+      ) VALUES (?, 'flow', '슬러지', 1, 992, NULL, 0)
+    `).run(secondarySiteId);
     const returnFlowNormalization = normalizeDocuments(db, [{
       date: '2098-02-20',
       documentKey: 'validation-return-flow-aliases',
@@ -132,6 +137,26 @@ async function main() {
       FROM medicine_logs
       WHERE site_id = ? AND date = ? AND medicine_name = ?
     `).all(secondarySiteId, '2098-03-01', '팩(PAC)');
+    const sludgeRestore = await applyRestore(db, testRoot, {
+      documents: [{
+        date: '2098-03-10',
+        documentKey: 'validation-sludge-values',
+        flow: [{
+          dwrmWeihgInsrCd: '슬러지반출량',
+          tdayDrwtMsrmVal: 144,
+          drwtProsAmnt: 48,
+        }],
+        chemicals: [],
+      }],
+      startDate: '2098-03-10',
+      endDate: '2098-03-10',
+      siteId: secondarySiteId,
+    });
+    const sludgeRow = db.prepare(`
+      SELECT raw_value, calculated_flow, sludge_export
+      FROM flow_readings
+      WHERE site_id = ? AND date = ? AND type = '슬러지'
+    `).get(secondarySiteId, '2098-03-10');
     const isolatedRows = {
       primary: db.prepare('SELECT COUNT(*) AS count FROM flow_readings WHERE site_id = ? AND date BETWEEN ? AND ?')
         .get(primarySiteId, '2098-02-01', '2098-02-02')?.count || 0,
@@ -177,7 +202,11 @@ async function main() {
       && coagulantRows[0]?.purchase_amount === 0
       && coagulantRows[0]?.usage_amount === 7
       && coagulantRows[0]?.current_inventory === 93
-      && coagulantOverwrite.stats.sourceRowsOverwritten >= 1;
+      && coagulantOverwrite.stats.sourceRowsOverwritten >= 1
+      && sludgeRestore.verification?.complete
+      && sludgeRow?.raw_value === 48
+      && sludgeRow?.sludge_export === 48
+      && sludgeRow?.calculated_flow === 144;
 
     console.log(JSON.stringify({
       passed,
@@ -191,6 +220,7 @@ async function main() {
         overwriteStats: coagulantOverwrite.stats,
         verification: coagulantOverwrite.verification,
       },
+      sludge: { row: sludgeRow, verification: sludgeRestore.verification },
       complemented,
     }, null, 2));
     if (!passed) process.exitCode = 1;

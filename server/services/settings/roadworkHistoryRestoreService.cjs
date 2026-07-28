@@ -446,11 +446,12 @@ async function applyRestore(db, appDataPath, payload = {}) {
     INSERT INTO flow_readings (
       date, type, raw_value, calculated_flow, reading_unit, is_reset, is_manual,
       sludge_export, input_status, site_id, site_name, author, created_at, last_modified, is_synced
-    ) VALUES (?, ?, ?, ?, ?, 0, 0, NULL, ?, ?, ?, ?, ?, ?, 0)
+    ) VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, 0)
     ON CONFLICT(site_id, date, type) DO UPDATE SET
       raw_value = excluded.raw_value,
       calculated_flow = excluded.calculated_flow,
       reading_unit = excluded.reading_unit,
+      sludge_export = excluded.sludge_export,
       is_reset = 0,
       is_manual = 0,
       input_status = excluded.input_status,
@@ -537,6 +538,7 @@ async function applyRestore(db, appDataPath, payload = {}) {
     }
 
     for (const type of flowTypes) {
+      const isSludge = normalizeName(type) === normalizeName('슬러지');
       const localLatest = db.prepare(`
         SELECT raw_value FROM flow_readings
         WHERE site_id = ? AND type = ? AND raw_value IS NOT NULL
@@ -544,11 +546,12 @@ async function applyRestore(db, appDataPath, payload = {}) {
       `).get(metadata.siteId, type);
       const latestRaw = toNullableNumber(localLatest?.raw_value) ?? 0;
       const localPrevious = db.prepare(`
-        SELECT raw_value FROM flow_readings
+        SELECT raw_value, calculated_flow FROM flow_readings
         WHERE site_id = ? AND type = ? AND date < ? AND raw_value IS NOT NULL
         ORDER BY date DESC, id DESC LIMIT 1
       `).get(metadata.siteId, type, startDate);
       let previousRaw = toNullableNumber(localPrevious?.raw_value);
+      let previousSludgeCumulative = toNullableNumber(localPrevious?.calculated_flow) ?? 0;
       let nextSourcePrevious = null;
       const futurePreviousByDate = new Map();
       for (const date of [...dates].reverse()) {
@@ -562,9 +565,35 @@ async function applyRestore(db, appDataPath, payload = {}) {
       for (const date of dates) {
         const source = flowSource.get(`${date}\u0000${type}`);
         const existing = db.prepare(
-          'SELECT raw_value FROM flow_readings WHERE site_id = ? AND date = ? AND type = ?'
+          'SELECT raw_value, calculated_flow, sludge_export FROM flow_readings WHERE site_id = ? AND date = ? AND type = ?'
         ).get(metadata.siteId, date, type);
         const existingRaw = toNullableNumber(existing?.raw_value);
+        if (isSludge) {
+          const sludgeExport = source ? (source.usage ?? source.rawValue ?? 0) : 0;
+          const cumulative = source?.rawValue ?? round3(previousSludgeCumulative + sludgeExport);
+          const status = source ? 'imported' : 'defaulted';
+          const existedBefore = Boolean(existing);
+          const result = insertFlow.run(
+            date,
+            type,
+            round3(sludgeExport),
+            round3(cumulative),
+            null,
+            round3(sludgeExport),
+            status,
+            metadata.siteId,
+            metadata.siteName,
+            metadata.author,
+            metadata.createdAt,
+            metadata.lastModified
+          );
+          if (source && existedBefore && result.changes) stats.sourceRowsOverwritten += 1;
+          else if (result.changes) stats.flowInserted += 1;
+          else stats.protectedExisting += 1;
+          previousRaw = sludgeExport;
+          previousSludgeCumulative = cumulative;
+          continue;
+        }
         const sourceBase = source?.previousReading ?? previousRaw ?? futurePreviousByDate.get(date) ?? latestRaw;
         const rawValue = source?.rawValue
           ?? existingRaw
@@ -588,6 +617,7 @@ async function applyRestore(db, appDataPath, payload = {}) {
           nullableRound3(rawValue),
           round3(usage),
           String(type).includes('전력') ? 'KWH' : null,
+          null,
           status,
           metadata.siteId,
           metadata.siteName,
