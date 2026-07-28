@@ -9,7 +9,7 @@
     "dev:all": "node run-all.cjs",
     "build": "vite build",
     "lint": "eslint .",
-    "audit:prod": "npm audit --omit=dev --audit-level=high",
+    "audit:prod": "node scripts/audit-production.cjs",
     "api:inventory:update": "node scripts/update-api-route-baseline.cjs",
     "preview": "vite preview",
     "server": "node server.cjs",
@@ -47,7 +47,7 @@
     "react-dom": "^19.2.0",
     "react-quill-new": "^3.8.3",
     "sanitize-html": "^2.17.6",
-    "sharp": "^0.34.5"
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
