@@ -15,6 +15,10 @@ const DEFAULT_ROADWORK_URL = 'https://nwpo.ex.co.kr:5002/security/login.do';
 export default function HistoryRestoreModal({ open, onClose }) {
     const webviewRef = useRef(null);
     const previewCancelledRef = useRef(false);
+    const windowSiteId = new URLSearchParams(window.location.search).get('siteId') || '';
+    const roadworkPartition = windowSiteId
+        ? `persist:osoo-roadwork-${windowSiteId.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+        : 'persist:osoo-roadwork';
     const [preloadPath, setPreloadPath] = useState('');
     const [webviewUrl, setWebviewUrl] = useState('');
     const [status, setStatus] = useState({ authenticated: false, dailyScreenReady: false, reason: 'loading' });
@@ -29,6 +33,8 @@ export default function HistoryRestoreModal({ open, onClose }) {
     const [applyResult, setApplyResult] = useState(null);
     const [showPreviewGrid, setShowPreviewGrid] = useState(false);
     const [detailProgress, setDetailProgress] = useState({ current: 0, total: 0 });
+    const [retryRows, setRetryRows] = useState([]);
+    const [isRetrying, setIsRetrying] = useState(false);
     const [message, setMessage] = useState('');
 
     useEffect(() => {
@@ -75,6 +81,7 @@ export default function HistoryRestoreModal({ open, onClose }) {
         setIsQuerying(true);
         setListResult(null);
         setPreviewResult(null);
+        setRetryRows([]);
         setInspectionResult(null);
         setShowPreviewGrid(false);
         setMessage('도로공사 기간 목록을 조회하는 중입니다.');
@@ -97,37 +104,34 @@ export default function HistoryRestoreModal({ open, onClose }) {
         previewCancelledRef.current = false;
         setIsBuildingPreview(true);
         setPreviewResult(null);
+        setRetryRows([]);
         setInspectionResult(null);
         setDetailProgress({ current: 0, total: listResult.count || 0 });
         setMessage(`상세자료 ${listResult.count || 0}건을 한 건씩 천천히 읽습니다. 도로공사 화면을 조작하지 마세요.`);
         try {
             const documents = [];
-            const errors = [];
+            const failedRows = [];
             const rows = listResult.rows || [];
+            const rowKey = (row) => String(row?.documentKey || '').trim()
+                || `${String(row?.registeredAt || '').trim()}::${Number(row?.index)}`;
+            const documentKey = (document) => String(document?.documentKey || '').trim()
+                || String(document?.date || '').trim();
+            const appendDocuments = (items = []) => {
+                const known = new Set(documents.map(documentKey));
+                for (const item of items) {
+                    const key = documentKey(item);
+                    if (!key || known.has(key)) continue;
+                    known.add(key);
+                    documents.push(item);
+                }
+            };
             for (let index = 0; index < rows.length; index += 1) {
                 if (previewCancelledRef.current) break;
                 setDetailProgress({ current: index + 1, total: rows.length });
                 setMessage(`상세 요청 중 ${index + 1}/${rows.length}${rows[index]?.registeredAt ? ` · ${rows[index].registeredAt}` : ''}`);
                 const partial = await webview.executeJavaScript(buildRoadworkHistoryPreviewScript([rows[index]]));
-                if (partial?.documents?.length) documents.push(...partial.documents);
-                if (partial?.errors?.length) errors.push(...partial.errors);
-                if (partial?.fatal) {
-                    const failure = partial.errors?.[0] || {};
-                    setPreviewResult({
-                        success: documents.length > 0,
-                        count: documents.length,
-                        documents,
-                        errors,
-                        cancelled: true,
-                        fatal: partial.fatal,
-                    });
-                    setMessage(
-                        `상세 응답 실패(${partial.fatal}) · 목표문서 ${failure.targetDocumentKey || '-'}`
-                        + ` · 전→후 문서 ${failure.beforeDocumentKey || '-'}→${failure.afterDocumentKey || '-'}`
-                        + ` · 전→후 날짜 ${failure.beforeDate || '-'}→${failure.afterDate || '-'}`
-                    );
-                    return;
-                }
+                appendDocuments(partial?.documents || []);
+                if (partial?.fatal || partial?.errors?.length) failedRows.push(rows[index]);
                 if (index < rows.length - 1 && !previewCancelledRef.current) {
                     const isBatchBoundary = (index + 1) % 5 === 0;
                     if (isBatchBoundary) {
@@ -138,18 +142,39 @@ export default function HistoryRestoreModal({ open, onClose }) {
                 }
             }
             if (previewCancelledRef.current) {
-                setPreviewResult({ success: documents.length > 0, count: documents.length, documents, errors, cancelled: true });
+                setPreviewResult({ success: documents.length > 0, count: documents.length, documents, errors: [], cancelled: true });
                 setMessage(`상세 읽기를 ${documents.length}/${rows.length}건에서 중단했습니다. 저장된 데이터는 없습니다.`);
                 return;
             }
-            const result = { success: documents.length > 0, count: documents.length, documents, errors };
+
+            // 상세 읽기 도중 목록 자체가 늦게 갱신됐을 수 있으므로 현재 조회목록을 한 번 더 읽는다.
+            const refreshedList = await webview.executeJavaScript(buildRoadworkHistoryListScript());
+            const refreshedRows = refreshedList?.success ? (refreshedList.rows || []) : rows;
+            const completedKeys = new Set(documents.map(documentKey));
+            const retryMap = new Map(failedRows.map((row) => [rowKey(row), row]));
+            for (const row of refreshedRows) {
+                const expectedKey = String(row?.documentKey || '').trim() || String(row?.registeredAt || '').trim();
+                if (expectedKey && !completedKeys.has(expectedKey)) retryMap.set(rowKey(row), row);
+            }
+
+            const pendingRetryRows = [...retryMap.values()];
+            const result = {
+                success: documents.length > 0,
+                count: documents.length,
+                documents,
+                errors: [],
+                pendingRetryCount: pendingRetryRows.length,
+            };
             if (!result?.success) {
                 setPreviewResult(result);
                 setMessage(result?.message || '상세자료를 읽지 못했습니다.');
                 return;
             }
             setPreviewResult(result);
-            setMessage(`상세자료 ${result.count || 0}일을 읽었습니다. 복원 미리보기를 눌러 항목 매칭과 기존 데이터 충돌을 확인하세요.`);
+            setRetryRows(pendingRetryRows);
+            setMessage(pendingRetryRows.length
+                ? `상세자료 ${result.count || 0}건을 받았습니다. 누락·응답실패 ${pendingRetryRows.length}건을 확인한 뒤 '누락자료 재요청'을 눌러 주세요.`
+                : `상세자료 ${result.count || 0}건을 모두 받았습니다. 복원 미리보기에서 무결성을 확인해 주세요.`);
         } catch (error) {
             setMessage(error?.message || '상세자료 미리보기 중 오류가 발생했습니다.');
         } finally {
@@ -157,37 +182,95 @@ export default function HistoryRestoreModal({ open, onClose }) {
         }
     }, [isBuildingPreview, listResult]);
 
+    const retryMissingDocuments = useCallback(async () => {
+        const webview = webviewRef.current;
+        if (!webview || !retryRows.length || isRetrying || !previewResult?.success) return;
+        setIsRetrying(true);
+        setInspectionResult(null);
+        setShowPreviewGrid(false);
+        try {
+            const merged = [...(previewResult.documents || [])];
+            const documentKey = (document) => String(document?.documentKey || '').trim()
+                || String(document?.date || '').trim();
+            const known = new Set(merged.map(documentKey));
+            const stillMissing = [];
+            for (let index = 0; index < retryRows.length; index += 1) {
+                const row = retryRows[index];
+                setMessage(`누락자료 수동 재요청 중 ${index + 1}/${retryRows.length}${row?.registeredAt ? ` · ${row.registeredAt}` : ''}`);
+                const partial = await webview.executeJavaScript(buildRoadworkHistoryPreviewScript([row]));
+                let added = false;
+                for (const document of partial?.documents || []) {
+                    const key = documentKey(document);
+                    if (!key || known.has(key)) continue;
+                    known.add(key);
+                    merged.push(document);
+                    added = true;
+                }
+                if (!added || partial?.fatal || partial?.errors?.length) stillMissing.push(row);
+                if (index < retryRows.length - 1) {
+                    const delay = (index + 1) % 5 === 0 ? 10000 : 5000;
+                    await new Promise((resolve) => window.setTimeout(resolve, delay));
+                }
+            }
+            merged.sort((a, b) => String(a?.date || '').localeCompare(String(b?.date || '')));
+            setPreviewResult({
+                ...previewResult,
+                success: merged.length > 0,
+                count: merged.length,
+                documents: merged,
+                pendingRetryCount: stillMissing.length,
+            });
+            setRetryRows(stillMissing);
+            setMessage(stillMissing.length
+                ? `재요청 후에도 ${stillMissing.length}건이 누락되었습니다. 다시 재요청하거나, 복원 미리보기에서 빈 날짜 보완 가능 여부를 확인해 주세요.`
+                : `누락자료 재요청이 완료되었습니다. 총 ${merged.length}건입니다. 이제 복원 미리보기로 무결성을 확인해 주세요.`);
+        } catch (error) {
+            setMessage(error?.message || '누락자료 재요청 중 오류가 발생했습니다. 저장은 진행되지 않았습니다.');
+        } finally {
+            setIsRetrying(false);
+        }
+    }, [isRetrying, previewResult, retryRows]);
+
     const inspectPreview = useCallback(async () => {
         if (!previewResult?.success || isInspecting) return;
         setIsInspecting(true);
         setInspectionResult(null);
         setMessage('복원 항목 매칭과 기존 로컬 데이터 충돌을 확인하는 중입니다.');
         try {
-            const inspection = await SettingsModel.inspectRoadworkHistoryRestore(previewResult.documents || []);
+            const inspection = await SettingsModel.inspectRoadworkHistoryRestore(
+                previewResult.documents || [],
+                { startDate: listResult?.startDate, endDate: listResult?.endDate }
+            );
             setInspectionResult(inspection);
             setShowPreviewGrid(Boolean(inspection?.success));
             setMessage(inspection?.success
                 ? `미리보기 완료 · 상세 ${inspection.documentCount || 0}일 · 유량 ${inspection.flowRows || 0}건 · 약품 ${inspection.medicineRows || 0}건 · 키트 ${inspection.kitRows || 0}건 · 기존 데이터 ${inspection.existingRows || 0}건`
+                    + (retryRows.length ? ` · 미수신 ${retryRows.length}건은 빈 날짜 보완 대상으로 처리됩니다.` : '')
                 : inspection?.message || '복원 미리보기를 만들지 못했습니다.');
         } catch (error) {
             setMessage(`${error?.message || '복원 미리보기 실패'} · 개발서버의 백엔드 재시작이 필요할 수 있습니다.`);
         } finally {
             setIsInspecting(false);
         }
-    }, [isInspecting, previewResult]);
+    }, [isInspecting, listResult?.endDate, listResult?.startDate, previewResult, retryRows.length]);
 
     const applyPreview = useCallback(async () => {
         if (!inspectionResult?.success || !previewResult?.success || isApplying || applyResult?.success) return;
         const confirmed = window.confirm(
             '현재 로컬 DB를 먼저 백업한 뒤 과거자료를 복원합니다.\n'
-            + '기존 데이터는 덮어쓰지 않고, 누락된 날짜만 보완합니다.\n\n계속하시겠습니까?'
+            + '도로공사에서 받은 날짜는 원본 값으로 갱신하고, 받지 못한 날짜는 검침 연속성과 0 사용량으로 보완합니다.\n'
+            + (retryRows.length ? `도로공사 상세자료 ${retryRows.length}건은 아직 받지 못했습니다.\n` : '')
+            + '\n계속하시겠습니까?'
         );
         if (!confirmed) return;
         setIsApplying(true);
         setApplyResult(null);
         setMessage('로컬 DB 백업 후 복원·보완·연속성 검증을 진행하고 있습니다.');
         try {
-            const result = await SettingsModel.applyRoadworkHistoryRestore(previewResult.documents || []);
+            const result = await SettingsModel.applyRoadworkHistoryRestore(
+                previewResult.documents || [],
+                { startDate: listResult?.startDate, endDate: listResult?.endDate }
+            );
             FlowModel.clearHistoryCache();
             MedicineModel.clearHistoryCache();
             KitModel.clearHistoryCache();
@@ -206,7 +289,7 @@ export default function HistoryRestoreModal({ open, onClose }) {
         } finally {
             setIsApplying(false);
         }
-    }, [applyResult?.success, inspectionResult?.success, isApplying, previewResult]);
+    }, [applyResult?.success, inspectionResult?.success, isApplying, listResult?.endDate, listResult?.startDate, previewResult, retryRows.length]);
 
     const formatNumber = (value) => {
         if (value === null || value === undefined || String(value).trim() === '') return '-';
@@ -300,7 +383,7 @@ export default function HistoryRestoreModal({ open, onClose }) {
                             <webview
                                 ref={webviewRef}
                                 src={webviewUrl}
-                                partition="persist:osoo-roadwork"
+                                partition={roadworkPartition}
                                 preload={preloadPath || undefined}
                                 nodeintegration="false"
                                 enableremotemodule="false"
@@ -332,10 +415,22 @@ export default function HistoryRestoreModal({ open, onClose }) {
                         {isBuildingPreview ? (
                             <button type="button" className="history-restore-cancel" onClick={cancelPreview}>읽기 중단</button>
                         ) : null}
+                        {previewResult?.success ? (
+                            <button type="button" onClick={() => setShowPreviewGrid(true)}>다운로드 결과 보기</button>
+                        ) : null}
+                        {retryRows.length ? (
+                            <button
+                                type="button"
+                                onClick={retryMissingDocuments}
+                                disabled={isRetrying || isBuildingPreview}
+                            >
+                                {isRetrying ? '누락자료 재요청 중...' : `누락자료 재요청 (${retryRows.length}건)`}
+                            </button>
+                        ) : null}
                         <button
                             type="button"
                             onClick={inspectPreview}
-                            disabled={!previewResult?.success || previewResult?.cancelled || isInspecting}
+                            disabled={!previewResult?.success || previewResult?.cancelled || isInspecting || isRetrying}
                         >
                             {isInspecting ? '미리보기 생성 중...' : inspectionResult?.success ? '복원 미리보기 완료' : '복원 미리보기'}
                         </button>

@@ -473,6 +473,8 @@ function validateRegressionContracts() {
   const basicSitePanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'BasicSitePanel.jsx');
   const basicSiteHeaderPanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'BasicSiteHeaderPanel.jsx');
   const settingsRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'settingsRoutes.cjs');
+  const historyRestoreModalPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'historyRestore', 'HistoryRestoreModal.jsx');
+  const historyRestoreServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'roadworkHistoryRestoreService.cjs');
   const mappingServicePath = path.join(BASE_DIR, 'server', 'services', 'settings', 'mappingSettingsService.cjs');
   const inventoryMappingPanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'InventoryMappingPanel.jsx');
   const flowMappingPanelPath = path.join(BASE_DIR, 'src', 'features', 'settings', 'panels', 'FlowMappingPanel.jsx');
@@ -641,6 +643,8 @@ function validateRegressionContracts() {
   const boardViewModelText = readText(boardViewModelPath);
   const boardViewText = readText(boardViewPath);
   const sidebarText = readText(sidebarPath);
+  const historyRestoreModalText = readText(historyRestoreModalPath);
+  const historyRestoreServiceText = readText(historyRestoreServicePath);
   const appText = readText(appPath);
   const authViewModelText = readText(authViewModelPath);
   const boardPopupNoticeText = readText(boardPopupNoticePath);
@@ -686,6 +690,18 @@ function validateRegressionContracts() {
       authViewModelText.includes('setSharedAuthenticatedUser'),
     '양방향 토글 즉시 방향 버튼·보조 창 로그인 승계 계약 유지',
     '토글 직후 방향 버튼 갱신 또는 보조 현장 창의 인증 승계 연결이 빠졌습니다.'
+  );
+
+  checkSource(
+    historyRestoreModalText.includes('persist:osoo-roadwork-${windowSiteId') &&
+      historyRestoreModalText.includes('누락자료 재요청') &&
+      historyRestoreServiceText.includes('FROM site_config_items') &&
+      historyRestoreServiceText.includes("normalizeDocuments(db, payload.documents, metadata.siteId)") &&
+      historyRestoreServiceText.includes('futurePreviousByDate') &&
+      historyRestoreServiceText.includes('const latestRaw = toNullableNumber(localLatest?.raw_value) ?? 0') &&
+      fs.existsSync(path.join(BASE_DIR, 'scripts', 'validate-roadwork-history-restore.cjs')),
+    '양방향 과거자료 복원 세션·설정·DB 현장격리 및 누락일 보완 계약 유지',
+    '과거자료 복원에서 방향별 도로공사 세션, 현장별 설정 또는 누락일 검침 보완 보호가 빠졌습니다.'
   );
 
   checkSource(

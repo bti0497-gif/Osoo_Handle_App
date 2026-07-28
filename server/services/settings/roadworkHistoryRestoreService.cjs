@@ -25,13 +25,24 @@ function normalizeName(value) {
     .toLowerCase();
 }
 
-function getConfiguredNames(db, category) {
-  return db.prepare(`
-    SELECT item_name
-    FROM config_items
-    WHERE category = ? AND COALESCE(is_active, 1) = 1
-    ORDER BY display_order ASC, item_name ASC
-  `).all(category).map((row) => String(row.item_name || '').trim()).filter(Boolean);
+function getConfiguredNames(db, category, siteId = '') {
+  const scoped = siteId
+    ? db.prepare(`
+        SELECT item_name
+        FROM site_config_items
+        WHERE site_id = ? AND category = ? AND COALESCE(is_active, 1) = 1
+        ORDER BY display_order ASC, item_name ASC
+      `).all(siteId, category)
+    : [];
+  const rows = scoped.length
+    ? scoped
+    : db.prepare(`
+        SELECT item_name
+        FROM config_items
+        WHERE category = ? AND COALESCE(is_active, 1) = 1
+        ORDER BY display_order ASC, item_name ASC
+      `).all(category);
+  return rows.map((row) => String(row.item_name || '').trim()).filter(Boolean);
 }
 
 function resolveConfiguredName(rawName, configuredNames) {
@@ -99,10 +110,10 @@ function classifyInventoryRow(row, medicineNames, kitNames) {
   return { kind: 'medicine', name: medicine || rawName };
 }
 
-function normalizeDocuments(db, documents = []) {
-  const flowNames = getConfiguredNames(db, 'flow');
-  const medicineNames = getConfiguredNames(db, 'medicine');
-  const kitNames = getConfiguredNames(db, 'kit');
+function normalizeDocuments(db, documents = [], siteId = '') {
+  const flowNames = getConfiguredNames(db, 'flow', siteId);
+  const medicineNames = getConfiguredNames(db, 'medicine', siteId);
+  const kitNames = getConfiguredNames(db, 'kit', siteId);
   const normalized = [];
   const rejected = [];
 
@@ -159,8 +170,8 @@ function normalizeDocuments(db, documents = []) {
 }
 
 function inspectRestore(db, payload = {}) {
-  const normalized = normalizeDocuments(db, payload.documents);
   const metadata = getCurrentRecordMetadata(db, payload);
+  const normalized = normalizeDocuments(db, payload.documents, metadata.siteId);
   const flowTypes = new Set();
   const medicineNames = new Set();
   const kitNames = new Set();
@@ -186,15 +197,24 @@ function inspectRestore(db, payload = {}) {
       if (db.prepare('SELECT 1 FROM kit_logs WHERE site_id = ? AND date = ? AND kit_name = ?').get(metadata.siteId, document.date, row.name)) existingRows += 1;
     }
   }
+  const range = resolveRestoreRange(normalized.documents, payload);
+  const continuity = inspectFlowContinuity(db, normalized.documents, metadata, range);
 
+  const success = normalized.documents.length > 0 && continuity.unresolvedFlowRows === 0;
   return {
-    success: normalized.documents.length > 0,
+    success,
+    message: success
+      ? ''
+      : continuity.unresolvedFlowRows > 0
+        ? `검침값을 복원할 근거가 없는 유량 행이 ${continuity.unresolvedFlowRows}건 있어 저장할 수 없습니다.`
+        : '복원할 상세자료가 없습니다.',
     documentCount: normalized.documents.length,
     rejectedCount: normalized.rejected.length,
     flowRows,
     medicineRows,
     kitRows,
     existingRows,
+    continuity,
     mappings: {
       flow: Array.from(flowTypes),
       medicine: Array.from(medicineNames),
@@ -215,6 +235,22 @@ function enumerateDates(startDate, endDate) {
   return result;
 }
 
+function resolveRestoreRange(documents, payload = {}) {
+  if (!documents.length) return { startDate: '', endDate: '' };
+  const firstDocumentDate = documents[0].date;
+  const lastDocumentDate = documents[documents.length - 1].date;
+  const requestedStart = normalizeDate(payload.startDate);
+  const requestedEnd = normalizeDate(payload.endDate);
+  const startDate = requestedStart || firstDocumentDate;
+  const endDate = requestedEnd || lastDocumentDate;
+  if (startDate > endDate || firstDocumentDate < startDate || lastDocumentDate > endDate) {
+    const error = new Error('요청 기간과 내려받은 도로공사 자료의 날짜 범위가 일치하지 않습니다.');
+    error.statusCode = 400;
+    throw error;
+  }
+  return { startDate, endDate };
+}
+
 function round3(value) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.round(number * 1000) / 1000 : 0;
@@ -222,6 +258,72 @@ function round3(value) {
 
 function nullableRound3(value) {
   return value === null || value === undefined ? null : round3(value);
+}
+
+function inspectFlowContinuity(db, documents, metadata, range = {}) {
+  if (!documents.length) {
+    return { startDate: '', endDate: '', totalDateCount: 0, missingDates: [], unresolvedFlowRows: 0 };
+  }
+  const startDate = range.startDate || documents[0].date;
+  const endDate = range.endDate || documents[documents.length - 1].date;
+  const dates = enumerateDates(startDate, endDate);
+  const documentDates = new Set(documents.map((document) => document.date));
+  const flowTypes = [...new Set(documents.flatMap((document) => document.flows.map((row) => row.type)))];
+  const flowSource = new Map();
+  for (const document of documents) {
+    for (const row of document.flows) flowSource.set(`${document.date}\u0000${row.type}`, row);
+  }
+
+  let unresolvedFlowRows = 0;
+  for (const type of flowTypes) {
+    const localLatest = db.prepare(`
+      SELECT raw_value FROM flow_readings
+      WHERE site_id = ? AND type = ? AND raw_value IS NOT NULL
+      ORDER BY date DESC, id DESC LIMIT 1
+    `).get(metadata.siteId, type);
+    const latestRaw = toNullableNumber(localLatest?.raw_value) ?? 0;
+    const localPrevious = db.prepare(`
+      SELECT raw_value FROM flow_readings
+      WHERE site_id = ? AND type = ? AND date < ? AND raw_value IS NOT NULL
+      ORDER BY date DESC, id DESC LIMIT 1
+    `).get(metadata.siteId, type, startDate);
+    let previousRaw = toNullableNumber(localPrevious?.raw_value);
+    let nextSourcePrevious = null;
+    const futurePreviousByDate = new Map();
+    for (const date of [...dates].reverse()) {
+      const futureSource = flowSource.get(`${date}\u0000${type}`);
+      if (futureSource?.previousReading != null) {
+        nextSourcePrevious = toNullableNumber(futureSource.previousReading);
+      }
+      futurePreviousByDate.set(date, nextSourcePrevious);
+    }
+
+    for (const date of dates) {
+      const source = flowSource.get(`${date}\u0000${type}`);
+      const existing = db.prepare(
+        'SELECT raw_value FROM flow_readings WHERE site_id = ? AND date = ? AND type = ?'
+      ).get(metadata.siteId, date, type);
+      const existingRaw = toNullableNumber(existing?.raw_value);
+      const sourceBase = source?.previousReading ?? previousRaw ?? futurePreviousByDate.get(date) ?? latestRaw;
+      const rawValue = source?.rawValue
+        ?? existingRaw
+        ?? (sourceBase != null && source?.usage != null ? round3(sourceBase + source.usage) : null)
+        ?? source?.previousReading
+        ?? futurePreviousByDate.get(date)
+        ?? previousRaw
+        ?? latestRaw;
+      if (rawValue === null) unresolvedFlowRows += 1;
+      else previousRaw = rawValue;
+    }
+  }
+
+  return {
+    startDate,
+    endDate,
+    totalDateCount: dates.length,
+    missingDates: dates.filter((date) => !documentDates.has(date)),
+    unresolvedFlowRows,
+  };
 }
 
 async function backupDatabase(db, appDataPath) {
@@ -234,23 +336,22 @@ async function backupDatabase(db, appDataPath) {
 }
 
 async function applyRestore(db, appDataPath, payload = {}) {
-  const normalized = normalizeDocuments(db, payload.documents);
+  const metadata = getCurrentRecordMetadata(db, payload);
+  const normalized = normalizeDocuments(db, payload.documents, metadata.siteId);
   if (!normalized.documents.length) {
     const error = new Error('복원할 상세자료가 없습니다.');
     error.statusCode = 400;
     throw error;
   }
 
-  const startDate = normalized.documents[0].date;
-  const endDate = normalized.documents[normalized.documents.length - 1].date;
+  const { startDate, endDate } = resolveRestoreRange(normalized.documents, payload);
   const dates = enumerateDates(startDate, endDate);
-  const metadata = getCurrentRecordMetadata(db, payload);
   const backupPath = await backupDatabase(db, appDataPath);
 
   const documentsByDate = new Map(normalized.documents.map((document) => [document.date, document]));
   const flowTypes = [...new Set(normalized.documents.flatMap((document) => document.flows.map((row) => row.type)))];
-  const configuredMedicineNames = getConfiguredNames(db, 'medicine');
-  const configuredKitNames = getConfiguredNames(db, 'kit');
+  const configuredMedicineNames = getConfiguredNames(db, 'medicine', metadata.siteId);
+  const configuredKitNames = getConfiguredNames(db, 'kit', metadata.siteId);
   const medicineNames = [...new Set([
     ...configuredMedicineNames,
     ...normalized.documents.flatMap((document) => document.medicine.map((row) => row.name)),
@@ -364,12 +465,27 @@ async function applyRestore(db, appDataPath, payload = {}) {
     }
 
     for (const type of flowTypes) {
+      const localLatest = db.prepare(`
+        SELECT raw_value FROM flow_readings
+        WHERE site_id = ? AND type = ? AND raw_value IS NOT NULL
+        ORDER BY date DESC, id DESC LIMIT 1
+      `).get(metadata.siteId, type);
+      const latestRaw = toNullableNumber(localLatest?.raw_value) ?? 0;
       const localPrevious = db.prepare(`
         SELECT raw_value FROM flow_readings
         WHERE site_id = ? AND type = ? AND date < ? AND raw_value IS NOT NULL
         ORDER BY date DESC, id DESC LIMIT 1
       `).get(metadata.siteId, type, startDate);
       let previousRaw = toNullableNumber(localPrevious?.raw_value);
+      let nextSourcePrevious = null;
+      const futurePreviousByDate = new Map();
+      for (const date of [...dates].reverse()) {
+        const futureSource = flowSource.get(`${date}\u0000${type}`);
+        if (futureSource?.previousReading != null) {
+          nextSourcePrevious = toNullableNumber(futureSource.previousReading);
+        }
+        futurePreviousByDate.set(date, nextSourcePrevious);
+      }
 
       for (const date of dates) {
         const source = flowSource.get(`${date}\u0000${type}`);
@@ -377,13 +493,14 @@ async function applyRestore(db, appDataPath, payload = {}) {
           'SELECT raw_value FROM flow_readings WHERE site_id = ? AND date = ? AND type = ?'
         ).get(metadata.siteId, date, type);
         const existingRaw = toNullableNumber(existing?.raw_value);
-        const sourceBase = source?.previousReading ?? previousRaw;
+        const sourceBase = source?.previousReading ?? previousRaw ?? futurePreviousByDate.get(date) ?? latestRaw;
         const rawValue = source?.rawValue
           ?? existingRaw
           ?? (sourceBase != null && source?.usage != null ? round3(sourceBase + source.usage) : null)
           ?? source?.previousReading
+          ?? futurePreviousByDate.get(date)
           ?? previousRaw
-          ?? null;
+          ?? latestRaw;
         const usage = source
           ? (source.usage ?? (
               rawValue !== null && previousRaw !== null
@@ -487,10 +604,19 @@ async function applyRestore(db, appDataPath, payload = {}) {
       expectedFlowRows: dates.length * flowTypes.length,
       expectedMedicineRows: dates.length * medicineNames.length,
       expectedKitRows: dates.length * kitNames.length,
+      unresolvedFlowRows: Number(db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM flow_readings
+        WHERE site_id = ?
+          AND date BETWEEN ? AND ?
+          AND type IN (${flowTypes.map(() => '?').join(', ') || "''"})
+          AND raw_value IS NULL
+      `).get(metadata.siteId, startDate, endDate, ...flowTypes)?.count || 0),
     };
     result.complete = result.flowRows >= result.expectedFlowRows
       && result.medicineRows >= result.expectedMedicineRows
-      && result.kitRows >= result.expectedKitRows;
+      && result.kitRows >= result.expectedKitRows
+      && result.unresolvedFlowRows === 0;
     if (!result.complete) {
       const error = new Error('복원 데이터 연속성 검증에 실패했습니다. 변경 내용은 저장되지 않았습니다.');
       error.statusCode = 500;

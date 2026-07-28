@@ -96,6 +96,11 @@ export function buildRoadworkHistoryListScript() {
       input.dispatchEvent(new Event('change', { bubbles: true }));
     }
   };
+  const readValue = (id) => {
+    const item = component(id);
+    const input = daily.document?.getElementById(id + '_input') || daily.document?.getElementById(id);
+    try { return item?.getValue?.() ?? input?.value ?? ''; } catch { return input?.value ?? ''; }
+  };
   const getDataList = (grid) => {
     try {
       const candidate = grid?.getDataList?.();
@@ -136,6 +141,8 @@ export function buildRoadworkHistoryListScript() {
     success: true,
     count: rows.length,
     rows,
+    startDate: normalizeDate(readValue('ipt_FromDay')),
+    endDate: normalizeDate(readValue('ipt_ToDay')),
   };
 })()
 `;

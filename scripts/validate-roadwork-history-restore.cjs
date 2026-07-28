@@ -33,7 +33,7 @@ async function main() {
       {
         date: '2098-01-01',
         documentKey: 'validation-1',
-        flow: [{ insrIdntIdText: flowName, tdayDrwtMsrmVal: 100, drwtProsAmnt: 10 }],
+        flow: [{ insrIdntIdText: flowName, prvdDrwtMsrmVal: 90, tdayDrwtMsrmVal: 100, drwtProsAmnt: 10 }],
         chemicals: [
           { chmcText: medicineName, chmcClssNmText: '약품', chmcPuchAmnt: 10, chmcUseAmnt: 2, chmcRsqnVal: 108 },
           { chmcClssNmText: 'NH₃-N', dwrmChmcClssCd: 'KIT', chmcPuchAmnt: 5, chmcUseAmnt: 1, chmcRsqnVal: 54 },
@@ -50,9 +50,45 @@ async function main() {
       },
     ];
 
-    const first = await applyRestore(db, testRoot, { documents });
-    const second = await applyRestore(db, testRoot, { documents });
+    const range = { startDate: '2097-12-31', endDate: '2098-01-03' };
+    const first = await applyRestore(db, testRoot, { documents, ...range });
+    const second = await applyRestore(db, testRoot, { documents, ...range });
+    const primarySiteId = String(db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || '');
+    const secondarySiteId = 'history-restore-secondary-site';
+    db.prepare(`
+      INSERT OR REPLACE INTO sites (id, site_name, manager_name, is_active)
+      VALUES (?, '복원검증 보조방향', '검증관리자', 1)
+    `).run(secondarySiteId);
+    db.prepare(`
+      INSERT OR IGNORE INTO site_config_items (
+        site_id, category, item_name, is_active, display_order, excel_cell, default_amount
+      )
+      SELECT ?, category, item_name, is_active, display_order, excel_cell, default_amount
+      FROM site_config_items WHERE site_id = ?
+    `).run(secondarySiteId, primarySiteId);
+    const secondaryDocuments = [{
+      date: '2098-02-01',
+      documentKey: 'validation-secondary-1',
+      flow: [{ insrIdntIdText: flowName, prvdDrwtMsrmVal: 890, tdayDrwtMsrmVal: 900, drwtProsAmnt: 10 }],
+      chemicals: [],
+    }];
+    const secondary = await applyRestore(db, testRoot, {
+      documents: secondaryDocuments,
+      startDate: '2098-02-01',
+      endDate: '2098-02-02',
+      siteId: secondarySiteId,
+    });
+    const isolatedRows = {
+      primary: db.prepare('SELECT COUNT(*) AS count FROM flow_readings WHERE site_id = ? AND date BETWEEN ? AND ?')
+        .get(primarySiteId, '2098-02-01', '2098-02-02')?.count || 0,
+      secondary: db.prepare('SELECT raw_value, calculated_flow FROM flow_readings WHERE site_id = ? AND date = ? AND type = ?')
+        .get(secondarySiteId, '2098-02-01', flowName),
+      secondaryGap: db.prepare('SELECT raw_value, calculated_flow FROM flow_readings WHERE site_id = ? AND date = ? AND type = ?')
+        .get(secondarySiteId, '2098-02-02', flowName),
+    };
     const complemented = {
+      leadingFlow: db.prepare('SELECT raw_value, calculated_flow FROM flow_readings WHERE date = ? AND type = ?')
+        .get('2097-12-31', flowName),
       flow: db.prepare('SELECT raw_value, calculated_flow FROM flow_readings WHERE date = ? AND type = ?')
         .get('2098-01-02', flowName),
       medicine: db.prepare('SELECT purchase_amount, usage_amount, current_inventory FROM medicine_logs WHERE date = ? AND medicine_name = ?')
@@ -62,7 +98,9 @@ async function main() {
     };
 
     const passed = first.verification?.complete
-      && first.stats.complementedDates === 1
+      && first.stats.complementedDates === 2
+      && complemented.leadingFlow?.raw_value === 90
+      && complemented.leadingFlow?.calculated_flow === 0
       && complemented.flow?.raw_value === 100
       && complemented.flow?.calculated_flow === 0
       && complemented.medicine?.purchase_amount === 0
@@ -73,13 +111,19 @@ async function main() {
       && complemented.kit?.current_inventory === 54
       && second.stats.flowInserted === 0
       && second.stats.medicineInserted === 0
-      && second.stats.kitInserted === 0;
+      && second.stats.kitInserted === 0
+      && secondary.verification?.complete
+      && isolatedRows.primary === 0
+      && isolatedRows.secondary?.raw_value === 900
+      && isolatedRows.secondaryGap?.raw_value === 900
+      && isolatedRows.secondaryGap?.calculated_flow === 0;
 
     console.log(JSON.stringify({
       passed,
       testDbPath,
       first,
       second: { stats: second.stats, verification: second.verification },
+      secondary: { stats: secondary.stats, verification: secondary.verification, isolatedRows },
       complemented,
     }, null, 2));
     if (!passed) process.exitCode = 1;
