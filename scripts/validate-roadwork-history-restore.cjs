@@ -97,8 +97,8 @@ async function main() {
       date: '2098-02-20',
       documentKey: 'validation-return-flow-aliases',
       flow: [
-        { dwrmWeihgInsrCdText: '내부반송슬러지', tdayDrwtMsrmVal: 101, drwtProsAmnt: 1 },
-        { dwrmWeihgInsrCdText: '외부반송슬러지', tdayDrwtMsrmVal: 202, drwtProsAmnt: 2 },
+        { dwrmWeihgInsrCd: '내부반송슬러지', tdayDrwtMsrmVal: 101, drwtProsAmnt: 1 },
+        { dwrmWeihgInsrCd: '외부반송슬러지', tdayDrwtMsrmVal: 202, drwtProsAmnt: 2 },
       ],
       chemicals: [],
     }], secondarySiteId);

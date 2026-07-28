@@ -70,8 +70,6 @@ function resolveConfiguredName(rawName, configuredNames) {
 }
 
 function resolveFlowName(rawName, configuredNames) {
-  const direct = resolveConfiguredName(rawName, configuredNames);
-  if (configuredNames.includes(direct)) return direct;
   const normalized = normalizeName(rawName);
   const returnFlowAliases = [
     ['내부반송', '내부반송슬러지'],
@@ -85,6 +83,8 @@ function resolveFlowName(rawName, configuredNames) {
     const configured = configuredNames.find((name) => normalizeName(name).includes(direction));
     if (configured) return configured;
   }
+  const direct = resolveConfiguredName(rawName, configuredNames);
+  if (configuredNames.includes(direct)) return direct;
   const keywordGroups = [
     ['유입'],
     ['방류'],
@@ -104,6 +104,7 @@ function resolveFlowName(rawName, configuredNames) {
 function extractConfiguredFlowName(row, configuredNames) {
   const explicitCandidates = [
     row?.insrIdntIdText,
+    row?.dwrmWeihgInsrCd,
     row?.dwrmWeihgInsrCdText,
     row?.dwrmWeihgInsrText,
     row?.insrIdntNm,

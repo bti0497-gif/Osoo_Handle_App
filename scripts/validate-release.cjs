@@ -707,6 +707,7 @@ function validateRegressionContracts() {
       roadworkSessionBridgeText.includes("window.sessionStorage.setItem(storageKey(partition), normalizedUrl)") &&
       roadworkSessionBridgeText.includes('LOGIN_PATH_PATTERN.test(normalizedUrl)') &&
       historyRestoreServiceText.includes('function extractConfiguredFlowName(row, configuredNames)') &&
+      historyRestoreServiceText.includes('row?.dwrmWeihgInsrCd,') &&
       historyRestoreServiceText.includes("['외부반송', '외부반송슬러지']") &&
       historyRestoreServiceText.includes('/유입|방류|반송|전력|슬러지/.test(value)') &&
       historyRestoreServiceText.includes('row?.dwrmChmcClssCdText') &&
