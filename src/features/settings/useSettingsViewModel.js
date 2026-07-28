@@ -17,7 +17,10 @@ import {
     getDefaultFlowOptionBySeries,
 } from './settingsDefaults';
 
-export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {}) => {
+export const useSettingsViewModel = (
+    currentUser,
+    { showAlert, showConfirm, onMultiSiteModeChanged } = {}
+) => {
     const [activeTab, setActiveTab] = useState('basic');
     const [isLoading, setIsLoading] = useState(true);
     const [hasLoadedSettings, setHasLoadedSettings] = useState(false);
@@ -505,6 +508,7 @@ export const useSettingsViewModel = (currentUser, { showAlert, showConfirm } = {
                 throw new Error(response?.message || '양방향 통합관리 설정 저장 실패');
             }
             await loadSettings({ force: true });
+            onMultiSiteModeChanged?.(response);
             showAlert?.(nextEnabled
                 ? '양방향 통합관리 사용 설정이 저장되었습니다.'
                 : '양방향 통합관리 사용 설정이 해제되었습니다.');

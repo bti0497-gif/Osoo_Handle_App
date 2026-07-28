@@ -13,9 +13,13 @@ import LogMappingPanel from './panels/LogMappingPanel';
 import BasicSitePanel from './panels/BasicSitePanel';
 import HistoryRestoreModal from './historyRestore/HistoryRestoreModal';
 
-const SettingsView = ({ currentUser }) => {
+const SettingsView = ({ currentUser, onMultiSiteModeChanged }) => {
     const { showAlert, showConfirm } = useDialog();
-    const vm = useSettingsViewModel(currentUser, { showAlert, showConfirm });
+    const vm = useSettingsViewModel(currentUser, {
+        showAlert,
+        showConfirm,
+        onMultiSiteModeChanged,
+    });
     const [showHistoryRestore, setShowHistoryRestore] = React.useState(false);
     const {
         shellState,

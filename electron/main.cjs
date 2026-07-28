@@ -437,6 +437,8 @@ function createSiteWindow(siteId, siteName) {
   return child;
 }
 
+let sharedAuthenticatedUser = null;
+
 function setupRoadworkSafeUsePopupGuard() {
   app.on('web-contents-created', (_event, contents) => {
     if (contents.getType() !== 'webview') return;
@@ -781,6 +783,13 @@ ipcMain.handle('app:openSiteWindow', (_event, site = {}) => {
   const child = createSiteWindow(site.siteId, site.siteName);
   return { success: true, siteId: String(site.siteId || ''), focused: child.isFocused() };
 });
+ipcMain.handle('auth:setSharedUser', (_event, user = null) => {
+  sharedAuthenticatedUser = user && typeof user === 'object'
+    ? { ...user, password: undefined }
+    : null;
+  return { success: true };
+});
+ipcMain.handle('auth:getSharedUser', () => sharedAuthenticatedUser);
 
 ipcMain.handle('notification:showPopupNotice', (event, rawNotice = {}) => {
   const noticeId = String(rawNotice?.id || '').trim().slice(0, 160);

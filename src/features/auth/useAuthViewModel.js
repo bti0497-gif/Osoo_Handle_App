@@ -236,6 +236,15 @@ export const useAuthViewModel = () => {
 
                 const savedUser = AuthModel.loadSession();
                 if (!savedUser || !savedUser.id) {
+                    const windowSiteId = new URLSearchParams(window.location.search).get('siteId') || '';
+                    if (windowSiteId) {
+                        const sharedUser = await window.electronAPI?.getSharedAuthenticatedUser?.();
+                        if (sharedUser?.id) {
+                            userRef.current = sharedUser;
+                            setUser(sharedUser);
+                            setLocationStatus({ status: 'idle', message: '' });
+                        }
+                    }
                     return;
                 }
 
@@ -269,6 +278,7 @@ export const useAuthViewModel = () => {
                 };
 
                 AuthModel.saveSession(restoredUser);
+                await window.electronAPI?.setSharedAuthenticatedUser?.(restoredUser);
                 userRef.current = restoredUser;
                 setUser(restoredUser);
                 if (field) {
@@ -335,6 +345,7 @@ export const useAuthViewModel = () => {
                     const enrichedUser = { ...userData, isRemote: false };
 
                     AuthModel.saveSession(enrichedUser);
+                    await window.electronAPI?.setSharedAuthenticatedUser?.(enrichedUser);
                     userRef.current = enrichedUser;
                     setUser(enrichedUser);
                     setupAutoLogoutTimer(enrichedUser);
@@ -345,6 +356,7 @@ export const useAuthViewModel = () => {
                 }
 
                 AuthModel.clearSession();
+                await window.electronAPI?.setSharedAuthenticatedUser?.(userData);
                 userRef.current = userData;
                 setUser(userData);
                 setLocationStatus({ status: 'idle', message: '' });
@@ -379,6 +391,7 @@ export const useAuthViewModel = () => {
             }
         }
         AuthModel.clearSession();
+        await window.electronAPI?.setSharedAuthenticatedUser?.(null);
         userRef.current = null;
         setUser(null);
         setLocationStatus({ status: 'idle', message: '' });

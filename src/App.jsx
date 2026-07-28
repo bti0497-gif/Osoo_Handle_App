@@ -74,19 +74,37 @@ const PlaceholderView = ({ title }) => (
 
 function App() {
     const { user: authenticatedUser, loginHintName, isAuthenticated, isLoading, locationStatus, login, logout } = useAuthViewModel();
+    const [multiSiteRuntime, setMultiSiteRuntime] = useState(null);
     const windowSiteId = new URLSearchParams(window.location.search).get('siteId') || '';
     const user = useMemo(() => {
-        if (!authenticatedUser || !windowSiteId) return authenticatedUser;
-        const site = (authenticatedUser.managed_sites || []).find((item) => String(item.id) === String(windowSiteId));
+        if (!authenticatedUser) return authenticatedUser;
+        let runtimeUser = authenticatedUser;
+        if (multiSiteRuntime) {
+            const sitesById = new Map(
+                (authenticatedUser.managed_sites || []).map((site) => [String(site.id), site])
+            );
+            for (const site of multiSiteRuntime.sites || []) {
+                if (site?.id) sitesById.set(String(site.id), { ...sitesById.get(String(site.id)), ...site });
+            }
+            runtimeUser = {
+                ...authenticatedUser,
+                managed_sites: [...sitesById.values()],
+                multi_site_enabled: Boolean(multiSiteRuntime.enabled),
+                primary_site_id: multiSiteRuntime.primarySiteId || null,
+                secondary_site_id: multiSiteRuntime.secondarySiteId || null,
+            };
+        }
+        if (!windowSiteId) return runtimeUser;
+        const site = (runtimeUser.managed_sites || []).find((item) => String(item.id) === String(windowSiteId));
         return site ? {
-            ...authenticatedUser,
+            ...runtimeUser,
             site_id: site.id,
             site_name1: site.site_name,
             target_lat: site.target_lat,
             target_lng: site.target_lng,
             radius_m: site.radius_m,
-        } : authenticatedUser;
-    }, [authenticatedUser, windowSiteId]);
+        } : runtimeUser;
+    }, [authenticatedUser, multiSiteRuntime, windowSiteId]);
     const [activeTab, setActiveTab] = useState(DEFAULT_TAB);
     const [isRoadworkMounted, setIsRoadworkMounted] = useState(false);
     const [preloadedUserId, setPreloadedUserId] = useState(null);
@@ -363,7 +381,31 @@ function App() {
                 return <BoardView currentUser={user} />;
             case 'dashboard':
                 return <DashboardView currentUser={user} />;
-            case 'settings': return <SettingsView currentUser={user} />;
+            case 'settings': return (
+                <SettingsView
+                    currentUser={user}
+                    onMultiSiteModeChanged={(response) => {
+                        const enabled = Boolean(response?.enabled);
+                        setMultiSiteRuntime({
+                            enabled,
+                            primarySiteId: response?.primarySiteId || null,
+                            secondarySiteId: response?.secondarySiteId || null,
+                            sites: enabled ? [
+                                {
+                                    id: response?.primarySiteId,
+                                    site_name: response?.primarySiteName || '',
+                                    is_primary: true,
+                                },
+                                {
+                                    id: response?.secondarySiteId,
+                                    site_name: response?.secondarySiteName || '',
+                                    is_primary: false,
+                                },
+                            ].filter((site) => site.id && site.site_name) : [],
+                        });
+                    }}
+                />
+            );
             default: return <DashboardView currentUser={user} />;
         }
     };

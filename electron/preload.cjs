@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   hideToTray: () => ipcRenderer.invoke('app:hideToTray'),
   openSiteWindow: (site) => ipcRenderer.invoke('app:openSiteWindow', site),
+  setSharedAuthenticatedUser: (user) => ipcRenderer.invoke('auth:setSharedUser', user),
+  getSharedAuthenticatedUser: () => ipcRenderer.invoke('auth:getSharedUser'),
   showPopupNotification: (notice) => ipcRenderer.invoke('notification:showPopupNotice', notice),
   onOpenPopupModal: (callback) => {
     const listener = (_event, payload) => callback(payload || {});

@@ -531,6 +531,8 @@ function validateRegressionContracts() {
   const boardViewModelPath = path.join(BASE_DIR, 'src', 'features', 'board', 'useBoardViewModel.js');
   const boardViewPath = path.join(BASE_DIR, 'src', 'features', 'board', 'BoardView.jsx');
   const sidebarPath = path.join(BASE_DIR, 'src', 'components', 'Sidebar.jsx');
+  const appPath = path.join(BASE_DIR, 'src', 'App.jsx');
+  const authViewModelPath = path.join(BASE_DIR, 'src', 'features', 'auth', 'useAuthViewModel.js');
   const boardPopupNoticePath = path.join(BASE_DIR, 'src', 'features', 'board', 'BoardPopupNotice.jsx');
   const boardPopupWatcherPath = path.join(BASE_DIR, 'src', 'features', 'board', 'usePopupNoticeWatcher.js');
   const boardNewBadgePath = path.join(BASE_DIR, 'src', 'features', 'board', 'boardNewBadge.js');
@@ -639,6 +641,8 @@ function validateRegressionContracts() {
   const boardViewModelText = readText(boardViewModelPath);
   const boardViewText = readText(boardViewPath);
   const sidebarText = readText(sidebarPath);
+  const appText = readText(appPath);
+  const authViewModelText = readText(authViewModelPath);
   const boardPopupNoticeText = readText(boardPopupNoticePath);
   const boardPopupWatcherText = readText(boardPopupWatcherPath);
   const boardNewBadgeText = readText(boardNewBadgePath);
@@ -666,6 +670,22 @@ function validateRegressionContracts() {
     boardServiceText.includes("process.env.BOARD_BACKEND || 'firebase'"),
     '소통게시판 Firebase 운영 원본 기본값 계약 유지',
     '소통게시판 기본 백엔드가 Firebase가 아니어서 중앙관리자/현장 목록이 분리될 수 있습니다'
+  );
+
+  checkSource(
+    settingsViewModelText.includes('onMultiSiteModeChanged?.(response)') &&
+      appText.includes('setMultiSiteRuntime') &&
+      appText.includes('primarySiteName') &&
+      appText.includes('secondarySiteName') &&
+      sidebarText.includes('setSharedAuthenticatedUser?.(user)') &&
+      electronMainText.includes("ipcMain.handle('auth:setSharedUser'") &&
+      electronMainText.includes("ipcMain.handle('auth:getSharedUser'") &&
+      electronPreloadText.includes('setSharedAuthenticatedUser') &&
+      electronPreloadText.includes('getSharedAuthenticatedUser') &&
+      authViewModelText.includes('getSharedAuthenticatedUser') &&
+      authViewModelText.includes('setSharedAuthenticatedUser'),
+    '양방향 토글 즉시 방향 버튼·보조 창 로그인 승계 계약 유지',
+    '토글 직후 방향 버튼 갱신 또는 보조 현장 창의 인증 승계 연결이 빠졌습니다.'
   );
 
   checkSource(
