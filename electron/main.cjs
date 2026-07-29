@@ -391,6 +391,10 @@ function createSiteWindow(siteId, siteName) {
     existing.show();
     existing.maximize();
     existing.focus();
+    if (!existing.webContents.isDestroyed()) {
+      existing.webContents.focus();
+      existing.webContents.send('app:window-restored', { reason: 'site-window-focus' });
+    }
     return existing;
   }
 
@@ -432,9 +436,25 @@ function createSiteWindow(siteId, siteName) {
     }
   });
   child.on('closed', () => {
-    siteWindows.delete(normalizedSiteId);
+    if (siteWindows.get(normalizedSiteId) === child) {
+      siteWindows.delete(normalizedSiteId);
+    }
   });
   return child;
+}
+
+function registerSiteWindow(siteId, window) {
+  const normalizedSiteId = String(siteId || '').trim();
+  if (!normalizedSiteId || !window || window.isDestroyed()) return;
+
+  // A BrowserWindow represents exactly one active site. Remove any stale
+  // alias for the same window before registering its current site.
+  for (const [registeredSiteId, registeredWindow] of siteWindows.entries()) {
+    if (registeredWindow === window && registeredSiteId !== normalizedSiteId) {
+      siteWindows.delete(registeredSiteId);
+    }
+  }
+  siteWindows.set(normalizedSiteId, window);
 }
 
 let sharedAuthenticatedUser = null;
@@ -779,7 +799,9 @@ ipcMain.handle('app:hideToTray', () => {
   }
   return { ok: true };
 });
-ipcMain.handle('app:openSiteWindow', (_event, site = {}) => {
+ipcMain.handle('app:openSiteWindow', (event, site = {}) => {
+  const sourceWindow = BrowserWindow.fromWebContents(event.sender);
+  registerSiteWindow(site.currentSiteId, sourceWindow);
   const child = createSiteWindow(site.siteId, site.siteName);
   return { success: true, siteId: String(site.siteId || ''), focused: child.isFocused() };
 });

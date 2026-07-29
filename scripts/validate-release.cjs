@@ -686,6 +686,11 @@ function validateRegressionContracts() {
       appText.includes('primarySiteName') &&
       appText.includes('secondarySiteName') &&
       sidebarText.includes('setSharedAuthenticatedUser?.(user)') &&
+      sidebarText.includes("currentSiteId: user?.site_id || ''") &&
+      electronMainText.includes('function registerSiteWindow(siteId, window)') &&
+      electronMainText.includes('registerSiteWindow(site.currentSiteId, sourceWindow)') &&
+      electronMainText.includes('const existing = siteWindows.get(normalizedSiteId)') &&
+      electronMainText.includes("existing.webContents.send('app:window-restored', { reason: 'site-window-focus' })") &&
       electronMainText.includes("ipcMain.handle('auth:setSharedUser'") &&
       electronMainText.includes("ipcMain.handle('auth:getSharedUser'") &&
       electronPreloadText.includes('setSharedAuthenticatedUser') &&

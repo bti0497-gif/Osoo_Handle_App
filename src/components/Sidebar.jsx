@@ -27,7 +27,11 @@ const Sidebar = ({ user, activeTab, onTabChange, onLogout, onUpdatePassword }) =
     const handleSiteWindow = async (site) => {
         if (!site || String(site.id) === String(user?.site_id || '')) return;
         await window.electronAPI?.setSharedAuthenticatedUser?.(user);
-        await window.electronAPI?.openSiteWindow?.({ siteId: site.id, siteName: site.site_name });
+        await window.electronAPI?.openSiteWindow?.({
+            siteId: site.id,
+            siteName: site.site_name,
+            currentSiteId: user?.site_id || '',
+        });
     };
 
     const toggleMenu = (menuId) => {
