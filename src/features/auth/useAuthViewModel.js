@@ -256,10 +256,11 @@ export const useAuthViewModel = () => {
                             setUser(sharedUser);
                             setLocationStatus({ status: 'idle', message: '' });
                         }
-                    } else {
-                        await window.electronAPI?.invokeRoadwork?.('roadwork:clearSessions').catch(() => undefined);
-                        clearRoadworkRendererSessionUrls();
                     }
+                    // ROADWORK_SESSION_PRESERVE_ON_APP_RESTART
+                    // 앱 업데이트·재시작으로 현장 앱 로그인만 풀린 경우에도 도로공사
+                    // persist 파티션은 보존한다. 도로공사 세션 삭제는 사용자가 실제
+                    // 로그아웃할 때 clearLocalAuthenticatedState()에서만 수행한다.
                     return;
                 }
 

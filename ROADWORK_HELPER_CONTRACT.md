@@ -24,6 +24,7 @@ This file protects the working roadwork input helper. Do not change these rules 
 - The user must review the populated roadwork form and save it directly in the roadwork site.
 - Only the separate popup titled `도로통합플랫폼 안내` whose body contains `[안전한 PC 사용을 위한 공지]` and `오늘 하루 그만보기` may be dismissed automatically.
 - Login forms and verification dialogs for SMS confirmation codes, OTP, or two-step verification must never be dismissed automatically.
+- App startup, update restart, or a missing app login session must not clear a roadwork persistent partition. Roadwork cookies and storage may be cleared only by the explicit app logout lifecycle.
 
 ## Change Discipline
 

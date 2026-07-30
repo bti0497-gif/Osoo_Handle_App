@@ -55,7 +55,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
     const [pageRenderData, setPageRenderData] = useState(null);
     const [isPreviewAssetLoading, setIsPreviewAssetLoading] = useState(false);
     const [isOutputProcessing, setIsOutputProcessing] = useState(false);
-    const [outputFormat, setOutputFormat] = useState('pdf');
+    const [outputFormat, setOutputFormat] = useState(isDailyWorkLog ? 'hwp' : 'excel');
     const [activeDates, setActiveDates] = useState([]);
     const [siteName, setSiteName] = useState('');
     const [localSite, setLocalSite] = useState({ id: '', name: '' });
@@ -82,7 +82,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
 
     useEffect(() => {
         if (isDailyWorkLog && outputFormat === 'excel') {
-            setOutputFormat('pdf');
+            setOutputFormat('hwp');
         }
     }, [isDailyWorkLog, outputFormat]);
 

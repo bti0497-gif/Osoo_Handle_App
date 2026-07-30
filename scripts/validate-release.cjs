@@ -467,6 +467,7 @@ function validateRegressionContracts() {
   const dailyWorkLogServicePath = path.join(BASE_DIR, 'server', 'services', 'dailyWorkLogService.cjs');
   const dailyWorkLogHwpxServicePath = path.join(BASE_DIR, 'server', 'services', 'dailyWorkLogHwpxService.cjs');
   const dailyWorkLogHwpServicePath = path.join(BASE_DIR, 'server', 'services', 'dailyWorkLogHwpService.cjs');
+  const weatherHistoryServicePath = path.join(BASE_DIR, 'server', 'services', 'weatherHistoryService.cjs');
   const reportTemplateServicePath = path.join(BASE_DIR, 'server', 'services', 'reportTemplateService.cjs');
   const flowRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'flowRoutes.cjs');
   const medicineRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineRoutes.cjs');
@@ -595,6 +596,7 @@ function validateRegressionContracts() {
   const dailyWorkLogServiceText = readText(dailyWorkLogServicePath);
   const dailyWorkLogHwpxServiceText = readText(dailyWorkLogHwpxServicePath);
   const dailyWorkLogHwpServiceText = readText(dailyWorkLogHwpServicePath);
+  const weatherHistoryServiceText = readText(weatherHistoryServicePath);
   const facilityRoutesText = readText(facilityRoutesPath);
   const facilityModelText = readText(facilityModelPath);
   const facilityViewText = readText(facilityViewPath);
@@ -1119,6 +1121,15 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    dailyLogViewModelText.includes("useState(isDailyWorkLog ? 'hwp' : 'excel')") &&
+      dailyLogViewModelText.includes("setOutputFormat('hwp')") &&
+      dailyLogViewText.includes("{ id: 'hwp', label: '한글(HWP)' }") &&
+      dailyLogViewText.includes("{ id: 'pdf', label: 'PDF' }"),
+    '일일업무일지 한글(HWP) 기본 선택·PDF 선택 유지 계약',
+    '수정 가능한 한글 일지가 기본 선택되지 않거나 PDF 선택 기능이 사라졌습니다'
+  );
+
+  checkSource(
     !dailyWorkLogText.includes('restoreOperationalData') &&
       !excelRoutesText.includes('restoreOperationalData') &&
       !roadworkHelperRoutesText.includes('restoreOperationalData') &&
@@ -1173,6 +1184,21 @@ function validateRegressionContracts() {
       dailyWorkLogHwpxServiceText.includes('values.반출량, values.월간누계, context'),
     '일일업무일지 슬러지 현장 범위 계약 유지',
     '양방향 공유 DB에서 다른 현장의 슬러지 반출정보가 일지에 섞일 수 있습니다'
+  );
+
+  checkSource(
+    dailyWorkLogText.includes("const siteId = req.query.siteId || req.query.site_id || req.siteContext?.siteId || ''") &&
+      dailyWorkLogText.includes('siteId,') &&
+      dailyLogViewModelText.includes('siteId: selectedSiteId') &&
+      dailyWorkLogHwpxServiceText.includes('getDailyWeather({ db, appDataPath, date, context })') &&
+      weatherHistoryServiceText.includes("const siteId = String(context.siteId || context.site_id || '').trim()") &&
+      weatherHistoryServiceText.includes('WHERE id = ?') &&
+      weatherHistoryServiceText.includes('location.latitude.toFixed(4)') &&
+      weatherHistoryServiceText.includes('location.longitude.toFixed(4)') &&
+      weatherHistoryServiceText.includes("timezone: 'Asia/Seoul'") &&
+      weatherHistoryServiceText.includes("daily: 'weather_code,temperature_2m_mean'"),
+    '일일업무일지 현장별 좌표·날씨·평균기온 바인딩 계약 유지',
+    '일지 날씨 조회가 선택 현장 site_id·좌표·한국 날짜 기준과 분리되지 않을 수 있습니다'
   );
 
   checkSource(
@@ -1606,6 +1632,8 @@ function validateRegressionContracts() {
       electronPreloadText.includes("'roadwork:clearSessions'") &&
       authViewModelText.includes('clearLocalAuthenticatedState') &&
       authViewModelText.includes("invokeRoadwork?.('roadwork:clearSessions')") &&
+      authViewModelText.includes('ROADWORK_SESSION_PRESERVE_ON_APP_RESTART') &&
+      roadworkContractText.includes('App startup, update restart, or a missing app login session must not clear a roadwork persistent partition') &&
       authViewModelText.includes('if (!session || session?.logout_time != null)') &&
       boardPopupWatcherText.includes('Number(error?.status) === 401') &&
       boardPopupWatcherText.includes("String(error?.data?.code || '') === 'ACTIVE_SESSION_REQUIRED'") &&
