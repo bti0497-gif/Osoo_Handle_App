@@ -30,11 +30,9 @@ const getDomSnapshot = (sourceTarget) => ({
 export function FocusDiagnostics() {
   const sequenceRef = useRef(0);
   const recoveryPendingRef = useRef(false);
-  const recoveryActiveRef = useRef(false);
 
   useEffect(() => {
     let disposed = false;
-    const timers = new Set();
 
     const record = async (event, target, details = {}) => {
       if (disposed) return;
@@ -55,19 +53,10 @@ export function FocusDiagnostics() {
       });
     };
 
-    const scheduleSnapshot = (event, target, delayMs) => {
-      const timer = window.setTimeout(() => {
-        timers.delete(timer);
-        void record(event, target, { delayMs });
-      }, delayMs);
-      timers.add(timer);
-    };
-
     const handlePointerDown = (event) => {
       const input = event.target instanceof Element ? event.target.closest(INPUT_SELECTOR) : null;
       if (!input) return;
       if (!document.hasFocus() && !recoveryPendingRef.current) {
-        recoveryActiveRef.current = true;
         void record('input-focus-anomaly', input, { button: event.button });
         recoveryPendingRef.current = true;
         void (async () => {
@@ -85,34 +74,12 @@ export function FocusDiagnostics() {
             };
           } finally {
             recoveryPendingRef.current = false;
-            void record('native-focus-recovery', input, { recoveryResult });
+            if (!recoveryResult.recovered || !document.hasFocus()) {
+              void record('native-focus-recovery-failed', input, { recoveryResult });
+            }
           }
         })();
-        scheduleSnapshot('input-focus-recovery-settled', input, 80);
-        scheduleSnapshot('input-focus-recovery-settled', input, 300);
       }
-    };
-    const handleFocusIn = (event) => {
-      if (!recoveryActiveRef.current) return;
-      if (!(event.target instanceof Element) || !event.target.matches(INPUT_SELECTOR)) return;
-      void record('input-focus-recovered', event.target);
-    };
-    const handleInput = (event) => {
-      if (!recoveryActiveRef.current) return;
-      if (!(event.target instanceof Element) || !event.target.matches(INPUT_SELECTOR)) return;
-      recoveryActiveRef.current = false;
-      void record('recovery-input-accepted', event.target, {
-        valueLength: 'value' in event.target ? String(event.target.value || '').length : null,
-      });
-    };
-    const handleWindowFocus = () => {
-      if (recoveryActiveRef.current) void record('dom-window-focus', document.activeElement);
-    };
-    const handleWindowBlur = () => {
-      if (recoveryActiveRef.current) void record('dom-window-blur', document.activeElement);
-    };
-    const handleVisibility = () => {
-      if (recoveryActiveRef.current) void record('visibility-change', document.activeElement);
     };
     const handleAppDiagnostic = (event) => {
       const detail = event.detail && typeof event.detail === 'object' ? event.detail : {};
@@ -120,30 +87,13 @@ export function FocusDiagnostics() {
         appState: detail.details && typeof detail.details === 'object' ? detail.details : {},
       });
     };
-    const unsubscribeNative = window.electronAPI?.onNativeFocusEvent?.((info) => {
-      void record('native-event', document.activeElement, { nativeEvent: info });
-    });
-
     document.addEventListener('pointerdown', handlePointerDown, true);
-    document.addEventListener('focusin', handleFocusIn, true);
-    document.addEventListener('input', handleInput, true);
-    window.addEventListener('focus', handleWindowFocus);
-    window.addEventListener('blur', handleWindowBlur);
-    document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('osoo:focus-diagnostic', handleAppDiagnostic);
-    void record('diagnostics-mounted', document.activeElement);
 
     return () => {
       disposed = true;
-      timers.forEach((timer) => window.clearTimeout(timer));
       document.removeEventListener('pointerdown', handlePointerDown, true);
-      document.removeEventListener('focusin', handleFocusIn, true);
-      document.removeEventListener('input', handleInput, true);
-      window.removeEventListener('focus', handleWindowFocus);
-      window.removeEventListener('blur', handleWindowBlur);
-      document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('osoo:focus-diagnostic', handleAppDiagnostic);
-      if (typeof unsubscribeNative === 'function') unsubscribeNative();
     };
   }, []);
 

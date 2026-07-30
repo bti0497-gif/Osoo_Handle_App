@@ -43,6 +43,7 @@ const siteWindows = new Map();
 let serverProcess = null;
 let tray = null;
 let isQuitting = false;
+let isUpdateInstalling = false;
 let serverGuardTimer = null;
 let serverRestartTimer = null;
 let serverHealthFailures = 0;
@@ -56,6 +57,30 @@ const SERVER_STARTUP_GRACE_MS = 120000;
 
 const isDev = !app.isPackaged;
 const useExternalServer = isDev && process.env.OSOO_EXTERNAL_SERVER === '1';
+const isBackgroundStartup = process.argv.includes('--osoo-background-start');
+
+function shouldKeepEmbeddedServerAlive() {
+  return !isQuitting && !isUpdateInstalling && !useExternalServer;
+}
+
+function configureWindowsBackgroundStartup() {
+  if (isDev || process.platform !== 'win32') return;
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: true,
+      openAsHidden: true,
+      path: process.execPath,
+      args: ['--osoo-background-start'],
+    });
+    const settings = app.getLoginItemSettings({
+      path: process.execPath,
+      args: ['--osoo-background-start'],
+    });
+    console.log(`[Electron] Windows background startup: ${settings.openAtLogin ? 'enabled' : 'disabled'}`);
+  } catch (error) {
+    console.warn('[Electron] Failed to configure Windows background startup:', error.message);
+  }
+}
 
 function reclaimDedicatedServerPort() {
   if (useExternalServer || process.platform !== 'win32') return true;
@@ -104,7 +129,7 @@ exit 1
 }
 
 function scheduleServerRestart(delayMs = 500) {
-  if (isQuitting || useExternalServer || serverRestartTimer) return;
+  if (!shouldKeepEmbeddedServerAlive() || serverRestartTimer) return;
   serverRestartTimer = setTimeout(() => {
     serverRestartTimer = null;
     startServer();
@@ -112,7 +137,7 @@ function scheduleServerRestart(delayMs = 500) {
 }
 
 function checkEmbeddedServerHealth() {
-  if (isQuitting || useExternalServer || !serverProcess || !serverInstanceToken) {
+  if (!shouldKeepEmbeddedServerAlive() || !serverProcess || !serverInstanceToken) {
     return Promise.resolve(false);
   }
   return new Promise((resolve) => {
@@ -146,7 +171,7 @@ function checkEmbeddedServerHealth() {
 function startServerGuard() {
   if (useExternalServer || serverGuardTimer) return;
   serverGuardTimer = setInterval(async () => {
-    if (isQuitting) return;
+    if (!shouldKeepEmbeddedServerAlive()) return;
     const healthy = await checkEmbeddedServerHealth();
     if (healthy) {
       serverHealthFailures = 0;
@@ -206,7 +231,7 @@ function startServer() {
     console.log('[Electron] External dev server mode: skip embedded server start');
     return;
   }
-  if (serverProcess || isQuitting) return;
+  if (serverProcess || !shouldKeepEmbeddedServerAlive()) return;
   if (!reclaimDedicatedServerPort()) {
     console.error('[Electron] Cannot start until dedicated port 18731 is clean. Retrying.');
     scheduleServerRestart(1500);
@@ -261,7 +286,7 @@ function startServer() {
     if (serverProcess === launchedProcess) serverProcess = null;
     if (serverInstanceToken === launchedToken) serverInstanceToken = null;
     serverLaunchedAt = 0;
-    if (!isQuitting && mainWindow && !mainWindow.isDestroyed()) {
+    if (shouldKeepEmbeddedServerAlive()) {
       scheduleServerRestart();
     }
   });
@@ -314,7 +339,7 @@ function stopServerGracefully(timeoutMs = 3000) {
   });
 }
 
-function createWindow() {
+function createWindow({ showOnReady = true } = {}) {
   const iconPath = isDev
     ? path.join(__dirname, '..', 'public', 'icon.ico')
     : path.join(process.resourcesPath, 'app.asar.unpacked', 'public', 'icon.ico');
@@ -338,7 +363,9 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.maximize();
-    mainWindow.show();
+    if (showOnReady) {
+      mainWindow.show();
+    }
   });
 
   if (isDev) {
@@ -643,6 +670,7 @@ if (!gotTheLock) {
 }
 
 app.whenReady().then(() => {
+  configureWindowsBackgroundStartup();
   setupRoadworkSafeUsePopupGuard();
   try {
     require('./roadworkDumpHelper.cjs')(ipcMain, app, { isDev });
@@ -654,14 +682,19 @@ app.whenReady().then(() => {
   handleVersionMigration();
   startServer();
   startServerGuard();
-  createWindow();
+  createWindow({ showOnReady: !isBackgroundStartup });
   createTray();
 
   if (!isDev) {
     setupAutoUpdater(mainWindow, {
       logFilePath: path.join(app.getPath('appData'), 'Osoo_Handle_App', 'logs', 'electron-updater.log'),
       onBeforeInstall: async () => {
+        isUpdateInstalling = true;
         isQuitting = true;
+        if (serverGuardTimer) clearInterval(serverGuardTimer);
+        if (serverRestartTimer) clearTimeout(serverRestartTimer);
+        serverGuardTimer = null;
+        serverRestartTimer = null;
         await stopServerGracefully();
       },
     });

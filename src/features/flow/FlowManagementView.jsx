@@ -68,13 +68,15 @@ const ManagementFooter = ({ count, loading, onOpen }) => (
 
 const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSessionChange }) => {
     const { showAlert, showConfirm } = useDialog();
-    const { itemState = {} } = useSettingsViewModel();
+    const { itemState = {}, shellState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
+    const settingsReady = shellState.isLoading === false;
 
     const visibleFlowItems = useMemo(() => {
+        if (!settingsReady) return [];
         const active = flowItems.filter((item) => item.checked);
         return active.length > 0 ? active : DEFAULT_FLOW_VIEW_ITEMS;
-    }, [flowItems]);
+    }, [flowItems, settingsReady]);
 
     const flowMeterTypes = useMemo(() => visibleFlowItems.map((item) => item.name), [visibleFlowItems]);
     const {
@@ -82,7 +84,11 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
         loading,
         correctData,
         refresh,
-    } = useFlowViewModel(currentUser, { showAlert, flowTypes: flowMeterTypes });
+    } = useFlowViewModel(currentUser, {
+        showAlert,
+        flowTypes: flowMeterTypes,
+        enabled: settingsReady,
+    });
 
     const [selectedDate, setSelectedDate] = useState(workspaceSession.selectedKey || null);
     const [modalState, setModalState] = useState({ open: false, tab: 'flow', mode: 'add', date: null });
@@ -99,7 +105,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
     const selectedRow = history.find((row) => row.date === selectedDate) || null;
     const modalRow = history.find((row) => row.date === modalDate) || null;
 
-    const gridCols = visibleFlowItems.map((item, idx) => {
+    const gridCols = useMemo(() => visibleFlowItems.map((item, idx) => {
         const color = FLOW_COLORS[idx % FLOW_COLORS.length];
         return {
             id: item.name,
@@ -123,7 +129,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                 },
             ],
         };
-    });
+    }), [visibleFlowItems]);
 
     const buildModalContexts = () => ({
         flow: {
@@ -312,31 +318,52 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
     return (
         <div className="flow-management-view">
             <div className="flow-management-view__grid-scroll">
-                <AdvancedDataGrid
-                    {...ADVANCED_DATAGRID_READ_ONLY_PROPS}
-                    title="유량 검침 데이터"
-                    description="그리드는 조회와 행 선택만 지원합니다. 추가와 수정은 통합 입력 모달에서 확인합니다."
-                    columns={gridCols}
-                    data={history}
-                    keyField="date"
-                    defaultSelectedRowKey={workspaceSession.selectedKey || todayStr}
-                    scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : (workspaceSession.selectedKey || todayStr)}
-                    initialScrollTop={workspaceSession.scrollTop}
-                    onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}
-                    width="100%"
-                    height={400}
-                    rowHeaderWidth={84}
-                    rowHeaderLabel="날짜"
-                    showBottomBar={false}
-                    selectionMode="row"
-                    contextMenu={false}
-                    onRowSelect={handleRowSelect}
-                    onCellDoubleClick={(row) => openModal('edit', row)}
-                    getRowStyle={getRowStyle}
-                    renderRowHeader={renderRowHeader}
-                    renderCell={renderCell}
-                    onRefresh={refresh}
-                />
+                {!settingsReady ? (
+                    <div
+                        role="status"
+                        aria-live="polite"
+                        style={{
+                            height: 400,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 10,
+                            background: '#fff',
+                            color: '#64748b',
+                            fontSize: 13,
+                            fontWeight: 800,
+                        }}
+                    >
+                        현장 유량 설정을 준비하고 있습니다...
+                    </div>
+                ) : (
+                    <AdvancedDataGrid
+                        {...ADVANCED_DATAGRID_READ_ONLY_PROPS}
+                        title="유량 검침 데이터"
+                        description="그리드는 조회와 행 선택만 지원합니다. 추가와 수정은 통합 입력 모달에서 확인합니다."
+                        columns={gridCols}
+                        data={history}
+                        keyField="date"
+                        defaultSelectedRowKey={workspaceSession.selectedKey || todayStr}
+                        scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : (workspaceSession.selectedKey || todayStr)}
+                        initialScrollTop={workspaceSession.scrollTop}
+                        onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}
+                        width="100%"
+                        height={400}
+                        rowHeaderWidth={84}
+                        rowHeaderLabel="날짜"
+                        showBottomBar={false}
+                        selectionMode="row"
+                        contextMenu={false}
+                        onRowSelect={handleRowSelect}
+                        onCellDoubleClick={(row) => openModal('edit', row)}
+                        getRowStyle={getRowStyle}
+                        renderRowHeader={renderRowHeader}
+                        renderCell={renderCell}
+                        onRefresh={refresh}
+                    />
+                )}
             </div>
 
             <ManagementFooter

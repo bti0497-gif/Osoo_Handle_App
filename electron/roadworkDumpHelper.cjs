@@ -3,9 +3,37 @@
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const { session } = require('electron');
 
 const DEFAULT_ROADWORK_URL = 'https://nwpo.ex.co.kr:5002/security/login.do';
 const APP_DATA_DIR_NAME = 'Osoo_Handle_App';
+const ROADWORK_PARTITION_PREFIX = 'persist:osoo-roadwork';
+const ROADWORK_KEEP_ALIVE_MS = 4 * 60 * 1000;
+const roadworkKeepAliveTimers = new Map();
+const registeredRoadworkPartitions = new Set();
+
+function normalizeRoadworkPartition(value) {
+  const partition = String(value || ROADWORK_PARTITION_PREFIX).trim();
+  return partition.startsWith(ROADWORK_PARTITION_PREFIX) ? partition : ROADWORK_PARTITION_PREFIX;
+}
+
+function stopRoadworkKeepAlive(partition) {
+  const timer = roadworkKeepAliveTimers.get(partition);
+  if (timer) clearInterval(timer);
+  roadworkKeepAliveTimers.delete(partition);
+}
+
+async function pingRoadworkSession(partition, targetUrl) {
+  try {
+    const roadworkSession = session.fromPartition(partition);
+    if (typeof roadworkSession.fetch === 'function') {
+      const response = await roadworkSession.fetch(targetUrl, { method: 'GET', redirect: 'follow' });
+      await response.arrayBuffer();
+    }
+  } catch (error) {
+    console.warn('[Roadwork Session] keep-alive failed:', error?.message || error);
+  }
+}
 
 function getCanonicalAppDataPath(app) {
   if (process.env.APPDATA) {
@@ -39,6 +67,40 @@ function withLocalDb(app, fallback, reader) {
 }
 
 function registerRuntimeHandlers(ipcMain, app) {
+  ipcMain.handle('roadwork:keepSessionAlive', async (_event, payload = {}) => {
+    const partition = normalizeRoadworkPartition(payload.partition);
+    const targetUrl = String(payload.url || '').trim();
+    if (!/^https:\/\/nwpo\.ex\.co\.kr(?::\d+)?\//i.test(targetUrl)) {
+      return { success: false, error: '허용되지 않은 도로공사 세션 URL입니다.' };
+    }
+
+    registeredRoadworkPartitions.add(partition);
+    stopRoadworkKeepAlive(partition);
+    roadworkKeepAliveTimers.set(partition, setInterval(() => {
+      void pingRoadworkSession(partition, targetUrl);
+    }, ROADWORK_KEEP_ALIVE_MS));
+    return { success: true, partition };
+  });
+
+  ipcMain.handle('roadwork:clearSessions', async () => {
+    const livePartitions = typeof session.getAllPartitions === 'function'
+      ? session.getAllPartitions().filter((partition) => partition.startsWith(ROADWORK_PARTITION_PREFIX))
+      : [];
+    const partitions = new Set([ROADWORK_PARTITION_PREFIX, ...registeredRoadworkPartitions, ...livePartitions]);
+    for (const partition of partitions) {
+      stopRoadworkKeepAlive(partition);
+      try {
+        await session.fromPartition(partition).clearStorageData({
+          storages: ['cookies', 'localstorage', 'cachestorage', 'indexdb', 'serviceworkers'],
+        });
+      } catch (error) {
+        console.warn(`[Roadwork Session] clear failed (${partition}):`, error?.message || error);
+      }
+    }
+    registeredRoadworkPartitions.clear();
+    return { success: true, cleared: partitions.size };
+  });
+
   ipcMain.handle('roadwork:getPreloadPath', async () => {
     const rawPath = path.join(__dirname, 'preload-roadwork.cjs');
     return url.pathToFileURL(rawPath).href;

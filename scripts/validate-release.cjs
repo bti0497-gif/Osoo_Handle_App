@@ -1018,6 +1018,17 @@ function validateRegressionContracts() {
   }
 
   checkSource(
+    modalText.includes("{ id: 'operation', label: '운전상태' }") &&
+      modalText.indexOf("{ id: 'operation', label: '운전상태' }") < modalText.indexOf("{ id: 'photos'") &&
+      modalText.includes("getDraftForItem('operation', selectedItem)") &&
+      modalText.includes('operationRecord,') &&
+      viewModelText.includes("OperationStatusModel.fetchHistory({ force })") &&
+      viewModelText.includes('OperationStatusModel.saveRecord(operationRecord)'),
+    '통합입력 운전상태 탭·기존 저장 API 연결 보호',
+    '운전상태 탭 순서 또는 operation_status_logs 조회·저장 연결이 누락됐습니다.'
+  );
+
+  checkSource(
     modalText.includes("reading: item.values?.reading ?? (isSludge ? 0 : '')") &&
       modalText.includes('const purchase = item.values?.purchase ?? 0;') &&
       modalText.includes('const usage = item.values?.usage ?? 0;') &&
@@ -1131,6 +1142,18 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    flowManagementViewText.includes('const settingsReady = shellState.isLoading === false;') &&
+      flowManagementViewText.includes('if (!settingsReady) return [];') &&
+      flowManagementViewText.includes('enabled: settingsReady') &&
+      flowViewModelText.includes('if (!enabled) return;') &&
+      flowViewModelText.includes('FlowModel.fetchHistory().catch') &&
+      flowViewModelText.includes('현장 공법/계열 설정이 확정되기 전에는 기본(A2O) 열로 그리드를') &&
+      flowViewModelText.includes('올바른 열로 한 번만 화면에 반영한다.'),
+    '유량 그리드 공법 확정 전 임시 A2O 열 렌더링 차단',
+    'MBR 현장에서 외부반송 열이 먼저 나타났다 사라지는 이중 렌더링이 다시 발생할 수 있습니다.'
+  );
+
+  checkSource(
     sludgePhotoRoutesText.includes('if (!siteId) throw new Error') &&
       sludgePhotoRoutesText.includes('AND site_id = ?') &&
       sludgePhotoRoutesText.includes('amount <= 0') &&
@@ -1190,12 +1213,13 @@ function validateRegressionContracts() {
     modalText.includes('tabIds: [activeTab]') &&
       modalText.includes("targetTabs.has('water')") &&
       modalText.includes("targetTabs.has('kit')") &&
-      modalText.includes('이번 통합입력 작업 현황') &&
-      modalText.includes('저장 후 다시 변경됨 — 현재 변경은 미저장') &&
-      modalText.includes("markTabsSaved(['water', 'kit'])") &&
+      !modalText.includes('이번 통합입력 작업 현황') &&
+      modalText.includes("const visibleFlowItems = resolvedContexts.flow?.items || [];") &&
+      modalText.includes("activeTab === 'flow' || activeTab === 'medicine'") &&
+      modalText.includes("onSaveComplete?.({ date, savedTabs: ['water', 'kit'], source: 'qntech' })") &&
       waterQualityViewText.includes('return success ? rangeResult : null;'),
-    '통합 모달 탭별 단독 저장·닫기 작업요약·모든 진입경로 QnTECH 계약 유지',
-    '통합 모달 저장이 다른 탭을 함께 변경하거나 닫기 요약/QnTECH 공통 진입이 깨졌습니다'
+    '통합 모달 탭별 단독 저장·유량 전체입력·닫기 단일확인·모든 진입경로 QnTECH 계약 유지',
+    '통합 모달 저장이 다른 탭을 함께 변경하거나 유량 전체입력/닫기/QnTECH 공통 진입이 깨졌습니다'
   );
 
   checkSource(
@@ -1426,6 +1450,7 @@ function validateRegressionContracts() {
       !electronBuilderConfigText.includes("{ from: 'templates', to: 'templates' }") &&
       electronBuilderConfigText.includes("to: 'defaults/report-templates/일일업무일지(A2O).hwp'") &&
       electronBuilderConfigText.includes("to: 'defaults/report-templates/일일업무일지(MBR).hwp'") &&
+      electronBuilderConfigText.includes("to: 'defaults/report-templates/수질분석일지.xlsx'") &&
       electronBuilderConfigText.includes("templates/reports/월운영보고서.xlsx") &&
       integratedInstallerScriptText.includes("'templates/**/*'") &&
       integratedInstallerScriptText.includes("{ from: 'templates', to: 'templates' }") &&
@@ -1435,6 +1460,8 @@ function validateRegressionContracts() {
       reportTemplateText.includes('syncBundledTemplatesToAppData') &&
       reportTemplateText.includes("'defaults', 'report-templates'") &&
       reportTemplateText.includes('if (existingNames.has(normalizeTemplateKey(fileName)))') &&
+      reportTemplateText.includes("'수질분석일지.xlsx': '2026-07-30-six-locations-v1'") &&
+      reportTemplateText.includes('appliedRevisions[fileName] !== forcedRevision') &&
       !reportTemplateText.includes('shouldReplacePlaceholder') &&
       !reportTemplateText.includes('DAILY_WORK_LOG_HWP_MIGRATION_MARKER'),
     '자동업데이트 HWP 누락시만 복사·기존 현장양식 무조건 보호·통합 설치 전체양식 계약 유지',
@@ -1517,6 +1544,7 @@ function validateRegressionContracts() {
   const roadworkViewModelText = readText(path.join(BASE_DIR, 'src', 'features', 'roadwork-helper', 'useRoadworkHelperViewModel.js'));
   const roadworkViewText = readText(path.join(BASE_DIR, 'src', 'features', 'roadwork-helper', 'RoadworkHelperView.jsx'));
   const roadworkPreloadText = readText(path.join(BASE_DIR, 'electron', 'preload-roadwork.cjs'));
+  const roadworkRuntimeText = readText(path.join(BASE_DIR, 'electron', 'roadworkDumpHelper.cjs'));
   const electronMainTextForWindow = readText(path.join(BASE_DIR, 'electron', 'main.cjs'));
 
   checkSource(
@@ -1565,6 +1593,37 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    roadworkRuntimeText.includes("ipcMain.handle('roadwork:keepSessionAlive'") &&
+      roadworkRuntimeText.includes("ipcMain.handle('roadwork:clearSessions'") &&
+      roadworkRuntimeText.includes('session.getAllPartitions()') &&
+      roadworkRuntimeText.includes('session.fromPartition(partition).clearStorageData') &&
+      roadworkViewText.includes("invokeRoadwork?.('roadwork:keepSessionAlive'") &&
+      electronPreloadText.includes("'roadwork:keepSessionAlive'") &&
+      electronPreloadText.includes("'roadwork:clearSessions'") &&
+      authViewModelText.includes('clearLocalAuthenticatedState') &&
+      authViewModelText.includes("invokeRoadwork?.('roadwork:clearSessions')") &&
+      authViewModelText.includes('if (!session || session?.logout_time != null)') &&
+      boardPopupWatcherText.includes('Number(error?.status) === 401') &&
+      boardPopupWatcherText.includes("String(error?.data?.code || '') === 'ACTIVE_SESSION_REQUIRED'") &&
+      boardPopupWatcherText.includes("new CustomEvent('osoo:server-session-invalid')"),
+    '자동로그아웃·게시판 감시·도로공사 세션 수명주기 계약 유지',
+    '서버 로그아웃 시 로컬 인증 정리, 게시판 401 감시 중단 또는 도로공사 세션 유지·로그아웃 정리가 누락됐습니다.'
+  );
+
+  checkSource(
+    !modalText.includes("event: 'modal-input-gate-state'") &&
+      !viewModelText.includes("emitFocusDiagnostic('context-load-start'") &&
+      !viewModelText.includes("emitFocusDiagnostic('context-load-applied'") &&
+      !viewModelText.includes("emitFocusDiagnostic('context-load-finished'") &&
+      !viewModelText.includes("emitFocusDiagnostic('save-start'") &&
+      !viewModelText.includes("emitFocusDiagnostic('save-finished'") &&
+      viewModelText.includes("emitFocusDiagnostic('context-load-failed'") &&
+      viewModelText.includes("emitFocusDiagnostic('save-failed'"),
+    '통합입력 정상 성공 진단 제거·실패 진단 유지',
+    '안정화된 정상 상태 진단이 다시 활성화되었거나 통합입력 조회·저장 실패 진단이 누락됐습니다.'
+  );
+
+  checkSource(
     electronMainTextForWindow.includes("mainWindow.once('ready-to-show'") &&
       electronMainTextForWindow.includes('mainWindow.maximize();') &&
       electronMainTextForWindow.includes('mainWindow.show();'),
@@ -1575,15 +1634,30 @@ function validateRegressionContracts() {
   checkSource(
       electronMainTextForWindow.includes('const DEDICATED_SERVER_PORT = 18731') &&
       electronMainTextForWindow.includes('function reclaimDedicatedServerPort()') &&
+      electronMainTextForWindow.includes('function shouldKeepEmbeddedServerAlive()') &&
       electronMainTextForWindow.includes('function startServerGuard()') &&
       electronMainTextForWindow.includes('const SERVER_STARTUP_GRACE_MS = 120000') &&
       electronMainTextForWindow.includes('OSOO_SERVER_TOKEN: launchedToken') &&
       electronMainTextForWindow.includes('if (serverProcess === launchedProcess) serverProcess = null') &&
+      electronMainTextForWindow.includes('if (shouldKeepEmbeddedServerAlive())') &&
       electronMainTextForWindow.includes('isQuitting = true;') &&
       electronMainTextForWindow.includes('Embedded server health lost; forcing clean restart') &&
       /handleVersionMigration\(\);\s*startServer\(\);\s*startServerGuard\(\);/.test(electronMainTextForWindow),
     '전용 18731 포트 강제 회수·고정 기동·지속 감시 계약 유지',
     '배포 앱의 전용 포트 클린 부팅 또는 서버 지속 보호 계약이 깨졌습니다'
+  );
+
+  checkSource(
+    electronMainTextForWindow.includes("const isBackgroundStartup = process.argv.includes('--osoo-background-start')") &&
+      electronMainTextForWindow.includes('function configureWindowsBackgroundStartup()') &&
+      electronMainTextForWindow.includes('app.setLoginItemSettings({') &&
+      electronMainTextForWindow.includes('openAtLogin: true') &&
+      electronMainTextForWindow.includes("args: ['--osoo-background-start']") &&
+      electronMainTextForWindow.includes('createWindow({ showOnReady: !isBackgroundStartup })') &&
+      electronMainTextForWindow.includes('isUpdateInstalling = true;') &&
+      electronMainTextForWindow.includes('await stopServerGracefully();'),
+    'Windows 시작 시 서버 사전 기동·업데이트 계획 종료 계약 유지',
+    'Windows 백그라운드 시작 또는 업데이트 직전 서버 보호 해제·정상 종료 계약이 깨졌습니다.'
   );
 
   checkSource(

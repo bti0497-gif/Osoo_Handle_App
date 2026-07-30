@@ -108,6 +108,31 @@ export const useAuthViewModel = () => {
         setLoginHintName(String(hint || '').trim());
     }, []);
 
+    const clearRoadworkRendererSessionUrls = useCallback(() => {
+        try {
+            Object.keys(window.sessionStorage)
+                .filter((key) => key.startsWith('osoo:roadwork-session-url:'))
+                .forEach((key) => window.sessionStorage.removeItem(key));
+        } catch {
+            // 로그아웃 자체는 브라우저 저장소 접근 실패와 무관하게 계속 진행합니다.
+        }
+    }, []);
+
+    const clearLocalAuthenticatedState = useCallback(async ({ hideToTray = false } = {}) => {
+        clearAutoLogoutTimer();
+        backgroundAttendanceRunRef.current += 1;
+        AuthModel.clearSession();
+        clearRoadworkRendererSessionUrls();
+        await window.electronAPI?.invokeRoadwork?.('roadwork:clearSessions').catch((error) => {
+            console.warn('[로그아웃] 도로공사 세션 정리 실패:', error);
+        });
+        await window.electronAPI?.setSharedAuthenticatedUser?.(null);
+        userRef.current = null;
+        setUser(null);
+        setLocationStatus({ status: 'idle', message: '' });
+        if (hideToTray) hideAppToTray();
+    }, [clearAutoLogoutTimer, clearRoadworkRendererSessionUrls]);
+
     useEffect(() => {
         userRef.current = user;
     }, [user]);
@@ -126,11 +151,7 @@ export const useAuthViewModel = () => {
             } catch (err) {
                 console.error('Auto logout failed:', err);
             }
-            AuthModel.clearSession();
-            userRef.current = null;
-            setUser(null);
-            setLocationStatus({ status: 'idle', message: '' });
-            hideAppToTray();
+            await clearLocalAuthenticatedState({ hideToTray: true });
             try {
                 const result = await AuthModel.syncAttendanceBQ();
                 console.log(`[자동 퇴근] BigQuery 출결 동기화 완료 (${result?.syncedCount ?? 0}건)`);
@@ -140,16 +161,7 @@ export const useAuthViewModel = () => {
         } finally {
             autoLogoutInProgressRef.current = false;
         }
-    }, []);
-
-    useEffect(() => {
-        const handleLoginUiDiagnostic = (event) => {
-            const payload = event?.detail || {};
-            AuthModel.recordLoginUiDiagnostic(payload.event, payload.details || {});
-        };
-        window.addEventListener('osoo:login-ui-diagnostic', handleLoginUiDiagnostic);
-        return () => window.removeEventListener('osoo:login-ui-diagnostic', handleLoginUiDiagnostic);
-    }, []);
+    }, [clearLocalAuthenticatedState]);
 
     const setupAutoLogoutTimer = useCallback(
         (userData) => {
@@ -244,6 +256,9 @@ export const useAuthViewModel = () => {
                             setUser(sharedUser);
                             setLocationStatus({ status: 'idle', message: '' });
                         }
+                    } else {
+                        await window.electronAPI?.invokeRoadwork?.('roadwork:clearSessions').catch(() => undefined);
+                        clearRoadworkRendererSessionUrls();
                     }
                     return;
                 }
@@ -268,7 +283,7 @@ export const useAuthViewModel = () => {
                     } catch (err) {
                         console.error('[세션 복원] BigQuery 동기화 실패:', err);
                     }
-                    AuthModel.clearSession();
+                    await clearLocalAuthenticatedState({ hideToTray: false });
                     return;
                 }
 
@@ -301,7 +316,7 @@ export const useAuthViewModel = () => {
 
         restoreSession();
         return () => clearAutoLogoutTimer();
-    }, [setupAutoLogoutTimer, startBackgroundAttendance, clearAutoLogoutTimer, refreshLoginHint]);
+    }, [setupAutoLogoutTimer, startBackgroundAttendance, clearAutoLogoutTimer, refreshLoginHint, clearLocalAuthenticatedState, clearRoadworkRendererSessionUrls]);
 
     /** 절전 등으로 20시 타이머를 놓친 경우 — 당일 20시 이전 출근·미퇴근만 보정 */
     useEffect(() => {
@@ -313,7 +328,10 @@ export const useAuthViewModel = () => {
             if (!isKstAtOrPastAutoLogoutHour()) return;
             try {
                 const session = await AuthModel.findActiveSession(u.id);
-                if (session?.logout_time != null) return;
+                if (!session || session?.logout_time != null) {
+                    await clearLocalAuthenticatedState({ hideToTray: true });
+                    return;
+                }
                 if (shouldForceEodLogoutForOpenSession(session?.login_time)) {
                     performAutoLogout(u);
                 }
@@ -324,7 +342,15 @@ export const useAuthViewModel = () => {
 
         const id = setInterval(tick, 60 * 1000);
         return () => clearInterval(id);
-    }, [user, performAutoLogout]);
+    }, [user, performAutoLogout, clearLocalAuthenticatedState]);
+
+    useEffect(() => {
+        const handleServerSessionInvalid = () => {
+            void clearLocalAuthenticatedState({ hideToTray: false }).then(refreshLoginHint);
+        };
+        window.addEventListener('osoo:server-session-invalid', handleServerSessionInvalid);
+        return () => window.removeEventListener('osoo:server-session-invalid', handleServerSessionInvalid);
+    }, [clearLocalAuthenticatedState, refreshLoginHint]);
 
     const login = async (name, password) => {
         setIsLoading(true);
@@ -390,11 +416,7 @@ export const useAuthViewModel = () => {
                 console.error('Logout sync failed:', err);
             }
         }
-        AuthModel.clearSession();
-        await window.electronAPI?.setSharedAuthenticatedUser?.(null);
-        userRef.current = null;
-        setUser(null);
-        setLocationStatus({ status: 'idle', message: '' });
+        await clearLocalAuthenticatedState({ hideToTray: false });
         await refreshLoginHint();
 
         if (u && isFieldWorker(u)) {

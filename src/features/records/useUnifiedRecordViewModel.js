@@ -4,6 +4,7 @@ import { MedicineModel } from '../medicine/MedicineModel';
 import { KitModel } from '../kit/KitModel';
 import { WaterQualityModel } from '../water/WaterQualityModel';
 import { SettingsModel } from '../settings/SettingsModel';
+import { OperationStatusModel } from '../operation/OperationStatusModel';
 
 const WATER_FIELDS = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity'];
 const emitFocusDiagnostic = (event, details = {}) => {
@@ -189,8 +190,24 @@ const mergeWaterContext = (baseContext = {}, history = [], date) => {
     };
 };
 
+const mergeOperationContext = (baseContext = {}, history = [], date) => {
+    const current = history.find((row) => row?.date === date) || {};
+    return {
+        ...baseContext,
+        items: [{
+            key: 'aeration-status',
+            label: '포기조 운영상태',
+            values: {
+                ph: hasValue(current.ph) ? current.ph : '',
+                do_value: hasValue(current.do_value) ? current.do_value : '',
+                svi: hasValue(current.svi) ? current.svi : '',
+            },
+        }],
+    };
+};
+
 const contextSignature = (contexts = {}) => JSON.stringify(
-    ['flow', 'water', 'medicine', 'kit'].map((tab) => ({
+    ['flow', 'water', 'medicine', 'kit', 'operation'].map((tab) => ({
         tab,
         items: (contexts?.[tab]?.items || []).map((item) => ({
             key: item.key || item.name || item.label,
@@ -210,7 +227,7 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
     const [resolvedDate, setResolvedDate] = useState('');
     const requestSequenceRef = useRef(0);
 
-    const reloadContexts = useCallback(async ({ force = false, tabs = ['flow', 'medicine', 'kit', 'water'] } = {}) => {
+    const reloadContexts = useCallback(async ({ force = false, tabs = ['flow', 'medicine', 'kit', 'water', 'operation'] } = {}) => {
         if (!date) return;
         const requestSequence = requestSequenceRef.current + 1;
         requestSequenceRef.current = requestSequence;
@@ -218,19 +235,13 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
         const baseContexts = contextsRef.current;
         const targetTabs = new Set(tabs);
         setIsLoading(true);
-        emitFocusDiagnostic('context-load-start', {
-            requestedDate,
-            requestSequence,
-            force,
-            tabs: [...targetTabs],
-        });
-
         try {
             const [
                 flowResult,
                 medicineResult,
                 kitResult,
                 waterResult,
+                operationResult,
                 medicineDefaults,
                 kitDefaults,
             ] = await Promise.all([
@@ -238,6 +249,7 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                 targetTabs.has('medicine') ? MedicineModel.fetchHistory({ force }) : null,
                 targetTabs.has('kit') ? KitModel.fetchHistory({ force }) : null,
                 targetTabs.has('water') ? WaterQualityModel.fetchHistory({ force }) : null,
+                targetTabs.has('operation') ? OperationStatusModel.fetchHistory({ force }) : null,
                 targetTabs.has('medicine')
                     ? SettingsModel.getMedicineDefaults().catch(() => ({ success: false, items: [] }))
                     : null,
@@ -262,13 +274,11 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                 ...(targetTabs.has('water') && {
                     water: mergeWaterContext(baseContexts.water, unwrapHistory(waterResult), date),
                 }),
+                ...(targetTabs.has('operation') && {
+                    operation: mergeOperationContext(baseContexts.operation, unwrapHistory(operationResult), date),
+                }),
             }));
             setResolvedDate(requestedDate);
-            emitFocusDiagnostic('context-load-applied', {
-                requestedDate,
-                requestSequence,
-                tabs: [...targetTabs],
-            });
         } catch (error) {
             if (requestSequence !== requestSequenceRef.current) return;
             console.error('[unified-record] failed to load contexts:', error);
@@ -282,11 +292,6 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
         } finally {
             const isCurrentRequest = requestSequence === requestSequenceRef.current;
             if (isCurrentRequest) setIsLoading(false);
-            emitFocusDiagnostic('context-load-finished', {
-                requestedDate,
-                requestSequence,
-                isCurrentRequest,
-            });
         }
     }, [date]);
 
@@ -305,10 +310,9 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
         };
     }, [isOpen, date, signature, reloadContexts]);
 
-    const saveAllTabs = useCallback(async ({ flowItems, medicineItems, waterItems, kitItems }) => {
+    const saveAllTabs = useCallback(async ({ flowItems, medicineItems, waterItems, kitItems, operationRecord }) => {
         const savedTabs = [];
         setIsSaving(true);
-        emitFocusDiagnostic('save-start', { date });
         try {
             if (flowItems.length > 0) {
                 const result = await FlowModel.bulkSave(date, flowItems);
@@ -330,6 +334,11 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                 if (!result?.success) throw new Error(result?.error || '키트관리 저장에 실패했습니다.');
                 savedTabs.push('kit');
             }
+            if (operationRecord) {
+                const result = await OperationStatusModel.saveRecord(operationRecord);
+                if (!result?.success) throw new Error(result?.error || '운전상태 저장에 실패했습니다.');
+                savedTabs.push('operation');
+            }
             if (savedTabs.length > 0) {
                 await reloadContexts({ force: true, tabs: savedTabs });
             }
@@ -343,7 +352,6 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
             return { success: false, savedTabs, error: error.message };
         } finally {
             setIsSaving(false);
-            emitFocusDiagnostic('save-finished', { date, savedTabs });
         }
     }, [date, reloadContexts]);
 

@@ -9,28 +9,10 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
     const nameRef = useRef(null);
     const passRef = useRef(null);
     const hasEditedNameRef = useRef(false);
-    const mountedAtRef = useRef(null);
-    const recordedEventsRef = useRef(new Set());
     const restoringFocusRef = useRef(false);
 
-    const recordOnce = (event, details = {}) => {
-        if (recordedEventsRef.current.has(event)) return;
-        recordedEventsRef.current.add(event);
-        window.dispatchEvent(new CustomEvent('osoo:login-ui-diagnostic', {
-            detail: {
-                event,
-                details: {
-                    elapsedMs: mountedAtRef.current ? Date.now() - mountedAtRef.current : 0,
-                    ...details,
-                },
-            },
-        }));
-    };
-
     useEffect(() => {
-        mountedAtRef.current = Date.now();
         const hasPrefilledName = Boolean(nameRef.current?.value);
-        recordOnce('login-view-mounted', { hasPrefilledName });
         window.focus();
         const timer = window.setTimeout(() => {
             (hasPrefilledName ? passRef.current : nameRef.current)?.focus();
@@ -39,7 +21,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
     }, []);
 
     useEffect(() => {
-        const restoreInputFocus = (info = {}) => {
+        const restoreInputFocus = () => {
             if (restoringFocusRef.current) return;
             restoringFocusRef.current = true;
             window.focus();
@@ -50,13 +32,12 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                     ? active
                     : (nameRef.current?.value ? passRef.current : nameRef.current);
                 target?.focus({ preventScroll: true });
-                recordOnce('login-focus-restored', { reason: info.reason || 'window-focus' });
                 restoringFocusRef.current = false;
             });
         };
 
         const unsubscribe = window.electronAPI?.onWindowRestored?.(restoreInputFocus);
-        const handleWindowFocus = () => restoreInputFocus({ reason: 'window-focus' });
+        const handleWindowFocus = () => restoreInputFocus();
         window.addEventListener('focus', handleWindowFocus);
 
         return () => {
@@ -70,11 +51,9 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
         if (!nextName) return;
         const timer = setTimeout(() => {
             if (hasEditedNameRef.current) {
-                recordOnce('login-hint-skipped-after-edit');
                 return;
             }
             setName(nextName);
-            recordOnce('login-hint-applied');
             setPass('');
             setError('');
             passRef.current?.focus();
@@ -84,9 +63,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        recordOnce('login-submit', { hasName: Boolean(name), hasPassword: Boolean(pass) });
         const result = await onLogin(name, pass);
-        recordOnce(result.success ? 'login-result-success' : 'login-result-failed');
         if (result.success) {
             localStorage.setItem('lastLoginName', name);
         } else {
@@ -115,10 +92,8 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                             value={name}
                             ref={nameRef}
                             onPointerDown={() => window.focus()}
-                            onFocus={() => recordOnce('login-name-focused')}
                             onChange={(e) => {
                                 hasEditedNameRef.current = true;
-                                recordOnce('login-name-first-input');
                                 setName(e.target.value);
                             }}
                             onKeyDown={(e) => {
@@ -142,9 +117,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                             value={pass}
                             ref={passRef}
                             onPointerDown={() => window.focus()}
-                            onFocus={() => recordOnce('login-password-focused')}
                             onChange={(e) => {
-                                recordOnce('login-password-first-input');
                                 setPass(e.target.value);
                             }}
                             autoFocus

@@ -13,6 +13,7 @@ const TAB_META = [
     { id: 'water', label: '수질분석' },
     { id: 'medicine', label: '약품관리' },
     { id: 'kit', label: '키트관리' },
+    { id: 'operation', label: '운전상태' },
     { id: 'photos', label: '사진관리' },
 ];
 
@@ -267,6 +268,14 @@ function buildInitialDraft(tabId, item, roundValue) {
         };
     }
 
+    if (tabId === 'operation') {
+        return {
+            ph: item.values?.ph ?? '',
+            do_value: item.values?.do_value ?? '',
+            svi: item.values?.svi ?? '',
+        };
+    }
+
     const roundValues = item.valuesByRound?.[roundValue];
     const values = roundValues || item.values || {};
     return WATER_FIELD_META.reduce((acc, field) => {
@@ -324,7 +333,6 @@ export default function UnifiedRecordModal({
     const [rangeEndDate, setRangeEndDate] = useState(initialDate);
     const [waterInputMode, setWaterInputMode] = useState('manual');
     const [saveStatusMode, setSaveStatusMode] = useState('manual');
-    const [savedTabs, setSavedTabs] = useState([]);
     const [internalQntechProgress, setInternalQntechProgress] = useState(null);
     const [isInternalQntechImporting, setIsInternalQntechImporting] = useState(false);
     const [isLookingUpExperimentCounts, setIsLookingUpExperimentCounts] = useState(false);
@@ -457,22 +465,6 @@ export default function UnifiedRecordModal({
     }, [isOpen, isRefreshingUnifiedData, isDateContextPending, date, activeTab]);
 
     useEffect(() => {
-        if (!isOpen) return;
-        window.dispatchEvent(new CustomEvent('osoo:focus-diagnostic', {
-            detail: {
-                event: 'modal-input-gate-state',
-                details: {
-                    date,
-                    activeTab,
-                    isDateContextPending,
-                    isRefreshingUnifiedData,
-                    isSaving,
-                },
-            },
-        }));
-    }, [isOpen, date, activeTab, isDateContextPending, isRefreshingUnifiedData, isSaving]);
-
-    useEffect(() => {
         if (!isOpen) {
             wasOpenRef.current = false;
             return undefined;
@@ -490,7 +482,6 @@ export default function UnifiedRecordModal({
             setSelectedByTab({});
             setDraft({});
             setDefaultPurchaseAppliedByTab({});
-            setSavedTabs([]);
             setInternalQntechProgress(null);
             setIsInternalQntechImporting(false);
             setSaveStatusMode('manual');
@@ -805,10 +796,6 @@ export default function UnifiedRecordModal({
         }
     };
 
-    const markTabsSaved = (tabIds = []) => {
-        setSavedTabs((prev) => Array.from(new Set([...prev, ...tabIds])));
-    };
-
     const handleAddWaterRound = () => {
         const nextOrder = Math.max(0, ...waterRounds.map((round) => Number(round.value) || 0)) + 1;
         const nextRound = {
@@ -914,7 +901,7 @@ export default function UnifiedRecordModal({
     );
 
     const buildSavePlan = ({
-        tabIds = ['flow', 'medicine', 'water', 'kit'],
+        tabIds = ['flow', 'medicine', 'water', 'kit', 'operation'],
         validateFlow = true,
         allowFlowDefaults = false,
     } = {}) => {
@@ -925,6 +912,7 @@ export default function UnifiedRecordModal({
         const medicineItemsToSave = [];
         const kitItemsToSave = [];
         const waterItemsToSave = [];
+        let operationRecord = null;
         const effectiveSaveStatusMode = canUseBaselineStatus ? saveStatusMode : 'manual';
         const isAdminUser = ADMIN_ROLES.has(String(currentUser?.role || '').trim().toLowerCase());
         const shouldAutoAdjustKitUsageFromWater = targetTabs.has('water')
@@ -1049,6 +1037,16 @@ export default function UnifiedRecordModal({
         if (targetTabs.has('kit')) {
             collectInventoryItems('kit', 'kit_name', kitItemsToSave);
         }
+        if (targetTabs.has('operation')) {
+            const operationItem = resolvedContexts.operation?.items?.[0];
+            const values = operationItem ? getDraftForItem('operation', operationItem) : {};
+            operationRecord = {
+                date,
+                ph: toNumberOrNull(values.ph),
+                do_value: toNumberOrNull(values.do_value),
+                svi: toNumberOrNull(values.svi),
+            };
+        }
 
         const waterUsageByKit = new Map([
             ['nh3_n', { kitName: '암모니아성질소(NH3-N)', count: 0 }],
@@ -1159,6 +1157,7 @@ export default function UnifiedRecordModal({
             medicineItems: medicineItemsToSave,
             waterItems: waterItemsToSave,
             kitItems: kitItemsToSave,
+            operationRecord,
         };
     };
 
@@ -1170,7 +1169,6 @@ export default function UnifiedRecordModal({
         }
 
         if (result.savedTabs.length > 0) {
-            markTabsSaved(result.savedTabs);
             setDraft((prev) => {
                 const savedTabSet = new Set(result.savedTabs);
                 return Object.fromEntries(
@@ -1227,16 +1225,6 @@ export default function UnifiedRecordModal({
             if (!window.confirm('저장하지 않은 입력이 있습니다. 저장하지 않고 닫을까요?')) return;
         }
 
-        const statusLines = TAB_META.map((tab) => {
-            const dirty = hasDraftTabData(tab.id);
-            const saved = savedTabs.includes(tab.id);
-            const status = dirty
-                ? (saved ? '저장 후 다시 변경됨 — 현재 변경은 미저장' : '변경 후 미저장')
-                : (saved ? '저장됨' : '작업하지 않음');
-            return `- ${tab.label}: ${status}`;
-        });
-        window.alert(['이번 통합입력 작업 현황', '', ...statusLines].join('\n'));
-
         onClose?.();
     };
 
@@ -1251,7 +1239,6 @@ export default function UnifiedRecordModal({
         setRangeEndDate(nextDate);
         setSelectedByTab({});
         setDraft({});
-        setSavedTabs([]);
         onDateChange?.(nextDate);
     };
 
@@ -1359,7 +1346,6 @@ export default function UnifiedRecordModal({
                                                 importResult = await effectiveImportQntech(rangeStartDate);
                                             }
                                             if (importResult?.success) {
-                                                markTabsSaved(['water', 'kit']);
                                                 await onSaveComplete?.({ date, savedTabs: ['water', 'kit'], source: 'qntech' });
                                             }
                                         } catch (error) {
@@ -1415,13 +1401,51 @@ export default function UnifiedRecordModal({
             );
         }
 
+        if (activeTab === 'operation') {
+            const values = getDraftForItem('operation', selectedItem);
+            const operationDraftKey = getDraftKeyForItem('operation', selectedItem);
+            const fields = [
+                ['ph', 'PH', '수소이온농도'],
+                ['do_value', 'DO', '용존산소'],
+                ['svi', 'SVI', '슬러지 용적 지수'],
+            ];
+            return (
+                <div style={{ maxWidth: 620, border: '1px solid #e2e8f0', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
+                    <div style={{ padding: '12px 16px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', fontSize: 16, fontWeight: 900, color: '#0f172a' }}>
+                        포기조 운영상태
+                    </div>
+                    {fields.map(([field, label, description]) => (
+                        <div key={field} style={{ display: 'grid', gridTemplateColumns: '1fr 180px', gap: 16, alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #f1f5f9' }}>
+                            <div>
+                                <div style={{ fontSize: 15, fontWeight: 900, color: '#0f172a' }}>{label}</div>
+                                <div style={{ marginTop: 3, fontSize: 12, fontWeight: 700, color: '#64748b' }}>{description}</div>
+                            </div>
+                            <input
+                                type="number"
+                                step="0.01"
+                                aria-label={`포기조 ${label}`}
+                                value={values[field] ?? ''}
+                                onChange={(event) => setDraft((previous) => ({
+                                    ...previous,
+                                    [operationDraftKey]: {
+                                        ...(previous[operationDraftKey] || buildInitialDraft('operation', selectedItem)),
+                                        [field]: event.target.value,
+                                    },
+                                }))}
+                                style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
+                            />
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
         if (activeTab === 'flow') {
-            const visibleFlowItems = selectedFlowGroup?.items || [];
-            const isSludgeGroup = visibleFlowItems.length > 0 && visibleFlowItems.every(isSludgeFlowItem);
-            const sludgeItem = isSludgeGroup ? visibleFlowItems[0] : null;
+            const visibleFlowItems = resolvedContexts.flow?.items || [];
+            const sludgeItem = visibleFlowItems.find(isSludgeFlowItem) || null;
             const sludgeValues = sludgeItem ? getDraftForItem('flow', sludgeItem) : {};
             const hasSludgeAmount = (toNumberOrNull(sludgeValues.reading) || 0) > 0;
-            const flowHeaderLabels = isSludgeGroup ? ['항목', '반출량', '월 반출량'] : ['유량계', '검침값', '유량 계산값'];
+            const flowHeaderLabels = ['항목', '검침값 / 반출량', '유량 / 월 반출량'];
             return (
                 <div style={{
                     display: 'grid',
@@ -1502,7 +1526,7 @@ export default function UnifiedRecordModal({
                             </React.Fragment>
                         );
                     })}
-                    {isSludgeGroup && (
+                    {sludgeItem && (
                         <div style={{
                             gridColumn: '1 / -1',
                             display: 'flex',
@@ -1873,8 +1897,8 @@ export default function UnifiedRecordModal({
                     </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: (activeTab === 'medicine' || activeTab === 'kit' || activeTab === 'photos') ? '1fr' : '210px 1fr', gap: 0, minHeight: 0, flex: 1 }}>
-                    {activeTab !== 'medicine' && activeTab !== 'kit' && activeTab !== 'photos' && (
+                <div style={{ display: 'grid', gridTemplateColumns: (activeTab === 'flow' || activeTab === 'medicine' || activeTab === 'kit' || activeTab === 'photos') ? '1fr' : '210px 1fr', gap: 0, minHeight: 0, flex: 1 }}>
+                    {activeTab !== 'flow' && activeTab !== 'medicine' && activeTab !== 'kit' && activeTab !== 'photos' && (
                     <aside style={{ borderRight: '1px solid #e2e8f0', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                         {activeTab === 'water' ? renderWaterSidebar() : (
                             <div style={{ overflowY: 'auto', padding: 10, display: 'grid', alignContent: 'start', gap: 6 }}>
@@ -1917,7 +1941,7 @@ export default function UnifiedRecordModal({
                                 {activeTab === 'water'
                                     ? `수질분석 ${selectedRound?.label || ''}`
                                     : activeTab === 'flow'
-                                        ? (selectedFlowGroup?.label || selectedItem?.label || '항목 선택')
+                                        ? '전체 유량·전력·슬러지 입력'
                                     : activeTab === 'medicine'
                                         ? '약품 입고/사용/재고'
                                         : activeTab === 'kit'
@@ -1928,7 +1952,7 @@ export default function UnifiedRecordModal({
                                 {(activeTab === 'water'
                                     ? [{ label: '날짜', value: date }, { label: '입력방식', value: selectedRound?.sourceType === 'qntech' ? '서버자료' : '수동입력' }]
                                     : activeTab === 'flow'
-                                        ? [{ label: '날짜', value: date }, { label: '항목', value: `${selectedFlowGroup?.items?.length || 0}개` }]
+                                        ? [{ label: '날짜', value: date }, { label: '항목', value: `${resolvedContexts.flow?.items?.length || 0}개` }]
                                     : activeTab === 'medicine' || activeTab === 'kit'
                                         ? [{ label: '날짜', value: date }, { label: '항목', value: `${currentItems.length}개` }]
                                         : (selectedItem?.summary || [])

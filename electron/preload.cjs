@@ -55,6 +55,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'roadwork:getCredentials',
       'roadwork:getCredentialStatus',
       'roadwork:dumpStructure',
+      'roadwork:keepSessionAlive',
+      'roadwork:clearSessions',
     ];
     if (allowed.includes(channel)) {
       return ipcRenderer.invoke(channel, ...args);

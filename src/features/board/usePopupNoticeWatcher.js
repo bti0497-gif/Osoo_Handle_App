@@ -48,6 +48,7 @@ export function usePopupNoticeWatcher(currentUser) {
 
     let cancelled = false;
     let retryTimer = null;
+    let intervalId = null;
     const poll = async (attempt = 0) => {
       try {
         const items = await BoardModel.fetchPosts(currentUser);
@@ -76,6 +77,14 @@ export function usePopupNoticeWatcher(currentUser) {
         setNow(checkedAt);
       } catch (error) {
         if (cancelled) return;
+        const sessionInvalid = Number(error?.status) === 401
+          || String(error?.data?.code || '') === 'ACTIVE_SESSION_REQUIRED';
+        if (sessionInvalid) {
+          cancelled = true;
+          if (intervalId) window.clearInterval(intervalId);
+          window.dispatchEvent(new CustomEvent('osoo:server-session-invalid'));
+          return;
+        }
         console.warn(`[Board Popup] 공지 조회 실패 (${attempt + 1}/3):`, error);
         if (attempt < 2) {
           retryTimer = window.setTimeout(() => poll(attempt + 1), 3000);
@@ -84,11 +93,11 @@ export function usePopupNoticeWatcher(currentUser) {
     };
 
     poll();
-    const interval = window.setInterval(() => poll(), POLL_INTERVAL_MS);
+    intervalId = window.setInterval(() => poll(), POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       if (retryTimer) window.clearTimeout(retryTimer);
-      window.clearInterval(interval);
+      if (intervalId) window.clearInterval(intervalId);
     };
   }, [enabled, currentUser, userKey, isDismissed]);
 

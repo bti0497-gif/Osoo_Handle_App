@@ -886,6 +886,12 @@ export default function RoadworkHelperView() {
       }
       const isLoginPage = /\/security\/login\.do(?:[?#]|$)/i.test(currentUrl);
       setShowRefreshToast(isLoginPage);
+      if (!isLoginPage) {
+        window.electronAPI?.invokeRoadwork?.('roadwork:keepSessionAlive', {
+          partition: roadworkPartition,
+          url: currentUrl,
+        }).catch((error) => console.warn('[Roadwork Helper] 세션 유지 등록 실패:', error));
+      }
       recordRoadworkDiagnostic('webview-load-finished', { pageOrigin });
       if (wasLoginPageRef.current && !isLoginPage) {
         recordRoadworkDiagnostic('webview-login-transition', { result: 'login-page-exited', pageOrigin });
@@ -898,6 +904,12 @@ export default function RoadworkHelperView() {
       rememberRoadworkSessionUrl(roadworkPartition, currentUrl);
       const isLoginPage = /\/security\/login\.do(?:[?#]|$)/i.test(currentUrl);
       setShowRefreshToast(isLoginPage);
+      if (!isLoginPage) {
+        window.electronAPI?.invokeRoadwork?.('roadwork:keepSessionAlive', {
+          partition: roadworkPartition,
+          url: currentUrl,
+        }).catch((error) => console.warn('[Roadwork Helper] 세션 유지 등록 실패:', error));
+      }
       if (wasLoginPageRef.current && !isLoginPage) {
         let pageOrigin = '';
         try {

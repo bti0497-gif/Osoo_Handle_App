@@ -120,7 +120,11 @@ function recalculateFromIndex(rows, startIndex, type, isManualAtStart) {
     return pendingByDate;
 }
 
-export const useFlowViewModel = (currentUser, { showAlert, flowTypes: flowTypesProp } = {}) => {
+export const useFlowViewModel = (currentUser, {
+    showAlert,
+    flowTypes: flowTypesProp,
+    enabled = true,
+} = {}) => {
     const flowTypesKey = useMemo(() => {
         if (!Array.isArray(flowTypesProp) || flowTypesProp.length === 0) return '';
         return flowTypesProp.join('|');
@@ -142,6 +146,7 @@ export const useFlowViewModel = (currentUser, { showAlert, flowTypes: flowTypesP
     }, []);
 
     const loadReadings = useCallback(async (options = {}) => {
+        if (!enabled) return;
         setLoading(true);
         try {
             const todayStr = getTodayKST();
@@ -193,11 +198,21 @@ export const useFlowViewModel = (currentUser, { showAlert, flowTypes: flowTypesP
         } finally {
             setLoading(false);
         }
-    }, [flowTypesResolved, showAlert]);
+    }, [enabled, flowTypesResolved, showAlert]);
 
     useEffect(() => {
-        loadReadings();
-    }, [loadReadings]);
+        if (enabled) {
+            loadReadings();
+            return;
+        }
+
+        // 현장 공법/계열 설정이 확정되기 전에는 기본(A2O) 열로 그리드를
+        // 만들지 않는다. 데이터 자체는 병렬로 미리 받아 두고, 설정이
+        // 확정되면 캐시를 사용해 올바른 열로 한 번만 화면에 반영한다.
+        FlowModel.fetchHistory().catch((error) => {
+            console.warn('유량 데이터 사전 로드 실패:', error.message);
+        });
+    }, [enabled, loadReadings]);
 
     const updateReading = (rowDate, type, rawValue) => {
         const raw = toNumberOrNull(rawValue);

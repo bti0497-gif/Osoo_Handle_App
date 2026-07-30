@@ -11,7 +11,7 @@ const { convertExcelToPdf } = require('./excelPdfService.cjs');
 const { getActiveLocations } = require('./qntechWaterValueImportService.cjs');
 const { resolvePhotoRoot } = require('./qntechWaterPhotoImportService.cjs');
 
-const PREVIEW_RENDER_VERSION = '2026-03-16-photo-anchor-lock-v10';
+const PREVIEW_RENDER_VERSION = '2026-07-30-six-water-locations-v11';
 
 const ANALYTE_DEFINITIONS = [
   {
@@ -45,7 +45,7 @@ const ANALYTE_DEFINITIONS = [
 ];
 
 const pendingPreviewJobs = new Map();
-const DEFAULT_RENDER_LOCATIONS = ['유량조정조', '혐기조', '무산소조', '포기조', '침전조'];
+const DEFAULT_RENDER_LOCATIONS = ['유량조정조', '혐기조', '무산소조', '포기조', '침전조', '방류조'];
 
 function ensureDirectory(dirPath) {
   if (!fs.existsSync(dirPath)) {
@@ -105,7 +105,7 @@ function parsePageKey(pageKey) {
 }
 
 function parseCellReference(range) {
-  const match = String(range || '').match(/^(?:'((?:[^']|'')+)'|([^!]+))!\$?([A-Z]+)\$?(\d+)$/);
+  const match = String(range || '').match(/^(?:'((?:[^']|'')+)'|([^!]+))!\$?([A-Z]+)\$?(\d+)(?::\$?[A-Z]+\$?\d+)?$/);
   if (!match) return null;
 
   const sheetName = (match[1] || match[2] || '').replace(/''/g, "'");
@@ -183,6 +183,46 @@ function extractAnalyteValueBinding(namedEntry) {
     }
   }
   return null;
+}
+
+function buildSixLocationRows(rows = [], activeLocations = []) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const configuredLocations = Array.isArray(activeLocations) ? activeLocations : [];
+  const orderedRows = configuredLocations.length > 0
+    ? configuredLocations.map((location) => (
+      sourceRows.find((row) => normalizeKey(row?.location) === normalizeKey(location)) || null
+    ))
+    : sourceRows.slice(0, 6);
+  const configuredCount = configuredLocations.length || orderedRows.length;
+  if (configuredCount === 5) {
+    return [orderedRows[0], null, orderedRows[1], orderedRows[2], orderedRows[3], orderedRows[4]];
+  }
+  return orderedRows;
+}
+
+function findLocationRow(rows, keywords) {
+  return rows.find((row) => {
+    const location = normalizeKey(row?.location);
+    return keywords.some((keyword) => location.includes(normalizeKey(keyword)));
+  }) || null;
+}
+
+function buildPhosphorusRows(rows = [], activeLocations = []) {
+  const hasSettling = activeLocations.some((location) => normalizeKey(location).includes(normalizeKey('침전')));
+  return [
+    findLocationRow(rows, ['유량조정조', '유량조정', '유입']),
+    hasSettling
+      ? findLocationRow(rows, ['침전조', '침전'])
+      : findLocationRow(rows, ['포기조', '폭기조', '포기', '폭기', 'MBR']),
+    findLocationRow(rows, ['방류조', '방류']),
+  ];
+}
+
+function getRowsForAnalyte(pageContext, definition) {
+  if (definition.field === 'po4_p') {
+    return buildPhosphorusRows(pageContext.rows, pageContext.activeLocations);
+  }
+  return buildSixLocationRows(pageContext.rows, pageContext.activeLocations);
 }
 
 function getPreviewDirectories(appDataPath) {
@@ -468,7 +508,12 @@ function buildPageRenderData({ db, baseDir, page, siteName }) {
     sourceLabel: page.sourceLabel || '',
     pageNumberForDate: page.pageNumberForDate,
     totalPagesForDate: page.totalPagesForDate,
-    locationLabels: (pageContext.activeLocations.length ? pageContext.activeLocations : DEFAULT_RENDER_LOCATIONS).slice(0, 5),
+    locationLabels: buildSixLocationRows(
+      pageContext.activeLocations.length
+        ? pageContext.activeLocations.map((location) => ({ location }))
+        : DEFAULT_RENDER_LOCATIONS.map((location) => ({ location })),
+      pageContext.activeLocations.length ? pageContext.activeLocations : DEFAULT_RENDER_LOCATIONS,
+    ).map((row) => row?.location || ''),
     rows: pageContext.rows.map((row) => ({
       location: row.location || '',
       nh3_n: row.nh3_n ?? '',
@@ -804,7 +849,7 @@ async function bindWorkbookToPage(templatePath, workbookPath, page, pageContext)
 
     const valueBinding = extractAnalyteValueBinding(namedCell);
     if (valueBinding) {
-      const row = rows[valueBinding.position];
+      const row = getRowsForAnalyte(pageContext, valueBinding.definition)[valueBinding.position];
       setCellValue(worksheet, namedCell.cell.address, row?.[valueBinding.definition.field] ?? '');
       continue;
     }
@@ -987,7 +1032,7 @@ async function buildBatchExportExcel({ db, baseDir, appDataPath, templateInfo, m
 
       const valueBinding = extractAnalyteValueBinding(namedCell);
       if (valueBinding) {
-        const row = rows[valueBinding.position];
+        const row = getRowsForAnalyte(pageContext, valueBinding.definition)[valueBinding.position];
         setCellValue(currentSheet, namedCell.cell.address, row?.[valueBinding.definition.field] ?? '');
         continue;
       }
@@ -1040,9 +1085,12 @@ module.exports = {
   buildPreviewManifest,
   buildPageRenderData,
   buildPagePreviewPdf,
+  bindWorkbookToPage,
   findPageInManifest,
   normalizeDateRange,
   parsePageKey,
   normalizeKey,
+  buildSixLocationRows,
+  buildPhosphorusRows,
   getActiveDates,
 };
