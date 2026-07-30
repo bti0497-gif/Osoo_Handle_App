@@ -214,11 +214,15 @@ function validateReportTemplatesExcluded(rootDir, description) {
   const safeDefaults = fs.existsSync(safeDefaultsDir)
     ? fs.readdirSync(safeDefaultsDir).filter((name) => !name.startsWith('.')).sort()
     : [];
-  const expectedDefaults = ['일일업무일지(A2O).hwp', '일일업무일지(MBR).hwp'].sort();
+  const expectedDefaults = [
+    '수질분석일지.xlsx',
+    '일일업무일지(A2O).hwp',
+    '일일업무일지(MBR).hwp',
+  ].sort();
   if (JSON.stringify(safeDefaults) === JSON.stringify(expectedDefaults)) {
-    success(`${description} HWP 누락현장 전용 기본양식 2종 확인`);
+    success(`${description} 보호된 1회 교체·누락현장 기본양식 3종 확인`);
   } else {
-    error(`${description} HWP 누락현장 전용 기본양식 구성이 잘못됨: ${safeDefaults.join(', ')}`);
+    error(`${description} 보호된 기본양식 구성이 잘못됨: ${safeDefaults.join(', ')}`);
   }
 }
 
