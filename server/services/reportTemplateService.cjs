@@ -18,6 +18,10 @@ const ALLOWED_REPORT_TEMPLATE_NAMES = [
 const ALLOWED_REPORT_TEMPLATE_IDENTITIES = new Set(
   ALLOWED_REPORT_TEMPLATE_NAMES.map((name) => normalizeTemplateKey(name))
 );
+const FORCED_TEMPLATE_REVISIONS = Object.freeze({
+  '수질분석일지.xlsx': '2026-07-30-six-locations-v1',
+});
+const TEMPLATE_REVISION_MARKER = '.bundled-template-revisions.json';
 
 function normalizeTemplateKey(value) {
   return String(value || '').normalize('NFC').trim().toLowerCase();
@@ -113,6 +117,9 @@ function removeDisallowedTemplates(dirPath) {
     if (isOfficeLockFile(fileName)) {
       return;
     }
+    if (fileName === TEMPLATE_REVISION_MARKER) {
+      return;
+    }
 
     if (isAllowedReportTemplateName(fileName)) {
       return;
@@ -167,6 +174,14 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
 
   const existingFiles = listFiles(customDir);
   const existingNames = new Set(existingFiles.map((fileName) => normalizeTemplateKey(fileName)));
+  const revisionMarkerPath = path.join(customDir, TEMPLATE_REVISION_MARKER);
+  let appliedRevisions = {};
+  try {
+    appliedRevisions = JSON.parse(fs.readFileSync(revisionMarkerPath, 'utf8'));
+  } catch {
+    appliedRevisions = {};
+  }
+  let revisionMarkerChanged = false;
 
   bundledDirs.forEach((bundledDir) => {
     listFiles(bundledDir).forEach((fileName) => {
@@ -176,6 +191,17 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
 
       const sourcePath = path.join(bundledDir, fileName);
       const targetPath = path.join(customDir, fileName);
+      const forcedRevision = FORCED_TEMPLATE_REVISIONS[fileName];
+
+      // 구조가 바뀐 지정 양식만 릴리즈 최초 실행 때 한 번 교체한다.
+      // 같은 버전의 이후 실행과 다른 현장 수정 양식은 다시 덮어쓰지 않는다.
+      if (forcedRevision && appliedRevisions[fileName] !== forcedRevision) {
+        fs.copyFileSync(sourcePath, targetPath);
+        existingNames.add(normalizeTemplateKey(fileName));
+        appliedRevisions[fileName] = forcedRevision;
+        revisionMarkerChanged = true;
+        return;
+      }
 
       // 같은 일지의 Excel/HWP/HWPX 양식을 함께 유지한다.
       // 현장에서 수정한 양식은 크기나 내용과 관계없이 절대 덮어쓰지 않는다.
@@ -189,6 +215,10 @@ function syncBundledTemplatesToAppData(baseDir, appDataPath) {
       }
     });
   });
+
+  if (revisionMarkerChanged) {
+    fs.writeFileSync(revisionMarkerPath, `${JSON.stringify(appliedRevisions, null, 2)}\n`, 'utf8');
+  }
 
   return customDir;
 }

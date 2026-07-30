@@ -1044,6 +1044,15 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    dailyLogViewModelText.includes("useState(isDailyWorkLog ? 'hwp' : 'excel')") &&
+      dailyLogViewModelText.includes("setOutputFormat('hwp')") &&
+      dailyLogViewText.includes("{ id: 'hwp', label: '한글(HWP)' }") &&
+      dailyLogViewText.includes("{ id: 'pdf', label: 'PDF' }"),
+    '일일업무일지 한글(HWP) 기본 선택·PDF 선택 유지 계약',
+    '수정 가능한 한글 일지가 기본 선택되지 않거나 PDF 선택 기능이 사라졌습니다'
+  );
+
+  checkSource(
     !dailyWorkLogText.includes('restoreOperationalData') &&
       !excelRoutesText.includes('restoreOperationalData') &&
       !roadworkHelperRoutesText.includes('restoreOperationalData') &&

@@ -735,6 +735,10 @@ function buildRoadworkAutoFillScript(payload) {
 
 export default function RoadworkHelperView() {
   const vm = useRoadworkHelperViewModel();
+  const windowSiteId = new URLSearchParams(window.location.search).get('siteId') || '';
+  const roadworkPartition = windowSiteId
+    ? `persist:osoo-roadwork-${windowSiteId.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+    : 'persist:osoo-roadwork';
   const rootRef = useRef(null);
   const webviewRef = useRef(null);
   const lastRefreshAtRef = useRef(0);
