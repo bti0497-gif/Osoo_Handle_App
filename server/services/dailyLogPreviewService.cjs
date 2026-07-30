@@ -235,7 +235,7 @@ function getPreviewDirectories(appDataPath) {
   };
 }
 
-function listPageGroups(db, startDate, endDate, siteName) {
+function listPageGroups(db, startDate, endDate, siteName, siteId = '') {
   let query = `
     SELECT
       date,
@@ -250,7 +250,11 @@ function listPageGroups(db, startDate, endDate, siteName) {
   `;
   let params = [startDate, endDate];
 
-  if (siteName) {
+  const normalizedSiteId = String(siteId || '').trim();
+  if (normalizedSiteId) {
+    query += ' AND site_id = ?';
+    params.push(normalizedSiteId);
+  } else if (siteName) {
     query += ' AND site_name = ?';
     params.push(siteName);
   }
@@ -263,9 +267,9 @@ function listPageGroups(db, startDate, endDate, siteName) {
   return db.prepare(query).all(...params);
 }
 
-function buildPreviewManifest(db, startDate, endDate, siteName) {
-  console.log(`[Manifest] Building manifest for ${startDate} ~ ${endDate} (Site: ${siteName || 'null'})`);
-  const groups = listPageGroups(db, startDate, endDate, siteName);
+function buildPreviewManifest(db, startDate, endDate, siteName, siteId = '') {
+  console.log(`[Manifest] Building manifest for ${startDate} ~ ${endDate} (Site: ${siteId || siteName || 'null'})`);
+  const groups = listPageGroups(db, startDate, endDate, siteName, siteId);
   console.log(`[Manifest] Groups found (database rows): ${groups.length}`);
   if (groups.length > 0) {
       console.log(`[Manifest] Database first group: ${groups[0].date}, last group: ${groups[groups.length - 1].date}`);
@@ -467,22 +471,25 @@ function getTemplateSignature(templatePath) {
   return `${path.basename(templatePath)}:${stat.mtimeMs}:${stat.size}`;
 }
 
-function buildPageContext(db, baseDir, page, siteName) {
-  const siteId = resolveSiteIdByName(db, siteName);
-  const activeLocations = getActiveLocations(db, siteId);
+function buildPageContext(db, baseDir, page, siteName, siteId = '') {
+  const resolvedSiteId = String(siteId || '').trim() || resolveSiteIdByName(db, siteName);
+  const activeLocations = getActiveLocations(db, resolvedSiteId);
   
   // 1. 해당 측정 그룹의 모든 데이터 조회
   let query = 'SELECT * FROM qntech_water_quality WHERE date = ? AND measurement_group = ?';
   let params = [page.date, page.measurementGroup];
 
-  if (siteName) {
+  if (resolvedSiteId) {
+    query += ' AND site_id = ?';
+    params.push(resolvedSiteId);
+  } else if (siteName) {
     query += ' AND site_name = ?';
     params.push(siteName);
   }
 
   const baseRows = pivotQntechWaterRows(db.prepare(query).all(...params));
   const rows = sortRowsByLocation(baseRows, activeLocations);
-  const photoFiles = listPhotoFiles(baseDir, getConfiguredPhotoRoot(db, siteId), page.date);
+  const photoFiles = listPhotoFiles(baseDir, getConfiguredPhotoRoot(db, resolvedSiteId), page.date);
   const photoSelection = buildPhotoSelection(photoFiles, page);
 
   return {
@@ -499,8 +506,8 @@ function buildPageContext(db, baseDir, page, siteName) {
   };
 }
 
-function buildPageRenderData({ db, baseDir, page, siteName }) {
-  const pageContext = buildPageContext(db, baseDir, page, siteName);
+function buildPageRenderData({ db, baseDir, page, siteName, siteId = '' }) {
+  const pageContext = buildPageContext(db, baseDir, page, siteName, siteId);
 
   return {
     pageKey: page.pageKey,
@@ -881,8 +888,8 @@ async function runPendingJob(cacheKey, factory) {
   return promise;
 }
 
-async function buildPagePreviewPdf({ db, baseDir, appDataPath, templateInfo, page, siteName }) {
-  const pageContext = buildPageContext(db, baseDir, page, siteName);
+async function buildPagePreviewPdf({ db, baseDir, appDataPath, templateInfo, page, siteName, siteId = '' }) {
+  const pageContext = buildPageContext(db, baseDir, page, siteName, siteId);
   const templateSignature = getTemplateSignature(templateInfo.absolutePath);
   const cacheKey = hashParts([templateSignature, pageContext.contentSignature]);
   const directories = getPreviewDirectories(appDataPath);
@@ -903,7 +910,7 @@ async function buildPagePreviewPdf({ db, baseDir, appDataPath, templateInfo, pag
   return { pdfPath, workbookPath };
 }
 
-async function buildBatchPreviewPdf({ db, baseDir, appDataPath, templateInfo, manifest, siteName }) {
+async function buildBatchPreviewPdf({ db, baseDir, appDataPath, templateInfo, manifest, siteName, siteId = '' }) {
   if (!manifest.pages.length) {
     throw new Error('선택한 기간에 수질분석 데이터가 없습니다.');
   }
@@ -923,7 +930,7 @@ async function buildBatchPreviewPdf({ db, baseDir, appDataPath, templateInfo, ma
 
     const pdfPaths = [];
     for (const page of manifest.pages) {
-      const { pdfPath } = await buildPagePreviewPdf({ db, baseDir, appDataPath, templateInfo, page, siteName });
+    const { pdfPath } = await buildPagePreviewPdf({ db, baseDir, appDataPath, templateInfo, page, siteName, siteId });
       pdfPaths.push(pdfPath);
     }
 
@@ -982,7 +989,7 @@ function cloneSheet(workbook, sourceSheet, newSheetName) {
 }
 
 // --- 엑셀 내보내기: 단일 파일 내 시트 추가(복사) 방식 ---
-async function buildBatchExportExcel({ db, baseDir, appDataPath, templateInfo, manifest, siteName }) {
+async function buildBatchExportExcel({ db, baseDir, appDataPath, templateInfo, manifest, siteName, siteId = '' }) {
   const startTotal = Date.now();
   console.log(`[Excel Export] 내보내기 요청 파라미터: startDate=${manifest.startDate}, endDate=${manifest.endDate}, siteName=${siteName || 'null'}`);
   console.log(`[Excel Export] 매니페스트 정보: 총 ${manifest.pages.length}개 페이지`);
@@ -1013,7 +1020,7 @@ async function buildBatchExportExcel({ db, baseDir, appDataPath, templateInfo, m
   for (let i = 0; i < manifest.pages.length; i++) {
     const startPage = Date.now();
     const page = manifest.pages[i];
-    const pageContext = buildPageContext(db, baseDir, page, siteName);
+    const pageContext = buildPageContext(db, baseDir, page, siteName, siteId);
     
     let finalSheetName = `${i + 1}차`;
     console.log(`[Excel Export] [${i + 1}/${manifest.pages.length}] "${finalSheetName}" (${page.date}) 처리 중...`);
@@ -1064,11 +1071,15 @@ async function buildBatchExportExcel({ db, baseDir, appDataPath, templateInfo, m
   return [outputPath];
 }
 
-function getActiveDates(db, startDate, endDate, siteName) {
+function getActiveDates(db, startDate, endDate, siteName, siteId = '') {
   let query = 'SELECT DISTINCT date FROM qntech_water_quality WHERE date BETWEEN ? AND ?';
   let params = [startDate, endDate];
 
-  if (siteName) {
+  const normalizedSiteId = String(siteId || '').trim();
+  if (normalizedSiteId) {
+    query += ' AND site_id = ?';
+    params.push(normalizedSiteId);
+  } else if (siteName) {
     query += ' AND site_name = ?';
     params.push(siteName);
   }

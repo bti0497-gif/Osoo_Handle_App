@@ -26,6 +26,13 @@ function buildMissingTemplateResponse(templateName) {
   };
 }
 
+function getReportSiteScope(req) {
+  return {
+    siteId: String(req.query.siteId || req.query.site_id || req.siteContext?.siteId || '').trim(),
+    siteName: String(req.query.siteName || req.query.site_name || req.siteContext?.siteName || '').trim(),
+  };
+}
+
 module.exports = function(db, baseDir, appDataPath) {
   router.get('/api/logs/preview-template-html', async (req, res) => {
     const { templateName } = req.query;
@@ -65,8 +72,8 @@ module.exports = function(db, baseDir, appDataPath) {
       }
 
       const range = normalizeDateRange(startDate, endDate);
-      const siteName = req.query.siteName || req.siteContext?.siteName || '';
-      const activeDates = getActiveDates(db, range.startDate, range.endDate, siteName);
+      const { siteId, siteName } = getReportSiteScope(req);
+      const activeDates = getActiveDates(db, range.startDate, range.endDate, siteName, siteId);
       console.log(`[Active Dates API] Range: ${range.startDate} ~ ${range.endDate}, Site: ${siteName || 'ALL'}, Found: ${activeDates.length}`);
       if (activeDates.length > 0) {
           console.log(`[Active Dates API] Sample dates: ${activeDates.slice(0, 5).join(', ')}${activeDates.length > 5 ? '...' : ''}`);
@@ -86,9 +93,9 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
-      const siteName = req.query.siteName || req.siteContext?.siteName || '';
+      const { siteId, siteName } = getReportSiteScope(req);
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName, siteId);
 
       return res.json({ success: true, ...manifest });
     } catch (err) {
@@ -105,9 +112,9 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
-      const siteName = req.query.siteName || req.siteContext?.siteName || '';
+      const { siteId, siteName } = getReportSiteScope(req);
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName, siteId);
       const targetPage = findPageInManifest(manifest, pageKey);
 
       if (!targetPage) {
@@ -121,6 +128,7 @@ module.exports = function(db, baseDir, appDataPath) {
         templateInfo,
         page: targetPage,
         siteName,
+        siteId,
       });
 
       const outputFileName = `${path.parse(templateInfo.fileName).name}-${targetPage.date}-${targetPage.pageNumberForDate}.pdf`;
@@ -147,22 +155,22 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
-      const siteName = req.query.siteName || req.siteContext?.siteName || '';
+      const { siteId, siteName } = getReportSiteScope(req);
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName, siteId);
       const targetPage = findPageInManifest(manifest, pageKey);
 
       if (!targetPage) {
         return res.status(404).json({ error: 'Preview page not found' });
       }
 
-      const renderData = buildPageRenderData({ db, baseDir, page: targetPage, siteName });
+      const renderData = buildPageRenderData({ db, baseDir, page: targetPage, siteName, siteId });
       const photoUrls = Object.fromEntries(
         Object.entries(renderData.selectedPhotos || {})
           .filter(([, photoPath]) => Boolean(photoPath))
           .map(([analyteKey]) => [
             analyteKey,
-            `${req.protocol}://${req.get('host')}/api/logs/preview-photo?startDate=${encodeURIComponent(range.startDate)}&endDate=${encodeURIComponent(range.endDate)}&pageKey=${encodeURIComponent(targetPage.pageKey)}&templateName=${encodeURIComponent(templateInfo.fileName)}&analyte=${encodeURIComponent(analyteKey)}${siteName ? `&siteName=${encodeURIComponent(siteName)}` : ''}`,
+            `${req.protocol}://${req.get('host')}/api/logs/preview-photo?startDate=${encodeURIComponent(range.startDate)}&endDate=${encodeURIComponent(range.endDate)}&pageKey=${encodeURIComponent(targetPage.pageKey)}&templateName=${encodeURIComponent(templateInfo.fileName)}&analyte=${encodeURIComponent(analyteKey)}${siteId ? `&siteId=${encodeURIComponent(siteId)}` : ''}`,
           ])
       );
 
@@ -193,9 +201,9 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
-      const siteName = req.query.siteName || req.siteContext?.siteName || '';
+      const { siteId, siteName } = getReportSiteScope(req);
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName, siteId);
       const parsedPageKey = pageKey ? parsePageKey(pageKey) : null;
       const targetPage = findPageInManifest(manifest, pageKey || (parsedPageKey ? pageKey : ''));
 
@@ -203,7 +211,7 @@ module.exports = function(db, baseDir, appDataPath) {
         return res.status(404).json({ error: 'Preview page not found' });
       }
 
-      const renderData = buildPageRenderData({ db, baseDir, page: targetPage, siteName });
+      const renderData = buildPageRenderData({ db, baseDir, page: targetPage, siteName, siteId });
       const photoPath = renderData.selectedPhotos?.[analyteKey];
 
       if (!photoPath || !fs.existsSync(photoPath)) {
@@ -226,9 +234,9 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
-      const siteName = req.query.siteName || req.siteContext?.siteName || '';
+      const { siteId, siteName } = getReportSiteScope(req);
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
-      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName, siteId);
       const pdfPath = await buildBatchPreviewPdf({
         db,
         baseDir,
@@ -236,6 +244,7 @@ module.exports = function(db, baseDir, appDataPath) {
         templateInfo,
         manifest,
         siteName,
+        siteId,
       });
       const outputFileName = `${path.parse(templateInfo.fileName).name}-${range.startDate}-${range.endDate}.pdf`;
 
@@ -262,10 +271,10 @@ module.exports = function(db, baseDir, appDataPath) {
     }
 
     try {
-      const siteName = req.query.siteName || req.siteContext?.siteName || '';
+      const { siteId, siteName } = getReportSiteScope(req);
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);
       console.log(`[Excel Export] Request Range: ${range.startDate} ~ ${range.endDate}, Site: ${siteName || 'ALL'}`);
-      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName);
+      const manifest = buildPreviewManifest(db, range.startDate, range.endDate, siteName, siteId);
       console.log(`[Excel Export] Manifest generated. Total Sheets: ${manifest.pages.length}`);
       if (manifest.pages.length > 0) {
           const distinctDates = [...new Set(manifest.pages.map(p => p.date))];
@@ -283,6 +292,7 @@ module.exports = function(db, baseDir, appDataPath) {
         templateInfo,
         manifest,
         siteName,
+        siteId,
       });
 
       // 생성된 각 파일을 시스템 기본 프로그램(Excel)으로 열기
