@@ -49,8 +49,10 @@ module.exports = {
   },
   nsis: {
     oneClick: false,
+    perMachine: true,
+    allowElevation: true,
     include: 'scripts/installer-process-guard.nsh',
-    allowToChangeInstallationDirectory: true,
+    allowToChangeInstallationDirectory: false,
     installerIcon: 'public/icon.ico',
     uninstallerIcon: 'public/icon.ico',
     installerHeaderIcon: 'public/icon.ico',

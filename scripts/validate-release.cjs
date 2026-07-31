@@ -265,6 +265,18 @@ function validateInstallerProcessGuardContract() {
   }
 
   if (
+    builderText.includes('perMachine: true')
+    && builderText.includes('allowElevation: true')
+    && builderText.includes('allowToChangeInstallationDirectory: false')
+    && integratedText.includes('perMachine: true')
+    && integratedText.includes('allowElevation: true')
+  ) {
+    success('모든 현장 설치 위치·관리자 권한 계약 통일');
+  } else {
+    error('일반/통합 설치판의 모든 사용자 설치 및 관리자 권한 계약이 일치하지 않습니다');
+  }
+
+  if (
     integratedText.includes("$processGuardFile = Join-Path $projectRoot 'scripts\\installer-process-guard.nsh'")
     && integratedText.includes('$processGuardSourcePath = ConvertTo-NsisSourcePath $processGuardFile')
     && integratedText.includes('!include')

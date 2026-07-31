@@ -135,6 +135,23 @@ async function installDownloadedUpdateAndQuit() {
     version: downloadedVersion,
   });
   await autoUpdater.__installOptions?.onBeforeInstall?.();
+  const installerPath = autoUpdater.installerPath
+    || autoUpdater.downloadedUpdateHelper?.file
+    || null;
+  if (process.platform === 'win32') {
+    const downloadedFileInfo = autoUpdater.downloadedUpdateHelper?.downloadedFileInfo;
+    if (downloadedFileInfo) {
+      // All field PCs must follow the same machine-wide installation path.
+      // Explicitly force electron-updater to launch elevate.exe so an existing
+      // Program Files installation never exits without starting the installer.
+      downloadedFileInfo.isAdminRightsRequired = true;
+    }
+  }
+  writeUpdateLog('installer-launch-requested', {
+    version: downloadedVersion,
+    installerPath,
+    elevationRequired: process.platform === 'win32',
+  });
   autoUpdater.quitAndInstall(false, true);
   return true;
 }

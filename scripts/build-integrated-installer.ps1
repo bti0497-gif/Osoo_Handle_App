@@ -132,8 +132,8 @@ $asarUnpackSection
   nsis: {
     ...base.nsis,
     include: '$includeConfigPath',
-    perMachine: false,
-    allowElevation: false,
+    perMachine: true,
+    allowElevation: true,
     allowToChangeInstallationDirectory: false,
   },
   publish: base.publish,
