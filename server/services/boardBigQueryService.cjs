@@ -98,7 +98,7 @@ async function getPosts(role, siteName, userName = '') {
         WHERE c.post_id = p.id AND c.is_deleted = FALSE) AS comment_count
     FROM \`${DATASET_ID}.posts\` p
     WHERE ${where}
-    ORDER BY p.is_notice DESC, p.created_at DESC
+    ORDER BY p.is_notice DESC, p.created_at ASC
     LIMIT 300
   `;
 

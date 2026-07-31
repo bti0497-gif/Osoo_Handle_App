@@ -146,7 +146,7 @@ async function getPosts(role, siteName, userName = '') {
     // 2. 최신글 우선
     const aTime = a.created_at || '';
     const bTime = b.created_at || '';
-    return bTime.localeCompare(aTime);
+    return aTime.localeCompare(bTime);
   });
 
   return visiblePosts;

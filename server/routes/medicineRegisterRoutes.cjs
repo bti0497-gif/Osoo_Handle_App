@@ -50,10 +50,8 @@ function resolveSiteScope(db, source = {}) {
 }
 
 function siteWhere(scope) {
-  if (scope?.siteId && scope?.siteName) return { clause: ' AND (site_id = ? OR site_name = ?)', params: [scope.siteId, scope.siteName] };
   if (scope?.siteId) return { clause: ' AND site_id = ?', params: [scope.siteId] };
-  if (scope?.siteName) return { clause: ' AND site_name = ?', params: [scope.siteName] };
-  return { clause: '', params: [] };
+  throw new Error('현재 현장의 site_id가 없어 약품관리대장을 조회할 수 없습니다.');
 }
 
 function getAggregate(db, table, nameCol, name, startDate, endDate, yearStart, scope) {

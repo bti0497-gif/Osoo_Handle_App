@@ -45,6 +45,34 @@ async function queryRows(tableName, startDate, endDate, scope) {
   return rows || [];
 }
 
+async function inspectOperationalData(db, { startDate, endDate, tables = [], siteId = '', siteName = '' } = {}) {
+  const normalizedStart = String(startDate || '').slice(0, 10);
+  const normalizedEnd = String(endDate || startDate || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedStart) || !/^\d{4}-\d{2}-\d{2}$/.test(normalizedEnd)) {
+    return { success: false, skipped: true, reason: 'invalid-date' };
+  }
+  const defaults = getDefaultScope(db);
+  const scope = {
+    siteId: String(siteId || defaults.siteId || '').trim(),
+    siteName: String(siteName || defaults.siteName || '').trim(),
+  };
+  if (!scope.siteId) throw new Error('현재 현장의 site_id가 없어 BigQuery 자료를 조회할 수 없습니다.');
+
+  const targetTables = tables.length
+    ? tables
+    : ['flow_readings', 'medicine_logs', 'kit_logs', 'qntech_water_quality', 'operation_status_logs'];
+  const result = {};
+  for (const tableName of targetTables) {
+    try {
+      const rows = await queryRows(tableName, normalizedStart, normalizedEnd, scope);
+      result[tableName] = { success: true, count: rows.length };
+    } catch (error) {
+      result[tableName] = { success: false, count: 0, error: error.message };
+    }
+  }
+  return { success: true, startDate: normalizedStart, endDate: normalizedEnd, ...scope, result };
+}
+
 function restoreFlowRows(db, rows) {
   const stmt = db.prepare(`
     INSERT INTO flow_readings (
@@ -193,6 +221,7 @@ function restoreOperationStatusRows(db, rows) {
       author = excluded.author,
       last_modified = excluded.last_modified,
       is_synced = 1
+    WHERE operation_status_logs.is_synced = 1
   `);
   db.transaction(() => {
     rows.forEach((row) => {
@@ -251,5 +280,6 @@ async function restoreOperationalData(db, { startDate, endDate, tables = [], sit
 }
 
 module.exports = {
+  inspectOperationalData,
   restoreOperationalData,
 };

@@ -6,6 +6,7 @@ import QuillResize from 'quill-resize-module';
 import 'react-quill-new/dist/quill.snow.css';
 import { useBoardViewModel } from './useBoardViewModel';
 import { useDialog } from '../../components/common/DialogContext';
+import { isBoardPostNew } from './boardNewBadge';
 
 const PRIVILEGED_BOARD_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
 Quill.register('modules/resize', QuillResize);
@@ -356,6 +357,14 @@ const BoardView = ({ currentUser }) => {
                                                     <span style={{ fontWeight: p.parent_id ? 500 : 700, color: '#1e293b', fontSize: '0.8125rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                         {p.title}
                                                     </span>
+                                                    {isBoardPostNew(p) && (
+                                                        <span style={{
+                                                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                                            minWidth: '15px', height: '15px', borderRadius: '50%',
+                                                            backgroundColor: '#ef4444', color: '#fff', fontSize: '0.5625rem',
+                                                            fontWeight: 900, lineHeight: 1, flexShrink: 0,
+                                                        }}>N</span>
+                                                    )}
                                                     {p.comment_count > 0 && (
                                                         <span style={{ fontSize: '0.625rem', color: '#3b82f6', fontWeight: 800, flexShrink: 0 }}>
                                                             [{p.comment_count}]

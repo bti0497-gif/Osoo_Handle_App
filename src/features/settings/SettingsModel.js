@@ -55,6 +55,14 @@ export const SettingsModel = {
         return apiClient.post('/api/settings/history-restore/apply', { documents, ...range });
     },
 
+    async inspectBigQueryRestore(payload) {
+        return apiClient.post('/api/settings/bigquery-restore/inspect', payload);
+    },
+
+    async applyBigQueryRestore(payload) {
+        return apiClient.post('/api/settings/bigquery-restore/apply', payload);
+    },
+
     async saveSettings(settingsData) {
         return mutateSettings(() => apiClient.post('/api/settings', settingsData));
     },

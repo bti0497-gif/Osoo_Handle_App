@@ -76,7 +76,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
             .map((post) => numberedPostMap.get(post.id) || post)
             .filter(isNotice)
             .map(p => ({ ...p, depth: 0 }))
-            .sort((a, b) => toTimestampMs(b.created_at) - toTimestampMs(a.created_at));
+            .sort((a, b) => toTimestampMs(a.created_at) - toTimestampMs(b.created_at));
         const regulars = numberedPosts.filter(p => !isNotice(p));
 
         const postMap = {};
@@ -112,7 +112,11 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
             return { rootId, items: thread.items, lastActivity };
         });
 
-        threadList.sort((a, b) => b.lastActivity - a.lastActivity);
+        threadList.sort((a, b) => {
+            const aRoot = a.items.find((item) => item.id === a.rootId);
+            const bRoot = b.items.find((item) => item.id === b.rootId);
+            return Number(aRoot?.board_number || 0) - Number(bRoot?.board_number || 0);
+        });
 
         const sortedRegulars = [];
         threadList.forEach(t => {

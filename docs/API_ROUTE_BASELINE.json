@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 138,
-  "digest": "b3da066b8de97f9e1ac717a061f134e0542ed08d12845f70eef14ba6d4d22d6b",
+  "endpointCount": 140,
+  "digest": "73feb358938fd98bd91f1c3588f9e2bd10b567de0a14fd02ceabffe05254e83e",
   "endpoints": [
     {
       "method": "GET",
@@ -662,6 +662,22 @@
     {
       "method": "POST",
       "path": "/api/settings/add-item",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/bigquery-restore/apply",
+      "module": "./routes/settingsRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings/bigquery-restore/inspect",
       "module": "./routes/settingsRoutes.cjs",
       "tier": 2,
       "mutation": true,

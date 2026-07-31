@@ -14,6 +14,10 @@ const { reconcileConfiguredQntechSiteId } = require('../services/qntechAuthServi
 const { requireAdminSession } = require('../services/activeUserSessionService.cjs');
 const { applyRestore, inspectRestore } = require('../services/settings/roadworkHistoryRestoreService.cjs');
 const {
+  inspectBigQueryRestore,
+  applyBigQueryRestore,
+} = require('../services/settings/bigQueryDisasterRestoreService.cjs');
+const {
   getCustomReportTemplatesDir,
   syncBundledTemplatesToAppData,
 } = require('../services/reportTemplateService.cjs');
@@ -307,6 +311,36 @@ module.exports = function (db, baseDir, appDataPath) {
       return res.json(result);
     } catch (error) {
       console.error('[Settings] 과거자료 로컬 복원 실패:', error);
+      return res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message,
+        details: error.details || null,
+      });
+    }
+  });
+
+  router.post('/api/settings/bigquery-restore/inspect', async (req, res) => {
+    try {
+      const result = await inspectBigQueryRestore(db, {
+        ...(req.body || {}),
+        siteId: req.siteContext?.siteId || req.body?.siteId || null,
+      });
+      return res.json(result);
+    } catch (error) {
+      console.error('[Settings] BigQuery 복원 미리보기 실패:', error);
+      return res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    }
+  });
+
+  router.post('/api/settings/bigquery-restore/apply', async (req, res) => {
+    try {
+      const result = await applyBigQueryRestore(db, appDataPath, {
+        ...(req.body || {}),
+        siteId: req.siteContext?.siteId || req.body?.siteId || null,
+      });
+      return res.json(result);
+    } catch (error) {
+      console.error('[Settings] BigQuery 로컬 복원 실패:', error);
       return res.status(error.statusCode || 500).json({
         success: false,
         message: error.message,

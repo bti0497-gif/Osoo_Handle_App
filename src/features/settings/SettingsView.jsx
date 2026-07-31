@@ -12,6 +12,8 @@ import WebAppPanel from './panels/WebAppPanel';
 import LogMappingPanel from './panels/LogMappingPanel';
 import BasicSitePanel from './panels/BasicSitePanel';
 import HistoryRestoreModal from './historyRestore/HistoryRestoreModal';
+import BigQueryRestorePanel from './panels/BigQueryRestorePanel';
+import { useBigQueryRestore } from './hooks/useBigQueryRestore';
 
 const SettingsView = ({ currentUser, onMultiSiteModeChanged }) => {
     const { showAlert, showConfirm } = useDialog();
@@ -21,6 +23,7 @@ const SettingsView = ({ currentUser, onMultiSiteModeChanged }) => {
         onMultiSiteModeChanged,
     });
     const [showHistoryRestore, setShowHistoryRestore] = React.useState(false);
+    const bigQueryRestoreState = useBigQueryRestore({ showAlert, showConfirm });
     const {
         shellState,
         basicSiteState,
@@ -279,6 +282,7 @@ const SettingsView = ({ currentUser, onMultiSiteModeChanged }) => {
             kit: renderKitSettings,
             logMapping: renderLogMappingSettings,
             webapp: renderWebAppSettings,
+            bigqueryRestore: () => <BigQueryRestorePanel state={bigQueryRestoreState} />,
         };
         return panels[activeTab]?.() || null;
     };

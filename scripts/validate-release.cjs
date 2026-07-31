@@ -817,7 +817,7 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    boardViewModelText.includes('.sort((a, b) => toTimestampMs(b.created_at) - toTimestampMs(a.created_at))') &&
+    boardViewModelText.includes('.sort((a, b) => toTimestampMs(a.created_at) - toTimestampMs(b.created_at))') &&
       boardViewModelText.includes("target_site: parentPost.target_site || ''"),
     '소통게시판 최신 공지 우선·답글 대상 승계 계약 유지',
     '최신 공지가 위로 오지 않거나 답글이 원글과 다른 현장에 노출될 수 있습니다'

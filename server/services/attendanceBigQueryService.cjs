@@ -131,7 +131,6 @@ async function syncAttendanceLogs(logs, siteMeta = {}) {
           FROM source_rows S
           WHERE T.id = S.id
             AND COALESCE(T.site_id, '') = COALESCE(S.site_id, '')
-            AND COALESCE(T.site_name, '') = COALESCE(S.site_name, '')
             AND T.login_time = S.login_time
         );
 

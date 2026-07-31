@@ -8,6 +8,10 @@ const {
 } = require('./services/sqliteProtectionService.cjs');
 const { ensureMultiSiteFoundation } = require('./services/multiSiteSchemaService.cjs');
 const { ensureSiteDataIsolation } = require('./services/siteDataIsolationMigrationService.cjs');
+const {
+  inspectSiteIdentity,
+  repairUnambiguousSingleSiteIdentity,
+} = require('./services/siteIdentityIntegrityService.cjs');
 
 const DEFAULT_ROAD_WEB_URL = 'https://nwpo.ex.co.kr:5002//security/login.do';
 const DEFAULT_WATER_ANALYSIS_URL = 'https://eco.qntech.co.kr';
@@ -1107,6 +1111,25 @@ if (siteDataIsolation.applied) {
 const multiSiteFoundation = ensureMultiSiteFoundation(db);
 if (multiSiteFoundation.applied) {
   console.log(`Multi-site foundation migration complete for site: ${multiSiteFoundation.siteId}`);
+}
+
+const siteIdentityRepair = repairUnambiguousSingleSiteIdentity(db);
+if (siteIdentityRepair.applied) {
+  console.warn('[Migration] 단일 현장 site_id 불일치 자동 복구:', siteIdentityRepair);
+}
+const siteIdentityInspection = inspectSiteIdentity(db);
+const unexpectedSiteIds = siteIdentityInspection.multiSiteEnabled
+  ? []
+  : siteIdentityInspection.rowCounts.filter(
+    (item) => item.siteId && item.siteId !== siteIdentityInspection.currentSiteId
+  );
+if (!siteIdentityInspection.currentSiteExists || unexpectedSiteIds.length > 0) {
+  console.warn('[Migration] site_id 무결성 점검 필요:', {
+    currentSiteId: siteIdentityInspection.currentSiteId,
+    currentSiteName: siteIdentityInspection.currentSiteName,
+    currentSiteExists: siteIdentityInspection.currentSiteExists,
+    unexpectedSiteIds,
+  });
 }
 
 recordSchemaBaseline(db);

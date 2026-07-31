@@ -6,6 +6,7 @@ const SETTINGS_TABS = [
   { id: 'kit', label: '키트설정' },
   { id: 'logMapping', label: '일지설정' },
   { id: 'webapp', label: '웹/앱설정' },
+  { id: 'bigqueryRestore', label: 'BigQuery 복원' },
 ];
 
 export default function SettingsTabs({ activeTab, setActiveTab, isAppSiteConfigured }) {

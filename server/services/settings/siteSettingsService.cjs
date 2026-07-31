@@ -133,7 +133,7 @@ async function listSites(db) {
     String(right?.site_name || '').trim()
   ));
 
-  const current = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get();
+  const current = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get();
   const currentSiteId = String(current?.site_id || '').trim();
 
   // 신규 설치(site_id가 비어있는 상태)에서는 자동으로 첫 번째 현장을 할당하지 않는다.
@@ -141,27 +141,41 @@ async function listSites(db) {
   if (currentSiteId) {
     const matchedSite = sites.find((site) => String(site.id) === currentSiteId);
     if (matchedSite) {
-      return { sites, currentSiteId: matchedSite.id, source };
-    }
-    // 확정 현장이 사이트 목록에서 사라진 경우에만 fallback
-    const fallbackSite = sites[0] || null;
-    if (fallbackSite) {
-      const series = String(fallbackSite.series || '').trim() || '1계열';
-      const flowOption = getFlowOptionForSite(db, series);
+      const series = String(matchedSite.series || '').trim() || '1계열';
       db.prepare(`
         UPDATE app_settings
-        SET site_id = ?, site_name = ?, manager_name = ?, method = ?, series = ?, flow_option = ?
-        WHERE id = 1
+        SET site_name = ?, manager_name = ?, method = ?, series = ?, flow_option = ?
+        WHERE id = 1 AND site_id = ?
       `).run(
-        fallbackSite.id,
-        fallbackSite.site_name || '',
-        fallbackSite.manager_name || '',
-        fallbackSite.method || 'A2O',
+        matchedSite.site_name || '',
+        matchedSite.manager_name || '',
+        matchedSite.method || 'A2O',
         series,
-        flowOption
+        getFlowOptionForSite(db, series),
+        currentSiteId
       );
-      return { sites, currentSiteId: fallbackSite.id, source };
+      return { sites, currentSiteId: matchedSite.id, source };
     }
+
+    const normalizedCurrentName = String(current?.site_name || '').trim();
+    const sameNameSite = normalizedCurrentName
+      ? sites.find((site) => String(site.site_name || '').trim() === normalizedCurrentName)
+      : null;
+    if (sameNameSite) {
+      console.warn('[Settings] 같은 현장명에 서로 다른 site_id가 있어 자동 변경하지 않습니다.', {
+        currentSiteId,
+        matchedSiteId: sameNameSite.id,
+        siteName: normalizedCurrentName,
+      });
+    }
+
+    // 현장명이 다른 상태에서는 첫 번째 현장으로 자동 변경하지 않는다.
+    // 과거 현장명 변경이나 잘못된 ID를 임의로 다른 현장에 연결하는 것보다
+    // 기존 식별자를 유지하고 명시적인 현장 선택/진단을 기다리는 편이 안전하다.
+    console.warn('[Settings] 현재 site_id를 현장 목록에서 찾지 못해 기존 설정을 유지합니다.', {
+      currentSiteId,
+      currentSiteName: normalizedCurrentName,
+    });
   }
 
   return { sites, currentSiteId: currentSiteId || null, source };

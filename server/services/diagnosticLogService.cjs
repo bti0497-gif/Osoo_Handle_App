@@ -10,6 +10,7 @@ const {
   isDriveConfigured,
   uploadBufferToFolder,
 } = require('./driveService.cjs');
+const { inspectSiteIdentity } = require('./siteIdentityIntegrityService.cjs');
 
 const SECRET_KEY_PATTERN = /(password|passwd|pwd|token|secret|key|credential|authorization|cookie|client_secret|refresh_token)/i;
 const MAX_STRING_LENGTH = 2000;
@@ -152,6 +153,12 @@ function buildDatabaseDiagnosticDetails(db, appDataPath) {
     } catch (error) {
       details.tableCounts[tableName] = `error:${safeString(error.message)}`;
     }
+  }
+
+  try {
+    details.siteIdentity = inspectSiteIdentity(db);
+  } catch (error) {
+    details.siteIdentity = { error: safeString(error.message) };
   }
 
   return details;
