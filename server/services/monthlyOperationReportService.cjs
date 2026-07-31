@@ -51,6 +51,13 @@ function monthRange(year, month) {
   return { year: y, month: m, days, startDate: `${y}-${mm}-01`, endDate: `${y}-${mm}-${String(days).padStart(2, '0')}` };
 }
 
+function toExcelCalendarDate(year, month, day) {
+  // ExcelJS converts JavaScript Date values through an absolute UTC timestamp.
+  // Local midnight in KST becomes the previous UTC date, so use UTC noon to
+  // preserve the intended calendar day in every supported timezone.
+  return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12));
+}
+
 function resolveMedicineNames(db, scope) {
   const names = scope.siteId ? db.prepare(`
     SELECT item_name FROM site_config_items
@@ -153,7 +160,9 @@ async function exportMonthlyOperationReport({ db, templatePath, outputPath, year
   };
 
   setScalar('현장명년도월', `${data.siteName} ${data.year}년 ${data.month}월 운영보고서`);
-  setColumn('날짜', data.rows.map((row) => row.date ? new Date(data.year, data.month - 1, Number(row.date.slice(-2))) : null));
+  setColumn('날짜', data.rows.map((row) => (
+    row.date ? toExcelCalendarDate(data.year, data.month, Number(row.date.slice(-2))) : null
+  )));
   for (const [name, key] of [['유입량', 'inflow'], ['방류량', 'outflow'], ['슬러지', 'sludge'], ['포도당', 'glucose'], ['중탄산', 'bicarbonate'], ['응집제', 'coagulant']]) setColumn(name, data.rows.map((row) => row[key]));
   for (const [name, role, field] of [['포도당이월', 'glucose', 'carryover'], ['포도당입고', 'glucose', 'receipt'], ['중탄산이월', 'bicarbonate', 'carryover'], ['중탄산입고', 'bicarbonate', 'receipt'], ['응집제이월', 'coagulant', 'carryover'], ['응집제입고', 'coagulant', 'receipt']]) setScalar(name, data.inventory[role][field]);
 
@@ -167,4 +176,12 @@ async function exportMonthlyOperationReport({ db, templatePath, outputPath, year
   return data;
 }
 
-module.exports = { TEMPLATE_NAME, REQUIRED_NAMES, monthRange, getMonthlyData, enforceAutomaticFullCalculation, exportMonthlyOperationReport };
+module.exports = {
+  TEMPLATE_NAME,
+  REQUIRED_NAMES,
+  monthRange,
+  toExcelCalendarDate,
+  getMonthlyData,
+  enforceAutomaticFullCalculation,
+  exportMonthlyOperationReport,
+};
