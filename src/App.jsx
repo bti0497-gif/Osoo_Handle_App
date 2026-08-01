@@ -26,6 +26,7 @@ const CertificateView = lazy(() => import('./features/certificate').then((module
 const SludgePhotoView = lazy(() => import('./features/sludge').then((module) => ({ default: module.SludgePhotoView })));
 const SludgeLedgerView = lazy(() => import('./features/sludge').then((module) => ({ default: module.SludgeLedgerView })));
 const RoadworkHelperView = lazy(() => import('./features/roadwork-helper').then((module) => ({ default: module.RoadworkHelperView })));
+const GRID_CACHE_REFRESH_MS = 10 * 60 * 1000;
 
 const contentLoadingFallback = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '320px' }}>
@@ -323,6 +324,44 @@ function App() {
         };
     }, [isAuthenticated, preloadedUserId, user?.id, user?.site_id]);
 
+    useEffect(() => {
+        if (!isAuthenticated || !user?.id) return undefined;
+
+        let cancelled = false;
+        const refreshCaches = () => {
+            if (cancelled || document.visibilityState === 'hidden') return;
+            preloadRecordGridData({ force: true }).catch((error) => {
+                console.warn('[cache-warmup] grid refresh failed:', error);
+            });
+            // 게시판도 메뉴를 열기 전에 짧은 캐시에 준비한다. 실패는 기존 캐시를 유지한다.
+            import('./features/board/BoardModel')
+                .then(({ BoardModel }) => BoardModel.fetchPosts(user, { force: true }))
+                .catch((error) => console.warn('[cache-warmup] board refresh failed:', error));
+        };
+
+        const timer = window.setInterval(refreshCaches, GRID_CACHE_REFRESH_MS);
+        const onVisible = () => {
+            if (document.visibilityState === 'visible') refreshCaches();
+        };
+        document.addEventListener('visibilitychange', onVisible);
+
+        // 로그인 직후에는 그리드 예열이 먼저 시작되도록 아주 짧게 양보한 후,
+        // 게시판과 그 모듈 번들을 백그라운드에서 준비한다.
+        const warmupTimer = window.setTimeout(() => {
+            if (cancelled) return;
+            import('./features/board/BoardModel')
+                .then(({ BoardModel }) => BoardModel.fetchPosts(user))
+                .catch((error) => console.warn('[cache-warmup] board initial preload failed:', error));
+        }, 1200);
+
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+            window.clearTimeout(warmupTimer);
+            document.removeEventListener('visibilitychange', onVisible);
+        };
+    }, [isAuthenticated, user]);
+
     if (isLoading) {
         return <SplashLoadingView percent={0} label="" showProgress={false} />;
     }
@@ -337,6 +376,7 @@ function App() {
 
     const handleLogout = () => {
         clearRecordGridHistoryCache();
+        import('./features/board/BoardModel').then(({ BoardModel }) => BoardModel.clearPostsCache());
         resetRecordGridSessions();
         setPreloadedUserId(null);
         setIsRoadworkMounted(false);

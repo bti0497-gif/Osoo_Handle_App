@@ -1,5 +1,24 @@
 import { apiClient } from '../../core/api';
 
+const POSTS_CACHE_TTL_MS = 60 * 1000;
+const postsCache = new Map();
+
+function boardCacheKey(currentUser) {
+    return [
+        currentUser?.id || currentUser?.name || 'unknown',
+        currentUser?.role || 'manager',
+        currentUser?.site_id || currentUser?.site_name1 || 'site',
+    ].map((value) => String(value)).join('::');
+}
+
+function clearPostsCache(currentUser) {
+    if (currentUser) {
+        postsCache.delete(boardCacheKey(currentUser));
+        return;
+    }
+    postsCache.clear();
+}
+
 /**
  * _user 헬퍼 — 현재 로그인 사용자 정보를 요청 body에 포함시킨다.
  * boardRoutes.cjs는 이 정보를 기준으로 가시성 필터와 권한 체크를 수행한다.
@@ -30,15 +49,36 @@ export const BoardModel = {
         return Array.isArray(res.sites) ? res.sites : [];
     },
 
-    async fetchPosts(currentUser) {
+    async fetchPosts(currentUser, { force = false } = {}) {
+        const cacheKey = boardCacheKey(currentUser);
+        const cached = postsCache.get(cacheKey);
+        if (cached?.promise) return cached.promise;
+        if (!force && cached && (Date.now() - cached.loadedAt) < POSTS_CACHE_TTL_MS) {
+            return cached.data;
+        }
+
         const u = userPayload(currentUser)._user;
-        const res = await apiClient.get('/api/board/posts', {
+        const request = apiClient.get('/api/board/posts', {
             _role: u.role,
             _site: u.site,
             _name: u.name
+        }).then((res) => {
+            if (!res.success) throw new Error(res.message || '게시글 로드 실패');
+            const data = Array.isArray(res.data) ? res.data : [];
+            postsCache.set(cacheKey, { data, loadedAt: Date.now(), promise: null });
+            return data;
+        }).catch((error) => {
+            const previous = postsCache.get(cacheKey);
+            if (previous?.data) {
+                postsCache.set(cacheKey, { ...previous, promise: null });
+            } else {
+                postsCache.delete(cacheKey);
+            }
+            throw error;
         });
-        if (!res.success) throw new Error(res.message || '게시글 로드 실패');
-        return res.data;
+
+        postsCache.set(cacheKey, { data: cached?.data || null, loadedAt: cached?.loadedAt || 0, promise: request });
+        return request;
     },
 
     async fetchPost(id, currentUser) {
@@ -57,10 +97,12 @@ export const BoardModel = {
         if (postData.id) {
             const res = await apiClient.put(`/api/board/posts/${postData.id}`, body);
             if (!res.success) throw new Error(res.message || '수정 실패');
+            clearPostsCache(currentUser);
             return { id: postData.id, ...postData };
         } else {
             const res = await apiClient.post('/api/board/posts', body);
             if (!res.success) throw new Error(res.message || '작성 실패');
+            clearPostsCache(currentUser);
             return res.data;
         }
     },
@@ -69,6 +111,7 @@ export const BoardModel = {
         const query = userQuery(currentUser);
         const res = await apiClient.delete(`/api/board/posts/${id}?${query}`);
         if (!res.success) throw new Error(res.message || '삭제 실패');
+        clearPostsCache(currentUser);
         return res.data;
     },
 
@@ -103,6 +146,8 @@ export const BoardModel = {
         if (boardId) formData.append('boardId', String(boardId));
         if (date) formData.append('date', String(date));
         return apiClient.upload('/api/upload', formData);
-    }
+    },
+
+    clearPostsCache
 };
 
