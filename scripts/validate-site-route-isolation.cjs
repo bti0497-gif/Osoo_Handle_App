@@ -133,6 +133,12 @@ async function main() {
     });
     assert.strictEqual(denied.status, 403);
 
+    const mismatchedQuery = await fetch(`${baseUrl}/api/flows?date=2026-07-24&site_id=site-b`, {
+      headers: { 'x-osoo-site-id': 'site-a' },
+    });
+    assert.strictEqual(mismatchedQuery.status, 409);
+    assert.strictEqual((await mismatchedQuery.json()).code, 'SITE_CONTEXT_MISMATCH');
+
     db.prepare('UPDATE app_settings SET multi_site_enabled = 0 WHERE id = 1').run();
     const singleSitePrimary = await request('site-a', '/api/roadwork-helper/all?date=2026-07-24');
     assert.strictEqual(singleSitePrimary.success, true);
@@ -148,6 +154,42 @@ async function main() {
     });
     assert.strictEqual(siteSwitch.status, 200);
     assert.strictEqual((await siteSwitch.json()).requestedSiteId, 'site-b');
+
+    const staleHeaderSiteSwitch = await fetch(`${baseUrl}/api/settings/select-site`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-osoo-site-id': 'site-obsolete' },
+      body: JSON.stringify({ siteId: 'site-b' }),
+    });
+    assert.strictEqual(staleHeaderSiteSwitch.status, 200);
+    assert.strictEqual((await staleHeaderSiteSwitch.json()).requestedSiteId, 'site-b');
+
+    db.prepare(`
+      UPDATE app_settings
+      SET site_id = 'site-missing', multi_site_enabled = 0,
+          primary_site_id = NULL, secondary_site_id = NULL
+      WHERE id = 1
+    `).run();
+    const loginWithMissingConfiguredSite = await fetch(`${baseUrl}/api/auth/local-login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '관리자', password: 'test' }),
+    });
+    assert.strictEqual(loginWithMissingConfiguredSite.status, 200);
+    const operationalWithMissingConfiguredSite = await fetch(`${baseUrl}/api/flows/history`);
+    assert.strictEqual(operationalWithMissingConfiguredSite.status, 409);
+    assert.strictEqual((await operationalWithMissingConfiguredSite.json()).code, 'SITE_CONTEXT_INVALID');
+
+    db.prepare("UPDATE sites SET is_active = 0 WHERE id = 'site-a'").run();
+    db.prepare("UPDATE app_settings SET site_id = 'site-a' WHERE id = 1").run();
+    const loginWithInactiveSite = await fetch(`${baseUrl}/api/auth/local-login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '관리자', password: 'test' }),
+    });
+    assert.strictEqual(loginWithInactiveSite.status, 200);
+    const operationalWithInactiveSite = await fetch(`${baseUrl}/api/flows/history`);
+    assert.strictEqual(operationalWithInactiveSite.status, 409);
+    assert.strictEqual((await operationalWithInactiveSite.json()).code, 'SITE_CONTEXT_INVALID');
 
     db.prepare(`
       UPDATE app_settings
@@ -167,6 +209,7 @@ async function main() {
     console.log('✓ 공사입력도우미 현장별 초기 조회·설정 보조항목 제외 검증 통과');
     console.log('✓ 허용되지 않은 site_id 요청 차단 검증 통과');
     console.log('✓ 로그인·현장전환 복구 경로 허용 및 무범위 운영 조회 차단 검증 통과');
+    console.log('✓ 누락·비활성 현장과 오래된 창 컨텍스트 복구 시뮬레이션 통과');
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
     db.close();
