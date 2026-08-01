@@ -233,8 +233,11 @@ namespace OsooWatchdog
                     lastRepeatedLogAt = DateTime.UtcNow;
                 }
                 RotateLog();
-                string line = DateTime.UtcNow.ToString("o") + "\t" + action + "\t" + result + (String.IsNullOrEmpty(details) ? "" : "\t" + details) + Environment.NewLine;
+                string createdAt = DateTime.UtcNow.ToString("o");
+                string line = createdAt + "\t" + action + "\t" + result + (String.IsNullOrEmpty(details) ? "" : "\t" + details) + Environment.NewLine;
                 File.AppendAllText(logPath, line, new UTF8Encoding(false));
+                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.0\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
+                File.AppendAllText(Path.Combine(runtimeDirectory, "watchdog-events.jsonl"), eventJson, new UTF8Encoding(false));
             }
             catch { }
         }

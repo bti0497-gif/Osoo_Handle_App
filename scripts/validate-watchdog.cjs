@@ -5,6 +5,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
+const Database = require('better-sqlite3');
+const { importWatchdogDiagnostics } = require('../server/services/watchdogDiagnosticImportService.cjs');
 
 const root = path.resolve(__dirname, '..');
 const executable = path.join(root, 'watchdog', 'dist', 'OsooWatchdog.exe');
@@ -72,7 +74,31 @@ try {
   assert.strictEqual(duplicate.status, 2);
   firstInstance.kill();
 
-  console.log('✓ watchdog restart decision, maintenance locks, and single-instance simulations passed');
+  const importAppData = path.join(testRoot, 'import-app-data');
+  const importRuntime = path.join(importAppData, 'runtime');
+  run(importRuntime);
+  const db = new Database(':memory:');
+  try {
+    db.exec(`
+      CREATE TABLE app_settings (id INTEGER PRIMARY KEY, site_id TEXT, site_name TEXT);
+      INSERT INTO app_settings VALUES (1, 'site-test', '테스트현장');
+      CREATE TABLE app_diagnostic_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, level TEXT, area TEXT,
+        action TEXT, result TEXT, message TEXT, details_json TEXT, site_id TEXT,
+        site_name TEXT, app_version TEXT, uploaded_at TEXT, drive_file_id TEXT,
+        drive_web_view_link TEXT, upload_attempts INTEGER DEFAULT 0, upload_error TEXT
+      );
+    `);
+    const firstImport = importWatchdogDiagnostics(db, importAppData);
+    assert.ok(firstImport.imported >= 1);
+    assert.strictEqual(db.prepare("SELECT COUNT(*) count FROM app_diagnostic_logs WHERE area = 'watchdog'").get().count, firstImport.imported);
+    const secondImport = importWatchdogDiagnostics(db, importAppData);
+    assert.strictEqual(secondImport.imported, 0);
+  } finally {
+    db.close();
+  }
+
+  console.log('✓ watchdog restart, locks, single-instance, and Drive diagnostic handoff simulations passed');
 } finally {
   fs.rmSync(testRoot, { recursive: true, force: true });
 }

@@ -208,6 +208,7 @@ function registerLazyApplication() {
   } = require('./services/diagnosticLogService.cjs');
   const ctx = { db, appDataPath, BASE_DIR };
   const { createSiteContextMiddleware } = require('./middleware/siteContext.cjs');
+  const { importWatchdogDiagnostics } = require('./services/watchdogDiagnosticImportService.cjs');
   // Stable releases keep high-volume successful read diagnostics off by default.
   // Set DIAGNOSTIC_VERBOSE_INITIAL=true temporarily when a field investigation
   // needs every successful API read. Failures and mutation/sync routes are
@@ -247,6 +248,20 @@ function registerLazyApplication() {
       });
     }, 15_000);
   };
+  try {
+    const watchdogImport = importWatchdogDiagnostics(db, appDataPath);
+    if (watchdogImport.imported > 0) scheduleDiagnosticUpload();
+  } catch (error) {
+    recordDiagnostic(db, appDataPath, {
+      level: 'error',
+      area: 'watchdog',
+      action: 'diagnostic-import',
+      result: 'failed',
+      message: 'watchdog diagnostic import failed',
+      details: { errorName: error.name, errorMessage: error.message },
+    });
+    scheduleDiagnosticUpload();
+  }
   app.use(createSiteContextMiddleware(db, {
     reportDiagnostic(event) {
       recordDiagnostic(db, appDataPath, event);

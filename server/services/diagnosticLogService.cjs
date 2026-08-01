@@ -294,7 +294,10 @@ function parseDetailsJson(value) {
 
 function recordDiagnostic(db, appDataPath, event = {}) {
   const site = getSiteInfo(db);
-  const now = new Date().toISOString();
+  const eventTime = event.createdAt ? new Date(event.createdAt) : null;
+  const now = eventTime && Number.isFinite(eventTime.getTime())
+    ? eventTime.toISOString()
+    : new Date().toISOString();
   const payload = {
     created_at: now,
     level: event.level || 'info',
