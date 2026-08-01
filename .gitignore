@@ -7,6 +7,8 @@ logs/
 # Dependencies and build output
 node_modules/
 dist/
+!watchdog/dist/
+!watchdog/dist/OsooWatchdog.exe
 dist-ssr/
 build/
 release/
