@@ -208,7 +208,6 @@ function registerLazyApplication() {
   } = require('./services/diagnosticLogService.cjs');
   const ctx = { db, appDataPath, BASE_DIR };
   const { createSiteContextMiddleware } = require('./middleware/siteContext.cjs');
-  app.use(createSiteContextMiddleware(db));
   // Stable releases keep high-volume successful read diagnostics off by default.
   // Set DIAGNOSTIC_VERBOSE_INITIAL=true temporarily when a field investigation
   // needs every successful API read. Failures and mutation/sync routes are
@@ -248,6 +247,12 @@ function registerLazyApplication() {
       });
     }, 15_000);
   };
+  app.use(createSiteContextMiddleware(db, {
+    reportDiagnostic(event) {
+      recordDiagnostic(db, appDataPath, event);
+      scheduleDiagnosticUpload();
+    },
+  }));
 
   // --- 초기 배포 진단 로그 ---
   // 1.0.x 현장 안정화 기간에는 /api/ping을 제외한 API 흐름을 넓게 기록한다.

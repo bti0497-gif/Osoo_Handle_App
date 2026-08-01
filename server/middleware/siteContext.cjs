@@ -22,6 +22,19 @@ function sendSiteContextError(res, status, code, message) {
   return res.status(status).json({ success: false, code, message, userMessage: message });
 }
 
+function createRateLimitedReporter(reportDiagnostic, cooldownMs = 5 * 60 * 1000) {
+  const reportedAt = new Map();
+  return (event) => {
+    if (typeof reportDiagnostic !== 'function') return;
+    const details = event.details || {};
+    const key = [event.action, details.method, details.path, details.requestedSiteId, details.defaultSiteId].join('|');
+    const now = Date.now();
+    if (now - (reportedAt.get(key) || 0) < cooldownMs) return;
+    reportedAt.set(key, now);
+    reportDiagnostic(event);
+  };
+}
+
 function attachSiteContext(req, site, { injectLegacyFields = true } = {}) {
   req.siteContext = {
     siteId: String(site.id),
@@ -47,7 +60,8 @@ function attachSiteContext(req, site, { injectLegacyFields = true } = {}) {
   }
 }
 
-function createSiteContextMiddleware(db) {
+function createSiteContextMiddleware(db, options = {}) {
+  const report = createRateLimitedReporter(options.reportDiagnostic, options.diagnosticCooldownMs);
   return function siteContextMiddleware(req, res, next) {
     if (!String(req.path || '').startsWith('/api/')) return next();
 
@@ -62,8 +76,19 @@ function createSiteContextMiddleware(db) {
         ? String(settings.primary_site_id || settings.site_id || '').trim()
         : String(settings.site_id || '').trim();
       const siteId = requestedSiteId || defaultSiteId;
+      const diagnosticDetails = {
+        method: req.method,
+        path: req.path,
+        requestedSiteId,
+        defaultSiteId,
+        resolvedSiteId: siteId,
+      };
       if (!siteId) {
-        if (siteOptional) return next();
+        if (siteOptional) {
+          report({ level: 'warn', area: 'site-context', action: 'recovery-route-allowed', result: 'allowed', message: 'site context is missing; recovery route remains available', details: { ...diagnosticDetails, reason: 'required' } });
+          return next();
+        }
+        report({ level: 'error', area: 'site-context', action: 'request-blocked', result: 'failed', message: 'operational request blocked because site context is missing', details: { ...diagnosticDetails, code: 'SITE_CONTEXT_REQUIRED', statusCode: 409 } });
         return sendSiteContextError(res, 409, 'SITE_CONTEXT_REQUIRED', '현장 설정이 필요합니다. 관리자로 로그인하여 현장을 먼저 설정해 주세요.');
       }
 
@@ -71,7 +96,11 @@ function createSiteContextMiddleware(db) {
         ? [settings.primary_site_id, settings.secondary_site_id].map((value) => String(value || '').trim()).filter(Boolean)
         : [String(settings.site_id || '').trim()].filter(Boolean);
       if (!allowedSiteIds.includes(siteId)) {
-        if (siteOptional) return next();
+        if (siteOptional) {
+          report({ level: 'warn', area: 'site-context', action: 'recovery-route-allowed', result: 'allowed', message: 'site context is not allowed; recovery route remains available', details: { ...diagnosticDetails, reason: 'forbidden', allowedSiteIds } });
+          return next();
+        }
+        report({ level: 'error', area: 'site-context', action: 'request-blocked', result: 'failed', message: 'operational request blocked because site context is not allowed', details: { ...diagnosticDetails, code: 'SITE_CONTEXT_FORBIDDEN', statusCode: 403, allowedSiteIds } });
         return sendSiteContextError(res, 403, 'SITE_CONTEXT_FORBIDDEN', '이 창에서 사용할 수 없는 현장입니다. 창을 닫고 올바른 방향 버튼으로 다시 열어 주세요.');
       }
 
@@ -80,7 +109,11 @@ function createSiteContextMiddleware(db) {
         FROM sites WHERE id = ? AND COALESCE(is_active, 1) = 1
       `).get(siteId);
       if (!site) {
-        if (siteOptional) return next();
+        if (siteOptional) {
+          report({ level: 'warn', area: 'site-context', action: 'recovery-route-allowed', result: 'allowed', message: 'configured site is missing or inactive; recovery route remains available', details: { ...diagnosticDetails, reason: 'invalid' } });
+          return next();
+        }
+        report({ level: 'error', area: 'site-context', action: 'request-blocked', result: 'failed', message: 'operational request blocked because configured site is missing or inactive', details: { ...diagnosticDetails, code: 'SITE_CONTEXT_INVALID', statusCode: 409 } });
         return sendSiteContextError(res, 409, 'SITE_CONTEXT_INVALID', '선택된 현장 정보를 로컬 DB에서 찾을 수 없습니다. 관리자로 로그인하여 현장 설정을 복구해 주세요.');
       }
 
@@ -92,6 +125,7 @@ function createSiteContextMiddleware(db) {
       const querySiteId = String(req.query?.site_id || req.query?.siteId || '').trim();
       const bodySiteId = String(req.body?.site_id || req.body?.siteId || '').trim();
       if ((querySiteId && querySiteId !== siteId) || (bodySiteId && bodySiteId !== siteId)) {
+        report({ level: 'error', area: 'site-context', action: 'request-blocked', result: 'failed', message: 'operational request blocked because site identifiers do not match', details: { ...diagnosticDetails, code: 'SITE_CONTEXT_MISMATCH', statusCode: 409, querySiteId, bodySiteId } });
         return sendSiteContextError(res, 409, 'SITE_CONTEXT_MISMATCH', '요청 현장과 현재 창의 현장이 일치하지 않아 작업을 중단했습니다.');
       }
 
@@ -99,6 +133,7 @@ function createSiteContextMiddleware(db) {
       return next();
     } catch (error) {
       console.error('[SiteContext] Failed to resolve request scope:', error.message);
+      report({ level: 'error', area: 'site-context', action: 'resolution-failed', result: 'failed', message: 'site context resolution failed', details: { code: 'SITE_CONTEXT_RESOLUTION_FAILED', statusCode: 500, method: req.method, path: req.path, errorName: error.name, errorMessage: error.message } });
       return sendSiteContextError(res, 500, 'SITE_CONTEXT_RESOLUTION_FAILED', '현장 범위를 확인하지 못했습니다. 앱을 다시 시작한 뒤 재시도해 주세요.');
     }
   };

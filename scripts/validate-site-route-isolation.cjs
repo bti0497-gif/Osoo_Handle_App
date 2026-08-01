@@ -68,8 +68,14 @@ async function main() {
     ensureSiteDataIsolation(db);
 
     const app = express();
+    const siteDiagnostics = [];
     app.use(express.json());
-    app.use(createSiteContextMiddleware(db));
+    app.use(createSiteContextMiddleware(db, {
+      reportDiagnostic(event) {
+        siteDiagnostics.push(event);
+      },
+      diagnosticCooldownMs: 60_000,
+    }));
     app.post('/api/auth/local-login', (req, res) => res.json({ success: true, siteContext: req.siteContext || null }));
     app.post('/api/settings/select-site', (req, res) => res.json({ success: true, requestedSiteId: req.body?.siteId || '' }));
     app.use(require('../server/routes/flowRoutes.cjs')(db));
@@ -205,6 +211,15 @@ async function main() {
     const operationalWithoutSite = await fetch(`${baseUrl}/api/flows/history`);
     assert.strictEqual(operationalWithoutSite.status, 409);
     assert.strictEqual((await operationalWithoutSite.json()).code, 'SITE_CONTEXT_REQUIRED');
+    const requiredDiagnostics = siteDiagnostics.filter((event) => event.details?.code === 'SITE_CONTEXT_REQUIRED');
+    assert.strictEqual(requiredDiagnostics.length, 1);
+    assert.strictEqual(requiredDiagnostics[0].area, 'site-context');
+    assert.strictEqual(requiredDiagnostics[0].action, 'request-blocked');
+    assert.ok(siteDiagnostics.some((event) => event.action === 'recovery-route-allowed' && event.details?.reason === 'required'));
+
+    const repeatedOperationalWithoutSite = await fetch(`${baseUrl}/api/flows/history`);
+    assert.strictEqual(repeatedOperationalWithoutSite.status, 409);
+    assert.strictEqual(siteDiagnostics.filter((event) => event.details?.code === 'SITE_CONTEXT_REQUIRED').length, 1);
     console.log('✓ 양방향 창별 유량·약품·키트 HTTP 저장 및 조회 분리 검증 통과');
     console.log('✓ 공사입력도우미 현장별 초기 조회·설정 보조항목 제외 검증 통과');
     console.log('✓ 허용되지 않은 site_id 요청 차단 검증 통과');
