@@ -113,6 +113,7 @@ export const AuthModel = {
         try {
             const data = await apiClient.post('/api/settings/select-site', { siteId });
             if (!data.success) throw new Error(data.message || '현장 전환 실패');
+            if (data?.site?.id) apiClient.setWindowSiteContext(data.site.id);
             return data;
         } catch (e) {
             console.error('[AuthModel] 현장 전환 오류:', e);

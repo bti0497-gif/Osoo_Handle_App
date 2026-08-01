@@ -44,7 +44,11 @@ export const SettingsModel = {
     },
 
     async selectSite(siteId) {
-        return mutateSettings(() => apiClient.post('/api/settings/select-site', { siteId }));
+        return mutateSettings(async () => {
+            const result = await apiClient.post('/api/settings/select-site', { siteId });
+            if (result?.success && result?.site?.id) apiClient.setWindowSiteContext(result.site.id);
+            return result;
+        });
     },
 
     async inspectRoadworkHistoryRestore(documents, range = {}) {

@@ -70,6 +70,8 @@ async function main() {
     const app = express();
     app.use(express.json());
     app.use(createSiteContextMiddleware(db));
+    app.post('/api/auth/local-login', (req, res) => res.json({ success: true, siteContext: req.siteContext || null }));
+    app.post('/api/settings/select-site', (req, res) => res.json({ success: true, requestedSiteId: req.body?.siteId || '' }));
     app.use(require('../server/routes/flowRoutes.cjs')(db));
     app.use(require('../server/routes/medicineRoutes.cjs')(db));
     app.use(require('../server/routes/kitRoutes.cjs')(db));
@@ -138,9 +140,33 @@ async function main() {
       headers: { 'x-osoo-site-id': 'site-b' },
     });
     assert.strictEqual(singleSiteSecondary.status, 403);
+
+    const siteSwitch = await fetch(`${baseUrl}/api/settings/select-site`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-osoo-site-id': 'site-a' },
+      body: JSON.stringify({ siteId: 'site-b' }),
+    });
+    assert.strictEqual(siteSwitch.status, 200);
+    assert.strictEqual((await siteSwitch.json()).requestedSiteId, 'site-b');
+
+    db.prepare(`
+      UPDATE app_settings
+      SET site_id = NULL, primary_site_id = NULL, secondary_site_id = NULL
+      WHERE id = 1
+    `).run();
+    const loginWithoutSite = await fetch(`${baseUrl}/api/auth/local-login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '관리자', password: 'test' }),
+    });
+    assert.strictEqual(loginWithoutSite.status, 200);
+    const operationalWithoutSite = await fetch(`${baseUrl}/api/flows/history`);
+    assert.strictEqual(operationalWithoutSite.status, 409);
+    assert.strictEqual((await operationalWithoutSite.json()).code, 'SITE_CONTEXT_REQUIRED');
     console.log('✓ 양방향 창별 유량·약품·키트 HTTP 저장 및 조회 분리 검증 통과');
     console.log('✓ 공사입력도우미 현장별 초기 조회·설정 보조항목 제외 검증 통과');
     console.log('✓ 허용되지 않은 site_id 요청 차단 검증 통과');
+    console.log('✓ 로그인·현장전환 복구 경로 허용 및 무범위 운영 조회 차단 검증 통과');
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
     db.close();

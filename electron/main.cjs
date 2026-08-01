@@ -4,6 +4,7 @@ const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const { fork, spawnSync } = require('child_process');
+const { writeMaintenanceLock, clearMaintenanceLockIfReason } = require('./maintenanceLock.cjs');
 const { setupAutoUpdater, checkForUpdates, installDownloadedUpdateAndQuit, hasDownloadedUpdate } = require('./updater.cjs');
 
 function isBrokenPipeError(error) {
@@ -50,6 +51,8 @@ let serverHealthFailures = 0;
 let serverInstanceToken = null;
 let serverLaunchedAt = 0;
 
+const FULL_EXIT_LOCK_TTL_MS = 8 * 60 * 60 * 1000;
+
 const DEDICATED_SERVER_PORT = 18731;
 const SERVER_GUARD_INTERVAL_MS = 3000;
 const SERVER_HEALTH_FAILURE_LIMIT = 3;
@@ -58,6 +61,62 @@ const SERVER_STARTUP_GRACE_MS = 120000;
 const isDev = !app.isPackaged;
 const useExternalServer = isDev && process.env.OSOO_EXTERNAL_SERVER === '1';
 const isBackgroundStartup = process.argv.includes('--osoo-background-start');
+
+function getOsooAppDataPath() {
+  return path.join(
+    process.env.APPDATA || process.env.LOCALAPPDATA || app.getPath('appData'),
+    'Osoo_Handle_App'
+  );
+}
+
+function resolveDefaultWindowSiteId() {
+  const dbPath = path.join(getOsooAppDataPath(), 'osoo.db');
+  if (!fs.existsSync(dbPath)) return '';
+
+  let db = null;
+  try {
+    const Database = require('better-sqlite3');
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    const row = db.prepare(`
+      SELECT site_id, multi_site_enabled, primary_site_id
+      FROM app_settings
+      WHERE id = 1
+    `).get() || {};
+    const multiEnabled = Number(row.multi_site_enabled || 0) === 1;
+    return String(
+      (multiEnabled ? row.primary_site_id : row.site_id) || row.site_id || ''
+    ).trim();
+  } catch (error) {
+    console.warn('[Electron] Failed to resolve default window siteId:', error.message);
+    return '';
+  } finally {
+    try { db?.close(); } catch (_) {}
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForServerReadyAndClearUpdateLock(timeoutMs = SERVER_STARTUP_GRACE_MS) {
+  if (useExternalServer) return;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const healthy = await checkEmbeddedServerHealth();
+    if (healthy) {
+      const cleared = clearMaintenanceLockIfReason('update', {
+        onlyIfNotExpired: true,
+        clearOnInvalidExpiresAt: true,
+      });
+      if (cleared) {
+        console.log('[MaintenanceLock] Cleared update lock after server-ready startup');
+      }
+      return;
+    }
+    await delay(1000);
+  }
+  console.warn('[MaintenanceLock] Server did not reach ready state in time; update lock untouched');
+}
 
 function shouldKeepEmbeddedServerAlive() {
   return !isQuitting && !isUpdateInstalling && !useExternalServer;
@@ -340,6 +399,7 @@ function stopServerGracefully(timeoutMs = 3000) {
 }
 
 function createWindow({ showOnReady = true } = {}) {
+  const defaultSiteId = resolveDefaultWindowSiteId();
   const iconPath = isDev
     ? path.join(__dirname, '..', 'public', 'icon.ico')
     : path.join(process.resourcesPath, 'app.asar.unpacked', 'public', 'icon.ico');
@@ -369,10 +429,21 @@ function createWindow({ showOnReady = true } = {}) {
   });
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:18735');
+    const url = defaultSiteId
+      ? `http://localhost:18735/?siteId=${encodeURIComponent(defaultSiteId)}`
+      : 'http://localhost:18735';
+    mainWindow.loadURL(url);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    const indexPath = path.join(__dirname, '..', 'dist', 'index.html');
+    if (defaultSiteId) {
+      mainWindow.loadFile(indexPath, { query: { siteId: defaultSiteId } });
+    } else {
+      mainWindow.loadFile(indexPath);
+    }
+  }
+  if (defaultSiteId) {
+    console.log(`[Electron] Main window started with default siteId=${defaultSiteId}`);
   }
 
   mainWindow.on('close', (event) => {
@@ -604,12 +675,13 @@ function createTray() {
   tray = new Tray(iconPath);
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: '열기',
+      label: '창 열기',
       click: () => {
         if (mainWindow) {
           mainWindow.show();
           mainWindow.focus();
           mainWindow.webContents.focus();
+          console.log('[Tray] Restore requested from menu');
           setTimeout(() => {
             if (!mainWindow || mainWindow.isDestroyed()) return;
             mainWindow.focus();
@@ -621,9 +693,16 @@ function createTray() {
     },
     { type: 'separator' },
     {
-      label: '종료',
+      label: '완전 종료',
       click: () => {
+        try {
+          writeMaintenanceLock('full-exit', FULL_EXIT_LOCK_TTL_MS);
+          console.log('[MaintenanceLock] Full-exit lock written');
+        } catch (error) {
+          console.warn('[MaintenanceLock] Failed to write full-exit lock:', error.message);
+        }
         isQuitting = true;
+        console.log('[Tray] Full exit requested by user');
         app.quit();
       }
     }
@@ -637,6 +716,7 @@ function createTray() {
       mainWindow.show();
       mainWindow.focus();
       mainWindow.webContents.focus();
+      console.log('[Tray] Restore requested by double-click');
       setTimeout(() => {
         if (!mainWindow || mainWindow.isDestroyed()) return;
         mainWindow.focus();
@@ -670,6 +750,7 @@ if (!gotTheLock) {
 }
 
 app.whenReady().then(() => {
+  console.log(`[Electron] App startup (background=${isBackgroundStartup ? 'yes' : 'no'})`);
   configureWindowsBackgroundStartup();
   setupRoadworkSafeUsePopupGuard();
   try {
@@ -684,6 +765,9 @@ app.whenReady().then(() => {
   startServerGuard();
   createWindow({ showOnReady: !isBackgroundStartup });
   createTray();
+  waitForServerReadyAndClearUpdateLock().catch((error) => {
+    console.warn('[MaintenanceLock] Failed while waiting for server readiness:', error.message);
+  });
 
   if (!isDev) {
     setupAutoUpdater(mainWindow, {
@@ -708,6 +792,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  console.log('[Electron] before-quit: app shutdown sequence started');
   if (serverGuardTimer) clearInterval(serverGuardTimer);
   if (serverRestartTimer) clearTimeout(serverRestartTimer);
   serverGuardTimer = null;
@@ -716,6 +801,10 @@ app.on('before-quit', () => {
 });
 
 ipcMain.handle('app:getVersion', () => app.getVersion());
+ipcMain.handle('app:getDefaultSiteContext', () => {
+  const siteId = resolveDefaultWindowSiteId();
+  return { siteId };
+});
 ipcMain.handle('app:getWindowFocusState', () => {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return {

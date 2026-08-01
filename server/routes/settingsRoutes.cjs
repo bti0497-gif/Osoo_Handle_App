@@ -273,7 +273,7 @@ module.exports = function (db, baseDir, appDataPath) {
         WHERE id = 1
       `).get() || {};
       const isScopedSiteWindow = Number(multiSite.multi_site_enabled || 0) === 1
-        && Boolean(String(req.get('x-osoo-site-id') || '').trim());
+        && Boolean(String(req.siteContext?.siteId || '').trim());
       const site = isScopedSiteWindow
         ? await siteSettingsService.resolveSiteSelection(db, req.siteContext?.siteId)
         : await siteSettingsService.selectSite(db, req.body?.siteId);

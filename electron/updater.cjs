@@ -5,6 +5,30 @@ let installingUpdate = false;
 let downloadedVersion = null;
 let updateLogPath = null;
 
+const fs = require('fs');
+const path = require('path');
+const { writeMaintenanceLock, clearMaintenanceLockIfReason } = require('./maintenanceLock.cjs');
+
+const UPDATE_LOCK_TTL_MS = 15 * 60 * 1000;
+
+function writeUpdateMaintenanceLock() {
+  const payload = writeMaintenanceLock('update', UPDATE_LOCK_TTL_MS);
+  writeUpdateLog('maintenance-lock-written', {
+    reason: payload.reason,
+    expiresAt: payload.expiresAt,
+  });
+}
+
+function clearUpdateMaintenanceLock() {
+  try {
+    const cleared = clearMaintenanceLockIfReason('update', { clearWhenMalformed: true });
+    if (!cleared) return;
+    writeUpdateLog('maintenance-lock-cleared', { reason: 'install-launch-failed' });
+  } catch (error) {
+    writeUpdateLog('maintenance-lock-clear-failed', { message: error.message });
+  }
+}
+
 function writeUpdateLog(event, details = {}) {
   const entry = JSON.stringify({
     timestamp: new Date().toISOString(),
@@ -14,8 +38,6 @@ function writeUpdateLog(event, details = {}) {
   console.log(`[Updater] ${entry}`);
   if (!updateLogPath) return;
   try {
-    const fs = require('fs');
-    const path = require('path');
     fs.mkdirSync(path.dirname(updateLogPath), { recursive: true });
     fs.appendFileSync(updateLogPath, `${entry}\n`, 'utf8');
   } catch (error) {
@@ -152,8 +174,15 @@ async function installDownloadedUpdateAndQuit() {
     installerPath,
     elevationRequired: process.platform === 'win32',
   });
-  autoUpdater.quitAndInstall(false, true);
-  return true;
+  writeUpdateMaintenanceLock();
+  try {
+    autoUpdater.quitAndInstall(false, true);
+    return true;
+  } catch (error) {
+    clearUpdateMaintenanceLock();
+    writeUpdateLog('installer-launch-failed', { message: error.message });
+    throw error;
+  }
 }
 
 function hasDownloadedUpdate() {

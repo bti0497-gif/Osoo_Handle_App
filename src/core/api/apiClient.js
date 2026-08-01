@@ -14,6 +14,39 @@ class ApiError extends Error {
   }
 }
 
+let defaultSiteContextPromise = null;
+let siteContextOverride = null;
+
+async function resolveSiteIdForRequest() {
+  if (siteContextOverride !== null) return siteContextOverride;
+  const fromQuery = new URLSearchParams(window.location.search).get('siteId');
+  if (fromQuery) return String(fromQuery).trim();
+  try {
+    if (!defaultSiteContextPromise) {
+      defaultSiteContextPromise = Promise.resolve(window.electronAPI?.getDefaultSiteContext?.())
+        .catch(() => ({ siteId: '' }));
+    }
+    const context = await defaultSiteContextPromise;
+    return String(context?.siteId || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function setWindowSiteContext(siteId) {
+  const normalized = String(siteId || '').trim();
+  siteContextOverride = normalized;
+  defaultSiteContextPromise = Promise.resolve({ siteId: normalized });
+  try {
+    const url = new URL(window.location.href);
+    if (normalized) url.searchParams.set('siteId', normalized);
+    else url.searchParams.delete('siteId');
+    window.history.replaceState(window.history.state, '', url.toString());
+  } catch (error) {
+    console.warn('[API] 브라우저 URL의 현장 컨텍스트 갱신을 건너뜁니다:', error?.message || error);
+  }
+}
+
 async function request(endpoint, options = {}) {
   const { timeout = 30000, raw = false, _hasRetried = false, ...fetchOptions } = options;
 
@@ -25,8 +58,8 @@ async function request(endpoint, options = {}) {
     const serverToken = await window.electronAPI?.getServerToken?.();
     const headers = new Headers(fetchOptions.headers || {});
     if (serverToken) headers.set('x-osoo-server-token', serverToken);
-    const windowSiteId = new URLSearchParams(window.location.search).get('siteId');
-    if (windowSiteId) headers.set('x-osoo-site-id', windowSiteId);
+    const requestSiteId = await resolveSiteIdForRequest();
+    if (requestSiteId) headers.set('x-osoo-site-id', requestSiteId);
     const response = await fetch(url, {
       ...fetchOptions,
       headers,
@@ -152,4 +185,5 @@ export const apiClient = {
   },
 
   ApiError,
+  setWindowSiteContext,
 };
