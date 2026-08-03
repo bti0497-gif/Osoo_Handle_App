@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 140,
-  "digest": "73feb358938fd98bd91f1c3588f9e2bd10b567de0a14fd02ceabffe05254e83e",
+  "endpointCount": 152,
+  "digest": "e0a6b8d2d9e21a01657a97b9ec304e1d080da92403dfe90171a9de1a287e9548",
   "endpoints": [
     {
       "method": "GET",
@@ -14,6 +14,70 @@
     {
       "method": "POST",
       "path": "/api/auth/attendance",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/background-tasks/claim",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/background-tasks/complete",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/background-tasks/fail",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/background-tasks/pending",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/background-tasks/prepare",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/background-tasks/run-data-sync",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/background-tasks/run-diagnostic-sync",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/background-tasks/run-file-sync",
       "module": "./routes/authRoutes.cjs",
       "tier": 0,
       "mutation": true,
@@ -132,6 +196,14 @@
       "syncWatch": false
     },
     {
+      "method": "POST",
+      "path": "/api/auth/user-activity",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
       "method": "DELETE",
       "path": "/api/board/comments/:id",
       "module": "./routes/boardRoutes.cjs",
@@ -228,8 +300,24 @@
       "syncWatch": false
     },
     {
+      "method": "GET",
+      "path": "/api/certificates/local/:id/:kind",
+      "module": "./routes/certificateRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
       "method": "POST",
       "path": "/api/certificates/sync-cache",
+      "module": "./routes/certificateRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/certificates/sync-local-files",
       "module": "./routes/certificateRoutes.cjs",
       "tier": 2,
       "mutation": true,
@@ -958,6 +1046,14 @@
     {
       "method": "GET",
       "path": "/api/sludge-photos/flow-amount",
+      "module": "./routes/sludgePhotoRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sludge-photos/photo",
       "module": "./routes/sludgePhotoRoutes.cjs",
       "tier": 2,
       "mutation": false,

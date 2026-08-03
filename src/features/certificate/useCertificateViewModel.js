@@ -56,7 +56,9 @@ function normalizeRecord(item) {
         sampledAt: toDisplayDate(item.sampledAt || item.sampled_at),
         issuedAt: toDisplayDate(item.issuedAt || item.issued_at),
         downloadUrl: item.downloadUrl || item.download_url || '',
-        previewUrl: CertificateModel.getPreviewUrl(id, fileName),
+        previewUrl: CertificateModel.resolveLocalUrl(item.previewUrl || item.preview_url),
+        localCached: Boolean(item.localCached ?? item.local_cached),
+        localFileUrl: CertificateModel.resolveLocalUrl(item.localFileUrl || item.local_file_url),
     };
 }
 
@@ -115,6 +117,12 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
 
     useEffect(() => {
         loadRecords();
+    }, [loadRecords]);
+
+    useEffect(() => {
+        const handleCacheUpdated = () => loadRecords();
+        window.addEventListener('osoo:certificate-cache-updated', handleCacheUpdated);
+        return () => window.removeEventListener('osoo:certificate-cache-updated', handleCacheUpdated);
     }, [loadRecords]);
 
     const visibleRecords = useMemo(() => {
@@ -211,8 +219,13 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
 
     const openPreview = useCallback((item) => {
         if (!item?.id) return;
-        window.open(CertificateModel.getPreviewUrl(item.id, item.fileName), '_blank', 'noopener,noreferrer');
-    }, []);
+        const localUrl = item.localFileUrl || item.previewUrl;
+        if (!localUrl) {
+            showToast?.('성적서를 로컬로 내려받는 중입니다. 잠시 후 다시 열어 주세요.', 'info');
+            return;
+        }
+        window.open(localUrl, '_blank', 'noopener,noreferrer');
+    }, [showToast]);
 
     const yearOptions = useMemo(() => {
         const set = new Set([currentYear, currentYear - 1, selectedYear]);

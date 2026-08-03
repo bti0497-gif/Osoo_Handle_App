@@ -1,0 +1,56 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = path.join(__dirname, '..');
+const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
+const app = read('src/App.jsx');
+const authRoutes = read('server/routes/authRoutes.cjs');
+const boardRoutes = read('server/routes/boardRoutes.cjs');
+const sludgeRoutes = read('server/routes/sludgePhotoRoutes.cjs');
+const medicineRoutes = read('server/routes/medicineInRoutes.cjs');
+const waterPhotos = read('server/services/qntechWaterPhotoImportService.cjs');
+const fileTasks = read('server/services/backgroundFileTaskService.cjs');
+const bigQueryTrigger = read('server/services/bigQueryTriggerService.cjs');
+const popupWatcher = read('src/features/board/usePopupNoticeWatcher.js');
+const serverIndex = read('server/index.cjs');
+const updater = read('electron/updater.cjs');
+
+assert.match(app, /BACKGROUND_IDLE_DELAY_MS\s*=\s*30\s*\*\s*60\s*\*\s*1000/);
+assert.match(app, /\['attendance-sync', 'data-sync', 'file-sync', 'certificate-cache', 'board-cache', 'diagnostic-sync', 'update-check'\]/);
+assert.match(app, /activityEvents\s*=\s*\['keydown', 'pointerdown', 'input', 'change', 'wheel'\]/);
+assert.match(authRoutes, /res\.json\(\{ success: true, member: enrichMemberWithSites\(member\), source: 'local' \}\)/);
+assert.doesNotMatch(authRoutes, /triggerBigQuerySync/);
+assert.doesNotMatch(authRoutes, /auth\/local-login[\s\S]{0,2500}await syncRecentCertificateCacheForSite/);
+assert.match(boardRoutes, /router\.use\('\/api\/board', requireActiveUser\)/);
+assert.doesNotMatch(sludgeRoutes, /await uploadSludgePhotoToDrive/);
+assert.doesNotMatch(medicineRoutes, /await uploadMedicinePhotoToDrive/);
+assert.match(sludgeRoutes, /enqueueBackgroundFileTask/);
+assert.match(medicineRoutes, /enqueueBackgroundFileTask/);
+assert.match(waterPhotos, /taskType: 'management-photo-drive'/);
+assert.match(fileTasks, /CREATE TABLE IF NOT EXISTS background_file_tasks/);
+assert.match(fileTasks, /WHERE status = 'running'/);
+assert.match(fileTasks, /ON CONFLICT\(dedupe_key\) DO UPDATE/);
+assert.match(bigQueryTrigger, /shouldContinue: \(\) => activityVersion === startedAtActivityVersion/);
+assert.doesNotMatch(bigQueryTrigger, /scheduleIdleSync/);
+assert.doesNotMatch(bigQueryTrigger, /function triggerSync/);
+assert.match(authRoutes, /const BACKGROUND_TASK_TYPES = new Set/);
+assert.match(authRoutes, /router\.use\('\/background-tasks', requireBackgroundFieldSession\)/);
+assert.match(authRoutes, /router\.post\('\/sync-attendance-bq', requireBackgroundFieldSession/);
+assert.match(authRoutes, /run-diagnostic-sync/);
+assert.doesNotMatch(popupWatcher, /BoardModel\.fetchPosts/);
+assert.match(popupWatcher, /BoardModel\.getCachedPosts/);
+assert.match(popupWatcher, /osoo:board-cache-updated/);
+assert.doesNotMatch(app, /checkForUpdates\('login'\)/);
+assert.doesNotMatch(serverIndex, /uploadPendingDiagnostics\(db, appDataPath\)/);
+assert.doesNotMatch(serverIndex, /triggerBigQuerySync\('app-startup-delayed'\)/);
+assert.doesNotMatch(serverIndex, /triggerBigQuerySync\(`after-save/);
+assert.match(serverIndex, /markBackgroundTaskPending\('data-sync'\)/);
+assert.doesNotMatch(serverIndex, /i >= tier1Entries\.length\) \{ startBigQueryScheduler/);
+assert.match(updater, /reason === 'manual' \|\| reason === 'status-bar'/);
+assert.match(updater, /manual: installImmediatelyForCurrentDownload/);
+assert.match(app, /if \(info\?\.manual\)[\s\S]*api\.installUpdate/);
+
+console.log('PASS 로컬 우선·30분 유휴·영구 파일 큐·사용자 입력 우선 라우트 계약');

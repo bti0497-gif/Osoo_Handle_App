@@ -1,5 +1,7 @@
 const express = require('express');
 const sharp = require('sharp');
+const fs = require('fs');
+const path = require('path');
 const { PDFDocument } = require('pdf-lib');
 const { drive } = require('../services/driveService.cjs');
 const { isSheetsConfigured: isSitesSheetsConfigured, getSites: getSitesFromSheets } = require('../services/sitesSheetsService.cjs');
@@ -1009,7 +1011,127 @@ function toNullableNumber(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-module.exports = function () {
+module.exports = function (appDataPath) {
+  const localCertificateRoot = path.join(appDataPath, '성적서');
+  const localSyncJobs = new Map();
+
+  function safeLocalSegment(value, fallback = 'file') {
+    const safe = String(value || '').replace(/[\\/:*?"<>|\r\n]+/g, '_').trim();
+    return (safe || fallback).slice(0, 180);
+  }
+
+  function localMonthDir(year, month) {
+    return path.join(localCertificateRoot, normalizeYear(year), normalizeMonth(month));
+  }
+
+  function findLocalCertificate(id, year, month) {
+    const dir = localMonthDir(year, month);
+    if (!fs.existsSync(dir)) return null;
+    const prefix = `${safeLocalSegment(id, 'certificate')}__`;
+    const files = fs.readdirSync(dir).filter((name) => name.startsWith(prefix));
+    const original = files.find((name) => !name.endsWith('.preview.jpg'));
+    const preview = files.find((name) => name.endsWith('.preview.jpg'));
+    return original ? {
+      filePath: path.join(dir, original),
+      previewPath: preview ? path.join(dir, preview) : '',
+      fileName: original.slice(prefix.length),
+    } : null;
+  }
+
+  function listLocalCertificates(year, month, siteNames = []) {
+    const dir = localMonthDir(year, month);
+    if (!fs.existsSync(dir)) return [];
+    const allowedSiteKeys = new Set(siteNames.map(normalizeSiteNameKey).filter(Boolean));
+    return fs.readdirSync(dir)
+      .filter((name) => name.includes('__') && !name.endsWith('.preview.jpg') && !name.endsWith('.downloading'))
+      .map((storedName) => {
+        const separator = storedName.indexOf('__');
+        const id = storedName.slice(0, separator);
+        const fileName = storedName.slice(separator + 2);
+        const parsed = parseManualCertificateFileName(fileName);
+        const legacy = parsed ? null : parseCertMeta(fileName);
+        const siteName = parsed?.site_name_raw || '';
+        const siteKey = normalizeSiteNameKey(siteName);
+        if (allowedSiteKeys.size > 0 && (!siteKey || !allowedSiteKeys.has(siteKey))) return null;
+        const reportDate = parsed ? normalizeDateLike(parsed.yyyymmdd) : (legacy?.issuedAt || '');
+        const cached = findLocalCertificate(id, year, month);
+        return {
+          id, fileName, siteName: siteName || '공통',
+          sampledAt: reportDate, issuedAt: reportDate,
+          category: parsed?.prefix || legacy?.category || '',
+          year, month, localCached: true,
+          previewUrl: cached?.previewPath
+            ? `/api/certificates/local/${encodeURIComponent(id)}/preview?year=${year}&month=${month}`
+            : '',
+          localFileUrl: `/api/certificates/local/${encodeURIComponent(id)}/file?year=${year}&month=${month}`,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => String(b.issuedAt).localeCompare(String(a.issuedAt)));
+  }
+
+  async function cacheCertificateFile({ id, year, month, expectedName, allowedSiteKeys }) {
+    const existing = findLocalCertificate(id, year, month);
+    if (existing?.previewPath || existing?.filePath) return existing;
+
+    const downloaded = await downloadDriveFileWithMeta(id);
+    const fileName = String(downloaded?.meta?.name || expectedName || 'certificate').trim();
+    if (!isAllowedManualMedia(toBaseName(fileName))) {
+      throw new Error('성적서 형식이 아닌 파일은 로컬 캐시에 저장할 수 없습니다.');
+    }
+    const parsed = parseManualCertificateFileName(fileName);
+    const legacy = parsed ? null : parseCertMeta(fileName);
+    const parsedSiteKey = normalizeSiteNameKey(parsed?.site_name_raw || '');
+    if (allowedSiteKeys.size > 0 && parsedSiteKey && !allowedSiteKeys.has(parsedSiteKey)) {
+      throw new Error('현재 현장의 성적서가 아닙니다.');
+    }
+    if (!parsed && !legacy) throw new Error('성적서 파일명을 확인할 수 없습니다.');
+
+    const dir = localMonthDir(year, month);
+    fs.mkdirSync(dir, { recursive: true });
+    const safeId = safeLocalSegment(id, 'certificate');
+    const safeName = safeLocalSegment(fileName, 'certificate');
+    const targetPath = path.join(dir, `${safeId}__${safeName}`);
+    const temporaryPath = `${targetPath}.downloading`;
+    fs.writeFileSync(temporaryPath, downloaded.buffer);
+    fs.renameSync(temporaryPath, targetPath);
+
+    const mimeType = String(downloaded?.meta?.mimeType || '').toLowerCase();
+    const ext = path.extname(fileName).toLowerCase();
+    const previewPath = `${targetPath}.preview.jpg`;
+    if (mimeType.startsWith('image/') || ['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
+      await sharp(downloaded.buffer, { limitInputPixels: 80_000_000 })
+        .rotate()
+        .resize({ width: 720, height: 960, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 72, mozjpeg: true })
+        .toFile(previewPath);
+    }
+    return findLocalCertificate(id, year, month);
+  }
+
+  async function syncLocalCertificateFiles({ items, year, month, siteNames }) {
+    const key = `${year}-${month}:${siteNames.join('|')}`;
+    if (localSyncJobs.has(key)) return localSyncJobs.get(key);
+    const allowedSiteKeys = new Set(siteNames.map(normalizeSiteNameKey).filter(Boolean));
+    const job = (async () => {
+      const results = [];
+      for (const item of items) {
+        try {
+          await cacheCertificateFile({
+            id: String(item.id || '').trim(), year, month,
+            expectedName: item.fileName, allowedSiteKeys,
+          });
+          results.push({ id: item.id, success: true });
+        } catch (error) {
+          console.warn(`[Certificate local cache] ${item.fileName || item.id}: ${error.message}`);
+          results.push({ id: item.id, success: false, message: error.message });
+        }
+      }
+      return results;
+    })().finally(() => localSyncJobs.delete(key));
+    localSyncJobs.set(key, job);
+    return job;
+  }
   router.get('/api/certificates', async (req, res) => {
     try {
       const role = resolveUserRole(req);
@@ -1039,13 +1161,17 @@ module.exports = function () {
         siteNameFilters.map((name) => normalizeSiteNameKey(name)).filter(Boolean)
       );
       const items = [];
+      const localItems = listLocalCertificates(year, month, siteNameFilters);
+      if (String(req.query.source || 'local').trim().toLowerCase() !== 'drive') {
+        return res.json({ success: true, items: localItems, source: 'local' });
+      }
       if (!drive || !CERTIFICATE_ROOT_FOLDER_ID) {
-        return res.status(400).json({ success: false, message: 'Drive 설정이 필요합니다.' });
+        return res.json({ success: true, items: localItems, offline: true });
       }
 
       // 성적서 메뉴의 파일 목록은 Drive를 단일 원천으로 사용한다.
       // BigQuery water_quality는 성적서 분석값 동기화/업무일지 바인딩용이며 파일 목록에는 사용하지 않는다.
-      {
+      try {
         const folders = await resolveMonthFolders({ year, month });
 
         for (const folder of folders) {
@@ -1101,6 +1227,12 @@ module.exports = function () {
             });
           }
         }
+      } catch (driveError) {
+        if (localItems.length > 0) {
+          console.warn(`[Certificate local cache] Drive 목록 조회 실패, 로컬 목록 사용: ${driveError.message}`);
+          return res.json({ success: true, items: localItems, offline: true });
+        }
+        throw driveError;
       }
 
       items.sort((a, b) => {
@@ -1108,10 +1240,63 @@ module.exports = function () {
         return String(a.fileName).localeCompare(String(b.fileName), 'ko');
       });
 
+      for (const item of items) {
+        const cached = findLocalCertificate(item.id, item.year, item.month);
+        item.localCached = Boolean(cached?.filePath);
+        item.previewUrl = cached?.previewPath
+          ? `/api/certificates/local/${encodeURIComponent(item.id)}/preview?year=${item.year}&month=${item.month}`
+          : '';
+        item.localFileUrl = cached?.filePath
+          ? `/api/certificates/local/${encodeURIComponent(item.id)}/file?year=${item.year}&month=${item.month}`
+          : '';
+      }
+
       res.json({ success: true, items });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message });
     }
+  });
+
+  router.post('/api/certificates/sync-local-files', async (req, res) => {
+    try {
+      const year = normalizeYear(req.body?.year);
+      const month = normalizeMonth(req.body?.month);
+      const currentSiteName = String(req.siteContext?.siteName || '').trim();
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      if (!year || !month || !currentSiteName) {
+        return res.status(400).json({ success: false, message: '현장과 대상 연월이 필요합니다.' });
+      }
+      const safeItems = items
+        .map((item) => ({ id: String(item?.id || '').trim(), fileName: String(item?.fileName || '').trim() }))
+        .filter((item) => item.id && item.fileName)
+        .slice(0, 200);
+      const results = await syncLocalCertificateFiles({
+        items: safeItems,
+        year,
+        month,
+        siteNames: [currentSiteName],
+      });
+      return res.json({
+        success: true,
+        cachedCount: results.filter((item) => item.success).length,
+        failedCount: results.filter((item) => !item.success).length,
+      });
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  router.get('/api/certificates/local/:id/:kind', (req, res) => {
+    const year = normalizeYear(req.query.year);
+    const month = normalizeMonth(req.query.month);
+    const cached = year && month ? findLocalCertificate(req.params.id, year, month) : null;
+    const targetPath = req.params.kind === 'preview' ? cached?.previewPath : cached?.filePath;
+    if (!targetPath || !fs.existsSync(targetPath)) {
+      return res.status(404).json({ success: false, message: '로컬 성적서 파일이 아직 준비되지 않았습니다.' });
+    }
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    if (req.params.kind === 'preview') res.type('image/jpeg');
+    return res.sendFile(targetPath);
   });
 
   router.post('/api/certificates/sync-cache', async (req, res) => {

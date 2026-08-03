@@ -43,6 +43,11 @@ function userQuery(currentUser) {
 }
 
 export const BoardModel = {
+    getCachedPosts(currentUser) {
+        const cached = postsCache.get(boardCacheKey(currentUser));
+        return Array.isArray(cached?.data) ? cached.data : null;
+    },
+
     async fetchSites() {
         const res = await apiClient.get('/api/settings/sites');
         if (!res.success) throw new Error(res.message || '현장 목록 로드 실패');
@@ -140,11 +145,12 @@ export const BoardModel = {
         return res.data;
     },
 
-    async uploadFile(file, { boardId = null, date = null } = {}) {
+    async uploadFile(file, { boardId = null, date = null, purpose = null } = {}) {
         const formData = new FormData();
         formData.append('file', file);
         if (boardId) formData.append('boardId', String(boardId));
         if (date) formData.append('date', String(date));
+        if (purpose) formData.append('purpose', String(purpose));
         return apiClient.upload('/api/upload', formData);
     },
 

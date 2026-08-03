@@ -102,6 +102,7 @@ function popupExpiry(isPopup, requestedDays) {
 
 module.exports = function () {
 
+  // 이 세션은 로그인 성공 시 생성되며 출결 기록·BigQuery 동기화와 무관하다.
   router.use('/api/board', requireActiveUser);
 
   // 1. 게시글 목록

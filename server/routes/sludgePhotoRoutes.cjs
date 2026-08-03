@@ -11,6 +11,7 @@ const {
   openExcelFile,
 } = require('../services/excelOpenService.cjs');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
+const { enqueueBackgroundFileTask } = require('../services/backgroundFileTaskService.cjs');
 const {
   isDriveConfigured,
   drive,
@@ -47,7 +48,7 @@ function sanitizeName(name) {
 //   {appDataPath}/사진관리/슬러지/{YYYY}/{YYYYMMDD}-슬러지{N}.jpg
 //   {appDataPath}/사진관리/슬러지/{YYYY}/{YYYYMMDD}-청소필증.jpg
 // DB columns store only the app URL form, never absolute paths:
-//   /사진관리슬러지/{YYYY}/{fileName}
+//   /사진관리/슬러지/{YYYY}/{fileName}
 function toDateStamp(date) {
   return String(date || '').replace(/-/g, '').slice(0, 8);
 }
@@ -126,9 +127,7 @@ function buildSludgePhotoFileName(date, index = 1) {
 }
 
 function buildSludgePhotoUrl(date, fileName, siteId = '') {
-  const safeSiteId = String(siteId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const prefix = safeSiteId ? `${safeSiteId}/` : '';
-  return `/사진관리슬러지/${prefix}${String(date || '').slice(0, 4)}/${fileName}`;
+  return `/api/sludge-photos/photo?date=${encodeURIComponent(String(date || '').slice(0, 10))}&file=${encodeURIComponent(fileName)}`;
 }
 
 /**
@@ -344,8 +343,10 @@ function resolvePhotoUrl(appDataPath, date, label, siteId = '') {
 function resolveLocalPathFromUrl(appDataPath, url) {
   const raw = String(url || '').trim();
   if (path.isAbsolute(raw) && fs.existsSync(raw)) return raw;
-  if (!raw.startsWith('/사진관리슬러지/')) return null;
-  const relative = raw.replace(/^\/사진관리슬러지\//, '');
+  if (!raw.startsWith('/사진관리/슬러지/') && !raw.startsWith('/사진관리슬러지/')) return null;
+  const relative = raw
+    .replace(/^\/사진관리\/슬러지\//, '')
+    .replace(/^\/사진관리슬러지\//, '');
   const candidate = path.join(appDataPath, '사진관리', '슬러지', relative);
   return fs.existsSync(candidate) ? candidate : null;
 }
@@ -438,6 +439,8 @@ module.exports = function (db, baseDir, appDataPath) {
       const items = rows.map(r => ({
         ...r,
         sludge_photo_url      : resolvePhotoUrl(appDataPath, r.date, '반출', req.siteContext?.siteId),
+        sludge_photo_urls     : listSludgeSequenceFiles(appDataPath, r.date, req.siteContext?.siteId)
+          .map((photo) => buildSludgePhotoUrl(r.date, photo.fileName, req.siteContext?.siteId)),
         certificate_photo_url : resolvePhotoUrl(appDataPath, r.date, '청소필증', req.siteContext?.siteId),
       }));
       res.json({ success: true, items });
@@ -525,8 +528,20 @@ module.exports = function (db, baseDir, appDataPath) {
       const sludgeIndex = sludgeLocalPath
         ? (parseSludgePhotoFileName(path.basename(sludgeLocalPath), date)?.index || 1)
         : 1;
-      const sludgeDriveFile = await uploadSludgePhotoToDrive(db, date, 'sludge', sludgeLocalPath, sludgeIndex, metadata.siteName);
-      const certificateDriveFile = await uploadSludgePhotoToDrive(db, date, 'certificate', certificateLocalPath, 1, metadata.siteName);
+      if (sludgeLocalPath) {
+        enqueueBackgroundFileTask(db, {
+          taskType: 'sludge-photo-drive',
+          dedupeKey: `sludge:${sludgeLocalPath}`,
+          payload: { date, type: 'sludge', localPath: sludgeLocalPath, index: sludgeIndex, siteName: metadata.siteName },
+        });
+      }
+      if (certificateLocalPath) {
+        enqueueBackgroundFileTask(db, {
+          taskType: 'sludge-photo-drive',
+          dedupeKey: `certificate:${certificateLocalPath}`,
+          payload: { date, type: 'certificate', localPath: certificateLocalPath, index: 1, siteName: metadata.siteName },
+        });
+      }
 
       const sludgeUrl = resolvePhotoUrl(appDataPath, date, '반출', metadata.siteId);
       const certUrl   = resolvePhotoUrl(appDataPath, date, '청소필증', metadata.siteId);
@@ -584,8 +599,8 @@ module.exports = function (db, baseDir, appDataPath) {
         certificate_photo_url : certUrl,
         sludge_photo_taken_at : finalTakenAt,
         driveUploads: {
-          sludge: sludgeLocalPath ? Boolean(sludgeDriveFile?.id) : null,
-          certificate: certificateLocalPath ? Boolean(certificateDriveFile?.id) : null,
+          sludge: sludgeLocalPath ? 'queued' : null,
+          certificate: certificateLocalPath ? 'queued' : null,
         },
       });
     } catch (err) {
@@ -635,14 +650,17 @@ module.exports = function (db, baseDir, appDataPath) {
       const sludgeIndex = isSludge
         ? (parseSludgePhotoFileName(fileName, date)?.index || 1)
         : 1;
-      const driveFile = await uploadSludgePhotoToDrive(
-        db,
-        date,
-        type === 'certificate' ? 'certificate' : 'sludge',
-        destPath,
-        sludgeIndex,
-        req.siteContext?.siteName
-      );
+      enqueueBackgroundFileTask(db, {
+        taskType: 'sludge-photo-drive',
+        dedupeKey: `${type === 'certificate' ? 'certificate' : 'sludge'}:${destPath}`,
+        payload: {
+          date,
+          type: type === 'certificate' ? 'certificate' : 'sludge',
+          localPath: destPath,
+          index: sludgeIndex,
+          siteName: req.siteContext?.siteName || '',
+        },
+      });
 
       const metadata = getCurrentRecordMetadata(db, req.body);
       const existingRow = db.prepare('SELECT id FROM sludge_photo_logs WHERE date = ? AND site_id = ?').get(date, metadata.siteId);
@@ -675,12 +693,31 @@ module.exports = function (db, baseDir, appDataPath) {
         success: true,
         url,
         sludge_photo_taken_at: takenAt,
-        driveUploaded: Boolean(driveFile?.id),
-        driveFileId: driveFile?.id || '',
+        driveQueued: true,
       });
     } catch (err) {
       console.error('[sludge-photos upload-photo]', err);
       res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  /** 로컬 슬러지/청소필증 사진 제공. 정적 한글 URL 대신 site_id 범위를 검증한다. */
+  router.get('/api/sludge-photos/photo', (req, res) => {
+    try {
+      const date = String(req.query.date || '').slice(0, 10);
+      const fileName = path.basename(String(req.query.file || ''));
+      const parsed = parseSludgePhotoFileName(fileName, date);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !parsed) {
+        return res.status(400).json({ success: false, error: '유효하지 않은 사진 경로입니다.' });
+      }
+      const filePath = path.join(getSludgePhotoDir(appDataPath, date, req.siteContext?.siteId), fileName);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ success: false, error: '로컬 사진을 찾을 수 없습니다.' });
+      }
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      return res.sendFile(filePath);
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
     }
   });
 
@@ -1038,6 +1075,8 @@ async function exportSludgePhotoXlsx({ templatePath, outputPath, year, month, it
 
   await wb.xlsx.writeFile(outputPath);
 }
+
+module.exports.__uploadSludgePhotoToDrive = uploadSludgePhotoToDrive;
 
 function _parseAddressRef(rangeRef) {
   if (!rangeRef) return null;

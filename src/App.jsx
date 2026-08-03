@@ -7,6 +7,7 @@ import Sidebar from './components/Sidebar';
 import StatusBar from './components/StatusBar';
 import { WorkspaceErrorBoundary } from './components/common';
 import { DashboardView } from './features/dashboard';
+import { CertificateModel } from './features/certificate/CertificateModel';
 const AttendanceView = lazy(() => import('./features/attendance').then((module) => ({ default: module.AttendanceView })));
 const MyInfoView = lazy(() => import('./features/members').then((module) => ({ default: module.MyInfoView })));
 const FlowManagementView = lazy(() => import('./features/flow').then((module) => ({ default: module.FlowManagementView })));
@@ -27,6 +28,8 @@ const SludgePhotoView = lazy(() => import('./features/sludge').then((module) => 
 const SludgeLedgerView = lazy(() => import('./features/sludge').then((module) => ({ default: module.SludgeLedgerView })));
 const RoadworkHelperView = lazy(() => import('./features/roadwork-helper').then((module) => ({ default: module.RoadworkHelperView })));
 const GRID_CACHE_REFRESH_MS = 10 * 60 * 1000;
+const CERTIFICATE_CACHE_REFRESH_MS = 60 * 60 * 1000;
+const BACKGROUND_IDLE_DELAY_MS = 30 * 60 * 1000;
 
 const contentLoadingFallback = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '320px' }}>
@@ -112,7 +115,6 @@ function App() {
     const [forcedUpdateNotice, setForcedUpdateNotice] = useState(null);
     const [directionToast, setDirectionToast] = useState('');
     const directionToastTimerRef = useRef(null);
-    const updateCheckKeyRef = useRef(null);
     const forcedUpdateActiveRef = useRef(false);
     const recordGridSessionsRef = useRef({ flow: {}, medicine: {}, kit: {}, water: {} });
 
@@ -161,57 +163,61 @@ function App() {
     }, []);
 
     useEffect(() => {
-        // 로딩 완료 시 1회 시도
-        if (!isLoading) {
-            SyncService.startBackgroundSync().catch(console.error);
-        }
-    }, [isLoading]);
-
-    useEffect(() => {
         const api = window.electronAPI;
         if (!api) return undefined;
 
-        const installSoon = () => {
-            window.setTimeout(() => {
-                api.installUpdate?.().catch((err) => {
-                    setForcedUpdateNotice({
-                        title: '업데이트 설치 실패',
-                        message: `업데이트 설치를 시작하지 못했습니다.\n${err?.message || err || ''}`,
-                        detail: '',
-                        percent: 0,
-                    });
-                });
-            }, 1200);
-        };
-
         api.onUpdateAvailable?.((info) => {
-            forcedUpdateActiveRef.current = true;
-            setForcedUpdateNotice({
-                title: '새 버전이 검색되어 업그레이드를 진행합니다',
-                message: `새 버전${info?.version ? ` v${info.version}` : ''}이 검색되어 업그레이드를 진행합니다.\n작업 세션은 유지되며, 설치 후 앱이 다시 시작됩니다.`,
-                detail: '업데이트 파일 다운로드 준비 중...',
-                percent: 0,
-            });
+            if (info?.manual) {
+                forcedUpdateActiveRef.current = true;
+                setForcedUpdateNotice({
+                    title: '새 버전 다운로드 중',
+                    message: `새 버전${info?.version ? ` v${info.version}` : ''}을 다운로드하고 있습니다.`,
+                    detail: '다운로드 준비 중...',
+                    percent: 0,
+                });
+                return;
+            }
+            console.info(`[Update] v${info?.version || ''} available; downloading in background.`);
+            forcedUpdateActiveRef.current = false;
+            setForcedUpdateNotice(null);
         });
         api.onUpdateProgress?.((progress) => {
-            if (!forcedUpdateActiveRef.current) return;
-            const percent = Math.max(0, Math.min(100, Math.round(Number(progress?.percent) || 0)));
-            setForcedUpdateNotice((prev) => ({
-                title: prev?.title || '새 버전이 검색되어 업그레이드를 진행합니다',
-                message: prev?.message || '새 버전이 검색되어 업그레이드를 진행합니다.',
-                detail: `업데이트 파일 다운로드 중... ${percent}%`,
-                percent,
-            }));
+            if (progress?.manual) {
+                const percent = Math.max(0, Math.min(100, Math.round(Number(progress?.percent) || 0)));
+                setForcedUpdateNotice((previous) => ({
+                    title: previous?.title || '새 버전 다운로드 중',
+                    message: previous?.message || '수동으로 요청한 업데이트를 다운로드하고 있습니다.',
+                    detail: `다운로드 중... ${percent}%`,
+                    percent,
+                }));
+                return;
+            }
+            console.debug(`[Update] download ${Math.round(Number(progress?.percent) || 0)}%`);
         });
         api.onUpdateDownloaded?.((info) => {
-            forcedUpdateActiveRef.current = true;
-            setForcedUpdateNotice({
-                title: '업데이트 설치 중',
-                message: `새 버전${info?.version ? ` v${info.version}` : ''} 다운로드가 완료되었습니다.\n곧 앱을 재시작하고 업그레이드를 적용합니다.`,
-                detail: '설치 준비 중...',
-                percent: 100,
-            });
-            installSoon();
+            if (info?.manual) {
+                forcedUpdateActiveRef.current = true;
+                setForcedUpdateNotice({
+                    title: '업데이트 설치 중',
+                    message: '수동으로 요청한 업데이트 다운로드가 완료되어 바로 설치합니다.',
+                    detail: '앱을 다시 시작하는 중...',
+                    percent: 100,
+                });
+                window.setTimeout(() => {
+                    api.installUpdate?.().catch((error) => {
+                        setForcedUpdateNotice({
+                            title: '업데이트 설치 실패',
+                            message: error?.message || String(error || '업데이트 설치를 시작하지 못했습니다.'),
+                            detail: '',
+                            percent: 0,
+                        });
+                    });
+                }, 500);
+                return;
+            }
+            console.info(`[Update] v${info?.version || ''} downloaded; installation deferred until idle.`);
+            forcedUpdateActiveRef.current = false;
+            setForcedUpdateNotice(null);
         });
         api.onUpdateInstalling?.(() => {
             forcedUpdateActiveRef.current = true;
@@ -242,61 +248,6 @@ function App() {
     }, []);
 
     // 로그인 완료 시 한 번만 업데이트를 확인한다. 시간 기반 체크와 선택형 설치는 사용하지 않는다.
-    useEffect(() => {
-        if (!isAuthenticated || !user?.id) {
-            updateCheckKeyRef.current = null;
-            forcedUpdateActiveRef.current = false;
-            setForcedUpdateNotice(null);
-            return undefined;
-        }
-
-        const api = window.electronAPI;
-        if (!api?.checkForUpdates) return undefined;
-        const checkKey = `${user.id}::${user.site_id || 'default'}`;
-        if (updateCheckKeyRef.current === checkKey) return undefined;
-        updateCheckKeyRef.current = checkKey;
-
-        let retryTimer = null;
-        const requestLoginUpdateCheck = (attempt = 0) => {
-            api.checkForUpdates('login').catch((err) => {
-                console.warn(`[Update] login update check failed (attempt ${attempt + 1}):`, err);
-                if (attempt < 1) {
-                    retryTimer = window.setTimeout(() => requestLoginUpdateCheck(attempt + 1), 15000);
-                }
-            });
-        };
-
-        api.getUpdateStatus?.().then((status) => {
-            if (status?.hasDownloadedUpdate) {
-                forcedUpdateActiveRef.current = true;
-                setForcedUpdateNotice({
-                    title: '업데이트 설치 중',
-                    message: '다운로드된 새 버전이 있어 업그레이드를 진행합니다.\n작업 세션은 유지되며, 설치 후 앱이 다시 시작됩니다.',
-                    detail: '설치 준비 중...',
-                    percent: 100,
-                });
-                window.setTimeout(() => {
-                    api.installUpdate?.().catch((err) => {
-                        setForcedUpdateNotice({
-                            title: '업데이트 설치 실패',
-                            message: `업데이트 설치를 시작하지 못했습니다.\n${err?.message || err || ''}`,
-                            detail: '',
-                            percent: 0,
-                        });
-                    });
-                }, 1200);
-                return;
-            }
-            requestLoginUpdateCheck();
-        }).catch(() => {
-            requestLoginUpdateCheck();
-        });
-
-        return () => {
-            if (retryTimer) window.clearTimeout(retryTimer);
-        };
-    }, [isAuthenticated, user?.id, user?.site_id]);
-
     useEffect(() => {
         // 온라인 이벤트 리스너 등록 (1회만)
         SyncService.initAutoSync();
@@ -333,10 +284,6 @@ function App() {
             preloadRecordGridData({ force: true }).catch((error) => {
                 console.warn('[cache-warmup] grid refresh failed:', error);
             });
-            // 게시판도 메뉴를 열기 전에 짧은 캐시에 준비한다. 실패는 기존 캐시를 유지한다.
-            import('./features/board/BoardModel')
-                .then(({ BoardModel }) => BoardModel.fetchPosts(user, { force: true }))
-                .catch((error) => console.warn('[cache-warmup] board refresh failed:', error));
         };
 
         const timer = window.setInterval(refreshCaches, GRID_CACHE_REFRESH_MS);
@@ -345,20 +292,127 @@ function App() {
         };
         document.addEventListener('visibilitychange', onVisible);
 
-        // 로그인 직후에는 그리드 예열이 먼저 시작되도록 아주 짧게 양보한 후,
-        // 게시판과 그 모듈 번들을 백그라운드에서 준비한다.
-        const warmupTimer = window.setTimeout(() => {
-            if (cancelled) return;
-            import('./features/board/BoardModel')
-                .then(({ BoardModel }) => BoardModel.fetchPosts(user))
-                .catch((error) => console.warn('[cache-warmup] board initial preload failed:', error));
-        }, 1200);
-
         return () => {
             cancelled = true;
             window.clearInterval(timer);
-            window.clearTimeout(warmupTimer);
             document.removeEventListener('visibilitychange', onVisible);
+        };
+    }, [isAuthenticated, user]);
+
+    useEffect(() => {
+        if (!isAuthenticated || !user?.id) return undefined;
+
+        let cancelled = false;
+        let running = false;
+        let activityVersion = 0;
+        let lastActivityAt = Date.now();
+        let idleTimer = null;
+        let lastServerNoticeAt = 0;
+
+        const scheduleFromLastActivity = () => {
+            if (idleTimer) window.clearTimeout(idleTimer);
+            const remaining = Math.max(0, BACKGROUND_IDLE_DELAY_MS - (Date.now() - lastActivityAt));
+            idleTimer = window.setTimeout(runBackgroundJobs, remaining);
+        };
+
+        const runBackgroundJobs = async () => {
+            if (cancelled || running) return;
+            if (Date.now() - lastActivityAt < BACKGROUND_IDLE_DELAY_MS) {
+                scheduleFromLastActivity();
+                return;
+            }
+
+            running = true;
+            const runVersion = activityVersion;
+            const canContinue = () => !cancelled && runVersion === activityVersion;
+            try {
+                const taskTypes = ['attendance-sync', 'data-sync', 'file-sync', 'certificate-cache', 'board-cache', 'diagnostic-sync', 'update-check'];
+                await SyncService.prepareBackgroundTasks(taskTypes);
+                const pendingTasks = await SyncService.getPendingBackgroundTasks();
+
+                for (const task of pendingTasks) {
+                    if (!canContinue()) break;
+                    const taskType = String(task?.task_type || '');
+                    try {
+                        const claim = await SyncService.claimBackgroundTask(taskType);
+                        if (!claim?.claimed) continue;
+                        if (taskType === 'attendance-sync') {
+                            await SyncService.startBackgroundSync();
+                        } else if (taskType === 'data-sync') {
+                            await SyncService.runDataBackgroundSync();
+                        } else if (taskType === 'file-sync') {
+                            await SyncService.runFileBackgroundSync();
+                        } else if (taskType === 'certificate-cache') {
+                            await CertificateModel.syncCurrentMonthInBackground(user);
+                            window.dispatchEvent(new CustomEvent('osoo:certificate-cache-updated'));
+                        } else if (taskType === 'board-cache') {
+                            const { BoardModel } = await import('./features/board/BoardModel');
+                            await BoardModel.fetchPosts(user, { force: true });
+                            window.dispatchEvent(new CustomEvent('osoo:board-cache-updated'));
+                        } else if (taskType === 'diagnostic-sync') {
+                            await SyncService.runDiagnosticBackgroundSync();
+                        } else if (taskType === 'update-check') {
+                            const updateStatus = await window.electronAPI?.getUpdateStatus?.();
+                            if (!canContinue()) throw new Error('user activity detected before update action');
+                            if (updateStatus?.hasDownloadedUpdate) {
+                                await window.electronAPI?.installUpdate?.();
+                            } else {
+                                await window.electronAPI?.checkForUpdates?.('idle');
+                            }
+                        }
+                        await SyncService.completeBackgroundTask(taskType, CERTIFICATE_CACHE_REFRESH_MS);
+                    } catch (taskError) {
+                        await SyncService.failBackgroundTask(taskType, taskError).catch(() => {});
+                        console.warn(`[background-idle] ${taskType} failed:`, taskError);
+                        // Background failures never interrupt field work or the
+                        // remaining queue. The persistent task retains retry state.
+                        continue;
+                    }
+                }
+            } catch (error) {
+                console.warn('[background-idle] background job failed:', error);
+            } finally {
+                running = false;
+                if (!cancelled) {
+                    if (runVersion === activityVersion) {
+                        idleTimer = window.setTimeout(runBackgroundJobs, CERTIFICATE_CACHE_REFRESH_MS);
+                    } else {
+                        scheduleFromLastActivity();
+                    }
+                }
+            }
+        };
+
+        const onUserActivity = () => {
+            activityVersion += 1;
+            lastActivityAt = Date.now();
+            scheduleFromLastActivity();
+            if (Date.now() - lastServerNoticeAt >= 10000) {
+                lastServerNoticeAt = Date.now();
+                void SyncService.notifyUserActivity();
+            }
+        };
+        const onWakeup = () => scheduleFromLastActivity();
+        const activityEvents = ['keydown', 'pointerdown', 'input', 'change', 'wheel'];
+        activityEvents.forEach((eventName) => window.addEventListener(eventName, onUserActivity, true));
+        window.addEventListener('osoo:background-sync-wakeup', onWakeup);
+        // 외부 작업을 시작하지 않고 로컬 투두리스트만 먼저 확보한다.
+        void SyncService.prepareBackgroundTasks([
+            'attendance-sync',
+            'data-sync',
+            'file-sync',
+            'certificate-cache',
+            'board-cache',
+            'diagnostic-sync',
+            'update-check',
+        ]).catch((error) => console.warn('[background-idle] task preparation failed:', error));
+        scheduleFromLastActivity();
+
+        return () => {
+            cancelled = true;
+            if (idleTimer) window.clearTimeout(idleTimer);
+            activityEvents.forEach((eventName) => window.removeEventListener(eventName, onUserActivity, true));
+            window.removeEventListener('osoo:background-sync-wakeup', onWakeup);
         };
     }, [isAuthenticated, user]);
 

@@ -152,12 +152,6 @@ export const useAuthViewModel = () => {
                 console.error('Auto logout failed:', err);
             }
             await clearLocalAuthenticatedState({ hideToTray: true });
-            try {
-                const result = await AuthModel.syncAttendanceBQ();
-                console.log(`[자동 퇴근] BigQuery 출결 동기화 완료 (${result?.syncedCount ?? 0}건)`);
-            } catch (err) {
-                console.error('[자동 퇴근] BigQuery 동기화 실패:', err);
-            }
         } finally {
             autoLogoutInProgressRef.current = false;
         }
@@ -278,11 +272,6 @@ export const useAuthViewModel = () => {
                         await AuthModel.recordLogout(freshData, true);
                     } catch (err) {
                         console.error('[세션 복원] 자동 퇴근 처리 실패:', err);
-                    }
-                    try {
-                        await AuthModel.syncAttendanceBQ();
-                    } catch (err) {
-                        console.error('[세션 복원] BigQuery 동기화 실패:', err);
                     }
                     await clearLocalAuthenticatedState({ hideToTray: false });
                     return;
@@ -420,14 +409,6 @@ export const useAuthViewModel = () => {
         await clearLocalAuthenticatedState({ hideToTray: false });
         await refreshLoginHint();
 
-        if (u && isFieldWorker(u)) {
-            try {
-                const result = await AuthModel.syncAttendanceBQ();
-                console.log(`[퇴근] BigQuery 출결 동기화 (${result?.syncedCount ?? 0}건)`);
-            } catch (err) {
-                console.error('[퇴근] BigQuery 동기화 실패:', err);
-            }
-        }
     };
 
     const switchActiveSite = async (siteId) => {

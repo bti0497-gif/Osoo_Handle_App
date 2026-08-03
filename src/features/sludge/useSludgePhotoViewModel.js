@@ -68,29 +68,6 @@ export function useSludgePhotoViewModel() {
     setEditEntry(found ? itemToEntry(found) : makeEmptyEntry(selectedDate));
   }, [selectedDate, savedItems]);
 
-  const checkRemotePhotoRestore = useCallback(async (items) => {
-    for (const item of items) {
-      const types = [
-        !item.sludge_photo_url ? 'sludge' : '',
-        !item.certificate_photo_url ? 'certificate' : '',
-      ].filter(Boolean);
-      if (!item.date || types.length === 0) continue;
-      const check = await SludgePhotoModel.checkRemotePhotos({ date: item.date, types });
-      if (!check?.success || !check.count) continue;
-      const ok = await showConfirm?.('사진이 서버에 있습니다. 내려받을까요?');
-      if (!ok) return false;
-      const restored = await SludgePhotoModel.restoreRemotePhotos({
-        date: item.date,
-        types: check.items.map((row) => row.type),
-      });
-      if (restored?.success && restored.count > 0) {
-        showToast(`${restored.count}개 사진을 내려받았습니다.`, 'success');
-        return true;
-      }
-    }
-    return false;
-  }, [showConfirm, showToast]);
-
   const loadMonth = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -98,17 +75,12 @@ export function useSludgePhotoViewModel() {
       if (!result?.success) throw new Error(result?.error || '데이터 로드 실패');
       const items = result.items || [];
       setSavedItems(items);
-      const restored = await checkRemotePhotoRestore(items);
-      if (restored) {
-        const refreshed = await SludgePhotoModel.fetchByMonth(year, month);
-        if (refreshed?.success) setSavedItems(refreshed.items || []);
-      }
     } catch (err) {
       showToast(err.message || '데이터를 불러오지 못했습니다.', 'error');
     } finally {
       setIsLoading(false);
     }
-  }, [year, month, showToast, checkRemotePhotoRestore]);
+  }, [year, month, showToast]);
 
   useEffect(() => {
     loadMonth();

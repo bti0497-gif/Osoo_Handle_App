@@ -402,7 +402,7 @@ async function syncTable(tableName) {
 }
 
 // 6. 전체 테이블 동기화 함수 (스케줄러에서 호출)
-async function syncAll() {
+async function syncAll({ shouldContinue = () => true } = {}) {
   if (isAdminSessionActive()) {
     const activeUser = getActiveUser();
     console.log(`[BigQuery] 전체 동기화 건너뜀: admin 세션 활성 (${activeUser?.name || 'admin'})`);
@@ -418,6 +418,10 @@ async function syncAll() {
 
   const results = {};
   for (const tableName of Object.keys(TABLE_MAPPINGS)) {
+    if (!shouldContinue()) {
+      results.paused = { success: true, count: 0, paused: true, reason: 'user-activity' };
+      break;
+    }
     // 서버 시작 시 '진행 중' 상태(is_synced=2)로 남아있는 레코드가 있다면
     // 이전 동기화가 비정상 종료된 것이므로, 다시 '대기' 상태(is_synced=0)로 되돌려 재시도 유도
     db.prepare(`UPDATE ${tableName} SET is_synced = 0 WHERE is_synced = 2`).run();

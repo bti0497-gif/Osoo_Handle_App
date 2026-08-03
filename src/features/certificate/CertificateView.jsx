@@ -259,12 +259,18 @@ const CertificateView = ({ currentUser }) => {
                                                 overflow: 'hidden',
                                             }}
                                         >
-                                            <img
-                                                src={item.previewUrl}
-                                                alt={item.fileName}
-                                                loading="lazy"
-                                                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', background: '#f1f5f9' }}
-                                            />
+                                            {item.previewUrl ? (
+                                                <img
+                                                    src={item.previewUrl}
+                                                    alt={item.fileName}
+                                                    loading="lazy"
+                                                    style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', background: '#f1f5f9' }}
+                                                />
+                                            ) : (
+                                                <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 800 }}>
+                                                    로컬 동기화 중...
+                                                </span>
+                                            )}
                                         </button>
                                         <button
                                             type="button"

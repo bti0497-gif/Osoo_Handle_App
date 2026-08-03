@@ -4,6 +4,7 @@ let checkingForUpdate = false;
 let installingUpdate = false;
 let downloadedVersion = null;
 let updateLogPath = null;
+let installImmediatelyForCurrentDownload = false;
 
 const fs = require('fs');
 const path = require('path');
@@ -62,10 +63,14 @@ function checkForUpdates(reason = 'manual') {
     throw new Error('자동 업데이트 모듈을 찾을 수 없습니다.');
   }
   if (checkingForUpdate) {
+    if (reason === 'manual' || reason === 'status-bar') {
+      installImmediatelyForCurrentDownload = true;
+    }
     console.log(`[Updater] Skip update check (${reason}): already checking`);
     return Promise.resolve({ skipped: true, reason: 'already-checking' });
   }
   checkingForUpdate = true;
+  installImmediatelyForCurrentDownload = reason === 'manual' || reason === 'status-bar';
   writeUpdateLog('check-requested', { reason });
   if (autoUpdater.__mainWindow) {
     sendUpdateEvent(autoUpdater.__mainWindow, 'update:checking', { reason });
@@ -108,6 +113,7 @@ function setupAutoUpdater(mainWindow, options = {}) {
     sendUpdateEvent(mainWindow, 'update:available', {
       version: info.version,
       releaseDate: info.releaseDate,
+      manual: installImmediatelyForCurrentDownload,
     });
   });
 
@@ -123,6 +129,7 @@ function setupAutoUpdater(mainWindow, options = {}) {
       bytesPerSecond: progress.bytesPerSecond,
       transferred: progress.transferred,
       total: progress.total,
+      manual: installImmediatelyForCurrentDownload,
     });
   });
 
@@ -133,6 +140,7 @@ function setupAutoUpdater(mainWindow, options = {}) {
     sendUpdateEvent(mainWindow, 'update:downloaded', {
       version: info.version,
       releaseDate: info.releaseDate,
+      manual: installImmediatelyForCurrentDownload,
     });
   });
 

@@ -4,12 +4,38 @@ import { sanitizeBoardHtml } from './sanitizeBoardHtml';
 import Quill from 'quill';
 import QuillResize from 'quill-resize-module';
 import 'react-quill-new/dist/quill.snow.css';
+import 'quill-resize-module/dist/resize.css';
 import { useBoardViewModel } from './useBoardViewModel';
 import { useDialog } from '../../components/common/DialogContext';
 import { isBoardPostNew } from './boardNewBadge';
+import { getApiBase } from '../../core/api';
 
 const PRIVILEGED_BOARD_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
 Quill.register('modules/resize', QuillResize);
+const Delta = Quill.import('delta');
+
+async function waitForImageReady(url, attempts = 3) {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const loaded = await new Promise((resolve) => {
+            const image = new Image();
+            const timer = window.setTimeout(() => resolve(false), 5000);
+            image.onload = () => {
+                window.clearTimeout(timer);
+                resolve(true);
+            };
+            image.onerror = () => {
+                window.clearTimeout(timer);
+                resolve(false);
+            };
+            image.src = url;
+        });
+        if (loaded) return true;
+        if (attempt < attempts - 1) {
+            await new Promise((resolve) => window.setTimeout(resolve, 700));
+        }
+    }
+    return false;
+}
 
 // ── 성능 최적화를 위한 댓글 입력 컴포넌트 분리 ──
 const CommentInput = ({ onSubmit, placeholder, initialValue = '', onCancel, buttonText = '등록' }) => {
@@ -69,6 +95,7 @@ const BoardView = ({ currentUser }) => {
     } = useBoardViewModel(currentUser, { showAlert, showConfirm });
 
     const [replyTo, setReplyTo] = useState(null);
+    const [inlineImageJobs, setInlineImageJobs] = useState(0);
     const fileInputRef = useRef(null);
     const inlineImageInputRef = useRef(null);
     const quillRef = useRef(null);
@@ -93,21 +120,83 @@ const BoardView = ({ currentUser }) => {
             await showAlert('본문 이미지는 10MB 이하만 넣을 수 있습니다.');
             return;
         }
-        const result = await uploadFile(file, { boardId: form.id || 'draft', date: new Date().toISOString() });
-        const imageUrl = String(result?.inlineUrl || result?.localUrl || '').trim();
+        const optimizedImage = await new Promise((resolve) => {
+            const localUrl = URL.createObjectURL(file);
+            const image = new Image();
+            image.onload = () => {
+                const sourceWidth = image.naturalWidth || 300;
+                const sourceHeight = image.naturalHeight || 300;
+                const scale = Math.min(600 / sourceWidth, 1);
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+                canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+                const context = canvas.getContext('2d');
+                context.fillStyle = '#ffffff';
+                context.fillRect(0, 0, canvas.width, canvas.height);
+                context.drawImage(image, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob((blob) => {
+                    URL.revokeObjectURL(localUrl);
+                    if (!blob) {
+                        resolve({ file, sourceWidth });
+                        return;
+                    }
+                    const baseName = String(file.name || 'board-image').replace(/\.[^.]+$/, '');
+                    resolve({
+                        file: new File([blob], `${baseName}.jpg`, { type: 'image/jpeg', lastModified: Date.now() }),
+                        sourceWidth,
+                    });
+                }, 'image/jpeg', 0.72);
+            };
+            image.onerror = () => {
+                URL.revokeObjectURL(localUrl);
+                resolve({ file, sourceWidth: 300 });
+            };
+            image.src = localUrl;
+        });
+        const sourceWidth = optimizedImage.sourceWidth;
+        const result = await uploadFile(optimizedImage.file, {
+            boardId: form.id || 'draft',
+            date: new Date().toISOString(),
+            purpose: 'inline',
+        });
+        if (!result?.uploadedToDrive) {
+            await showAlert('본문 이미지를 Drive에 올리지 못했습니다. 네트워크 연결을 확인한 뒤 다시 넣어 주세요. 로컬 파일은 다른 현장에서 볼 수 없어 본문에 삽입하지 않았습니다.');
+            return;
+        }
+        const rawImageUrl = String(result?.inlineUrl || '').trim();
+        const imageUrl = /^https?:\/\//i.test(rawImageUrl)
+            ? rawImageUrl
+            : `${getApiBase()}${rawImageUrl.startsWith('/') ? rawImageUrl : `/${rawImageUrl}`}`;
         if (!imageUrl) return;
+        if (!(await waitForImageReady(imageUrl))) {
+            await showAlert('Drive에 이미지는 저장되었지만 화면용 주소가 아직 준비되지 않았습니다. 잠시 후 이미지를 다시 넣어 주세요.');
+            return;
+        }
         const editor = quillRef.current?.getEditor();
         if (!editor) return;
         const index = editor.getSelection(true)?.index ?? editor.getLength();
-        editor.insertEmbed(index, 'image', imageUrl, 'user');
+        const displayWidth = Math.min(sourceWidth, 300);
+        editor.updateContents(
+            new Delta().retain(index).insert({ image: imageUrl }, { width: String(displayWidth) }),
+            'user'
+        );
         const insertedImage = Array.from(editor.root.querySelectorAll('img')).at(-1);
         if (insertedImage) {
-            insertedImage.style.width = '50%';
+            insertedImage.style.width = `${displayWidth}px`;
             insertedImage.style.height = 'auto';
-            insertedImage.setAttribute('width', '50%');
+            insertedImage.setAttribute('width', String(displayWidth));
             editor.update('user');
         }
         editor.setSelection(index + 1, 0, 'silent');
+    };
+
+    const processInlineImage = async (file) => {
+        setInlineImageJobs((count) => count + 1);
+        try {
+            await insertInlineImage(file);
+        } finally {
+            setInlineImageJobs((count) => Math.max(0, count - 1));
+        }
     };
 
     const quillModules = useMemo(() => ({
@@ -126,41 +215,76 @@ const BoardView = ({ currentUser }) => {
         },
         table: true,
         resize: {
-            modules: ['Resize', 'DisplaySize', 'Toolbar'],
+            modules: ['Resize'],
             parchment: { image: { attribute: ['width'], limit: { minWidth: 120, maxWidth: 960 } } },
+            onChangeSize(blot, _target, size) {
+                const width = Math.round(Number(size?.width) || 0);
+                if (!width) return;
+                const editor = this.quill;
+                const index = blot.offset(editor.scroll);
+                editor.formatText(index, 1, 'width', String(width), 'user');
+            },
         },
     }), []);
 
     const handleEditorPaste = (event) => {
+        if (event.__osooBoardImageHandled) return;
         const images = Array.from(event.clipboardData?.files || []).filter((file) => file.type?.startsWith('image/'));
         if (images.length === 0) return;
+        event.__osooBoardImageHandled = true;
         event.preventDefault();
-        images.reduce((chain, file) => chain.then(() => insertInlineImage(file)), Promise.resolve());
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        images.reduce((chain, file) => chain.then(() => processInlineImage(file)), Promise.resolve());
     };
 
     const handleEditorDrop = (event) => {
-        const images = Array.from(event.dataTransfer?.files || []).filter((file) => file.type?.startsWith('image/'));
+        if (event.__osooBoardImageHandled) return;
+        const images = Array.from(event.dataTransfer?.files || [])
+            .filter((file) => file.type?.startsWith('image/'))
+            .filter((file, index, all) => all.findIndex((candidate) => (
+                candidate.name === file.name
+                && candidate.size === file.size
+                && candidate.lastModified === file.lastModified
+            )) === index);
         if (images.length === 0) return;
+        event.__osooBoardImageHandled = true;
         event.preventDefault();
-        images.reduce((chain, file) => chain.then(() => insertInlineImage(file)), Promise.resolve());
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        images.reduce((chain, file) => chain.then(() => processInlineImage(file)), Promise.resolve());
     };
 
     useEffect(() => {
-        const editorRoot = quillRef.current?.getEditor()?.root;
+        let editorRoot = null;
+        try {
+            editorRoot = quillRef.current?.getEditor()?.root || null;
+        } catch {
+            return undefined;
+        }
         if (!editorRoot) return undefined;
 
-        editorRoot.addEventListener('paste', handleEditorPaste);
-        editorRoot.addEventListener('drop', handleEditorDrop);
+        // Capture 단계에서 Quill 기본 핸들러보다 먼저 막아 Base64 이미지가 본문에 들어가지 않게 한다.
+        editorRoot.addEventListener('paste', handleEditorPaste, true);
+        editorRoot.addEventListener('drop', handleEditorDrop, true);
         return () => {
-            editorRoot.removeEventListener('paste', handleEditorPaste);
-            editorRoot.removeEventListener('drop', handleEditorDrop);
+            editorRoot.removeEventListener('paste', handleEditorPaste, true);
+            editorRoot.removeEventListener('drop', handleEditorDrop, true);
         };
     });
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (inlineImageJobs > 0) {
+            await showAlert('이미지를 처리하고 있습니다. 이미지가 나타난 뒤 게시해 주세요.');
+            return;
+        }
         if (!form.title.trim()) { await showAlert('제목을 입력해주세요.'); return; }
         if (!form.content.trim() || form.content === '<p><br></p>') { await showAlert('내용을 입력해주세요.'); return; }
+        if (/src=["']data:image\//i.test(form.content)) {
+            await showAlert('본문에 원본 이미지가 직접 포함되어 있습니다. 해당 이미지를 삭제한 뒤 다시 넣어 주세요. 이미지는 먼저 서버에 저장한 후 게시글에 연결됩니다.');
+            return;
+        }
         submitPost();
     };
 
@@ -629,7 +753,7 @@ const BoardView = ({ currentUser }) => {
                                 )}
 
                                 {/* 에디터 */}
-                                <div style={{ flex: 1, marginBottom: '0.75rem', minHeight: '200px' }}>
+                                <div style={{ flex: 1, marginBottom: '0.75rem', minHeight: '200px', position: 'relative' }}>
                                     <label style={{ display: 'block', fontSize: '0.6875rem', fontWeight: 800, color: '#94a3b8', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>내용</label>
                                     <ReactQuill
                                         ref={quillRef}
@@ -640,6 +764,25 @@ const BoardView = ({ currentUser }) => {
                                         style={{ height: '220px', marginBottom: '42px' }}
                                         placeholder="내용을 입력하세요..."
                                     />
+                                    {inlineImageJobs > 0 && (
+                                        <div
+                                            role="status"
+                                            aria-live="polite"
+                                            style={{
+                                                position: 'absolute', top: '50%', left: '50%', zIndex: 20,
+                                                transform: 'translate(-50%, -50%)',
+                                                display: 'flex', alignItems: 'center', gap: '8px',
+                                                padding: '12px 16px', color: '#1d4ed8', background: '#eff6ff',
+                                                border: '1px solid #93c5fd', borderRadius: '9px',
+                                                boxShadow: '0 4px 12px rgba(37,99,235,0.16)',
+                                                fontSize: '13px', fontWeight: 900, whiteSpace: 'nowrap',
+                                                pointerEvents: 'none',
+                                            }}
+                                        >
+                                            <span className="spinner" style={{ width: '15px', height: '15px', margin: 0, borderWidth: '2px' }} />
+                                            이미지 처리 중{inlineImageJobs > 1 ? ` (${inlineImageJobs}장)` : ''} · 잠시만 기다려 주세요
+                                        </div>
+                                    )}
                                     <input
                                         ref={inlineImageInputRef}
                                         type="file"
@@ -647,7 +790,7 @@ const BoardView = ({ currentUser }) => {
                                         style={{ display: 'none' }}
                                         onChange={(e) => {
                                             const [file] = e.target.files;
-                                            if (file) insertInlineImage(file);
+                                            if (file) processInlineImage(file);
                                             e.target.value = '';
                                         }}
                                     />
@@ -676,8 +819,8 @@ const BoardView = ({ currentUser }) => {
                                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                                     <button type="button" onClick={() => { setViewMode('list'); resetForm(); }}
                                         style={{ flex: 1, height: '48px', borderRadius: '12px', border: '1.5px solid #e2e8f0', backgroundColor: 'white', fontWeight: 800, fontSize: '0.9375rem', color: '#64748b', cursor: 'pointer' }}>취소</button>
-                                    <button type="submit"
-                                        style={{ flex: 2, height: '48px', borderRadius: '12px', border: 'none', backgroundColor: '#1e293b', color: 'white', fontWeight: 900, fontSize: '1rem', cursor: 'pointer', boxShadow: '0 4px 12px rgba(30,41,59,0.2)' }}>
+                                    <button type="submit" disabled={inlineImageJobs > 0}
+                                        style={{ flex: 2, height: '48px', borderRadius: '12px', border: 'none', backgroundColor: inlineImageJobs > 0 ? '#94a3b8' : '#1e293b', color: 'white', fontWeight: 900, fontSize: '1rem', cursor: inlineImageJobs > 0 ? 'wait' : 'pointer', boxShadow: '0 4px 12px rgba(30,41,59,0.2)' }}>
                                         {form.id ? '수정하기' : '게시하기'}
                                     </button>
                                 </div>

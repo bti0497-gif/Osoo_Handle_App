@@ -2,17 +2,8 @@
 const path = require('path');
 
 const { httpRequest } = require('./qntechAuthService.cjs');
-const {
-  isDriveConfigured,
-  getDriveRootFolderId,
-  getOrCreateFolderPath,
-  uploadBufferToFolder
-} = require('./driveService.cjs');
-const {
-  managementPhotoName,
-  managementPhotoSegments,
-  sanitize,
-} = require('./drivePathService.cjs');
+const { enqueueBackgroundFileTask } = require('./backgroundFileTaskService.cjs');
+const { sanitize } = require('./drivePathService.cjs');
 
 const TARGET_PHOTO_ITEMS = ['암모니아성 질소', '질산성 질소', '오르토인산염', '알칼리도'];
 
@@ -48,16 +39,6 @@ function buildProjectSourceLabel(project, projectIndex, totalProjects) {
   return '';
 }
 
-
-async function ensureDrivePhotoFolder(date) {
-  if (!isDriveConfigured()) {
-    throw new Error('Google Drive 인증 또는 루트 폴더가 설정되지 않았습니다.');
-  }
-
-  const rootFolderId = getDriveRootFolderId();
-  const segments = managementPhotoSegments(date);
-  return getOrCreateFolderPath(rootFolderId, segments);
-}
 
 function getDefaultPhotoRoot(baseDir) {
   const appDataRoot = process.env.APPDATA
@@ -127,17 +108,7 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
   const photoRoot = resolvePhotoRoot(baseDir, configuredPhotoRoot);
   const photoDir = buildPhotoDirectory(photoRoot, date);
   ensureDirectory(photoDir);
-  let driveFolder = null;
   const driveUploadErrors = [];
-  try {
-    driveFolder = await ensureDrivePhotoFolder(date);
-  } catch (error) {
-    driveUploadErrors.push({
-      stage: 'folder',
-      fileName: '',
-      message: error.message,
-    });
-  }
   const sourceProjects = Array.isArray(projects) ? projects : [];
 
   const selectedFiles = [];
@@ -172,7 +143,7 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
   `);
 
   const savedPhotos = [];
-  const driveUploadedPhotos = [];
+  const driveQueuedPhotos = [];
   const usedFileNames = new Map();
   const stamp = toImportDateStamp(date);
   for (const file of selectedFiles) {
@@ -205,48 +176,33 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
     };
     savedPhotos.push(savedPhoto);
 
-    if (driveFolder?.id) {
-      try {
-        const driveItemLabel = ['수질분석', file.sourceLabel, file.itemName]
-          .filter(Boolean)
-          .join('_');
-        const driveFileName = managementPhotoName(
-          date,
-          siteName || 'Unknown Site',
-          driveItemLabel,
-          duplicateIndex > 0 ? duplicateIndex + 1 : 0,
-          ext
-        );
-        const driveFile = await uploadBufferToFolder({
-          folderId: driveFolder.id,
-          fileName: driveFileName,
-          buffer: downloaded.body,
-          mimeType: downloaded.contentType || 'image/jpeg'
-        });
-
-        driveUploadedPhotos.push({
-          ...savedPhoto,
-          driveFileName,
-          driveFileId: driveFile.id,
-          driveUrl: driveFile.webViewLink || driveFile.webContentLink || ''
-        });
-      } catch (error) {
-        driveUploadErrors.push({
-          stage: 'upload',
-          fileName: readableName,
-          message: error.message,
-        });
-      }
-    }
+    const driveItemLabel = ['수질분석', file.sourceLabel, file.itemName]
+      .filter(Boolean)
+      .join('_');
+    enqueueBackgroundFileTask(db, {
+      taskType: 'management-photo-drive',
+      dedupeKey: `water:${targetPath}`,
+      payload: {
+        date,
+        siteName: siteName || 'Unknown Site',
+        itemLabel: driveItemLabel,
+        photoIndex: duplicateIndex > 0 ? duplicateIndex + 1 : 0,
+        extension: ext,
+        mimeType: downloaded.contentType || 'image/jpeg',
+        localPath: targetPath,
+      },
+    });
+    driveQueuedPhotos.push({ ...savedPhoto, queued: true });
   }
 
   return {
     photoRoot,
     photoDirectory: photoDir,
-    driveFolderId: driveFolder?.id || '',
-    driveFolderUrl: driveFolder?.webViewLink || '',
+    driveFolderId: '',
+    driveFolderUrl: '',
     savedPhotos,
-    driveUploadedPhotos,
+    driveUploadedPhotos: [],
+    driveQueuedPhotos,
     driveUploadErrors,
     identifiedPhotos: selectedFiles.length
   };

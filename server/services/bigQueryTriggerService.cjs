@@ -8,24 +8,8 @@ const IDLE_DELAY_MS = Number.isFinite(configuredIdleMinutes) && configuredIdleMi
   : DEFAULT_IDLE_DELAY_MS;
 
 let isSyncing = false;
-let hasPending = false;
-let lastReason = '';
 let lastWriteAt = Date.now();
-let idleTimer = null;
-
-function scheduleIdleSync(reason = 'after-save') {
-  lastReason = reason;
-  if (idleTimer) clearTimeout(idleTimer);
-
-  const elapsed = Date.now() - lastWriteAt;
-  const remaining = Math.max(0, IDLE_DELAY_MS - elapsed);
-  idleTimer = setTimeout(() => {
-    idleTimer = null;
-    runSyncIfIdle(`idle:${lastReason || reason}`).catch((err) => {
-      console.error('[BigQuery Trigger] idle sync failed:', err.message);
-    });
-  }, remaining);
-}
+let activityVersion = 0;
 
 async function runSync(reason = 'manual') {
   const isEnabled = String(process.env.BIGQUERY_SYNC_ENABLED || 'true') === 'true';
@@ -45,14 +29,21 @@ async function runSync(reason = 'manual') {
   }
 
   if (isSyncing) {
-    hasPending = true;
-    lastReason = reason;
-    return { queued: true };
+    return { queued: true, skipped: true, reason: 'already-running' };
   }
 
   isSyncing = true;
+  const startedAtActivityVersion = activityVersion;
   try {
-    const results = await syncAll();
+    const results = await syncAll({
+      shouldContinue: () => activityVersion === startedAtActivityVersion,
+    });
+    const failedTables = Object.entries(results || {})
+      .filter(([, row]) => row?.success === false)
+      .map(([tableName]) => tableName);
+    if (failedTables.length > 0) {
+      throw new Error(`BigQuery table sync failed: ${failedTables.join(', ')}`);
+    }
     const totalCount = Object.values(results || {}).reduce((sum, row) => sum + (row?.count || 0), 0);
     if (totalCount > 0) {
       console.log(`[BigQuery Trigger] ${reason} 동기화 완료: ${totalCount}건 전송`);
@@ -63,24 +54,25 @@ async function runSync(reason = 'manual') {
     return { queued: false, error: error.message };
   } finally {
     isSyncing = false;
-    if (hasPending) {
-      hasPending = false;
-      scheduleIdleSync(`queued:${lastReason || 'pending'}`);
-    }
   }
 }
 
-function triggerSync(reason = 'after-save') {
+function notifyUserActivity(reason = 'renderer-input') {
+  activityVersion += 1;
   lastWriteAt = Date.now();
-  scheduleIdleSync(reason);
+  return { activityVersion, idleDelayMs: IDLE_DELAY_MS, reason };
+}
+
+function createUserIdleGuard() {
+  const version = activityVersion;
+  return () => version === activityVersion;
 }
 
 async function runSyncIfIdle(reason = 'scheduler') {
   const elapsed = Date.now() - lastWriteAt;
   if (elapsed < IDLE_DELAY_MS) {
-    scheduleIdleSync(reason);
     return {
-      queued: true,
+      queued: false,
       skipped: true,
       reason: 'waiting-for-idle',
       remainingMs: IDLE_DELAY_MS - elapsed,
@@ -90,8 +82,9 @@ async function runSyncIfIdle(reason = 'scheduler') {
 }
 
 module.exports = {
-  triggerSync,
   runSync,
   runSyncIfIdle,
+  notifyUserActivity,
+  createUserIdleGuard,
   IDLE_DELAY_MS,
 };

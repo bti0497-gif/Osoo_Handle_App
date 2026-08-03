@@ -154,9 +154,8 @@ check(
     'syncMemberSiteLinks(member)',
     'setActiveUser(localMember || member,',
     'closeStaleOpenSessions(localMember || member)',
-    "triggerBigQuerySync('login-success:sheets')",
   ]),
-  'field worker discovery-login refreshes local cache, site links, active user, and sync trigger',
+  'field worker discovery-login refreshes local cache and site links without remote sync',
   'field worker discovery-login side effects were changed'
 );
 
@@ -323,9 +322,9 @@ check(
 
 check(
   containsAll(appText, [
-    'const requestLoginUpdateCheck = (attempt = 0)',
-    'requestLoginUpdateCheck(attempt + 1)',
-    '15000',
+    "taskType === 'update-check'",
+    "checkForUpdates?.('idle')",
+    "getUpdateStatus?.()",
   ]) && containsAll(electronMainText, [
     "'Osoo_Handle_App', 'logs', 'electron-updater.log'",
   ]) && containsAll(updaterText, [
@@ -335,8 +334,8 @@ check(
     "writeUpdateLog('update-downloaded'",
     "writeUpdateLog('install-started'",
   ]),
-  'login update check retries once and writes a dedicated updater log',
-  'login update retry or updater diagnostic logging contract was removed'
+  'idle update check and dedicated updater log contract',
+  'idle update check or updater diagnostic logging contract was removed'
 );
 
 console.log(`[AUTH SUMMARY] pass=${passed} fail=${failed}`);

@@ -75,6 +75,7 @@ $processGuardSourcePath = ConvertTo-NsisSourcePath $processGuardFile
 $includeLines = @(
     "!include `"$processGuardSourcePath`""
     '!macro customInstall'
+    '  !insertmacro InstallOsooWatchdog'
     '  SetShellVarContext current'
     '  DetailPrint "Installing shared service configuration."'
     '  CreateDirectory "$APPDATA\Osoo_Handle_App\config"'

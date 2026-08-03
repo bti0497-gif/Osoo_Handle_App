@@ -3,7 +3,6 @@ import { BoardModel } from './BoardModel';
 import { updateBoardNewBadge } from './boardNewBadge';
 
 const ADMIN_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
-const POLL_INTERVAL_MS = 3 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const isPopupActive = (post, now) => {
@@ -46,59 +45,38 @@ export function usePopupNoticeWatcher(currentUser) {
       return undefined;
     }
 
-    let cancelled = false;
-    let retryTimer = null;
-    let intervalId = null;
-    const poll = async (attempt = 0) => {
-      try {
-        const items = await BoardModel.fetchPosts(currentUser);
-        if (cancelled) return;
-        const checkedAt = Date.now();
-        const activePosts = (items || [])
-          .filter((post) => isPopupActive(post, checkedAt))
-          .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-        updateBoardNewBadge(userKey, items, checkedAt);
-        const activeIds = new Set(activePosts.map((post) => String(post.id)));
+    // Popup observation is cache-only. The 30-minute idle scheduler owns the
+    // remote board request and emits this event after refreshing the cache.
+    const refreshFromLocalCache = () => {
+      const items = BoardModel.getCachedPosts(currentUser);
+      if (!items) return;
+      const checkedAt = Date.now();
+      const activePosts = items
+        .filter((post) => isPopupActive(post, checkedAt))
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+      updateBoardNewBadge(userKey, items, checkedAt);
+      const activeIds = new Set(activePosts.map((post) => String(post.id)));
 
-        if (knownPopupIdsRef.current) {
-          for (const post of activePosts) {
-            const id = String(post.id);
-            if (knownPopupIdsRef.current.has(id) || isDismissed(id, checkedAt)) continue;
-            window.electronAPI?.showPopupNotification?.({
-              id,
-              title: '\u{1F6A8} [중앙 긴급 공지]',
-              body: '새 중요 메시지가 등록되었습니다',
-            }).catch((error) => console.warn('[Board Popup] 트레이 알림 실패:', error));
-          }
-        }
-
-        knownPopupIdsRef.current = activeIds;
-        setPosts(activePosts);
-        setNow(checkedAt);
-      } catch (error) {
-        if (cancelled) return;
-        const sessionInvalid = Number(error?.status) === 401
-          || String(error?.data?.code || '') === 'ACTIVE_SESSION_REQUIRED';
-        if (sessionInvalid) {
-          cancelled = true;
-          if (intervalId) window.clearInterval(intervalId);
-          window.dispatchEvent(new CustomEvent('osoo:server-session-invalid'));
-          return;
-        }
-        console.warn(`[Board Popup] 공지 조회 실패 (${attempt + 1}/3):`, error);
-        if (attempt < 2) {
-          retryTimer = window.setTimeout(() => poll(attempt + 1), 3000);
+      if (knownPopupIdsRef.current) {
+        for (const post of activePosts) {
+          const id = String(post.id);
+          if (knownPopupIdsRef.current.has(id) || isDismissed(id, checkedAt)) continue;
+          window.electronAPI?.showPopupNotification?.({
+            id,
+            title: '\u{1F6A8} [\uC911\uC694 \uAE34\uAE09 \uACF5\uC9C0]',
+            body: '\uC0C8 \uC911\uC694 \uBA54\uC2DC\uC9C0\uAC00 \uB4F1\uB85D\uB418\uC5C8\uC2B5\uB2C8\uB2E4.',
+          }).catch((error) => console.warn('[Board Popup] 알림 표시 실패:', error));
         }
       }
+
+      knownPopupIdsRef.current = activeIds;
+      setPosts(activePosts);
+      setNow(checkedAt);
     };
 
-    poll();
-    intervalId = window.setInterval(() => poll(), POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      if (retryTimer) window.clearTimeout(retryTimer);
-      if (intervalId) window.clearInterval(intervalId);
-    };
+    refreshFromLocalCache();
+    window.addEventListener('osoo:board-cache-updated', refreshFromLocalCache);
+    return () => window.removeEventListener('osoo:board-cache-updated', refreshFromLocalCache);
   }, [enabled, currentUser, userKey, isDismissed]);
 
   useEffect(() => {

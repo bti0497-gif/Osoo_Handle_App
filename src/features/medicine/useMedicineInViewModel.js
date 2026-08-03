@@ -19,7 +19,7 @@ const toMonthStart = (year, month) => `${year}-${String(month).padStart(2, '0')}
 const getFilePath = (file) => (file?.path && file.path !== '') ? file.path : null;
 
 export function useMedicineInViewModel(currentUser) {
-  const { showToast, showConfirm } = useDialog();
+  const { showToast } = useDialog();
 
   const [year, setYear] = useState(currentYear);
   const [month, setMonth] = useState(currentMonth);
@@ -73,45 +73,12 @@ export function useMedicineInViewModel(currentUser) {
       setTradePhotoFile(null);
       setTradePreviewUrl(toAbsUrl(result.tradePhotoUrl));
 
-      const maybeRestore = async ({ targetTab, date, items }) => {
-        const missingNames = items
-          .filter((item) => !item.previewUrl)
-          .map((item) => item.name)
-          .filter(Boolean);
-        if (!missingNames.length || !date) return;
-        const check = await MedicineInModel.checkRemotePhotos({ date, itemNames: missingNames });
-        if (!check?.success || !check.count) return;
-        const confirmed = await showConfirm?.('사진이 서버에 있습니다. 내려받을까요?');
-        if (!confirmed) return;
-        const restored = await MedicineInModel.restoreRemotePhotos({
-          date,
-          itemNames: check.items.map((item) => item.name),
-          tab: targetTab,
-        });
-        if (restored?.success && restored.count > 0) {
-          showToast(`${restored.count}개 사진을 내려받았습니다.`);
-          await loadDefaultsImpl();
-        }
-      };
-
-      setTimeout(() => {
-        maybeRestore({
-          targetTab: 'medicine',
-          date: result.latestMedicineDate || fallbackDate,
-          items: result.medicines || [],
-        }).catch((err) => console.warn('[medicine-in] 약품 사진 복구 확인 실패:', err.message));
-        maybeRestore({
-          targetTab: 'kit',
-          date: result.latestKitDate || fallbackDate,
-          items: result.kits || [],
-        }).catch((err) => console.warn('[medicine-in] 키트 사진 복구 확인 실패:', err.message));
-      }, 0);
     } catch (err) {
       showToast(err.message || '데이터를 불러오지 못했습니다.', 'error');
     } finally {
       setIsLoading(false);
     }
-  }, [year, month, showToast, showConfirm, requestContext]);
+  }, [year, month, showToast, requestContext]);
 
   useEffect(() => {
     loadDefaults();

@@ -35,11 +35,17 @@ function withTimeout(promise, timeoutMs, label) {
   ]).finally(() => clearTimeout(timer));
 }
 
-function triggerBigQuerySync(reason) {
+function queueBigQuerySync(db) {
   try {
-    require('../services/bigQueryTriggerService.cjs').triggerSync(reason);
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO background_tasks (task_type, status, attempts, next_run_at, updated_at)
+      VALUES ('data-sync', 'pending', 0, ?, ?)
+      ON CONFLICT(task_type) DO UPDATE SET
+        status = 'pending', next_run_at = excluded.next_run_at, updated_at = excluded.updated_at
+    `).run(now, now);
   } catch (err) {
-    console.warn('[Settings] BigQuery 동기화 예약 실패:', err.message);
+    console.warn('[Settings] BigQuery TODO 기록 실패:', err.message);
   }
 }
 
@@ -327,7 +333,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const result = await applyRestore(db, appDataPath, payload);
       // 과거자료도 일반 현장 입력과 동일한 기존 BigQuery 대기열을 사용한다.
       // 현재 admin 세션에서는 전송하지 않고, 이후 현장관리자 로그인/유휴 동기화 때 처리한다.
-      triggerBigQuerySync('settings:history-restore-apply');
+      queueBigQuerySync(db);
       return res.json(result);
     } catch (error) {
       console.error('[Settings] 과거자료 로컬 복원 실패:', error);
@@ -448,7 +454,7 @@ module.exports = function (db, baseDir, appDataPath) {
     const importProgress = setImportProgress('flow', mappingSettingsService.createProgress(config));
     try {
       const result = await mappingSettingsService.saveFlowMapping(db, appDataPath, config, mapping, importProgress);
-      triggerBigQuerySync('settings:flow-mapping-import');
+      queueBigQuerySync(db);
       res.json({ success: true, ...result });
     } catch (e) {
       console.error('Flow mapping error:', e);
@@ -466,7 +472,7 @@ module.exports = function (db, baseDir, appDataPath) {
     const importProgress = setImportProgress('kit', mappingSettingsService.createProgress(config));
     try {
       const result = await mappingSettingsService.saveKitMapping(db, appDataPath, config, mapping, importProgress);
-      triggerBigQuerySync('settings:kit-mapping-import');
+      queueBigQuerySync(db);
       res.json({ success: true, ...result });
     } catch (e) {
       console.error('Kit mapping error:', e);
@@ -484,7 +490,7 @@ module.exports = function (db, baseDir, appDataPath) {
     const importProgress = setImportProgress('medicine', mappingSettingsService.createProgress(config));
     try {
       const result = await mappingSettingsService.saveMedicineMapping(db, appDataPath, config, mapping, importProgress);
-      triggerBigQuerySync('settings:medicine-mapping-import');
+      queueBigQuerySync(db);
       res.json({ success: true, ...result });
     } catch (e) {
       console.error('Medicine mapping error:', e);
@@ -501,7 +507,7 @@ module.exports = function (db, baseDir, appDataPath) {
     const importProgress = setImportProgress('water', mappingSettingsService.createProgress(config));
     try {
       const result = await mappingSettingsService.saveWaterMapping(db, appDataPath, config, mapping, importProgress);
-      triggerBigQuerySync('settings:water-mapping-import');
+      queueBigQuerySync(db);
       res.json({ success: true, ...result });
     } catch (e) {
       console.error('Water mapping error:', e);

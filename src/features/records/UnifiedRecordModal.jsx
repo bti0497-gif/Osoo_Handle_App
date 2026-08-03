@@ -321,7 +321,10 @@ export default function UnifiedRecordModal({
     onValidationError,
     onDateChange,
 }) {
-    const canUseBaselineStatus = ADMIN_ROLES.has(String(currentUser?.role || '').trim().toLowerCase());
+    // 기준값은 계량기 교체·초기화 때 현장에서 즉시 입력해야 한다.
+    // 로그인한 현장관리자와 관리자 모두 사용할 수 있으며 기본 저장구분은
+    // 기존과 동일하게 useState('manual')의 일반 입력을 유지한다.
+    const canUseBaselineStatus = Boolean(currentUser?.id || currentUser?.name);
     const [activeTab, setActiveTab] = useState(initialTab);
     const [date, setDate] = useState(initialDate);
     const [selectedByTab, setSelectedByTab] = useState({});

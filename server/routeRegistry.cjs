@@ -47,7 +47,7 @@ const routeRegistry = [
   { tier: 2, path: '/',                   module: './routes/sludgePhotoRoutes.cjs',    args: ['db', 'BASE_DIR', 'appDataPath'], watch: true },
   { tier: 2, path: '/',                   module: './routes/medicineInRoutes.cjs',     args: ['db', 'BASE_DIR', 'appDataPath'], watch: true },
   { tier: 2, path: '/',                   module: './routes/medicineRegisterRoutes.cjs', args: ['db', 'BASE_DIR', 'appDataPath'] },
-  { tier: 2, path: '/',                   module: './routes/certificateRoutes.cjs',    args: ['db'] },
+  { tier: 2, path: '/',                   module: './routes/certificateRoutes.cjs',    args: ['appDataPath'] },
   { tier: 2, path: '/',                   module: './routes/locationRoutes.cjs',       args: ['BASE_DIR'] },
   { tier: 2, path: '/',                   module: './routes/dailyWorkLogRoutes.cjs',   args: ['db', 'BASE_DIR', 'appDataPath'] },
   { tier: 2, path: '/',                   module: './routes/monthlyOperationReportRoutes.cjs', args: ['db', 'BASE_DIR', 'appDataPath'] },

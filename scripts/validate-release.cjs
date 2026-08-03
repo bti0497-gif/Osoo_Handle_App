@@ -856,8 +856,9 @@ function validateRegressionContracts() {
       boardPopupNoticeText.includes('오늘 하루 보지 않기') &&
       boardPopupNoticeText.includes("transform: 'translate(-50%, -50%)'") &&
       boardPopupNoticeText.includes('role="alertdialog"') &&
-      boardPopupWatcherText.includes('attempt < 2') &&
-      boardPopupWatcherText.includes('3 * 60 * 1000') &&
+      boardPopupWatcherText.includes('BoardModel.getCachedPosts(currentUser)') &&
+      boardPopupWatcherText.includes('osoo:board-cache-updated') &&
+      !boardPopupWatcherText.includes('BoardModel.fetchPosts') &&
       boardPopupWatcherText.includes('Date.now() + DAY_MS') &&
       electronMainText.includes("ipcMain.handle('notification:showPopupNotice'") &&
       electronMainText.includes("targetWindow.webContents.send('notification:openPopupModal'") &&
@@ -1217,7 +1218,8 @@ function validateRegressionContracts() {
     diagnosticLogServiceText.includes('async function cleanupOldDiagnosticsOnVersionStart') &&
       diagnosticLogServiceText.includes("findFolderPath(getDriveRootFolderId(), ['앱진단로그'])") &&
       diagnosticLogServiceText.includes("entry.name.slice(0, 10) >= todayKst") &&
-      serverIndexText.includes('cleanupOldDiagnosticsOnVersionStart(db, appDataPath)') &&
+      authRoutesText.includes("router.post('/background-tasks/run-diagnostic-sync'") &&
+      authRoutesText.includes('cleanupOldDiagnosticsOnVersionStart(db, appDataPath)') &&
       localDataBackupContractText.includes('Logs created on the current KST date must remain'),
     '버전 첫 실행 오늘 이전 진단로그 정리 계약 유지',
     '업데이트 후 과거 진단로그 정리 또는 오늘 로그 보존 규칙이 깨졌습니다'
@@ -1647,11 +1649,11 @@ function validateRegressionContracts() {
       authViewModelText.includes('ROADWORK_SESSION_PRESERVE_ON_APP_RESTART') &&
       roadworkContractText.includes('App startup, update restart, or a missing app login session must not clear a roadwork persistent partition') &&
       authViewModelText.includes('if (!session || session?.logout_time != null)') &&
-      boardPopupWatcherText.includes('Number(error?.status) === 401') &&
-      boardPopupWatcherText.includes("String(error?.data?.code || '') === 'ACTIVE_SESSION_REQUIRED'") &&
-      boardPopupWatcherText.includes("new CustomEvent('osoo:server-session-invalid')"),
+      boardPopupWatcherText.includes('BoardModel.getCachedPosts(currentUser)') &&
+      !boardPopupWatcherText.includes('BoardModel.fetchPosts') &&
+      !boardPopupWatcherText.includes("new CustomEvent('osoo:server-session-invalid')"),
     '자동로그아웃·게시판 감시·도로공사 세션 수명주기 계약 유지',
-    '서버 로그아웃 시 로컬 인증 정리, 게시판 401 감시 중단 또는 도로공사 세션 유지·로그아웃 정리가 누락됐습니다.'
+    '게시판 서버 오류가 로컬 인증을 종료하거나 도로공사 세션 수명주기 계약이 깨졌습니다.'
   );
 
   checkSource(

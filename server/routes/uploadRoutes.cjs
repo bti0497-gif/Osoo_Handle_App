@@ -83,23 +83,55 @@ module.exports = function(appDataPath) {
     fs.renameSync(req.file.path, targetLocalPath);
     const filePath = targetLocalPath;
     const localUrl = `/uploads/${path.basename(filePath)}`;
+    const isImage = String(req.file.mimetype || '').startsWith('image/');
+    let previewPath = '';
+    let previewLocalUrl = localUrl;
+    if (isImage) {
+      const sourceExt = path.extname(filePath);
+      const previewName = `${path.basename(filePath, sourceExt)}_preview.jpg`;
+      previewPath = ensureUniquePath(uploadDir, previewName);
+      await sharp(filePath, { limitInputPixels: MAX_IMAGE_PIXELS })
+        .rotate()
+        .resize({ width: 600, withoutEnlargement: true })
+        .jpeg({ quality: 72, mozjpeg: true })
+        .toFile(previewPath);
+      previewLocalUrl = `/uploads/${path.basename(previewPath)}`;
+    }
     try {
       const folderId = await getOrCreateBoardUploadsFolder();
+      const inlineOnly = String(req.body?.purpose || '').trim().toLowerCase() === 'inline' && Boolean(previewPath);
+      const primaryUploadPath = inlineOnly ? previewPath : filePath;
+      const primaryUploadName = inlineOnly ? path.basename(previewPath) : originalName;
+      const primaryMimeType = inlineOnly ? 'image/jpeg' : req.file.mimetype;
       const driveRes = await drive.files.create({
-        resource: { name: originalName, parents: [folderId] },
-        media: { mimeType: req.file.mimetype, body: fs.createReadStream(filePath) },
+        resource: { name: primaryUploadName, parents: [folderId] },
+        media: { mimeType: primaryMimeType, body: fs.createReadStream(primaryUploadPath) },
         fields: 'id, webViewLink, webContentLink'
       });
       await drive.permissions.create({
         fileId: driveRes.data.id,
         requestBody: { role: 'reader', type: 'anyone' }
       });
+      let inlineUrl = `https://drive.google.com/thumbnail?id=${encodeURIComponent(driveRes.data.id)}&sz=w1000`;
+      if (previewPath && !inlineOnly) {
+        const previewDriveRes = await drive.files.create({
+          resource: { name: path.basename(previewPath), parents: [folderId] },
+          media: { mimeType: 'image/jpeg', body: fs.createReadStream(previewPath) },
+          fields: 'id, webViewLink, webContentLink'
+        });
+        await drive.permissions.create({
+          fileId: previewDriveRes.data.id,
+          requestBody: { role: 'reader', type: 'anyone' }
+        });
+        inlineUrl = `https://drive.google.com/thumbnail?id=${encodeURIComponent(previewDriveRes.data.id)}&sz=w1000`;
+      }
       res.json({
         success: true,
         url: driveRes.data.webViewLink,
         driveUrl: driveRes.data.webViewLink,
-        inlineUrl: driveRes.data.webContentLink || driveRes.data.webViewLink,
+        inlineUrl,
         localUrl,
+        previewLocalUrl,
         uploadedToDrive: true,
         originalName,
         storedName: path.basename(filePath),
@@ -112,7 +144,8 @@ module.exports = function(appDataPath) {
         success: true,
         url: localUrl,
         localUrl,
-        inlineUrl: localUrl,
+        inlineUrl: previewLocalUrl,
+        previewLocalUrl,
         uploadedToDrive: false,
         originalName,
         storedName: path.basename(filePath),

@@ -54,11 +54,6 @@ export async function runStoredSessionRestore() {
         } catch (err) {
             console.error('[세션 복원] 자동 퇴근 처리 실패:', err);
         }
-        try {
-            await AuthModel.syncAttendanceBQ();
-        } catch (err) {
-            console.error('[세션 복원] BigQuery 동기화 실패:', err);
-        }
         AuthModel.clearSession();
         return { outcome: 'cleared' };
     }

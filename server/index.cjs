@@ -63,7 +63,10 @@ app.use(cors({
   origin(origin, callback) {
     callback(isAllowedLocalOrigin(origin) ? null : new Error('허용되지 않은 API 출처입니다.'), isAllowedLocalOrigin(origin));
   },
-  allowedHeaders: ['Content-Type', 'x-user-name', 'x-user-role', 'x-user-site', TOKEN_HEADER],
+  // The renderer attaches the immutable site scope to every API request.
+  // Keep this in the explicit CORS allow-list so the Vite renderer (18735)
+  // can call the local bridge (18731) during development as well as Electron.
+  allowedHeaders: ['Content-Type', 'x-user-name', 'x-user-role', 'x-user-site', 'x-user-sites', 'x-osoo-site-id', TOKEN_HEADER],
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -103,8 +106,6 @@ app.get('/api/ping', (req, res) => {
   });
 });
 
-const isBigQuerySyncEnabled = String(process.env.BIGQUERY_SYNC_ENABLED || 'true') === 'true';
-const isBigQuerySchedulerEnabled = String(process.env.BIGQUERY_SYNC_SCHEDULER || 'true') === 'true';
 
 let postStartupTasksScheduled = false;
 let postStartupCtx = null;
@@ -154,13 +155,7 @@ function schedulePostStartupTasks() {
   if (postStartupTasksScheduled || !postStartupCtx) return;
   postStartupTasksScheduled = true;
 
-  const { appDataPath, warmUpExcelPdfConverter, triggerBigQuerySync, normalizeLegacyPhotoFiles } = postStartupCtx;
-
-  if (isBigQuerySyncEnabled) {
-    setTimeout(() => {
-      triggerBigQuerySync('app-startup-delayed');
-    }, 20_000);
-  }
+  const { appDataPath, warmUpExcelPdfConverter, normalizeLegacyPhotoFiles } = postStartupCtx;
 
   setTimeout(() => {
     warmUpExcelPdfConverter(appDataPath).catch((error) => {
@@ -197,13 +192,10 @@ function registerLazyApplication() {
   }
   db.exec('BEGIN IMMEDIATE; ROLLBACK;');
   const { warmUpExcelPdfConverter } = require('./services/excelPdfService.cjs');
-  const { triggerSync: triggerBigQuerySync } = require('./services/bigQueryTriggerService.cjs');
   const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
   const {
     buildDatabaseDiagnosticDetails,
-    cleanupOldDiagnosticsOnVersionStart,
     recordDiagnostic,
-    uploadPendingDiagnostics,
     sanitize,
   } = require('./services/diagnosticLogService.cjs');
   const ctx = { db, appDataPath, BASE_DIR };
@@ -222,32 +214,20 @@ function registerLazyApplication() {
     message: 'local server initialized',
     details: buildDatabaseDiagnosticDetails(db, appDataPath),
   });
-  cleanupOldDiagnosticsOnVersionStart(db, appDataPath)
-    .then((result) => {
-      if (!result?.skipped) {
-        recordDiagnostic(db, appDataPath, {
-          level: 'info',
-          area: 'diagnostic',
-          action: 'cleanup-on-version-start',
-          result: 'ok',
-          message: 'old diagnostic logs cleaned',
-          details: result,
-        });
-      }
-    })
-    .catch((error) => {
-      console.warn('[diagnostic] version-start cleanup failed:', error.message);
-    });
-  let diagnosticUploadTimer = null;
-  const scheduleDiagnosticUpload = () => {
-    if (diagnosticUploadTimer) return;
-    diagnosticUploadTimer = setTimeout(() => {
-      diagnosticUploadTimer = null;
-      uploadPendingDiagnostics(db, appDataPath).catch((error) => {
-        console.warn('[diagnostic] upload failed:', error.message);
-      });
-    }, 15_000);
+  const markBackgroundTaskPending = (taskType) => {
+    try {
+      const now = new Date().toISOString();
+      db.prepare(`
+        INSERT INTO background_tasks (task_type, status, attempts, next_run_at, updated_at)
+        VALUES (?, 'pending', 0, ?, ?)
+        ON CONFLICT(task_type) DO UPDATE SET
+          status = 'pending', next_run_at = excluded.next_run_at, updated_at = excluded.updated_at
+      `).run(taskType, now, now);
+    } catch (_) {
+      // The local diagnostic rows remain the durable source of pending work.
+    }
   };
+  const scheduleDiagnosticUpload = () => markBackgroundTaskPending('diagnostic-sync');
   try {
     const watchdogImport = importWatchdogDiagnostics(db, appDataPath);
     if (watchdogImport.imported > 0) scheduleDiagnosticUpload();
@@ -297,7 +277,7 @@ function registerLazyApplication() {
     const originalEnd = res.end;
     res.end = function wrappedEnd(...args) {
       if (res.statusCode >= 200 && res.statusCode < 400 && shouldTriggerSync) {
-        triggerBigQuerySync(`after-save:${method}:${pathName}`);
+        markBackgroundTaskPending('data-sync');
       }
 
       const shouldLogResponse = shouldLogSuccessfulResponse || (shouldInspect && res.statusCode >= 400);
@@ -355,7 +335,7 @@ function registerLazyApplication() {
 
   if (IS_MINIMAL_BUILD) {
     console.log('[Server] minimal build mode: auth routes only');
-    return { appDataPath, warmUpExcelPdfConverter, triggerBigQuerySync, normalizeLegacyPhotoFiles };
+    return { appDataPath, warmUpExcelPdfConverter, normalizeLegacyPhotoFiles };
   }
 
   // --- Static file serving ---
@@ -390,32 +370,13 @@ function registerLazyApplication() {
     app.use(entry.path, makeLazy(entry.module, ...resolveArgs(entry.args, ctx)));
   }
 
-  // --- BigQuery 스케줄러 ---
-  function startBigQueryScheduler() {
-    if (isBigQuerySyncEnabled && isBigQuerySchedulerEnabled) {
-      const syncScheduler = require('./cron/syncScheduler.cjs');
-      syncScheduler.start();
-      console.log('[Scheduler] BigQuery 동기화 스케줄러 시작');
-    } else if (!isBigQuerySyncEnabled) {
-      console.log('[Scheduler] BigQuery 스케줄러 비활성화 (BIGQUERY_SYNC_ENABLED=false)');
-    } else {
-      console.log('[Scheduler] 즉시 스케줄러 비활성화 (BIGQUERY_SYNC_SCHEDULER=false) - 수동 시작/중지용 API 모듈 사용');
-    }
-  }
-
   // --- /api/preload-trigger: registry 기반 자동 로드 ---
-  setInterval(() => {
-    uploadPendingDiagnostics(db, appDataPath).catch((error) => {
-      console.warn('[diagnostic] periodic upload failed:', error.message);
-    });
-  }, 10 * 60 * 1000);
-
   app.post('/api/preload-trigger', (req, res) => {
     res.json({ ok: true });
     setImmediate(() => {
       let i = 0;
       function loadNext() {
-        if (i >= tier1Entries.length) { startBigQueryScheduler(); return; }
+        if (i >= tier1Entries.length) return;
         const entry = tier1Entries[i++];
         const entryKey = getTier1EntryKey(entry);
         if (!tier1RouterRefs[entryKey]) {
@@ -435,7 +396,7 @@ function registerLazyApplication() {
   const { uploadErrorMiddleware } = require('./middleware/uploadSecurity.cjs');
   app.use(uploadErrorMiddleware);
 
-  return { appDataPath, warmUpExcelPdfConverter, triggerBigQuerySync, normalizeLegacyPhotoFiles };
+  return { appDataPath, warmUpExcelPdfConverter, normalizeLegacyPhotoFiles };
 }
 
 const API_PORT_MIN = Number(process.env.OSOO_API_PORT_MIN) || 18731;

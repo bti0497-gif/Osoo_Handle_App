@@ -21,20 +21,23 @@ function getMembersFromDriveBackup(...args) {
 function findMemberInDriveBackup(...args) {
   return require('../services/membersDriveBackupService.cjs').findMemberInDriveBackup(...args);
 }
-function syncMembersBackupToDrive(...args) {
-  return require('../services/membersDriveBackupService.cjs').syncMembersBackupToDrive(...args);
-}
 function detectRemoteSession(...args) {
   return require('../services/remoteSessionDetectService.cjs').detectRemoteSession(...args);
 }
 function recordAttendanceSessions(...args) {
   return require('../services/attendanceSessionService.cjs').recordAttendanceSessions(...args);
 }
-function triggerBigQuerySync(...args) {
-  return require('../services/bigQueryTriggerService.cjs').triggerSync(...args);
+function notifyBigQueryUserActivity(...args) {
+  return require('../services/bigQueryTriggerService.cjs').notifyUserActivity(...args);
 }
-function syncRecentCertificateCacheForSite(...args) {
-  return require('../services/certificateCacheSyncService.cjs').syncRecentCertificateCacheForSite(...args);
+function runBigQuerySyncIfIdle(...args) {
+  return require('../services/bigQueryTriggerService.cjs').runSyncIfIdle(...args);
+}
+function createUserIdleGuard(...args) {
+  return require('../services/bigQueryTriggerService.cjs').createUserIdleGuard(...args);
+}
+function processPendingBackgroundFileTasks(...args) {
+  return require('../services/backgroundFileTaskService.cjs').processPendingBackgroundFileTasks(...args);
 }
 function setActiveUser(...args) {
   return require('../services/activeUserSessionService.cjs').setActiveUser(...args);
@@ -42,12 +45,58 @@ function setActiveUser(...args) {
 function clearActiveUser(...args) {
   return require('../services/activeUserSessionService.cjs').clearActiveUser(...args);
 }
+function getActiveUser(...args) {
+  return require('../services/activeUserSessionService.cjs').getActiveUser(...args);
+}
 function recordDiagnostic(...args) {
   return require('../services/diagnosticLogService.cjs').recordDiagnostic(...args);
+}
+function uploadPendingDiagnostics(...args) {
+  return require('../services/diagnosticLogService.cjs').uploadPendingDiagnostics(...args);
+}
+function cleanupOldDiagnosticsOnVersionStart(...args) {
+  return require('../services/diagnosticLogService.cjs').cleanupOldDiagnosticsOnVersionStart(...args);
 }
 
 module.exports = (db, appDataPath) => {
     const router = express.Router();
+    const BACKGROUND_TASK_TYPES = new Set([
+        'attendance-sync',
+        'data-sync',
+        'file-sync',
+        'certificate-cache',
+        'board-cache',
+        'diagnostic-sync',
+        'update-check',
+    ]);
+    const normalizeBackgroundTaskType = (value) => {
+        const taskType = String(value || '').trim();
+        return BACKGROUND_TASK_TYPES.has(taskType) ? taskType : '';
+    };
+    const requireBackgroundFieldSession = (req, res, next) => {
+        const activeUser = getActiveUser();
+        if (!activeUser) return res.status(401).json({ success: false, error: 'active field session required' });
+        const role = String(activeUser.role || '').trim();
+        if (role === 'admin' || role === 'group_admin' || role === 'super_admin' || role === 'central_admin') {
+            return res.status(403).json({ success: false, error: 'background field sync is disabled for admin sessions' });
+        }
+        req.backgroundActiveUser = activeUser;
+        return next();
+    };
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS background_tasks (
+        task_type TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        next_run_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      UPDATE background_tasks
+      SET status = 'pending', updated_at = CURRENT_TIMESTAMP
+      WHERE status = 'running';
+    `);
 
     const pad2 = (value) => String(value).padStart(2, '0');
 
@@ -139,9 +188,6 @@ module.exports = (db, appDataPath) => {
             try {
                 const members = await getMembers();
                 if (Array.isArray(members) && members.length > 0) {
-                    syncMembersBackupToDrive(members).catch((backupErr) => {
-                        console.warn('[auth] Drive 회원 백업 갱신 실패:', backupErr.message);
-                    });
                     return { members, source: 'sheets' };
                 }
                 console.warn('[auth] Sheets 회원 목록이 비어 있어 Drive JSON 백업으로 재시도합니다.');
@@ -408,17 +454,9 @@ module.exports = (db, appDataPath) => {
                 }
                 setActiveUser(member, 'local-login');
                 closeStaleOpenSessions(member);
-                try {
-                    await syncRecentCertificateCacheForSite({
-                        db,
-                        siteName: member.site_name1,
-                        months: 2,
-                    });
-                } catch (syncErr) {
-                    console.warn('[auth/local-login] certificate cache sync failed (local):', syncErr.message);
-                }
-                triggerBigQuerySync('login-success:local');
                 res.json({ success: true, member: enrichMemberWithSites(member), source: 'local' });
+                // 로그인 응답은 로컬 자격 확인만으로 즉시 끝낸다. Drive/BigQuery는
+                // 응답 이후 별도 작업으로 넘겨 외부 장애가 업무 화면 진입을 막지 않게 한다.
             } else {
                 res.status(401).json({ success: false, message: '이름 또는 비밀번호가 일치하지 않습니다.' });
             }
@@ -470,13 +508,12 @@ module.exports = (db, appDataPath) => {
             const localMember = db.prepare('SELECT * FROM members WHERE id = ? OR name = ? LIMIT 1').get(member.id, member.name);
             setActiveUser(localMember || member, 'discovery-login');
             closeStaleOpenSessions(localMember || member);
-            triggerBigQuerySync('login-success:sheets');
-
-            return res.json({
+            res.json({
                 success: true,
                 member: enrichMemberWithSites(localMember || member),
                 source
             });
+            return undefined;
         } catch (err) {
             return res.status(500).json({ success: false, error: err.message });
         }
@@ -510,6 +547,123 @@ module.exports = (db, appDataPath) => {
             details,
         });
         return res.json({ success: true, id });
+    });
+
+    router.post('/user-activity', (req, res) => {
+        const state = notifyBigQueryUserActivity('renderer-input');
+        return res.json({ success: true, ...state });
+    });
+
+    router.use('/background-tasks', requireBackgroundFieldSession);
+
+    router.post('/background-tasks/prepare', (req, res) => {
+        const taskTypes = Array.isArray(req.body?.taskTypes) ? req.body.taskTypes : [];
+        const now = new Date().toISOString();
+        const insert = db.prepare(`
+          INSERT INTO background_tasks (task_type, status, attempts, next_run_at, updated_at)
+          VALUES (?, 'pending', 0, ?, ?)
+          ON CONFLICT(task_type) DO UPDATE SET
+            status = CASE
+              WHEN background_tasks.status = 'completed'
+               AND COALESCE(background_tasks.next_run_at, '') <= excluded.next_run_at
+              THEN 'pending' ELSE background_tasks.status END,
+            updated_at = excluded.updated_at
+        `);
+        db.transaction(() => {
+            taskTypes.map(normalizeBackgroundTaskType).filter(Boolean)
+                .forEach((taskType) => insert.run(taskType, now, now));
+        })();
+        return res.json({ success: true });
+    });
+
+    router.get('/background-tasks/pending', (req, res) => {
+        const now = new Date().toISOString();
+        db.prepare(`
+          UPDATE background_tasks SET status = 'pending', updated_at = ?
+          WHERE status = 'completed' AND COALESCE(next_run_at, '') <= ?
+        `).run(now, now);
+        const tasks = db.prepare(`
+          SELECT * FROM background_tasks
+          WHERE status = 'pending' AND COALESCE(next_run_at, '') <= ?
+          ORDER BY updated_at ASC
+        `).all(now);
+        return res.json({ success: true, tasks });
+    });
+
+    router.post('/background-tasks/claim', (req, res) => {
+        const taskType = normalizeBackgroundTaskType(req.body?.taskType);
+        if (!taskType) return res.status(400).json({ success: false, error: 'invalid background task type' });
+        const result = db.prepare(`
+          UPDATE background_tasks
+          SET status = 'running', attempts = attempts + 1, updated_at = ?
+          WHERE task_type = ? AND status = 'pending'
+        `).run(new Date().toISOString(), taskType);
+        return res.json({ success: true, claimed: result.changes > 0 });
+    });
+
+    router.post('/background-tasks/complete', (req, res) => {
+        const taskType = normalizeBackgroundTaskType(req.body?.taskType);
+        if (!taskType) return res.status(400).json({ success: false, error: 'invalid background task type' });
+        const delayMs = Math.max(60000, Number(req.body?.delayMs) || 60 * 60 * 1000);
+        const now = new Date();
+        db.prepare(`
+          UPDATE background_tasks
+          SET status = 'completed', last_error = NULL, next_run_at = ?, updated_at = ?
+          WHERE task_type = ?
+        `).run(new Date(now.getTime() + delayMs).toISOString(), now.toISOString(), taskType);
+        return res.json({ success: true });
+    });
+
+    router.post('/background-tasks/fail', (req, res) => {
+        const taskType = normalizeBackgroundTaskType(req.body?.taskType);
+        if (!taskType) return res.status(400).json({ success: false, error: 'invalid background task type' });
+        const now = new Date();
+        db.prepare(`
+          UPDATE background_tasks
+          SET status = 'pending', last_error = ?, next_run_at = ?, updated_at = ?
+          WHERE task_type = ?
+        `).run(
+            String(req.body?.error || '').slice(0, 1000),
+            new Date(now.getTime() + 10 * 60 * 1000).toISOString(),
+            now.toISOString(),
+            taskType
+        );
+        return res.json({ success: true });
+    });
+
+    router.post('/background-tasks/run-data-sync', async (req, res) => {
+        try {
+            const result = await runBigQuerySyncIfIdle('persistent-background-task');
+            return res.json({ success: true, result });
+        } catch (error) {
+            return res.status(500).json({ success: false, error: error.message });
+        }
+    });
+
+    router.post('/background-tasks/run-file-sync', async (req, res) => {
+        try {
+            const summary = await processPendingBackgroundFileTasks(db, {
+                shouldContinue: createUserIdleGuard(),
+                limit: 50,
+            });
+            return res.json({ success: true, summary });
+        } catch (error) {
+            return res.status(500).json({ success: false, error: error.message });
+        }
+    });
+
+    router.post('/background-tasks/run-diagnostic-sync', async (req, res) => {
+        try {
+            const guard = createUserIdleGuard();
+            if (!guard()) return res.json({ success: true, paused: true });
+            const cleanup = await cleanupOldDiagnosticsOnVersionStart(db, appDataPath)
+                .catch((error) => ({ failed: true, error: error.message }));
+            if (!guard()) return res.json({ success: true, paused: true, cleanup });
+            const upload = await uploadPendingDiagnostics(db, appDataPath);
+            return res.json({ success: true, cleanup, upload });
+        } catch (error) {
+            return res.status(500).json({ success: false, error: error.message });
+        }
     });
 
     // 2. Sync member data downloaded by admin into the local DB.
@@ -667,8 +821,11 @@ module.exports = (db, appDataPath) => {
     });
 
     // 8. Sync attendance logs to BigQuery.
-    router.post('/sync-attendance-bq', async (req, res) => {
+    router.post('/sync-attendance-bq', requireBackgroundFieldSession, async (req, res) => {
         try {
+            if (!createUserIdleGuard()()) {
+                return res.status(409).json({ success: false, paused: true, error: 'waiting-for-idle' });
+            }
             const siteRow = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get();
             const siteName = siteRow?.site_name || '';
             const siteId = siteRow?.site_id || null;

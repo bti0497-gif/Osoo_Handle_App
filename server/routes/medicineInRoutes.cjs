@@ -14,6 +14,7 @@ const { openExcelFile } = require('../services/excelOpenService.cjs');
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const { recalculateInventoryCascade } = require('../services/inventoryCascadeService.cjs');
+const { enqueueBackgroundFileTask } = require('../services/backgroundFileTaskService.cjs');
 const {
   isDriveConfigured,
   drive,
@@ -159,6 +160,37 @@ function scanMedicinePhotoDates(appDataPath, year, mm, scope, targetName) {
     }
   }
   return [...dates];
+}
+
+function scanMedicinePhotoEntries(appDataPath, year, mm, scope = {}) {
+  const entries = [];
+  const seen = new Set();
+  const scanDirs = [getMedicinePhotoYearDir(appDataPath, year, scope)];
+  if (scope.multiSiteEnabled && scope.isPrimary) {
+    scanDirs.push(path.join(appDataPath, '사진관리', '약품입고', String(year)));
+  }
+  for (const dir of scanDirs) {
+    if (!fs.existsSync(dir)) continue;
+    let files;
+    try { files = fs.readdirSync(dir); } catch { continue; }
+    for (const file of files) {
+      const parsed = parseMedicinePhotoFileName(file);
+      if (!parsed || (mm && parsed.m !== mm)) continue;
+      const localPath = path.join(dir, file);
+      if (seen.has(localPath)) continue;
+      seen.add(localPath);
+      const relativePath = path.relative(
+        path.join(appDataPath, '사진관리', '약품입고'),
+        localPath
+      ).split(path.sep).join('/');
+      entries.push({
+        date: `${parsed.y}-${parsed.m}-${parsed.d}`,
+        name: sanitizeName(parsed.rawName).replace(/-\d+$/, ''),
+        url: `/api/medicine-in/photo?p=${encodeURIComponent(relativePath)}`,
+      });
+    }
+  }
+  return entries.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name));
 }
 
 function resolveSiteScope(db, source = {}) {
@@ -472,6 +504,12 @@ module.exports = function (db, baseDir, appDataPath) {
         mm,
         getMedicinePhotoScope(db, scope.siteId)
       );
+      const photoEntries = scanMedicinePhotoEntries(
+        appDataPath,
+        year,
+        mm,
+        getMedicinePhotoScope(db, scope.siteId)
+      );
       const tradePhotoDates = scanMedicinePhotoDates(
         appDataPath,
         year,
@@ -480,14 +518,17 @@ module.exports = function (db, baseDir, appDataPath) {
         '거래명세서'
       );
       const withPhoto = (row) => {
-        const found = photoMap[sanitizeName(row.name)];
+        const rowPhotos = photoEntries.filter((photo) => photo.date === row.date && photo.name === sanitizeName(row.name));
+        const found = rowPhotos[rowPhotos.length - 1] || photoMap[sanitizeName(row.name)];
         return {
           ...row,
           photoUrl: row.photo_url || (found?.date === row.date ? found.url : null),
+          photoUrls: rowPhotos.map((photo) => photo.url),
           photoDate: found?.date === row.date ? found.date : null,
         };
       };
-      const trade = photoMap[sanitizeName('거래명세서')] || null;
+      const tradeEntries = photoEntries.filter((photo) => photo.name === sanitizeName('거래명세서'));
+      const trade = tradeEntries[tradeEntries.length - 1] || photoMap[sanitizeName('거래명세서')] || null;
       res.json({
         success: true,
         medicines: medicineRows.map(withPhoto),
@@ -495,6 +536,7 @@ module.exports = function (db, baseDir, appDataPath) {
         tradePhotoUrl: trade?.url || null,
         tradePhotoDate: trade?.date || null,
         tradePhotoDates,
+        tradePhotos: tradeEntries,
       });
     } catch (err) {
       console.error('[medicine-in monthly]', err);
@@ -593,14 +635,12 @@ module.exports = function (db, baseDir, appDataPath) {
               const fileName = path.basename(localPath);
               const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(getMedicinePhotoRelativePath(yearStr, fileName, photoScope))}`;
               updateMedicinePhotoUrl(db, tab, date, medicineName, localUrl, metadata.siteId);
-              const driveFile = await uploadMedicinePhotoToDrive(
-                db,
-                date,
-                medicineName,
-                localPath,
-                req.siteContext?.siteName
-              );
-              drivePhotoResults.push({ medicineName, uploaded: Boolean(driveFile?.id) });
+              enqueueBackgroundFileTask(db, {
+                taskType: 'medicine-photo-drive',
+                dedupeKey: `medicine:${localPath}`,
+                payload: { date, itemName: medicineName, localPath, siteName: req.siteContext?.siteName || '', photoIndex: 0 },
+              });
+              drivePhotoResults.push({ medicineName, queued: true });
             }
           } catch (e) {
             console.warn(`[medicine-in save] 사진 저장 실패 (${medicineName}):`, e.message);
@@ -611,7 +651,8 @@ module.exports = function (db, baseDir, appDataPath) {
       res.json({
         success: true,
         drivePhotoResults,
-        driveUploadFailureCount: drivePhotoResults.filter((item) => !item.uploaded).length,
+        driveUploadFailureCount: 0,
+        driveQueuedCount: drivePhotoResults.filter((item) => item.queued).length,
       });
     } catch (err) {
       console.error('[medicine-in save]', err);
@@ -657,19 +698,21 @@ module.exports = function (db, baseDir, appDataPath) {
       const url = `/api/medicine-in/photo?p=${encodeURIComponent(getMedicinePhotoRelativePath(yearStr, fileName, photoScope))}`;
       updateMedicinePhotoUrl(db, 'medicine', date, medicineName, url, req.siteContext?.siteId);
       updateMedicinePhotoUrl(db, 'kit', date, medicineName, url, req.siteContext?.siteId);
-      const driveFile = await uploadMedicinePhotoToDrive(
-        db,
-        date,
-        medicineName,
-        destPath,
-        req.siteContext?.siteName,
-        photoIndex
-      );
+      enqueueBackgroundFileTask(db, {
+        taskType: 'medicine-photo-drive',
+        dedupeKey: `medicine:${destPath}`,
+        payload: {
+          date,
+          itemName: medicineName,
+          localPath: destPath,
+          siteName: req.siteContext?.siteName || '',
+          photoIndex,
+        },
+      });
       res.json({
         success: true,
         url,
-        driveUploaded: Boolean(driveFile?.id),
-        driveFileId: driveFile?.id || '',
+        driveQueued: true,
       });
     } catch (err) {
       console.error('[medicine-in upload-photo]', err);
@@ -806,13 +849,17 @@ module.exports = function (db, baseDir, appDataPath) {
                   const fileName = path.basename(localPath);
                   const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(getMedicinePhotoRelativePath(String(useDate).slice(0, 4), fileName, photoScope))}`;
                   updateMedicinePhotoUrl(db, isKit ? 'kit' : 'medicine', useDate, medicineName, localUrl, req.siteContext?.siteId);
-                  await uploadMedicinePhotoToDrive(
-                    db,
-                    useDate,
-                    medicineName,
-                    localPath,
-                    req.siteContext?.siteName
-                  );
+                  enqueueBackgroundFileTask(db, {
+                    taskType: 'medicine-photo-drive',
+                    dedupeKey: `medicine:${localPath}`,
+                    payload: {
+                      date: useDate,
+                      itemName: medicineName,
+                      localPath,
+                      siteName: req.siteContext?.siteName || '',
+                      photoIndex: 0,
+                    },
+                  });
                 }
               } catch (e) {
                 console.warn('[medicine-in export] 로컬 사진 저장 실패:', e.message);
@@ -1126,3 +1173,4 @@ module.exports.__photoIsolationTest = {
   scanMedicinePhotos,
   scanMedicinePhotoDates,
 };
+module.exports.__uploadMedicinePhotoToDrive = uploadMedicinePhotoToDrive;

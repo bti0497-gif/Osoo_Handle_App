@@ -11,6 +11,19 @@ const { importWatchdogDiagnostics } = require('../server/services/watchdogDiagno
 const root = path.resolve(__dirname, '..');
 const executable = path.join(root, 'watchdog', 'dist', 'OsooWatchdog.exe');
 assert.ok(fs.existsSync(executable), 'watchdog executable is missing; run watchdog/build-watchdog.ps1');
+const builderConfig = fs.readFileSync(path.join(root, 'electron-builder.config.cjs'), 'utf8');
+const installerGuard = fs.readFileSync(path.join(root, 'scripts', 'installer-process-guard.nsh'), 'utf8');
+const installerHooks = fs.readFileSync(path.join(root, 'scripts', 'installer-hooks.nsh'), 'utf8');
+const integratedInstaller = fs.readFileSync(path.join(root, 'scripts', 'build-integrated-installer.ps1'), 'utf8');
+const packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
+assert.ok(builderConfig.includes("watchdog/dist/OsooWatchdog.exe"), 'watchdog is not packaged as an extra resource');
+assert.ok(builderConfig.includes("include: 'scripts/installer-hooks.nsh'"), 'normal installer does not use watchdog hooks');
+assert.ok(installerHooks.includes('!insertmacro InstallOsooWatchdog'), 'normal installer does not install watchdog');
+assert.ok(installerGuard.includes('schtasks /Create /F /SC ONLOGON'), 'watchdog scheduled task registration is missing');
+assert.ok(installerGuard.includes('schtasks /Delete /F /TN "Osoo Handle App Watchdog"'), 'watchdog scheduled task cleanup is missing');
+assert.ok(installerGuard.includes('taskkill /F /T /IM "OsooWatchdog.exe"'), 'installer does not stop watchdog before replacing the app');
+assert.ok(integratedInstaller.includes("'  !insertmacro InstallOsooWatchdog'"), 'integrated installer does not install watchdog');
+assert.ok(packageJson.includes('watchdog:build'), 'release scripts do not rebuild watchdog');
 
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osoo-watchdog-'));
 const fakeApp = path.join(testRoot, 'Osoo Handle App.exe');

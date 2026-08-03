@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const {
   createLocalApiAuthMiddleware,
   isAllowedLocalOrigin,
@@ -48,6 +50,13 @@ assert.equal(isAllowedLocalOrigin('null'), true);
 assert.equal(isAllowedLocalOrigin('http://localhost:18735'), true);
 assert.equal(isAllowedLocalOrigin('http://127.0.0.1:18735'), true);
 assert.equal(isAllowedLocalOrigin('https://attacker.example'), false);
+
+const serverIndexText = fs.readFileSync(path.join(__dirname, '..', 'server', 'index.cjs'), 'utf8');
+assert.match(
+  serverIndexText,
+  /allowedHeaders:\s*\[[^\]]*['"]x-osoo-site-id['"][^\]]*\]/s,
+  'site_id 요청 헤더가 CORS 허용 목록에서 빠지면 개발 UI의 모든 API 요청이 차단됩니다.'
+);
 
 console.log('✓ 로컬 API capability token·ping 비노출·CORS 출처 경계 검증 통과');
 

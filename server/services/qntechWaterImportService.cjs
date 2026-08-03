@@ -300,6 +300,7 @@ async function importQntechWaterAll(db, baseDir, date, siteContext = {}) {
     identifiedPhotos: photoResult.identifiedPhotos,
     savedPhotos: photoResult.savedPhotos,
     driveUploadedPhotos: photoResult.driveUploadedPhotos,
+    driveQueuedPhotos: photoResult.driveQueuedPhotos,
     driveUploadErrors: photoResult.driveUploadErrors,
     photoRoot: photoResult.photoRoot,
     photoDirectory: photoResult.photoDirectory,
@@ -312,6 +313,7 @@ async function importQntechWaterAll(db, baseDir, date, siteContext = {}) {
       matchedRowCount: persistResult.matchedRowCount,
       savedPhotoCount: photoResult.savedPhotos.length,
       driveUploadedPhotoCount: photoResult.driveUploadedPhotos.length,
+      driveQueuedPhotoCount: photoResult.driveQueuedPhotos.length,
       driveUploadErrorCount: photoResult.driveUploadErrors.length
     }
   };
@@ -327,6 +329,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
   const summaryRows = [];
   let totalSavedPhotos = 0;
   let totalDriveUploadedPhotos = 0;
+  let totalDriveQueuedPhotos = 0;
   let totalDriveUploadErrors = 0;
   let totalInsertedRows = 0;
   let photoRoot = null;
@@ -375,6 +378,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
     photoRoot = photoResult.photoRoot;
     totalSavedPhotos += photoResult.savedPhotos.length;
     totalDriveUploadedPhotos += photoResult.driveUploadedPhotos.length;
+    totalDriveQueuedPhotos += photoResult.driveQueuedPhotos.length;
     totalDriveUploadErrors += photoResult.driveUploadErrors.length;
     totalInsertedRows += insertedRowCount;
 
@@ -388,6 +392,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
       insertedRowCount,
       savedPhotoCount: photoResult.savedPhotos.length,
       driveUploadedPhotoCount: photoResult.driveUploadedPhotos.length,
+      driveQueuedPhotoCount: photoResult.driveQueuedPhotos.length,
       driveUploadErrorCount: photoResult.driveUploadErrors.length,
       driveUploadErrors: photoResult.driveUploadErrors,
       photoDirectory: photoResult.photoDirectory,
@@ -421,6 +426,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
       insertedRowCount: totalInsertedRows,
       savedPhotoCount: totalSavedPhotos,
       driveUploadedPhotoCount: totalDriveUploadedPhotos,
+      driveQueuedPhotoCount: totalDriveQueuedPhotos,
       driveUploadErrorCount: totalDriveUploadErrors,
       existingValueDateCount: summaryRows.filter((item) => item.existingValues).length
     }
