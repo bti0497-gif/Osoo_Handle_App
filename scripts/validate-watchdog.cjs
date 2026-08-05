@@ -22,6 +22,10 @@ assert.ok(installerHooks.includes('!insertmacro InstallOsooWatchdog'), 'normal i
 assert.ok(installerGuard.includes('schtasks /Create /F /SC ONLOGON'), 'watchdog scheduled task registration is missing');
 assert.ok(installerGuard.includes('schtasks /Delete /F /TN "Osoo Handle App Watchdog"'), 'watchdog scheduled task cleanup is missing');
 assert.ok(installerGuard.includes('taskkill /F /T /IM "OsooWatchdog.exe"'), 'installer does not stop watchdog before replacing the app');
+assert.ok(installerGuard.includes('WriteRegStr HKLM "Software\\Microsoft\\Windows\\CurrentVersion\\Run"'), 'watchdog startup fallback is missing');
+assert.ok(installerGuard.includes('application installation will continue without watchdog'), 'watchdog failure must not cancel application installation');
+assert.ok(!installerGuard.includes('Abort "Failed to install Osoo Handle App watchdog."'), 'watchdog copy failure still cancels installation');
+assert.ok(!installerGuard.includes('Abort "Failed to register Osoo Handle App watchdog task."'), 'watchdog registration failure still cancels installation');
 assert.ok(integratedInstaller.includes("'  !insertmacro InstallOsooWatchdog'"), 'integrated installer does not install watchdog');
 assert.ok(packageJson.includes('watchdog:build'), 'release scripts do not rebuild watchdog');
 
