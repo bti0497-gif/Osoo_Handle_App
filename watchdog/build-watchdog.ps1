@@ -28,9 +28,21 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputPath)) {
 }
 
 $item = Get-Item -LiteralPath $outputPath
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+try {
+    $stream = [System.IO.File]::OpenRead($item.FullName)
+    try {
+        $hash = [System.BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '')
+    } finally {
+        $stream.Dispose()
+    }
+} finally {
+    $sha256.Dispose()
+}
+
 [PSCustomObject]@{
     Path = $item.FullName
     Version = $item.VersionInfo.FileVersion
     Size = $item.Length
-    Sha256 = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash
+    Sha256 = $hash
 }
