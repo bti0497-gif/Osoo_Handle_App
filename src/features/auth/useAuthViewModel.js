@@ -343,16 +343,18 @@ export const useAuthViewModel = () => {
     }, [clearLocalAuthenticatedState, refreshLoginHint]);
 
     const login = async (name, password) => {
-        setIsLoading(true);
         try {
             const normalizedName = String(name || '').trim();
             const isPrimaryAdminLogin = normalizedName.toLowerCase() === 'admin';
             let userData = isPrimaryAdminLogin
                 ? await AuthModel.discoveryLogin(normalizedName, password)
                 : await AuthModel.localLogin(normalizedName, password);
-            if (!userData && !isPrimaryAdminLogin) {
-                userData = await AuthModel.discoveryLogin(normalizedName, password);
-            }
+
+            // Field users authenticate only against the member information
+            // provisioned into the local DB by admin site setup. A failed local
+            // password must return immediately and must not turn login into a
+            // Google Sheets/network operation. Only the admin account uses the
+            // remote member master during login.
 
             if (userData) {
                 const field = isFieldWorker(userData);
@@ -367,7 +369,6 @@ export const useAuthViewModel = () => {
                     setupAutoLogoutTimer(enrichedUser);
                     startBackgroundAttendance(enrichedUser);
 
-                    setIsLoading(false);
                     return { success: true, user: enrichedUser, locationMatched: null };
                 }
 
@@ -377,16 +378,18 @@ export const useAuthViewModel = () => {
                 setUser(userData);
                 setLocationStatus({ status: 'idle', message: '' });
 
-                setIsLoading(false);
                 return { success: true, user: userData, locationMatched: true };
             }
 
-            setIsLoading(false);
-            return { success: false, message: '이름 또는 비밀번호가 올바르지 않습니다.' };
+            return { success: false, message: '이름 또는 비밀번호가 일치하지 않습니다.' };
         } catch (err) {
             console.error('Login Error:', err);
-            setIsLoading(false);
-            return { success: false, message: '서버 연결 실패: ' + err.message };
+            return {
+                success: false,
+                message: Number(err?.status) === 401
+                    ? '이름 또는 비밀번호가 일치하지 않습니다.'
+                    : `로그인 처리 중 오류가 발생했습니다: ${err?.message || '알 수 없는 오류'}`,
+            };
         }
     };
 

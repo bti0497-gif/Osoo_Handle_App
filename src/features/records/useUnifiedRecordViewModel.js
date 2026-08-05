@@ -43,6 +43,14 @@ const latestBefore = (rows, date, predicate) => {
     return null;
 };
 
+const previousCalendarDate = (date) => {
+    const match = String(date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return '';
+    const value = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    value.setUTCDate(value.getUTCDate() - 1);
+    return value.toISOString().slice(0, 10);
+};
+
 const isSludgeFlowName = (value) => String(value || '').includes('슬러지');
 
 const sumSludgeExportsBefore = (rows, date, flowName, periodLength) => {
@@ -58,14 +66,15 @@ const sumSludgeExportsBefore = (rows, date, flowName, periodLength) => {
 
 const mergeFlowContext = (baseContext = {}, history = [], date) => {
     const currentRow = history.find((row) => row?.date === date) || {};
+    const previousDate = previousCalendarDate(date);
+    const previousDateRow = history.find((row) => row?.date === previousDate) || {};
     return {
         ...baseContext,
         items: (baseContext.items || []).map((item) => {
             const name = item.key || item.name || item.label;
             const current = currentRow?.[name] || {};
             const hasCurrent = current.raw !== undefined || current.diff !== undefined;
-            const previousRow = latestBefore(history, date, (row) => row?.[name]);
-            const previous = previousRow?.[name] || {};
+            const previous = previousDateRow?.[name] || {};
             const basePrevious = item.previous || {};
             const isSludge = isSludgeFlowName(name);
             const currentExport = hasCurrent && !isDefaulted(current) && hasValue(current.raw)
@@ -84,9 +93,9 @@ const mergeFlowContext = (baseContext = {}, history = [], date) => {
                 },
                 previous: {
                     ...basePrevious,
-                    reading: hasValue(previous.raw) ? previous.raw : (basePrevious.reading ?? ''),
-                    flow: hasValue(previous.diff) ? previous.diff : (basePrevious.flow ?? ''),
-                    readingUnit: previous.reading_unit || basePrevious.readingUnit || '',
+                    reading: !isDefaulted(previous) && hasValue(previous.raw) ? previous.raw : '',
+                    flow: !isDefaulted(previous) && hasValue(previous.diff) ? previous.diff : '',
+                    readingUnit: previous.reading_unit || '',
                     ...(isSludge && {
                         monthlyExport: previousMonthlyExport,
                         yearlyExport: previousYearlyExport,

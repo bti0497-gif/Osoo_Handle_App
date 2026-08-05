@@ -15,6 +15,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const asar = require('@electron/asar');
 const { execSync, spawn, spawnSync } = require('child_process');
 const { runUnifiedRecordModalRegressionTests } = require('./validate-unified-record-modal.cjs');
 
@@ -258,7 +259,17 @@ function validateInstallerProcessGuardContract() {
     error('설치 프로세스 종료 보호 스크립트가 필수 종료/대기 계약을 충족하지 않습니다');
   }
 
-  if (builderText.includes("include: 'scripts/installer-process-guard.nsh'")) {
+  const installerHooksPath = path.join(BASE_DIR, 'scripts', 'installer-hooks.nsh');
+  const installerHooksText = fs.existsSync(installerHooksPath)
+    ? fs.readFileSync(installerHooksPath, 'utf8')
+    : '';
+  if (
+    builderText.includes("include: 'scripts/installer-process-guard.nsh'")
+    || (
+      builderText.includes("include: 'scripts/installer-hooks.nsh'")
+      && installerHooksText.includes('installer-process-guard.nsh')
+    )
+  ) {
     success('일반 자동업데이트 설치판에 프로세스 종료 보호 적용');
   } else {
     error('일반 자동업데이트 설치판에 프로세스 종료 보호가 적용되지 않았습니다');
@@ -302,6 +313,21 @@ function validateNativeModuleReleaseContract() {
     path.join(BASE_DIR, 'scripts', 'build-integrated-installer.ps1'),
     'utf8'
   );
+  const builderConfigText = fs.readFileSync(path.join(BASE_DIR, 'electron-builder.config.cjs'), 'utf8');
+  const rendererGuardPath = path.join(BASE_DIR, 'scripts', 'renderer-package-guard.cjs');
+
+  if (
+    fs.existsSync(rendererGuardPath)
+    && builderConfigText.includes('beforePack: rendererPackageGuard.beforePack')
+    && builderConfigText.includes('afterPack: rendererPackageGuard.afterPack')
+    && buildScript.includes('validate:renderer')
+    && buildScript.includes('validate:asar')
+    && workflowText.includes('Validate renderer build')
+  ) {
+    success('Electron 렌더러 원본·app.asar 이중 무결성 검증 강제');
+  } else {
+    error('Electron 렌더러 누락을 차단하는 패키징 전후 검증 계약이 없습니다');
+  }
 
   if (
     integratedInstallerText.includes("$asarUnpackSection = '  asarUnpack: base.asarUnpack,'")
@@ -1218,8 +1244,8 @@ function validateRegressionContracts() {
     diagnosticLogServiceText.includes('async function cleanupOldDiagnosticsOnVersionStart') &&
       diagnosticLogServiceText.includes("findFolderPath(getDriveRootFolderId(), ['앱진단로그'])") &&
       diagnosticLogServiceText.includes("entry.name.slice(0, 10) >= todayKst") &&
-      authRoutesText.includes("router.post('/background-tasks/run-diagnostic-sync'") &&
-      authRoutesText.includes('cleanupOldDiagnosticsOnVersionStart(db, appDataPath)') &&
+      authRoutesSecurityText.includes("router.post('/background-tasks/run-diagnostic-sync'") &&
+      authRoutesSecurityText.includes('cleanupOldDiagnosticsOnVersionStart(db, appDataPath)') &&
       localDataBackupContractText.includes('Logs created on the current KST date must remain'),
     '버전 첫 실행 오늘 이전 진단로그 정리 계약 유지',
     '업데이트 후 과거 진단로그 정리 또는 오늘 로그 보존 규칙이 깨졌습니다'
@@ -1280,7 +1306,11 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    viewModelText.includes("reading: hasValue(previous.raw) ? previous.raw : (basePrevious.reading ?? '')") &&
+    viewModelText.includes('const previousCalendarDate = (date) =>') &&
+      viewModelText.includes("const previousDateRow = history.find((row) => row?.date === previousDate) || {}") &&
+      viewModelText.includes("reading: !isDefaulted(previous) && hasValue(previous.raw) ? previous.raw : ''") &&
+      modalText.includes("['항목', '전일검침값', '검침값 / 반출량', '유량 / 월 반출량']") &&
+      modalText.includes("isSludge || previousReading === null ? '—'") &&
       viewModelText.includes("inventory: hasValue(previous.current_inventory)") &&
       viewModelText.includes("? previous.current_inventory") &&
       viewModelText.includes("purchase: hasCurrent ? (isDefaulted(current) ? '' : (current.purchase_amount ?? '')) : ''") &&
@@ -1951,6 +1981,19 @@ function validateAsarPackage(asarPath) {
   // asar 파일 존재 확인
   if (fs.existsSync(asarPath)) {
     success(`asar 파일 존재: ${path.basename(asarPath)}`);
+    try {
+      const entries = new Set(asar.listPackage(asarPath).map((entry) => entry.replace(/\\/g, '/')));
+      const hasIndex = entries.has('/dist/index.html');
+      const hasJs = [...entries].some((entry) => /^\/dist\/assets\/.+\.js$/i.test(entry));
+      const hasCss = [...entries].some((entry) => /^\/dist\/assets\/.+\.css$/i.test(entry));
+      if (hasIndex && hasJs && hasCss) {
+        success('패키지 렌더러 진입점·JavaScript·CSS 포함');
+      } else {
+        error(`패키지 렌더러 누락: index=${hasIndex}, js=${hasJs}, css=${hasCss}`);
+      }
+    } catch (asarError) {
+      error(`패키지 렌더러 검사 실패: ${asarError.message}`);
+    }
   } else {
     error(`asar 파일 없음: ${asarPath}`);
     return;
@@ -2096,6 +2139,32 @@ async function startApiValidationServer(devServerUrl) {
   if (!await waitForReadyServer(devServerUrl)) {
     try { child.kill('SIGKILL'); } catch (_) {}
     throw new Error(`API 검증 서버가 준비되지 않았습니다.\n${output.slice(-4000)}`);
+  }
+
+  // Operational routes intentionally reject requests until a real site_id is
+  // configured. Seed an isolated validation site so this smoke test proves
+  // those routes execute successfully instead of treating the 409 guard as a
+  // successful endpoint check.
+  const Database = require('better-sqlite3');
+  const validationDb = new Database(path.join(tempAppDataPath, 'osoo.db'));
+  try {
+    const validationSiteId = '00000000-0000-4000-8000-000000000025';
+    validationDb.prepare(`
+      INSERT INTO sites (id, site_name, manager_name, method, series, is_active)
+      VALUES (?, ?, ?, ?, ?, 1)
+      ON CONFLICT(id) DO UPDATE SET
+        site_name = excluded.site_name,
+        manager_name = excluded.manager_name,
+        is_active = 1
+    `).run(validationSiteId, 'API 검증 현장', '검증 관리자', 'A2O', '1계열');
+    validationDb.prepare(`
+      UPDATE app_settings
+      SET site_id = ?, site_name = ?, manager_name = ?, multi_site_enabled = 0,
+          primary_site_id = NULL, secondary_site_id = NULL
+      WHERE id = 1
+    `).run(validationSiteId, 'API 검증 현장', '검증 관리자');
+  } finally {
+    validationDb.close();
   }
   return child;
 }

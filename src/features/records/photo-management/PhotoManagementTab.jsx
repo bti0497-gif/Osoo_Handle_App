@@ -388,8 +388,8 @@ export default function PhotoManagementTab({ date, onError }) {
                             <div className="unified-photo-viewer__tools">
                                 <button type="button" onClick={() => setPreviewZoom((value) => Math.max(0.5, value - 0.25))} aria-label="축소">−</button>
                                 <span>{Math.round(previewZoom * 100)}%</span>
-                                <button type="button" onClick={() => setPreviewZoom((value) => Math.min(3, value + 0.25))} aria-label="확대">＋</button>
-                                <button type="button" onClick={() => setPreviewRotation((value) => (value + 90) % 360)} aria-label="회전">↻</button>
+                                <button type="button" onClick={() => setPreviewZoom((value) => Math.min(3, value + 0.25))} aria-label="확대">+</button>
+                                <button type="button" onClick={() => setPreviewRotation((value) => (value + 90) % 360)} aria-label="회전">회전</button>
                             </div>
                             <div className="unified-photo-viewer__tools">
                                 {galleryPhotos.length > 1 && <span>{previewIndex + 1} / {galleryPhotos.length}</span>}

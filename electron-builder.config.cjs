@@ -2,6 +2,8 @@
  * Temporary CommonJS wrapper for electron-builder execution in a type:module package.
  * Keep this in sync with electron-builder.config.js until the main config is migrated.
  */
+const rendererPackageGuard = require('./scripts/renderer-package-guard.cjs');
+
 module.exports = {
   appId: 'com.osoo.handle-app',
   productName: 'Osoo Handle App',
@@ -12,6 +14,8 @@ module.exports = {
     output: 'release',
     buildResources: 'build',
   },
+  beforePack: rendererPackageGuard.beforePack,
+  afterPack: rendererPackageGuard.afterPack,
   files: [
     'dist/**/*',
     'public/**/*',

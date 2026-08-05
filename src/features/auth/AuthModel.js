@@ -37,7 +37,8 @@ export const AuthModel = {
             return data.member;
         } catch (e) {
             console.error("Error during localLogin:", e);
-            return null;
+            if (Number(e?.status) === 401) return null;
+            throw e;
         }
     },
 
@@ -51,7 +52,7 @@ export const AuthModel = {
             return data.member;
         } catch (e) {
             console.error("Error during discoveryLogin:", e);
-            return null;
+            throw e;
         }
     },
 

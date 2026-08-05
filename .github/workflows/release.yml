@@ -37,8 +37,14 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Validate renderer build
+        run: npm run validate:renderer
+
       - name: Package Electron app without publishing
         run: npx electron-builder --config electron-builder.config.cjs --dir
+
+      - name: Restore Node native modules for source validation
+        run: npm rebuild better-sqlite3
 
       - name: Validate packaged files
         run: npm run validate:asar

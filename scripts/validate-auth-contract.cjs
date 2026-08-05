@@ -55,7 +55,7 @@ const updaterText = read('electron/updater.cjs');
 check(
   containsAll(contractText, [
     'must authenticate through remote discovery only',
-    'Field workers try local login first, then remote discovery fallback',
+    'Field workers authenticate only against the member information provisioned into the local DB',
     'must not request or compare PC coordinates',
     'must depend only on confirmed remote-session evidence',
     'must not by itself classify the login as remote',
@@ -209,10 +209,10 @@ check(
     'const isPrimaryAdminLogin',
     '? await AuthModel.discoveryLogin(normalizedName, password)',
     ': await AuthModel.localLogin(normalizedName, password)',
-    'if (!userData && !isPrimaryAdminLogin)',
-    'userData = await AuthModel.discoveryLogin(normalizedName, password)',
-  ]),
-  'login order remains admin remote-first and field local-then-remote',
+  ]) &&
+    !authVmText.includes('if (!userData && !isPrimaryAdminLogin)') &&
+    !authVmText.includes('userData = await AuthModel.discoveryLogin(normalizedName, password)'),
+  'login sources remain admin remote-only and field local-only',
   'login source ordering was changed'
 );
 

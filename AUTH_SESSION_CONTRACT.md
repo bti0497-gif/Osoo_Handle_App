@@ -6,7 +6,7 @@ This file protects login, session restore, and attendance behavior. Do not chang
 
 - Admin users (`admin`, `group_admin`, or name `admin`) must authenticate through remote discovery only.
 - Admin users must not be saved into the local `members` table as a reusable login cache.
-- Field workers try local login first, then remote discovery fallback.
+- Field workers authenticate only against the member information provisioned into the local DB during admin site setup. A wrong password or missing local member must fail immediately without Google Sheets or Drive access.
 - Remote discovery must read Google Sheets first and use Drive JSON backup if Sheets is unavailable or empty.
 
 ## Session Rules

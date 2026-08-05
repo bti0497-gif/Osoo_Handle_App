@@ -5,6 +5,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
     const [name, setName] = useState(() => String(loginHintName || localStorage.getItem('lastLoginName') || '').trim());
     const [pass, setPass] = useState('');
     const [error, setError] = useState('');
+    const [submitting, setSubmitting] = useState(false);
 
     const nameRef = useRef(null);
     const passRef = useRef(null);
@@ -63,11 +64,20 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        const result = await onLogin(name, pass);
-        if (result.success) {
-            localStorage.setItem('lastLoginName', name);
-        } else {
-            setError(result.message);
+        if (submitting) return;
+        setSubmitting(true);
+        setError('');
+        try {
+            const result = await onLogin(name, pass);
+            if (result.success) {
+                localStorage.setItem('lastLoginName', name);
+            } else {
+                setError(result.message || '이름 또는 비밀번호를 다시 확인해 주세요.');
+                passRef.current?.focus();
+                passRef.current?.select();
+            }
+        } finally {
+            setSubmitting(false);
         }
     };
 
@@ -125,12 +135,12 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                         />
                     </div>
 
-                    <button type="submit" className="btn-login-new">
-                        로그인
+                    <button type="submit" className="btn-login-new" disabled={submitting}>
+                        {submitting ? '로그인 확인 중…' : '로그인'}
                     </button>
 
                     {error && (
-                        <div style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '0.5rem', textAlign: 'center' }}>
+                        <div role="alert" style={{ color: '#dc2626', fontSize: '0.9rem', fontWeight: 700, marginTop: '0.75rem', textAlign: 'center' }}>
                             {error}
                         </div>
                     )}

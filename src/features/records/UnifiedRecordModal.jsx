@@ -1448,11 +1448,11 @@ export default function UnifiedRecordModal({
             const sludgeItem = visibleFlowItems.find(isSludgeFlowItem) || null;
             const sludgeValues = sludgeItem ? getDraftForItem('flow', sludgeItem) : {};
             const hasSludgeAmount = (toNumberOrNull(sludgeValues.reading) || 0) > 0;
-            const flowHeaderLabels = ['항목', '검침값 / 반출량', '유량 / 월 반출량'];
+            const flowHeaderLabels = ['항목', '전일검침값', '검침값 / 반출량', '유량 / 월 반출량'];
             return (
                 <div style={{
                     display: 'grid',
-                    gridTemplateColumns: 'minmax(160px, 1fr) repeat(2, minmax(110px, 150px))',
+                    gridTemplateColumns: 'minmax(150px, 1fr) repeat(3, minmax(105px, 145px))',
                     alignItems: 'center',
                     overflow: 'hidden',
                     border: '1px solid #e2e8f0',
@@ -1478,7 +1478,9 @@ export default function UnifiedRecordModal({
 
                     {visibleFlowItems.map((item) => {
                         const values = getDraftForItem('flow', item);
-                        const fieldLabels = isSludgeFlowItem(item)
+                        const isSludge = isSludgeFlowItem(item);
+                        const previousReading = toNumberOrNull(item?.previous?.reading);
+                        const fieldLabels = isSludge
                             ? [
                                 ['reading', '반출량'],
                                 ['calculatedFlow', '월 반출량'],
@@ -1505,6 +1507,24 @@ export default function UnifiedRecordModal({
                                             메가와트시(MWh) 입력
                                         </label>
                                     ) : null}
+                                </div>
+                                <div
+                                    aria-label={`${item.label} 전일검침값`}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'flex-end',
+                                        minHeight: 49,
+                                        padding: '7px 16px',
+                                        borderBottom: '1px solid #f1f5f9',
+                                        background: '#f8fafc',
+                                        color: isSludge ? '#cbd5e1' : '#334155',
+                                        fontSize: 15,
+                                        fontWeight: 800,
+                                        boxSizing: 'border-box',
+                                    }}
+                                >
+                                    {isSludge || previousReading === null ? '—' : previousReading.toLocaleString('ko-KR')}
                                 </div>
                                 {fieldLabels.map(([field, label]) => (
                                     <div key={`${item.key}-${field}`} style={{ padding: '7px 8px', borderBottom: '1px solid #f1f5f9' }}>
