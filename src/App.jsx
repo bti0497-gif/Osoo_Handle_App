@@ -343,7 +343,7 @@ function App() {
                         } else if (taskType === 'file-sync') {
                             await SyncService.runFileBackgroundSync();
                         } else if (taskType === 'certificate-cache') {
-                            await CertificateModel.syncCurrentMonthInBackground(user);
+                            await CertificateModel.syncAllMonthsInBackground(user);
                             window.dispatchEvent(new CustomEvent('osoo:certificate-cache-updated'));
                         } else if (taskType === 'board-cache') {
                             const { BoardModel } = await import('./features/board/BoardModel');

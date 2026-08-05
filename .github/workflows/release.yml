@@ -53,9 +53,19 @@ jobs:
         run: npm run validate:native
 
       - name: Build installer and publish verified package
+        run: npx electron-builder --config electron-builder.config.cjs --prepackaged release/win-unpacked --publish never
+
+      - name: Publish verified package in one release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --config electron-builder.config.cjs --prepackaged release/win-unpacked --publish always
+        shell: pwsh
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" `
+            release/latest.yml `
+            release/*.exe `
+            release/*.blockmap `
+            --title "$env:GITHUB_REF_NAME" `
+            --generate-notes
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

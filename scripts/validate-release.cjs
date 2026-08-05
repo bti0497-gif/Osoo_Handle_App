@@ -373,7 +373,12 @@ function validateNativeModuleReleaseContract() {
     error('GitHub Release 네이티브 모듈 검증 순서가 훼손되었습니다');
   }
 
-  if (workflowText.includes('--prepackaged release/win-unpacked --publish always')) {
+  if (
+    workflowText.includes('--prepackaged release/win-unpacked --publish never')
+    && workflowText.includes('gh release create')
+    && workflowText.includes('release/latest.yml')
+    && workflowText.includes('release/*.blockmap')
+  ) {
     success('검증된 win-unpacked 패키지만 GitHub Release에 게시함');
   } else {
     error('GitHub Release가 검증된 사전 패키지를 게시하지 않습니다');

@@ -17,6 +17,8 @@ const bigQueryTrigger = read('server/services/bigQueryTriggerService.cjs');
 const popupWatcher = read('src/features/board/usePopupNoticeWatcher.js');
 const serverIndex = read('server/index.cjs');
 const updater = read('electron/updater.cjs');
+const certificateModel = read('src/features/certificate/CertificateModel.js');
+const certificateViewModel = read('src/features/certificate/useCertificateViewModel.js');
 
 assert.match(app, /BACKGROUND_IDLE_DELAY_MS\s*=\s*30\s*\*\s*60\s*\*\s*1000/);
 assert.match(app, /\['attendance-sync', 'data-sync', 'file-sync', 'certificate-cache', 'board-cache', 'diagnostic-sync', 'update-check'\]/);
@@ -52,5 +54,12 @@ assert.doesNotMatch(serverIndex, /i >= tier1Entries\.length\) \{ startBigQuerySc
 assert.match(updater, /reason === 'manual' \|\| reason === 'status-bar'/);
 assert.match(updater, /manual: installImmediatelyForCurrentDownload/);
 assert.match(app, /if \(info\?\.manual\)[\s\S]*api\.installUpdate/);
+assert.match(app, /CertificateModel\.syncAllMonthsInBackground\(user\)/);
+assert.doesNotMatch(app, /CertificateModel\.syncCurrentMonthInBackground\(user\)/);
+assert.match(certificateModel, /fetchList\(\{ source: 'drive' \}/);
+assert.match(certificateModel, /const groups = new Map\(\)/);
+assert.match(certificateModel, /group\.items\.slice\(offset, offset \+ 200\)/);
+assert.match(certificateViewModel, /CertificateModel\.fetchList\([\s\S]{0,180}\{ year: selectedYear, month \}/);
+assert.doesNotMatch(certificateViewModel, /syncMonthInBackground/);
 
 console.log('PASS 로컬 우선·30분 유휴·영구 파일 큐·사용자 입력 우선 라우트 계약');

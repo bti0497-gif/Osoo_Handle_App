@@ -82,14 +82,18 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
     const isPrivileged = PRIVILEGED_ROLES.has(role);
     const fallbackSiteName = currentUser?.site_name1 || '현장';
 
-    const loadRecords = useCallback(async () => {
+    const loadRecords = useCallback(async ({ force = false } = {}) => {
         setIsLoading(true);
         setErrorMessage('');
         try {
             const authHeaders = buildCertificateAuthHeaders(currentUser);
             const month = String(selectedMonth).padStart(2, '0');
 
-            const res = await CertificateModel.fetchList({ year: selectedYear, month }, authHeaders);
+            const res = await CertificateModel.fetchList(
+                { year: selectedYear, month },
+                authHeaders,
+                { force },
+            );
             const list = Array.isArray(res?.items) ? res.items.map(normalizeRecord) : [];
             setRecords(list);
             setSelectedCertificateIds((prev) => {
@@ -98,8 +102,10 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
             });
             if (list.length === 0) {
                 setSelectedId(null);
-            } else if (!list.some((item) => item.id === selectedId)) {
-                setSelectedId(list[0].id);
+            } else {
+                setSelectedId((previousId) => (
+                    list.some((item) => item.id === previousId) ? previousId : list[0].id
+                ));
             }
         } catch (err) {
             console.error(err);
@@ -113,7 +119,7 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
         } finally {
             setIsLoading(false);
         }
-    }, [currentUser, selectedYear, selectedMonth, selectedId, showToast]);
+    }, [currentUser, selectedYear, selectedMonth, showToast]);
 
     useEffect(() => {
         loadRecords();

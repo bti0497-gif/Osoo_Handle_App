@@ -92,18 +92,74 @@ export const CertificateModel = {
         });
     },
 
-    async syncCurrentMonthInBackground(user) {
+    async syncMonthInBackground(user, { year, month } = {}) {
         const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const targetYear = Number(year) || now.getFullYear();
+        const targetMonth = String(Number(month) || now.getMonth() + 1).padStart(2, '0');
         const authHeaders = buildAuthHeaders(user);
-        const listResult = await this.fetchList({ year, month, source: 'drive' }, authHeaders, { force: true });
+        const listResult = await this.fetchList({
+            year: targetYear,
+            month: targetMonth,
+            source: 'drive',
+        }, authHeaders, { force: true });
         const items = Array.isArray(listResult?.items) ? listResult.items : [];
         const pendingItems = items.filter((item) => !item.localCached);
         if (pendingItems.length === 0) return { success: true, cachedCount: items.length, downloadedCount: 0 };
-        const syncResult = await this.syncLocalFiles({ items: pendingItems, year, month }, authHeaders);
+        const syncResult = await this.syncLocalFiles({
+            items: pendingItems,
+            year: targetYear,
+            month: targetMonth,
+        }, authHeaders);
         clearListCache();
         return { ...syncResult, downloadedCount: Number(syncResult?.cachedCount || 0) };
+    },
+
+    async syncCurrentMonthInBackground(user) {
+        const now = new Date();
+        return this.syncMonthInBackground(user, {
+            year: now.getFullYear(),
+            month: now.getMonth() + 1,
+        });
+    },
+
+    async syncAllMonthsInBackground(user) {
+        const authHeaders = buildAuthHeaders(user);
+        const listResult = await this.fetchList({ source: 'drive' }, authHeaders, { force: true });
+        const items = Array.isArray(listResult?.items) ? listResult.items : [];
+        const pendingItems = items.filter((item) => !item.localCached);
+        const groups = new Map();
+
+        pendingItems.forEach((item) => {
+            const year = String(item?.year || '').trim();
+            const month = String(item?.month || '').padStart(2, '0');
+            if (!/^\d{4}$/.test(year) || !/^(0[1-9]|1[0-2])$/.test(month)) return;
+            const key = `${year}-${month}`;
+            if (!groups.has(key)) groups.set(key, { year, month, items: [] });
+            groups.get(key).items.push(item);
+        });
+
+        let cachedCount = 0;
+        let failedCount = 0;
+        for (const group of groups.values()) {
+            for (let offset = 0; offset < group.items.length; offset += 200) {
+                const result = await this.syncLocalFiles({
+                    items: group.items.slice(offset, offset + 200),
+                    year: group.year,
+                    month: group.month,
+                }, authHeaders);
+                cachedCount += Number(result?.cachedCount || 0);
+                failedCount += Number(result?.failedCount || 0);
+            }
+        }
+
+        clearListCache();
+        return {
+            success: failedCount === 0,
+            totalCount: items.length,
+            cachedCount,
+            failedCount,
+            downloadedCount: cachedCount,
+        };
     },
 
     resolveLocalUrl(url = '') {
