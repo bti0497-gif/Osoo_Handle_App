@@ -17,6 +17,7 @@ const MedicineInView = lazy(() => import('./features/medicine').then((module) =>
 const WaterQualityView = lazy(() => import('./features/water').then((module) => ({ default: module.WaterQualityView })));
 const OperationStatusView = lazy(() => import('./features/operation').then((module) => ({ default: module.OperationStatusView })));
 const FacilityManagementView = lazy(() => import('./features/facility').then((module) => ({ default: module.FacilityManagementView })));
+const EquipmentCardView = lazy(() => import('./features/equipment').then((module) => ({ default: module.EquipmentCardView })));
 const DailyLogView = lazy(() => import('./features/dailylog').then((module) => ({ default: module.DailyLogView })));
 const MonthlyOperationReportView = lazy(() => import('./features/monthly-report').then((module) => ({ default: module.MonthlyOperationReportView })));
 const BoardView = lazy(() => import('./features/board').then((module) => ({ default: module.BoardView })));
@@ -457,7 +458,7 @@ function App() {
             //       · 장비 목록(사진, 기기명, 사양, 설치일 등) CRUD
             //       · facility_logs 의 facility_id 컬럼과 연계하여 장비별 수리이력 조회
             //       · 구글 드라이브 또는 로컬 파일로 장비 사진 관리
-            case 'equipment_card': return <PlaceholderView title="장비이력카드" />;
+            case 'equipment_card': return <EquipmentCardView currentUser={user} />;
             case 'log': return <PlaceholderView title="일지작성" />;
             case 'log_daily': return <DailyLogView key="log_daily" currentUser={user} templateName="일일업무일지" title="일일업무일지" />;
             case 'log_monthly_operation': return <MonthlyOperationReportView currentUser={user} />;

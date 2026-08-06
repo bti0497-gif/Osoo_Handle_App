@@ -19,6 +19,7 @@ const serverIndex = read('server/index.cjs');
 const updater = read('electron/updater.cjs');
 const certificateModel = read('src/features/certificate/CertificateModel.js');
 const certificateViewModel = read('src/features/certificate/useCertificateViewModel.js');
+const apiClient = read('src/core/api/apiClient.js');
 
 assert.match(app, /BACKGROUND_IDLE_DELAY_MS\s*=\s*30\s*\*\s*60\s*\*\s*1000/);
 assert.match(app, /\['attendance-sync', 'data-sync', 'file-sync', 'certificate-cache', 'board-cache', 'diagnostic-sync', 'update-check'\]/);
@@ -61,5 +62,7 @@ assert.match(certificateModel, /const groups = new Map\(\)/);
 assert.match(certificateModel, /group\.items\.slice\(offset, offset \+ 200\)/);
 assert.match(certificateViewModel, /CertificateModel\.fetchList\([\s\S]{0,180}\{ year: selectedYear, month \}/);
 assert.doesNotMatch(certificateViewModel, /syncMonthInBackground/);
+assert.match(apiClient, /\{ 'Content-Type': 'application\/json', \.\.\.\(options\.headers \|\| \{\}\) \}/);
+assert.match(apiClient, /method: 'POST',[\s\S]{0,100}\.\.\.options,[\s\S]{0,100}headers,[\s\S]{0,100}body:/);
 
 console.log('PASS 로컬 우선·30분 유휴·영구 파일 큐·사용자 입력 우선 라우트 계약');

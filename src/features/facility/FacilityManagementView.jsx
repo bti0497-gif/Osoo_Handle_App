@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { useFacilityViewModel } from './useFacilityViewModel';
 import { useDialog } from '../../components/common/DialogContext';
+import { EquipmentLinkSelector } from '../equipment';
 
 const TODAY = () => new Intl.DateTimeFormat('sv-SE', {
     timeZone: 'Asia/Seoul',
@@ -9,7 +10,7 @@ const TODAY = () => new Intl.DateTimeFormat('sv-SE', {
     day: '2-digit',
 }).format(new Date());
 
-const emptyDraft = () => ({ id: null, date: TODAY(), title: '', content: '', photo_count: 0 });
+const emptyDraft = () => ({ id: null, date: TODAY(), title: '', content: '', photo_count: 0, equipmentIds: [] });
 
 const FacilityManagementView = ({ currentUser }) => {
     const { showAlert, showConfirm } = useDialog();
@@ -36,6 +37,7 @@ const FacilityManagementView = ({ currentUser }) => {
             title: row.title || '',
             content: row.content || '',
             photo_count: Number(row.photo_count) || 0,
+            equipmentIds: [],
         });
         setDraftPhotos([]);
         setEditorOpen(true);
@@ -256,6 +258,10 @@ const FacilityManagementView = ({ currentUser }) => {
                                 본문 <span style={{ fontWeight: 500, color: '#94a3b8' }}>(필요한 경우에만 작성)</span>
                                 <textarea value={draft.content} onChange={(event) => setDraft((previous) => ({ ...previous, content: event.target.value }))} rows={4} placeholder="제목으로 설명이 부족할 때만 세부 내용을 작성하세요." style={{ minHeight: 80, maxHeight: 150, padding: 10, border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 12, lineHeight: 1.5, resize: 'vertical', outline: 'none' }} />
                             </label>
+                            <EquipmentLinkSelector
+                                value={draft.equipmentIds}
+                                onChange={(equipmentIds) => setDraft((previous) => ({ ...previous, equipmentIds }))}
+                            />
                             <div style={{ padding: 10, border: '1px dashed #94a3b8', borderRadius: 7, background: '#f8fafc' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                     <label style={{ padding: '8px 13px', borderRadius: 6, background: '#e2e8f0', color: '#334155', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>

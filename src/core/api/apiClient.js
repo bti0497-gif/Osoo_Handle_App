@@ -141,20 +141,24 @@ export const apiClient = {
 
   async post(endpoint, body, options = {}) {
     const isFormData = body instanceof FormData;
+    const headers = isFormData
+      ? options.headers
+      : { 'Content-Type': 'application/json', ...(options.headers || {}) };
     return request(endpoint, {
       method: 'POST',
-      headers: isFormData ? undefined : { 'Content-Type': 'application/json' },
-      body: isFormData ? body : JSON.stringify(body),
       ...options,
+      headers,
+      body: isFormData ? body : JSON.stringify(body),
     });
   },
 
   async put(endpoint, body, options = {}) {
+    const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
     return request(endpoint, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
       ...options,
+      headers,
+      body: JSON.stringify(body),
     });
   },
 

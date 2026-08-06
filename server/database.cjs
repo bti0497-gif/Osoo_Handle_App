@@ -240,6 +240,52 @@ db.exec(`
     last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(site_id, date)
   );
+  CREATE TABLE IF NOT EXISTS equipment_assets (
+    id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    site_name TEXT,
+    management_no TEXT NOT NULL,
+    category_1 TEXT,
+    category_2 TEXT,
+    category_3 TEXT,
+    category_4 TEXT,
+    equipment_name TEXT NOT NULL,
+    model TEXT,
+    specification TEXT,
+    unit TEXT,
+    quantity REAL DEFAULT 1,
+    power TEXT,
+    installed_at TEXT,
+    vendor TEXT,
+    location TEXT,
+    accessory TEXT,
+    status TEXT DEFAULT 'active',
+    notes TEXT,
+    author TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_modified TEXT DEFAULT CURRENT_TIMESTAMP,
+    is_synced INTEGER DEFAULT 0,
+    UNIQUE(site_id, management_no)
+  );
+  CREATE TABLE IF NOT EXISTS equipment_asset_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    equipment_id TEXT NOT NULL,
+    photo_type TEXT DEFAULT 'main',
+    original_name TEXT,
+    stored_name TEXT NOT NULL,
+    relative_path TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (equipment_id) REFERENCES equipment_assets(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS work_record_equipment_links (
+    work_record_id INTEGER NOT NULL,
+    equipment_id TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (work_record_id, equipment_id),
+    FOREIGN KEY (work_record_id) REFERENCES work_records(id) ON DELETE CASCADE,
+    FOREIGN KEY (equipment_id) REFERENCES equipment_assets(id) ON DELETE RESTRICT
+  );
   CREATE TABLE IF NOT EXISTS work_record_photos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     work_record_id INTEGER NOT NULL,
@@ -1088,6 +1134,9 @@ db.prepare('CREATE INDEX IF NOT EXISTS idx_qntech_water_quality_site_date ON qnt
 db.prepare('CREATE INDEX IF NOT EXISTS idx_kit_logs_site_date ON kit_logs (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_facility_logs_site_date ON facility_logs (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_work_records_date ON work_records (date, id)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_equipment_assets_site_name ON equipment_assets (site_id, equipment_name)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_equipment_photos_equipment ON equipment_asset_photos (equipment_id, sort_order, id)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_work_equipment_equipment ON work_record_equipment_links (equipment_id, work_record_id)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_work_record_photos_record ON work_record_photos (work_record_id)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_operation_status_logs_site_date ON operation_status_logs (site_id, date)').run();
 
