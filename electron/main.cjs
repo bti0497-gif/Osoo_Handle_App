@@ -731,23 +731,26 @@ function createTray() {
 // 트레이 아이콘이 2개 뜨거나 두 프로세스가 같은 DB를 잡고 충돌하는 것을 방지한다.
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
-  app.quit();
-} else {
-  app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
+  // app.quit() is asynchronous and can still allow whenReady handlers to run.
+  // A duplicate process must never start the local server or updater.
+  console.log('[Electron] Duplicate instance rejected before initialization');
+  app.exit(0);
+}
+
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.focus();
+    setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
       mainWindow.focus();
       mainWindow.webContents.focus();
-      setTimeout(() => {
-        if (!mainWindow || mainWindow.isDestroyed()) return;
-        mainWindow.focus();
-        mainWindow.webContents.focus();
-        mainWindow.webContents.send('app:window-restored', { reason: 'second-instance' });
-      }, 50);
-    }
-  });
-}
+      mainWindow.webContents.send('app:window-restored', { reason: 'second-instance' });
+    }, 50);
+  }
+});
 
 app.whenReady().then(() => {
   console.log(`[Electron] App startup (background=${isBackgroundStartup ? 'yes' : 'no'})`);
@@ -1004,4 +1007,3 @@ ipcMain.handle('pdf:save', async (_event, options = {}) => {
   fs.writeFileSync(filePath, pdfBuffer);
   return { canceled: false, filePath };
 });
-

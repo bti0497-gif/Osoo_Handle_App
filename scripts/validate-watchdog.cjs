@@ -16,6 +16,9 @@ const installerGuard = fs.readFileSync(path.join(root, 'scripts', 'installer-pro
 const installerHooks = fs.readFileSync(path.join(root, 'scripts', 'installer-hooks.nsh'), 'utf8');
 const integratedInstaller = fs.readFileSync(path.join(root, 'scripts', 'build-integrated-installer.ps1'), 'utf8');
 const packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
+const mainProcess = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8');
+const watchdogSource = fs.readFileSync(path.join(root, 'watchdog', 'OsooWatchdog.cs'), 'utf8');
+const serverIndex = fs.readFileSync(path.join(root, 'server', 'index.cjs'), 'utf8');
 assert.ok(builderConfig.includes("watchdog/dist/OsooWatchdog.exe"), 'watchdog is not packaged as an extra resource');
 assert.ok(builderConfig.includes("include: 'scripts/installer-hooks.nsh'"), 'normal installer does not use watchdog hooks');
 assert.ok(installerHooks.includes('!insertmacro InstallOsooWatchdog'), 'normal installer does not install watchdog');
@@ -28,6 +31,12 @@ assert.ok(!installerGuard.includes('Abort "Failed to install Osoo Handle App wat
 assert.ok(!installerGuard.includes('Abort "Failed to register Osoo Handle App watchdog task."'), 'watchdog registration failure still cancels installation');
 assert.ok(integratedInstaller.includes("'  !insertmacro InstallOsooWatchdog'"), 'integrated installer does not install watchdog');
 assert.ok(packageJson.includes('watchdog:build'), 'release scripts do not rebuild watchdog');
+assert.ok(mainProcess.includes("app.exit(0)"), 'duplicate Electron instances are not terminated before initialization');
+assert.ok(mainProcess.indexOf('app.exit(0)') < mainProcess.indexOf('app.whenReady()'), 'duplicate-instance exit must precede app initialization');
+assert.ok(watchdogSource.includes('catch\n                {') && watchdogSource.includes('return true;'), 'watchdog does not fail safe when process path inspection is denied');
+assert.ok(watchdogSource.includes('TimeSpan.FromMinutes(1)') && watchdogSource.includes('lastStatusKey'), 'watchdog status writes are not throttled for always-on field PCs');
+assert.ok(watchdogSource.includes('version=1.0.1'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(serverIndex.includes('setInterval(() =>') && serverIndex.includes('importWatchdogDiagnostics(db, appDataPath)'), 'watchdog diagnostics are not imported while the app remains running');
 
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osoo-watchdog-'));
 const fakeApp = path.join(testRoot, 'Osoo Handle App.exe');

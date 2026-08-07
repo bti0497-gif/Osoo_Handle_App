@@ -117,6 +117,7 @@ function App() {
     const [directionToast, setDirectionToast] = useState('');
     const directionToastTimerRef = useRef(null);
     const forcedUpdateActiveRef = useRef(false);
+    const loginUpdateCheckKeyRef = useRef(null);
     const recordGridSessionsRef = useRef({ flow: {}, medicine: {}, kit: {}, water: {} });
 
     useEffect(() => {
@@ -253,6 +254,47 @@ function App() {
         // 온라인 이벤트 리스너 등록 (1회만)
         SyncService.initAutoSync();
     }, []);
+
+    // Update discovery is the only remote task allowed to run immediately after
+    // login. Field data/file synchronization remains on the 30-minute idle queue.
+    useEffect(() => {
+        if (!isAuthenticated || !user?.id) {
+            loginUpdateCheckKeyRef.current = null;
+            return undefined;
+        }
+
+        const api = window.electronAPI;
+        if (!api?.checkForUpdates) return undefined;
+        const checkKey = `${user.id}::${user.site_id || 'default'}`;
+        if (loginUpdateCheckKeyRef.current === checkKey) return undefined;
+        loginUpdateCheckKeyRef.current = checkKey;
+
+        let cancelled = false;
+        let retryTimer = null;
+        const retryDelays = [15_000, 60_000];
+        const requestCheck = async (attempt = 0) => {
+            try {
+                const status = await api.getUpdateStatus?.();
+                if (cancelled) return;
+                if (status?.hasDownloadedUpdate) {
+                    await api.installUpdate?.();
+                    return;
+                }
+                await api.checkForUpdates('login');
+            } catch (error) {
+                console.warn(`[Update] login update check failed (attempt ${attempt + 1}):`, error);
+                if (!cancelled && attempt < retryDelays.length) {
+                    retryTimer = window.setTimeout(() => requestCheck(attempt + 1), retryDelays[attempt]);
+                }
+            }
+        };
+
+        void requestCheck();
+        return () => {
+            cancelled = true;
+            if (retryTimer) window.clearTimeout(retryTimer);
+        };
+    }, [isAuthenticated, user?.id, user?.site_id]);
 
     useEffect(() => {
         if (!isAuthenticated || !user?.id) {

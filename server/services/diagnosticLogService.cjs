@@ -292,6 +292,12 @@ function parseDetailsJson(value) {
   }
 }
 
+let diagnosticRecordedNotifier = null;
+
+function setDiagnosticRecordedNotifier(notifier) {
+  diagnosticRecordedNotifier = typeof notifier === 'function' ? notifier : null;
+}
+
 function recordDiagnostic(db, appDataPath, event = {}) {
   const site = getSiteInfo(db);
   const eventTime = event.createdAt ? new Date(event.createdAt) : null;
@@ -342,6 +348,14 @@ function recordDiagnostic(db, appDataPath, event = {}) {
     fs.appendFileSync(dailyLogPath(appDataPath, payload.site_name), line, 'utf8');
   } catch (error) {
     console.warn('[diagnostic] failed to append file log:', error.message);
+  }
+
+  if (diagnosticRecordedNotifier) {
+    try {
+      diagnosticRecordedNotifier({ id, level: payload.level, area: payload.area });
+    } catch (error) {
+      console.warn('[diagnostic] immediate upload notification failed:', error.message);
+    }
   }
 
   return id;
@@ -417,6 +431,7 @@ module.exports = {
   buildDatabaseDiagnosticDetails,
   cleanupOldDiagnosticsOnVersionStart,
   recordDiagnostic,
+  setDiagnosticRecordedNotifier,
   uploadPendingDiagnostics,
   sanitize,
 };

@@ -12,8 +12,8 @@ using System.Threading;
 [assembly: System.Reflection.AssemblyDescription("Background watchdog for Osoo Handle App")]
 [assembly: System.Reflection.AssemblyCompany("Osoo")]
 [assembly: System.Reflection.AssemblyProduct("Osoo Handle App Watchdog")]
-[assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.1.0")]
 
 namespace OsooWatchdog
 {
@@ -46,6 +46,8 @@ namespace OsooWatchdog
         private static DateTime cooldownUntil = DateTime.MinValue;
         private static string lastRepeatedLogKey;
         private static DateTime lastRepeatedLogAt = DateTime.MinValue;
+        private static string lastStatusKey;
+        private static DateTime lastStatusAt = DateTime.MinValue;
         private static Options options;
         private static string runtimeDirectory;
         private static string logPath;
@@ -69,7 +71,7 @@ namespace OsooWatchdog
                     return 2;
                 }
 
-                Log("watchdog-start", "ok", "version=1.0.0; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
+                Log("watchdog-start", "ok", "version=1.0.1; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
                 do
                 {
                     try { CheckOnce(); }
@@ -172,7 +174,13 @@ namespace OsooWatchdog
                     string actualPath = process.MainModule.FileName;
                     if (String.Equals(Path.GetFullPath(actualPath), Path.GetFullPath(expectedPath), StringComparison.OrdinalIgnoreCase)) return true;
                 }
-                catch { }
+                catch
+                {
+                    // A limited watchdog cannot inspect MainModule when the app
+                    // is elevated. The matching product process is safer to
+                    // treat as running than to start a duplicate every cycle.
+                    return true;
+                }
                 finally { process.Dispose(); }
             }
             return false;
@@ -216,7 +224,12 @@ namespace OsooWatchdog
 
         private static void WriteStatus(string state, string appPath, string reason)
         {
-            string json = "{\n  \"version\": \"1.0.0\",\n  \"checkedAt\": \"" + DateTime.UtcNow.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
+            DateTime now = DateTime.UtcNow;
+            string statusKey = (state ?? "") + "|" + (appPath ?? "") + "|" + (reason ?? "");
+            if (statusKey == lastStatusKey && now - lastStatusAt < TimeSpan.FromMinutes(1)) return;
+            lastStatusKey = statusKey;
+            lastStatusAt = now;
+            string json = "{\n  \"version\": \"1.0.1\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
             AtomicWrite(Path.Combine(runtimeDirectory, "watchdog-status.json"), json);
         }
 
@@ -236,7 +249,7 @@ namespace OsooWatchdog
                 string createdAt = DateTime.UtcNow.ToString("o");
                 string line = createdAt + "\t" + action + "\t" + result + (String.IsNullOrEmpty(details) ? "" : "\t" + details) + Environment.NewLine;
                 File.AppendAllText(logPath, line, new UTF8Encoding(false));
-                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.0\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
+                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.1\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
                 File.AppendAllText(Path.Combine(runtimeDirectory, "watchdog-events.jsonl"), eventJson, new UTF8Encoding(false));
             }
             catch { }

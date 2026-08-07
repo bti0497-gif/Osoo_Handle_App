@@ -197,6 +197,8 @@ function registerLazyApplication() {
     buildDatabaseDiagnosticDetails,
     recordDiagnostic,
     sanitize,
+    setDiagnosticRecordedNotifier,
+    uploadPendingDiagnostics,
   } = require('./services/diagnosticLogService.cjs');
   const ctx = { db, appDataPath, BASE_DIR };
   const { createSiteContextMiddleware } = require('./middleware/siteContext.cjs');
@@ -228,6 +230,46 @@ function registerLazyApplication() {
     }
   };
   const scheduleDiagnosticUpload = () => markBackgroundTaskPending('diagnostic-sync');
+  let immediateDiagnosticTimer = null;
+  let immediateDiagnosticUploadRunning = false;
+  let immediateDiagnosticUploadRequested = false;
+
+  const requestImmediateDiagnosticUpload = (delayMs = 1500) => {
+    immediateDiagnosticUploadRequested = true;
+    scheduleDiagnosticUpload();
+    if (immediateDiagnosticUploadRunning || immediateDiagnosticTimer) return;
+
+    immediateDiagnosticTimer = setTimeout(async () => {
+      immediateDiagnosticTimer = null;
+      if (immediateDiagnosticUploadRunning) return;
+      immediateDiagnosticUploadRunning = true;
+      immediateDiagnosticUploadRequested = false;
+      let retryDelayMs = null;
+      try {
+        const result = await uploadPendingDiagnostics(db, appDataPath, { limit: 200 });
+        if (!result?.success && !result?.skipped) {
+          retryDelayMs = 60 * 1000;
+        }
+      } catch (error) {
+        console.warn('[diagnostic] immediate upload failed:', error.message);
+        retryDelayMs = 60 * 1000;
+      } finally {
+        immediateDiagnosticUploadRunning = false;
+        if (retryDelayMs !== null && !immediateDiagnosticTimer) {
+          requestImmediateDiagnosticUpload(retryDelayMs);
+        } else if (immediateDiagnosticUploadRequested && !immediateDiagnosticTimer) {
+          requestImmediateDiagnosticUpload(1500);
+        }
+      }
+    }, Math.max(0, delayMs));
+    immediateDiagnosticTimer.unref?.();
+  };
+
+  // Diagnostic delivery is intentionally independent from the 30-minute idle
+  // queue. Recording remains local-first and Drive upload runs asynchronously.
+  // The persistent background task stays in place as a recovery safety net.
+  setDiagnosticRecordedNotifier(() => requestImmediateDiagnosticUpload());
+  requestImmediateDiagnosticUpload();
   try {
     const watchdogImport = importWatchdogDiagnostics(db, appDataPath);
     if (watchdogImport.imported > 0) scheduleDiagnosticUpload();
@@ -242,6 +284,21 @@ function registerLazyApplication() {
     });
     scheduleDiagnosticUpload();
   }
+  const watchdogDiagnosticTimer = setInterval(() => {
+    try {
+      importWatchdogDiagnostics(db, appDataPath);
+    } catch (error) {
+      recordDiagnostic(db, appDataPath, {
+        level: 'error',
+        area: 'watchdog',
+        action: 'diagnostic-import',
+        result: 'failed',
+        message: 'watchdog diagnostic import failed',
+        details: { errorName: error.name, errorMessage: error.message },
+      });
+    }
+  }, 5000);
+  watchdogDiagnosticTimer.unref?.();
   app.use(createSiteContextMiddleware(db, {
     reportDiagnostic(event) {
       recordDiagnostic(db, appDataPath, event);

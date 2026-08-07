@@ -7,6 +7,7 @@ const { spawnSync } = require('child_process');
 const projectRoot = path.join(__dirname, '..');
 const unpackedRoot = path.resolve(process.argv[2] || path.join(projectRoot, 'release', 'win-unpacked'));
 const electronExe = path.join(unpackedRoot, 'Osoo Handle App.exe');
+const updaterConfig = path.join(unpackedRoot, 'resources', 'app-update.yml');
 const sqlitePackage = path.join(
   unpackedRoot,
   'resources',
@@ -30,7 +31,7 @@ const unpackedServer = path.join(
 );
 const smokeScript = path.join(__dirname, 'smoke-packaged-sqlite.cjs');
 
-for (const requiredPath of [electronExe, unpackedServer, expressPackage, sqlitePackage, smokeScript]) {
+for (const requiredPath of [electronExe, updaterConfig, unpackedServer, expressPackage, sqlitePackage, smokeScript]) {
   if (!fs.existsSync(requiredPath)) {
     console.error(`[Packaged Native FAIL] Required path is missing: ${requiredPath}`);
     process.exit(1);
@@ -38,6 +39,7 @@ for (const requiredPath of [electronExe, unpackedServer, expressPackage, sqliteP
 }
 
 console.log(`[Packaged Native] Electron: ${electronExe}`);
+console.log(`[Packaged Update] app-update.yml: ${updaterConfig}`);
 console.log(`[Packaged Server] server.cjs: ${unpackedServer}`);
 console.log(`[Packaged Server] express: ${expressPackage}`);
 console.log(`[Packaged Native] better-sqlite3: ${sqlitePackage}`);
