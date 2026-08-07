@@ -50,6 +50,8 @@ This file protects login, session restore, and attendance behavior. Do not chang
 - Development startup must rebuild native modules for the exact Electron version before launching Electron.
 - `/api/ping` alone must never be treated as proof that login is ready.
 - Startup is ready only after `/api/auth/login-hint` responds successfully.
+- The login screen and any saved-session restore must remain hidden until that authenticated readiness probe succeeds. Startup-speed work may shorten this wait, cache it, or keep the local server warm, but must never bypass it.
+- If readiness is delayed or fails, keep the branded intro visible and retry the local readiness probe; do not expose a login form that can time out before the local API is usable.
 - If database or auth route initialization fails, the server must exit instead of remaining as a ping-only partial server.
 - Electron packaging must rebuild and smoke-test `better-sqlite3` before an installer or release is accepted.
 - Uploaded diagnostics must include `machine` and `runtime` so development PCs cannot be mistaken for field installations.

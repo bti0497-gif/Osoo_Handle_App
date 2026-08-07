@@ -64,6 +64,9 @@ check(
     'must enter the workspace without waiting for location lookup or attendance recording',
     'run in the background after workspace entry',
     'startup shows the existing branded animation while server discovery and session restore run',
+    'The login screen and any saved-session restore must remain hidden until that authenticated readiness probe succeeds',
+    'must never bypass it',
+    'do not expose a login form that can time out before the local API is usable',
     'Record-grid preloading continues in the background and must not block the dashboard',
     'An app update must preserve a same-day field worker session',
     'must be acknowledged and cleared without deleting the saved field worker session',
@@ -304,7 +307,13 @@ check(
       mainText.indexOf('await initServerConfig({ waitForReady: true })') &&
     !mainText.includes('서버 연결 중...') &&
     !appText.includes('세션 복원 중...') &&
-    !appText.includes('if (recordPreloadState.active)'),
+    !appText.includes('if (recordPreloadState.active)') &&
+    containsAll(read('src/core/api/serverConfig.js'), [
+      'async function probeLoginReady(port)',
+      '/api/auth/login-hint',
+      'waitForReady ? probeLoginReady(port) : pingPort(port)',
+      'if (await probeLoginReady(port)) return true',
+    ]),
   'startup animation waits for a ready local server before session restore and dashboard entry',
   'startup/server-ready/session ordering contract was changed'
 );
