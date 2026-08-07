@@ -23,7 +23,11 @@ const apiClient = read('src/core/api/apiClient.js');
 const diagnosticLogService = read('server/services/diagnosticLogService.cjs');
 
 assert.match(app, /BACKGROUND_IDLE_DELAY_MS\s*=\s*30\s*\*\s*60\s*\*\s*1000/);
-assert.match(app, /\['attendance-sync', 'data-sync', 'file-sync', 'certificate-cache', 'board-cache', 'diagnostic-sync', 'update-check'\]/);
+assert.match(app, /CERTIFICATE_CACHE_IDLE_DELAY_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/);
+assert.match(app, /const taskTypes = \['attendance-sync', 'data-sync', 'file-sync', 'board-cache', 'diagnostic-sync', 'update-check'\]/);
+assert.match(app, /scheduleCertificateFromLastActivity/);
+assert.match(app, /SyncService\.prepareBackgroundTasks\(\['certificate-cache'\]\)/);
+assert.match(app, /SyncService\.completeBackgroundTask\('certificate-cache', CERTIFICATE_CACHE_REFRESH_MS\)/);
 assert.match(app, /activityEvents\s*=\s*\['keydown', 'pointerdown', 'input', 'change', 'wheel'\]/);
 assert.match(authRoutes, /res\.json\(\{ success: true, member: enrichMemberWithSites\(member\), source: 'local' \}\)/);
 assert.doesNotMatch(authRoutes, /triggerBigQuerySync/);

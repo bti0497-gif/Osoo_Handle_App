@@ -50,6 +50,8 @@ let serverRestartTimer = null;
 let serverHealthFailures = 0;
 let serverInstanceToken = null;
 let serverLaunchedAt = 0;
+let watchdogHeartbeatTimer = null;
+const appStartedAt = new Date().toISOString();
 
 const FULL_EXIT_LOCK_TTL_MS = 8 * 60 * 60 * 1000;
 
@@ -57,6 +59,7 @@ const DEDICATED_SERVER_PORT = 18731;
 const SERVER_GUARD_INTERVAL_MS = 3000;
 const SERVER_HEALTH_FAILURE_LIMIT = 3;
 const SERVER_STARTUP_GRACE_MS = 120000;
+const WATCHDOG_HEARTBEAT_INTERVAL_MS = 15000;
 
 const isDev = !app.isPackaged;
 const useExternalServer = isDev && process.env.OSOO_EXTERNAL_SERVER === '1';
@@ -67,6 +70,47 @@ function getOsooAppDataPath() {
     process.env.APPDATA || process.env.LOCALAPPDATA || app.getPath('appData'),
     'Osoo_Handle_App'
   );
+}
+
+function getWatchdogHeartbeatPath() {
+  return path.join(getOsooAppDataPath(), 'runtime', 'app-heartbeat.json');
+}
+
+function writeWatchdogHeartbeat(serverReady) {
+  try {
+    const targetPath = getWatchdogHeartbeatPath();
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    const temporaryPath = `${targetPath}.${process.pid}.tmp`;
+    fs.writeFileSync(temporaryPath, JSON.stringify({
+      version: 1,
+      appPid: process.pid,
+      appStartedAt,
+      checkedAt: new Date().toISOString(),
+      serverReady: Boolean(serverReady),
+      serverPort: DEDICATED_SERVER_PORT,
+    }), 'utf8');
+    fs.renameSync(temporaryPath, targetPath);
+  } catch (error) {
+    console.warn('[Watchdog] Failed to write app heartbeat:', error.message);
+  }
+}
+
+function startWatchdogHeartbeat() {
+  if (useExternalServer || watchdogHeartbeatTimer) return;
+  const refreshHeartbeat = async () => {
+    writeWatchdogHeartbeat(await checkEmbeddedServerHealth());
+  };
+  void refreshHeartbeat();
+  watchdogHeartbeatTimer = setInterval(() => {
+    void refreshHeartbeat();
+  }, WATCHDOG_HEARTBEAT_INTERVAL_MS);
+  watchdogHeartbeatTimer.unref?.();
+}
+
+function stopWatchdogHeartbeat() {
+  if (watchdogHeartbeatTimer) clearInterval(watchdogHeartbeatTimer);
+  watchdogHeartbeatTimer = null;
+  try { fs.unlinkSync(getWatchdogHeartbeatPath()); } catch (_) {}
 }
 
 function resolveDefaultWindowSiteId() {
@@ -98,24 +142,26 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForServerReadyAndClearUpdateLock(timeoutMs = SERVER_STARTUP_GRACE_MS) {
+async function waitForServerReadyAndClearMaintenanceLocks(timeoutMs = SERVER_STARTUP_GRACE_MS) {
   if (useExternalServer) return;
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const healthy = await checkEmbeddedServerHealth();
     if (healthy) {
-      const cleared = clearMaintenanceLockIfReason('update', {
-        onlyIfNotExpired: true,
-        clearOnInvalidExpiresAt: true,
+      ['update', 'full-exit'].forEach((reason) => {
+        const cleared = clearMaintenanceLockIfReason(reason, {
+          onlyIfNotExpired: true,
+          clearOnInvalidExpiresAt: true,
+        });
+        if (cleared) {
+          console.log(`[MaintenanceLock] Cleared ${reason} lock after server-ready startup`);
+        }
       });
-      if (cleared) {
-        console.log('[MaintenanceLock] Cleared update lock after server-ready startup');
-      }
       return;
     }
     await delay(1000);
   }
-  console.warn('[MaintenanceLock] Server did not reach ready state in time; update lock untouched');
+  console.warn('[MaintenanceLock] Server did not reach ready state in time; maintenance lock untouched');
 }
 
 function shouldKeepEmbeddedServerAlive() {
@@ -766,9 +812,10 @@ app.whenReady().then(() => {
   handleVersionMigration();
   startServer();
   startServerGuard();
+  startWatchdogHeartbeat();
   createWindow({ showOnReady: !isBackgroundStartup });
   createTray();
-  waitForServerReadyAndClearUpdateLock().catch((error) => {
+  waitForServerReadyAndClearMaintenanceLocks().catch((error) => {
     console.warn('[MaintenanceLock] Failed while waiting for server readiness:', error.message);
   });
 
@@ -782,6 +829,7 @@ app.whenReady().then(() => {
         if (serverRestartTimer) clearTimeout(serverRestartTimer);
         serverGuardTimer = null;
         serverRestartTimer = null;
+        stopWatchdogHeartbeat();
         await stopServerGracefully();
       },
     });
@@ -800,6 +848,7 @@ app.on('before-quit', () => {
   if (serverRestartTimer) clearTimeout(serverRestartTimer);
   serverGuardTimer = null;
   serverRestartTimer = null;
+  stopWatchdogHeartbeat();
   stopServer();
 });
 

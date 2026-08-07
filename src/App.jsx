@@ -30,6 +30,9 @@ const SludgeLedgerView = lazy(() => import('./features/sludge').then((module) =>
 const RoadworkHelperView = lazy(() => import('./features/roadwork-helper').then((module) => ({ default: module.RoadworkHelperView })));
 const GRID_CACHE_REFRESH_MS = 10 * 60 * 1000;
 const CERTIFICATE_CACHE_REFRESH_MS = 60 * 60 * 1000;
+// 성적서는 화면에서 바로 조회하는 로컬 파일 캐시다. 일반 서버 동기화보다
+// 먼저 준비하되, 사용 중에는 절대로 시작하지 않는다.
+const CERTIFICATE_CACHE_IDLE_DELAY_MS = 5 * 60 * 1000;
 const BACKGROUND_IDLE_DELAY_MS = 30 * 60 * 1000;
 
 const contentLoadingFallback = (
@@ -350,12 +353,64 @@ function App() {
         let activityVersion = 0;
         let lastActivityAt = Date.now();
         let idleTimer = null;
+        let certificateTimer = null;
+        let certificateRunning = false;
         let lastServerNoticeAt = 0;
 
         const scheduleFromLastActivity = () => {
             if (idleTimer) window.clearTimeout(idleTimer);
             const remaining = Math.max(0, BACKGROUND_IDLE_DELAY_MS - (Date.now() - lastActivityAt));
             idleTimer = window.setTimeout(runBackgroundJobs, remaining);
+        };
+
+        const scheduleCertificateFromLastActivity = () => {
+            if (certificateTimer) window.clearTimeout(certificateTimer);
+            const remaining = Math.max(
+                0,
+                CERTIFICATE_CACHE_IDLE_DELAY_MS - (Date.now() - lastActivityAt),
+            );
+            certificateTimer = window.setTimeout(runCertificateCache, remaining);
+        };
+
+        const runCertificateCache = async () => {
+            if (cancelled || certificateRunning) return;
+            if (Date.now() - lastActivityAt < CERTIFICATE_CACHE_IDLE_DELAY_MS) {
+                scheduleCertificateFromLastActivity();
+                return;
+            }
+
+            certificateRunning = true;
+            const runVersion = activityVersion;
+            const canContinue = () => !cancelled && runVersion === activityVersion;
+            try {
+                await SyncService.prepareBackgroundTasks(['certificate-cache']);
+                if (!canContinue()) return;
+
+                const claim = await SyncService.claimBackgroundTask('certificate-cache');
+                if (!claim?.claimed || !canContinue()) return;
+
+                const result = await CertificateModel.syncAllMonthsInBackground(user);
+                if (result?.success === false) {
+                    throw new Error(result.error || 'certificate cache sync failed');
+                }
+                if (!canContinue()) {
+                    throw new Error('user activity detected during certificate cache sync');
+                }
+                window.dispatchEvent(new CustomEvent('osoo:certificate-cache-updated'));
+                await SyncService.completeBackgroundTask('certificate-cache', CERTIFICATE_CACHE_REFRESH_MS);
+            } catch (error) {
+                await SyncService.failBackgroundTask('certificate-cache', error).catch(() => {});
+                console.warn('[background-idle] certificate-cache failed:', error);
+            } finally {
+                certificateRunning = false;
+                if (!cancelled) {
+                    if (runVersion === activityVersion) {
+                        certificateTimer = window.setTimeout(runCertificateCache, CERTIFICATE_CACHE_REFRESH_MS);
+                    } else {
+                        scheduleCertificateFromLastActivity();
+                    }
+                }
+            }
         };
 
         const runBackgroundJobs = async () => {
@@ -369,7 +424,7 @@ function App() {
             const runVersion = activityVersion;
             const canContinue = () => !cancelled && runVersion === activityVersion;
             try {
-                const taskTypes = ['attendance-sync', 'data-sync', 'file-sync', 'certificate-cache', 'board-cache', 'diagnostic-sync', 'update-check'];
+                const taskTypes = ['attendance-sync', 'data-sync', 'file-sync', 'board-cache', 'diagnostic-sync', 'update-check'];
                 await SyncService.prepareBackgroundTasks(taskTypes);
                 const pendingTasks = await SyncService.getPendingBackgroundTasks();
 
@@ -385,9 +440,6 @@ function App() {
                             await SyncService.runDataBackgroundSync();
                         } else if (taskType === 'file-sync') {
                             await SyncService.runFileBackgroundSync();
-                        } else if (taskType === 'certificate-cache') {
-                            await CertificateModel.syncAllMonthsInBackground(user);
-                            window.dispatchEvent(new CustomEvent('osoo:certificate-cache-updated'));
                         } else if (taskType === 'board-cache') {
                             const { BoardModel } = await import('./features/board/BoardModel');
                             await BoardModel.fetchPosts(user, { force: true });
@@ -430,12 +482,16 @@ function App() {
             activityVersion += 1;
             lastActivityAt = Date.now();
             scheduleFromLastActivity();
+            scheduleCertificateFromLastActivity();
             if (Date.now() - lastServerNoticeAt >= 10000) {
                 lastServerNoticeAt = Date.now();
                 void SyncService.notifyUserActivity();
             }
         };
-        const onWakeup = () => scheduleFromLastActivity();
+        const onWakeup = () => {
+            scheduleFromLastActivity();
+            scheduleCertificateFromLastActivity();
+        };
         const activityEvents = ['keydown', 'pointerdown', 'input', 'change', 'wheel'];
         activityEvents.forEach((eventName) => window.addEventListener(eventName, onUserActivity, true));
         window.addEventListener('osoo:background-sync-wakeup', onWakeup);
@@ -450,10 +506,12 @@ function App() {
             'update-check',
         ]).catch((error) => console.warn('[background-idle] task preparation failed:', error));
         scheduleFromLastActivity();
+        scheduleCertificateFromLastActivity();
 
         return () => {
             cancelled = true;
             if (idleTimer) window.clearTimeout(idleTimer);
+            if (certificateTimer) window.clearTimeout(certificateTimer);
             activityEvents.forEach((eventName) => window.removeEventListener(eventName, onUserActivity, true));
             window.removeEventListener('osoo:background-sync-wakeup', onWakeup);
         };

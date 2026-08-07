@@ -33,9 +33,14 @@ assert.ok(integratedInstaller.includes("'  !insertmacro InstallOsooWatchdog'"), 
 assert.ok(packageJson.includes('watchdog:build'), 'release scripts do not rebuild watchdog');
 assert.ok(mainProcess.includes("app.exit(0)"), 'duplicate Electron instances are not terminated before initialization');
 assert.ok(mainProcess.indexOf('app.exit(0)') < mainProcess.indexOf('app.whenReady()'), 'duplicate-instance exit must precede app initialization');
+assert.ok(mainProcess.includes("['update', 'full-exit'].forEach((reason) =>"), 'manual relaunch does not clear a prior full-exit watchdog lock after the server is ready');
+assert.ok(mainProcess.includes('waitForServerReadyAndClearMaintenanceLocks'), 'server-ready maintenance lock recovery contract is missing');
 assert.ok(/catch\r?\n\s*\{/.test(watchdogSource) && watchdogSource.includes('return true;'), 'watchdog does not fail safe when process path inspection is denied');
 assert.ok(watchdogSource.includes('TimeSpan.FromMinutes(1)') && watchdogSource.includes('lastStatusKey'), 'watchdog status writes are not throttled for always-on field PCs');
-assert.ok(watchdogSource.includes('version=1.0.1'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(watchdogSource.includes('version=1.0.2'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(watchdogSource.includes('MonitorEmbeddedServer(appPath)') && watchdogSource.includes('IsDedicatedServerReachable()'), 'watchdog does not verify the embedded server port while the app process is alive');
+assert.ok(watchdogSource.includes('server-recovery') && watchdogSource.includes('TryTerminateApp(appPath)'), 'watchdog cannot recover an app whose embedded server remains unavailable');
+assert.ok(mainProcess.includes('app-heartbeat.json') && mainProcess.includes('startWatchdogHeartbeat()'), 'Electron does not publish its embedded-server heartbeat to the watchdog');
 assert.ok(serverIndex.includes('setInterval(() =>') && serverIndex.includes('importWatchdogDiagnostics(db, appDataPath)'), 'watchdog diagnostics are not imported while the app remains running');
 
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osoo-watchdog-'));

@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 
@@ -12,8 +13,8 @@ using System.Threading;
 [assembly: System.Reflection.AssemblyDescription("Background watchdog for Osoo Handle App")]
 [assembly: System.Reflection.AssemblyCompany("Osoo")]
 [assembly: System.Reflection.AssemblyProduct("Osoo Handle App Watchdog")]
-[assembly: System.Reflection.AssemblyVersion("1.0.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.1.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.2.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.2.0")]
 
 namespace OsooWatchdog
 {
@@ -22,6 +23,15 @@ namespace OsooWatchdog
     {
         [DataMember(Name = "reason")] public string Reason;
         [DataMember(Name = "expiresAt")] public string ExpiresAt;
+    }
+
+    [DataContract]
+    internal sealed class AppHeartbeat
+    {
+        [DataMember(Name = "appStartedAt")] public string AppStartedAt;
+        [DataMember(Name = "checkedAt")] public string CheckedAt;
+        [DataMember(Name = "serverReady")] public bool ServerReady;
+        [DataMember(Name = "serverPort")] public int ServerPort;
     }
 
     internal sealed class Options
@@ -40,14 +50,18 @@ namespace OsooWatchdog
     {
         private const string MutexName = "Local\\OsooHandleAppWatchdog-1.0";
         private const int MaxRestarts = 3;
+        private const int DedicatedServerPort = 18731;
+        private const int ServerHealthFailureLimit = 3;
         private static readonly TimeSpan RestartWindow = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan Cooldown = TimeSpan.FromMinutes(30);
+        private static readonly TimeSpan ServerStartupGrace = TimeSpan.FromMinutes(2);
         private static readonly Queue<DateTime> RestartTimes = new Queue<DateTime>();
         private static DateTime cooldownUntil = DateTime.MinValue;
         private static string lastRepeatedLogKey;
         private static DateTime lastRepeatedLogAt = DateTime.MinValue;
         private static string lastStatusKey;
         private static DateTime lastStatusAt = DateTime.MinValue;
+        private static int serverHealthFailures;
         private static Options options;
         private static string runtimeDirectory;
         private static string logPath;
@@ -71,7 +85,7 @@ namespace OsooWatchdog
                     return 2;
                 }
 
-                Log("watchdog-start", "ok", "version=1.0.1; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
+                Log("watchdog-start", "ok", "version=1.0.2; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
                 do
                 {
                     try { CheckOnce(); }
@@ -104,7 +118,7 @@ namespace OsooWatchdog
 
             if (!options.SimulateAbsent && IsAppRunning(appPath))
             {
-                WriteStatus("running", appPath, null);
+                MonitorEmbeddedServer(appPath);
                 return;
             }
 
@@ -135,6 +149,55 @@ namespace OsooWatchdog
                 return;
             }
 
+            StartApplication(appPath, "app-restart");
+        }
+
+        private static void MonitorEmbeddedServer(string appPath)
+        {
+            if (IsDedicatedServerReachable())
+            {
+                serverHealthFailures = 0;
+                WriteStatus("running", appPath, null);
+                return;
+            }
+
+            AppHeartbeat heartbeat = ReadAppHeartbeat();
+            if (IsWithinServerStartupGrace(heartbeat) || IsAppWithinStartupGrace(appPath))
+            {
+                WriteStatus("server-starting", appPath, null);
+                return;
+            }
+
+            serverHealthFailures += 1;
+            Log("server-health", "waiting", "port=" + DedicatedServerPort + "; failures=" + serverHealthFailures);
+            if (serverHealthFailures < ServerHealthFailureLimit)
+            {
+                WriteStatus("server-unavailable", appPath, null);
+                return;
+            }
+            serverHealthFailures = 0;
+
+            if (!CanRestart(appPath)) return;
+
+            if (!TryTerminateApp(appPath))
+            {
+                Log("server-recovery", "failed", "cannot-terminate-app");
+                WriteStatus("server-recovery-failed", appPath, null);
+                return;
+            }
+
+            Thread.Sleep(1000);
+            if (IsAppRunning(appPath))
+            {
+                Log("server-recovery", "failed", "app-still-running");
+                WriteStatus("server-recovery-failed", appPath, null);
+                return;
+            }
+            StartApplication(appPath, "server-recovery");
+        }
+
+        private static void StartApplication(string appPath, string action)
+        {
             var startInfo = new ProcessStartInfo
             {
                 FileName = appPath,
@@ -145,8 +208,28 @@ namespace OsooWatchdog
             };
             Process.Start(startInfo);
             RestartTimes.Enqueue(DateTime.UtcNow);
-            Log("app-restart", "started", "path=" + appPath);
-            WriteStatus("restart-started", appPath, null);
+            Log(action, "started", "path=" + appPath);
+            WriteStatus(action == "server-recovery" ? "server-recovery-started" : "restart-started", appPath, null);
+        }
+
+        private static bool CanRestart(string appPath)
+        {
+            DateTime now = DateTime.UtcNow;
+            while (RestartTimes.Count > 0 && now - RestartTimes.Peek() > RestartWindow) RestartTimes.Dequeue();
+            if (cooldownUntil > now)
+            {
+                Log("restart-cooldown", "waiting", "until=" + cooldownUntil.ToString("o"));
+                WriteStatus("cooldown", appPath, null);
+                return false;
+            }
+            if (RestartTimes.Count >= MaxRestarts)
+            {
+                cooldownUntil = now.Add(Cooldown);
+                Log("restart-cooldown", "started", "until=" + cooldownUntil.ToString("o"));
+                WriteStatus("cooldown", appPath, null);
+                return false;
+            }
+            return true;
         }
 
         private static string ResolveAppPath()
@@ -184,6 +267,84 @@ namespace OsooWatchdog
                 finally { process.Dispose(); }
             }
             return false;
+        }
+
+        private static bool TryTerminateApp(string expectedPath)
+        {
+            bool found = false;
+            foreach (Process process in Process.GetProcessesByName("Osoo Handle App"))
+            {
+                try
+                {
+                    string actualPath = process.MainModule.FileName;
+                    if (!String.Equals(Path.GetFullPath(actualPath), Path.GetFullPath(expectedPath), StringComparison.OrdinalIgnoreCase)) continue;
+                    found = true;
+                    process.Kill();
+                    process.WaitForExit(5000);
+                }
+                catch
+                {
+                    // Never kill an elevated or uninspectable process by name alone.
+                    return false;
+                }
+                finally { process.Dispose(); }
+            }
+            return found;
+        }
+
+        private static bool IsAppWithinStartupGrace(string expectedPath)
+        {
+            foreach (Process process in Process.GetProcessesByName("Osoo Handle App"))
+            {
+                try
+                {
+                    string actualPath = process.MainModule.FileName;
+                    if (!String.Equals(Path.GetFullPath(actualPath), Path.GetFullPath(expectedPath), StringComparison.OrdinalIgnoreCase)) continue;
+                    return DateTime.UtcNow - process.StartTime.ToUniversalTime() < ServerStartupGrace;
+                }
+                catch
+                {
+                    // If the process cannot be inspected, do not risk interrupting startup.
+                    return true;
+                }
+                finally { process.Dispose(); }
+            }
+            return false;
+        }
+
+        private static bool IsDedicatedServerReachable()
+        {
+            try
+            {
+                using (var client = new TcpClient())
+                {
+                    IAsyncResult pending = client.BeginConnect("127.0.0.1", DedicatedServerPort, null, null);
+                    if (!pending.AsyncWaitHandle.WaitOne(1000)) return false;
+                    client.EndConnect(pending);
+                    return client.Connected;
+                }
+            }
+            catch { return false; }
+        }
+
+        private static AppHeartbeat ReadAppHeartbeat()
+        {
+            string heartbeatPath = Path.Combine(runtimeDirectory, "app-heartbeat.json");
+            if (!File.Exists(heartbeatPath)) return null;
+            try
+            {
+                using (var stream = File.OpenRead(heartbeatPath))
+                    return (AppHeartbeat)new DataContractJsonSerializer(typeof(AppHeartbeat)).ReadObject(stream);
+            }
+            catch { return null; }
+        }
+
+        private static bool IsWithinServerStartupGrace(AppHeartbeat heartbeat)
+        {
+            if (heartbeat == null || String.IsNullOrWhiteSpace(heartbeat.AppStartedAt)) return false;
+            DateTime startedAt;
+            return DateTime.TryParse(heartbeat.AppStartedAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out startedAt)
+                && DateTime.UtcNow - startedAt.ToUniversalTime() < ServerStartupGrace;
         }
 
         private static bool TryGetActiveMaintenance(out string reason, out DateTime expiry)
