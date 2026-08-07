@@ -45,6 +45,22 @@ function assertPackagedRenderer(appOutDir) {
   return { asarPath };
 }
 
+function ensureUpdaterConfig(appOutDir) {
+  const updaterConfigPath = path.join(appOutDir, 'resources', 'app-update.yml');
+  if (!fs.existsSync(updaterConfigPath)) {
+    fs.writeFileSync(updaterConfigPath, [
+      'owner: bti0497-gif',
+      'repo: Osoo_Handle_App',
+      'provider: github',
+      'releaseType: release',
+      'updaterCacheDirName: wastewater-treatment-plant-updater',
+      '',
+    ].join('\n'), 'utf8');
+    console.log(`[renderer-package-guard] generated updater config: ${updaterConfigPath}`);
+  }
+  return updaterConfigPath;
+}
+
 async function beforePack(context) {
   const result = assertRendererBuild(context.appDir || process.cwd());
   console.log(`[renderer-package-guard] source renderer verified (${result.assetCount} assets)`);
@@ -52,7 +68,9 @@ async function beforePack(context) {
 
 async function afterPack(context) {
   const result = assertPackagedRenderer(context.appOutDir);
+  const updaterConfigPath = ensureUpdaterConfig(context.appOutDir);
   console.log(`[renderer-package-guard] packaged renderer verified: ${result.asarPath}`);
+  console.log(`[renderer-package-guard] updater config verified: ${updaterConfigPath}`);
 }
 
 if (require.main === module) {
@@ -60,4 +78,4 @@ if (require.main === module) {
   console.log(`[renderer-package-guard] renderer build verified (${result.assetCount} assets)`);
 }
 
-module.exports = { assertRendererBuild, assertPackagedRenderer, beforePack, afterPack };
+module.exports = { assertRendererBuild, assertPackagedRenderer, ensureUpdaterConfig, beforePack, afterPack };
