@@ -45,6 +45,19 @@ const round1 = (value) => Math.round(value * 10) / 10;
 const clampInventory = (value) => Math.max(0, round1(Number(value || 0)));
 const POWER_UNIT_STORAGE_KEY = 'osoo:power-reading-unit';
 
+// 검침값은 누적값이므로 저장 대상은 일일 유량(calculatedFlow)이다.
+// 평소와 크게 다른 값을 단순 오입력으로 저장하는 일을 한 번 더 확인한다.
+// 실제 비상 방류 등은 사용자가 확인 후 그대로 저장할 수 있다.
+const needsUnexpectedFlowConfirmation = ({ previousFlow, calculatedFlow }) => {
+    if (!Number.isFinite(calculatedFlow) || calculatedFlow < 0) return false;
+
+    if (!Number.isFinite(previousFlow) || previousFlow <= 0) {
+        return calculatedFlow >= 10000;
+    }
+
+    return calculatedFlow >= Math.max(1000, previousFlow * 5);
+};
+
 const getStoredPowerReadingUnit = () => {
     try {
         const unit = String(window.localStorage.getItem(POWER_UNIT_STORAGE_KEY) || '').toUpperCase();
@@ -910,6 +923,7 @@ export default function UnifiedRecordModal({
     } = {}) => {
         const targetTabs = new Set(tabIds);
         const flowMissing = [];
+        const unexpectedFlowItems = [];
         const notices = [];
         const flowItemsToSave = [];
         const medicineItemsToSave = [];
@@ -999,6 +1013,14 @@ export default function UnifiedRecordModal({
                     is_reset: effectiveSaveStatusMode === 'baseline' && !isSludge,
                     input_status: effectiveSaveStatusMode === 'baseline' ? 'baseline' : 'manual',
                 });
+
+                if (!isSludge && isDrafted && effectiveSaveStatusMode !== 'baseline'
+                    && needsUnexpectedFlowConfirmation({
+                        previousFlow: toNumberOrNull(item?.previous?.flow),
+                        calculatedFlow,
+                    })) {
+                    unexpectedFlowItems.push(item.label || item.key || '유량');
+                }
             });
         }
 
@@ -1155,6 +1177,7 @@ export default function UnifiedRecordModal({
 
         return {
             flowMissing,
+            unexpectedFlowItems,
             notices,
             flowItems: flowItemsToSave,
             medicineItems: medicineItemsToSave,
@@ -1198,6 +1221,13 @@ export default function UnifiedRecordModal({
             focusMissingInput(plan.flowMissing[0]);
             notifyValidation('유량탭에서 입력이 없는 항목이 있습니다.');
             return;
+        }
+
+        if (plan.unexpectedFlowItems.length > 0) {
+            const itemNames = plan.unexpectedFlowItems.join(', ');
+            if (!window.confirm(`평상시와 다른 값이 입력됐습니다. 확인해보세요.\n\n대상: ${itemNames}\n\n그래도 저장할까요?`)) {
+                return;
+            }
         }
 
         const result = await savePlan(plan);
