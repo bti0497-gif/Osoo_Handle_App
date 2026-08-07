@@ -5,6 +5,8 @@
 
 const PORT_MIN = 18731;
 const PING_TIMEOUT_MS = 600;
+const STARTUP_READY_TIMEOUT_MS = 120000;
+const STARTUP_RETRY_DELAY_MS = 250;
 const CACHE_KEY = 'osoo_server_port';
 
 let _cachedBase = null;
@@ -23,10 +25,23 @@ async function pingPort(port) {
   }
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForPortReady(port, timeoutMs = STARTUP_READY_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await pingPort(port)) return true;
+    await delay(STARTUP_RETRY_DELAY_MS);
+  }
+  return false;
+}
+
 /**
  * 앱 시작 시 한 번 호출. 서버 포트를 탐색하고 캐시합니다.
  */
-export async function initServerConfig() {
+export async function initServerConfig({ waitForReady = false } = {}) {
   const cached = localStorage.getItem(CACHE_KEY);
   if (cached) {
     const port = parseInt(cached, 10);
@@ -43,6 +58,17 @@ export async function initServerConfig() {
     localStorage.setItem(CACHE_KEY, String(PORT_MIN));
     console.log(`[ServerConfig] 전용 포트 ${PORT_MIN}에서 서버 발견`);
     return _cachedBase;
+  }
+
+  if (waitForReady && await waitForPortReady(PORT_MIN)) {
+    _cachedBase = `http://localhost:${PORT_MIN}`;
+    localStorage.setItem(CACHE_KEY, String(PORT_MIN));
+    console.log(`[ServerConfig] startup wait completed on dedicated port ${PORT_MIN}`);
+    return _cachedBase;
+  }
+
+  if (waitForReady) {
+    throw new Error('로컬 서버 준비 시간이 초과되었습니다.');
   }
 
   _cachedBase = `http://localhost:${PORT_MIN}`;

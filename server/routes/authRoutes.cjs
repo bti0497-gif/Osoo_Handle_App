@@ -446,6 +446,17 @@ module.exports = (db, appDataPath) => {
     router.post('/local-login', async (req, res) => {
         const { name, password } = req.body;
         try {
+            recordDiagnostic(db, appDataPath, {
+                level: 'info',
+                area: 'auth',
+                action: 'local-login',
+                result: 'received',
+                message: 'local field login request received',
+                details: {
+                    nameProvided: Boolean(String(name || '').trim()),
+                    passwordProvided: Boolean(String(password || '')),
+                },
+            });
             const member = db.prepare('SELECT * FROM members WHERE name = ? AND password = ?').get(name, password);
             if (member) {
                 if (String(member.role || '').trim() === 'admin' || String(member.role || '').trim() === 'group_admin' || String(member.name || '').trim() === 'admin') {
@@ -454,6 +465,14 @@ module.exports = (db, appDataPath) => {
                 }
                 setActiveUser(member, 'local-login');
                 closeStaleOpenSessions(member);
+                recordDiagnostic(db, appDataPath, {
+                    level: 'info',
+                    area: 'auth',
+                    action: 'local-login',
+                    result: 'accepted',
+                    message: 'local field login credential verified',
+                    details: { memberId: member.id, role: member.role || 'user' },
+                });
                 res.json({ success: true, member: enrichMemberWithSites(member), source: 'local' });
                 // 로그인 응답은 로컬 자격 확인만으로 즉시 끝낸다. Drive/BigQuery는
                 // 응답 이후 별도 작업으로 넘겨 외부 장애가 업무 화면 진입을 막지 않게 한다.

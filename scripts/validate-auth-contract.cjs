@@ -296,16 +296,17 @@ check(
     'preloadRecordGridData().finally',
   ]) && containsAll(mainText, [
     "import SplashLoadingView from './components/SplashLoadingView.jsx'",
-    '<SplashLoadingView percent={0} label="" showProgress={false} />',
-    'initServerConfig().then(() =>',
+    '<SplashLoadingView percent={0} label="앱을 준비하고 있습니다..." showProgress={false} />',
+    'await initServerConfig({ waitForReady: true })',
+    'window.setTimeout(bootstrapApplication, 2000)',
   ]) &&
-    mainText.indexOf('<SplashLoadingView percent={0} label="" showProgress={false} />') <
-      mainText.indexOf('initServerConfig().then(() =>') &&
+    mainText.indexOf('<SplashLoadingView percent={0} label="앱을 준비하고 있습니다..." showProgress={false} />') <
+      mainText.indexOf('await initServerConfig({ waitForReady: true })') &&
     !mainText.includes('서버 연결 중...') &&
     !appText.includes('세션 복원 중...') &&
     !appText.includes('if (recordPreloadState.active)'),
-  'startup animation covers session restore and record preloading no longer blocks dashboard entry',
-  'startup/session animation ordering or immediate dashboard entry contract was changed'
+  'startup animation waits for a ready local server before session restore and dashboard entry',
+  'startup/server-ready/session ordering contract was changed'
 );
 
 check(
