@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { rememberRoadworkSessionUrl } from './roadworkSessionBridge';
 import { useRoadworkHelperViewModel } from './useRoadworkHelperViewModel';
 import { RoadworkHelperModel } from './RoadworkHelperModel';
-import { SettingsModel } from '../settings/SettingsModel';
 import './components/RoadworkHelperModal.css';
 
 const DEFAULT_ROADWORK_URL = 'https://nwpo.ex.co.kr:5002/security/login.do';
@@ -761,16 +760,13 @@ export default function RoadworkHelperView() {
     }
 
     try {
-      // Direction-specific web credentials are refreshed into the local DB
-      // before the webview preload requests its auto-fill values.
-      await SettingsModel.getSettings({ force: true }).catch((error) => {
-        console.warn('[Roadwork Helper] Site credential refresh failed:', error?.message || error);
-      });
       const resolvedPreloadPath = await window.electronAPI.invokeRoadwork('roadwork:getPreloadPath');
       if (resolvedPreloadPath) {
         setPreloadPath(resolvedPreloadPath);
       }
 
+      // The roadwork helper uses only the local, direction-scoped credential
+      // saved from Web App Settings.  Opening this page must not query Sheets.
       const urlRes = await window.electronAPI.invokeRoadwork('roadwork:getRoadworkUrl');
       const targetUrl = String(urlRes?.url || DEFAULT_ROADWORK_URL)
         .replace(':5002//security', ':5002/security');
