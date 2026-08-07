@@ -4,6 +4,7 @@ const { getStoredSheets, hasStoredData, readExcelRow } = require('../excelServic
 const { isDriveConfigured, getDriveRootFolderId, getOrCreateFolder } = require('../driveService.cjs');
 const { DRIVE_CATEGORY } = require('../drivePathService.cjs');
 const { listReportTemplates } = require('../reportTemplateService.cjs');
+const { listCredentials } = require('./externalCredentialService.cjs');
 
 const DEFAULT_SITE_SUBFOLDERS = [
   '게시판첨부파일',
@@ -51,7 +52,7 @@ function getSettingsOverview(db, baseDir, appDataPath, requestedSiteId = '') {
   const configItems = siteId
     ? db.prepare('SELECT * FROM site_config_items WHERE site_id = ? ORDER BY category, display_order').all(siteId)
     : db.prepare('SELECT * FROM config_items ORDER BY category, display_order').all();
-  const credentials = db.prepare('SELECT service_key, service_name, service_url, user_id, password, updated_at FROM web_app_credentials ORDER BY id').all();
+  const credentials = listCredentials(db, siteId);
   const reportTemplates = listReportTemplates(baseDir, appDataPath);
 
   return { settings, sludgeExportSettings, configItems, credentials, reportTemplates };

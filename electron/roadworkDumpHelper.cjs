@@ -17,6 +17,39 @@ function normalizeRoadworkPartition(value) {
   return partition.startsWith(ROADWORK_PARTITION_PREFIX) ? partition : ROADWORK_PARTITION_PREFIX;
 }
 
+function getSiteIdFromRoadworkPartition(partition) {
+  const prefix = `${ROADWORK_PARTITION_PREFIX}-`;
+  const normalized = String(partition || '').trim();
+  return normalized.startsWith(prefix) ? normalized.slice(prefix.length) : '';
+}
+
+function getSiteIdFromSender(event) {
+  const partitionSiteId = getSiteIdFromRoadworkPartition(
+    event?.sender?.session?.getPartition?.(),
+  );
+  if (partitionSiteId) return partitionSiteId;
+
+  try {
+    const sourceUrl = event?.senderFrame?.url || event?.sender?.getURL?.() || '';
+    return String(new URL(sourceUrl).searchParams.get('siteId') || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function getScopedCredential(db, serviceKey, siteId) {
+  const global = db.prepare(`
+    SELECT service_url, user_id, password FROM web_app_credentials WHERE service_key = ?
+  `).get(serviceKey);
+  if (!global) return null;
+  if (!siteId || !['road_web', 'water_analysis_app'].includes(serviceKey)) return global;
+  const scoped = db.prepare(`
+    SELECT user_id, password FROM site_web_app_credentials
+    WHERE site_id = ? AND service_key = ?
+  `).get(siteId, serviceKey);
+  return scoped ? { ...global, ...scoped } : global;
+}
+
 function stopRoadworkKeepAlive(partition) {
   const timer = roadworkKeepAliveTimers.get(partition);
   if (timer) clearInterval(timer);
@@ -106,20 +139,20 @@ function registerRuntimeHandlers(ipcMain, app) {
     return url.pathToFileURL(rawPath).href;
   });
 
-  ipcMain.handle('roadwork:getRoadworkUrl', async () => withLocalDb(
+  ipcMain.handle('roadwork:getRoadworkUrl', async (event) => withLocalDb(
     app,
     { success: false, url: DEFAULT_ROADWORK_URL },
     (db) => {
-      const row = db.prepare("SELECT service_url FROM web_app_credentials WHERE service_key = 'road_web'").get();
+      const row = getScopedCredential(db, 'road_web', getSiteIdFromSender(event));
       return { success: Boolean(row?.service_url), url: row?.service_url || DEFAULT_ROADWORK_URL };
     },
   ));
 
-  ipcMain.handle('roadwork:getCredentials', async () => withLocalDb(
+  ipcMain.handle('roadwork:getCredentials', async (event) => withLocalDb(
     app,
     { success: false, userId: '', password: '' },
     (db) => {
-      const row = db.prepare("SELECT user_id, password FROM web_app_credentials WHERE service_key = 'road_web'").get();
+      const row = getScopedCredential(db, 'road_web', getSiteIdFromSender(event));
       return {
         success: Boolean(row?.user_id && row?.password),
         userId: row?.user_id || '',
@@ -128,13 +161,13 @@ function registerRuntimeHandlers(ipcMain, app) {
     },
   ));
 
-  ipcMain.handle('roadwork:getCredentialStatus', async () => {
+  ipcMain.handle('roadwork:getCredentialStatus', async (event) => {
     const dbPath = getLocalDbPath(app);
     return withLocalDb(
       app,
       { success: false, dbPath, dbExists: fs.existsSync(dbPath), hasUserId: false, hasPassword: false, passwordLen: 0 },
       (db) => {
-        const row = db.prepare("SELECT user_id, password FROM web_app_credentials WHERE service_key = 'road_web'").get();
+        const row = getScopedCredential(db, 'road_web', getSiteIdFromSender(event));
         const password = String(row?.password || '');
         return {
           success: Boolean(row?.user_id && row?.password),

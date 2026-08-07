@@ -180,6 +180,15 @@ module.exports = function (db, baseDir, appDataPath) {
       } catch (sheetErr) {
         console.warn('[Settings] App settings sheets lookup failed, keeping local credentials:', sheetErr.message);
       }
+      try {
+        await withTimeout(
+          externalCredentialService.syncSiteCredentialForSite(db, req.siteContext?.siteId),
+          1500,
+          '현장별 웹 계정 동기화'
+        );
+      } catch (sheetErr) {
+        console.warn('[Settings] Site web credential lookup failed, keeping local credentials:', sheetErr.message);
+      }
       const qntechIntegrity = process.env.OSOO_API_VALIDATION === '1'
         ? { qntechSiteId: '', repaired: false, source: 'local-validation' }
         : await withTimeout(
@@ -398,7 +407,11 @@ module.exports = function (db, baseDir, appDataPath) {
 
   router.post('/api/settings/web-app-credentials', async (req, res) => {
     try {
-      const credential = await externalCredentialService.saveWebAppCredentials(db, req.body || {});
+      const credential = await externalCredentialService.saveWebAppCredentials(
+        db,
+        req.body || {},
+        req.siteContext?.siteId,
+      );
       res.json({ success: true, credential, message: '크리덴셜 설정이 저장되었습니다.' });
     } catch (e) {
       res.status(e.statusCode || 500).json({ success: false, message: e.message });

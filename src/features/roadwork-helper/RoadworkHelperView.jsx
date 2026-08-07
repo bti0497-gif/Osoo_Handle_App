@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { rememberRoadworkSessionUrl } from './roadworkSessionBridge';
 import { useRoadworkHelperViewModel } from './useRoadworkHelperViewModel';
 import { RoadworkHelperModel } from './RoadworkHelperModel';
+import { SettingsModel } from '../settings/SettingsModel';
 import './components/RoadworkHelperModal.css';
 
 const DEFAULT_ROADWORK_URL = 'https://nwpo.ex.co.kr:5002/security/login.do';
@@ -760,6 +761,11 @@ export default function RoadworkHelperView() {
     }
 
     try {
+      // Direction-specific web credentials are refreshed into the local DB
+      // before the webview preload requests its auto-fill values.
+      await SettingsModel.getSettings({ force: true }).catch((error) => {
+        console.warn('[Roadwork Helper] Site credential refresh failed:', error?.message || error);
+      });
       const resolvedPreloadPath = await window.electronAPI.invokeRoadwork('roadwork:getPreloadPath');
       if (resolvedPreloadPath) {
         setPreloadPath(resolvedPreloadPath);

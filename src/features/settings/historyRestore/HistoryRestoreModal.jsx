@@ -59,6 +59,8 @@ export default function HistoryRestoreModal({ open, onClose }) {
         let cancelled = false;
         (async () => {
             try {
+                // 이 창의 siteId에 해당하는 도로공사 계정을 먼저 로컬 DB에 반영한다.
+                await SettingsModel.getSettings({ force: true });
                 const resolvedPreload = await window.electronAPI?.invokeRoadwork?.('roadwork:getPreloadPath');
                 const urlResult = await window.electronAPI?.invokeRoadwork?.('roadwork:getRoadworkUrl');
                 if (cancelled) return;

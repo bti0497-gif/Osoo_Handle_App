@@ -337,6 +337,16 @@ db.exec(`
     password TEXT,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+  -- 웹 로그인 계정은 양방향 현장에서 서로 다를 수 있다. URL은 공통 설정으로
+  -- 남기고, ID/비밀번호만 site_id 단위로 분리한다.
+  CREATE TABLE IF NOT EXISTS site_web_app_credentials (
+    site_id TEXT NOT NULL,
+    service_key TEXT NOT NULL,
+    user_id TEXT NOT NULL DEFAULT '',
+    password TEXT NOT NULL DEFAULT '',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (site_id, service_key)
+  );
   CREATE TABLE IF NOT EXISTS config_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     category TEXT NOT NULL,
@@ -1116,6 +1126,28 @@ if (hasSeedSiteId && hasRealSiteName) {
 
 // 5개 동기화 테이블에 site_id 추가 및 기존 데이터 백필
 const currentSiteId = db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || null;
+// 기존 단일현장 DB의 웹 계정은 현재 현장에만 한 번 이관한다. 다른 방향의
+// 계정은 Google Sheets에서 해당 site_id를 선택할 때 별도로 채워진다.
+if (currentSiteId) {
+  const legacyCredentials = db.prepare(`
+    SELECT service_key, user_id, password
+    FROM web_app_credentials
+    WHERE service_key IN ('road_web', 'water_analysis_app')
+  `).all();
+  const upsertSiteCredential = db.prepare(`
+    INSERT INTO site_web_app_credentials (site_id, service_key, user_id, password, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(site_id, service_key) DO NOTHING
+  `);
+  for (const credential of legacyCredentials) {
+    upsertSiteCredential.run(
+      currentSiteId,
+      credential.service_key,
+      String(credential.user_id || ''),
+      String(credential.password || ''),
+    );
+  }
+}
 syncTables.forEach(tableName => {
   const tCols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
   if (!tCols.includes('site_id')) {
