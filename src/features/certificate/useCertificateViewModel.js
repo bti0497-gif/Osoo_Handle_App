@@ -94,7 +94,19 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
                 authHeaders,
                 { force },
             );
-            const list = Array.isArray(res?.items) ? res.items.map(normalizeRecord) : [];
+            const normalized = Array.isArray(res?.items) ? res.items.map(normalizeRecord) : [];
+            const list = await Promise.all(normalized.map(async (item) => {
+                if (!item.previewUrl) return item;
+                try {
+                    return {
+                        ...item,
+                        previewUrl: await CertificateModel.createAuthenticatedLocalObjectUrl(item.previewUrl),
+                    };
+                } catch (previewError) {
+                    console.warn('[Certificate] local preview unavailable:', previewError?.message || previewError);
+                    return { ...item, previewUrl: '' };
+                }
+            }));
             setRecords(list);
             setSelectedCertificateIds((prev) => {
                 const validIds = new Set(list.map((item) => item.id));
@@ -130,6 +142,14 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
         window.addEventListener('osoo:certificate-cache-updated', handleCacheUpdated);
         return () => window.removeEventListener('osoo:certificate-cache-updated', handleCacheUpdated);
     }, [loadRecords]);
+
+    useEffect(() => () => {
+        records.forEach((item) => {
+            if (String(item.previewUrl || '').startsWith('blob:')) {
+                URL.revokeObjectURL(item.previewUrl);
+            }
+        });
+    }, [records]);
 
     const visibleRecords = useMemo(() => {
         let filtered = records;
@@ -223,15 +243,26 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
         setViewModeState(normalized);
     }, []);
 
-    const openPreview = useCallback((item) => {
+    const openPreview = useCallback(async (item) => {
         if (!item?.id) return;
         const localUrl = item.localFileUrl || item.previewUrl;
         if (!localUrl) {
             showToast?.('성적서를 로컬로 내려받는 중입니다. 잠시 후 다시 열어 주세요.', 'info');
             return;
         }
-        window.open(localUrl, '_blank', 'noopener,noreferrer');
-    }, [showToast]);
+        try {
+            const objectUrl = String(localUrl).startsWith('blob:')
+                ? localUrl
+                : await CertificateModel.createAuthenticatedLocalObjectUrl(localUrl);
+            window.open(objectUrl, '_blank', 'noopener,noreferrer');
+            if (!String(localUrl).startsWith('blob:')) {
+                setTimeout(() => URL.revokeObjectURL(objectUrl), 300_000);
+            }
+        } catch (error) {
+            console.error('[Certificate] local preview open failed:', error);
+            showAlert?.('성적서 파일을 열지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        }
+    }, [showAlert, showToast]);
 
     const yearOptions = useMemo(() => {
         const set = new Set([currentYear, currentYear - 1, selectedYear]);

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useDialog } from '../../components/common/DialogContext';
 import { useCertificateViewModel } from './useCertificateViewModel';
 
@@ -36,6 +36,7 @@ const iconButtonStyle = {
 };
 
 const CertificateView = ({ currentUser }) => {
+    const [hoveredCertificateId, setHoveredCertificateId] = useState(null);
     const { showToast, showAlert } = useDialog();
     const {
         isLoading,
@@ -212,17 +213,25 @@ const CertificateView = ({ currentUser }) => {
                             {visibleRecords.map((item) => {
                                 const selected = item.id === selectedId;
                                 const checked = selectedCertificateIds.has(item.id);
+                                const hovered = item.id === hoveredCertificateId;
                                 return (
                                     <article
                                         key={item.id}
+                                        onMouseEnter={() => setHoveredCertificateId(item.id)}
+                                        onMouseLeave={() => setHoveredCertificateId(null)}
                                         style={{
                                             position: 'relative',
                                             minWidth: 0,
-                                            border: `2px solid ${checked ? '#2563eb' : (selected ? '#93c5fd' : '#e2e8f0')}`,
+                                            border: `2px solid ${checked ? '#2563eb' : (selected || hovered ? '#60a5fa' : '#e2e8f0')}`,
                                             borderRadius: '12px',
                                             background: '#ffffff',
                                             overflow: 'hidden',
-                                            boxShadow: checked ? '0 8px 20px rgba(37, 99, 235, 0.14)' : '0 2px 8px rgba(15, 23, 42, 0.06)',
+                                            boxShadow: checked
+                                                ? '0 8px 20px rgba(37, 99, 235, 0.14)'
+                                                : (selected || hovered
+                                                    ? '0 6px 16px rgba(37, 99, 235, 0.14)'
+                                                    : '0 2px 8px rgba(15, 23, 42, 0.06)'),
+                                            transition: 'border-color 120ms ease, box-shadow 120ms ease',
                                         }}
                                     >
                                         <input
@@ -247,14 +256,14 @@ const CertificateView = ({ currentUser }) => {
                                                 setSelectedId(item.id);
                                                 openPreview(item);
                                             }}
-                                            title={`${item.fileName} 크게 보기`}
+                                            title={`${item.fileName} 선택하여 미리보기`}
                                             style={{
                                                 width: '100%',
                                                 height: '340px',
                                                 padding: 0,
                                                 border: 0,
                                                 background: '#e2e8f0',
-                                                cursor: 'zoom-in',
+                                                cursor: 'pointer',
                                                 display: 'block',
                                                 overflow: 'hidden',
                                             }}

@@ -169,6 +169,19 @@ export const CertificateModel = {
         return `${getApiBase()}${value.startsWith('/') ? value : `/${value}`}`;
     },
 
+    // Native <img> and window.open() requests cannot attach the local API token.
+    // Fetch the protected file through apiClient, then expose only a blob URL.
+    async createAuthenticatedLocalObjectUrl(url = '') {
+        const value = String(url || '').trim();
+        if (!value) return '';
+        const parsed = new URL(value, getApiBase());
+        const response = await apiClient.getRaw(`${parsed.pathname}${parsed.search}`);
+        if (!response.ok) {
+            throw new Error(`Certificate local media request failed (${response.status})`);
+        }
+        return URL.createObjectURL(await response.blob());
+    },
+
     async getDownloadInfo(certificateId) {
         return apiClient.get(`/api/certificates/${certificateId}/download`);
     },
