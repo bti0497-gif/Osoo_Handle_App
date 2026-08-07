@@ -33,7 +33,7 @@ assert.ok(integratedInstaller.includes("'  !insertmacro InstallOsooWatchdog'"), 
 assert.ok(packageJson.includes('watchdog:build'), 'release scripts do not rebuild watchdog');
 assert.ok(mainProcess.includes("app.exit(0)"), 'duplicate Electron instances are not terminated before initialization');
 assert.ok(mainProcess.indexOf('app.exit(0)') < mainProcess.indexOf('app.whenReady()'), 'duplicate-instance exit must precede app initialization');
-assert.ok(watchdogSource.includes('catch\n                {') && watchdogSource.includes('return true;'), 'watchdog does not fail safe when process path inspection is denied');
+assert.ok(/catch\r?\n\s*\{/.test(watchdogSource) && watchdogSource.includes('return true;'), 'watchdog does not fail safe when process path inspection is denied');
 assert.ok(watchdogSource.includes('TimeSpan.FromMinutes(1)') && watchdogSource.includes('lastStatusKey'), 'watchdog status writes are not throttled for always-on field PCs');
 assert.ok(watchdogSource.includes('version=1.0.1'), 'watchdog behavioral changes did not bump the diagnostic version');
 assert.ok(serverIndex.includes('setInterval(() =>') && serverIndex.includes('importWatchdogDiagnostics(db, appDataPath)'), 'watchdog diagnostics are not imported while the app remains running');
