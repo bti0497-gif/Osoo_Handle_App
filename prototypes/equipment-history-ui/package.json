@@ -1,0 +1,10 @@
+{
+  "name": "osoo-equipment-history-ui-prototype",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node ../../node_modules/vite/bin/vite.js --host 0.0.0.0 --port 5180",
+    "build": "node ../../node_modules/vite/bin/vite.js build"
+  }
+}
