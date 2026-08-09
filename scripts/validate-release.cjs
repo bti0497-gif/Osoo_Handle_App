@@ -1035,10 +1035,10 @@ function validateRegressionContracts() {
       viewModelText.includes('const result = await KitModel.bulkSave(kitItems);') &&
       viewModelText.includes('if (!result?.success) throw new Error') &&
       viewModelText.includes('await reloadContexts({ force: true, tabs: savedTabs });') &&
-      viewModelText.includes("targetTabs.has('flow') ? FlowModel.fetchHistory({ force }) : null") &&
-      viewModelText.includes("targetTabs.has('medicine') ? MedicineModel.fetchHistory({ force }) : null") &&
-      viewModelText.includes("targetTabs.has('kit') ? KitModel.fetchHistory({ force }) : null") &&
-      viewModelText.includes("targetTabs.has('water') ? WaterQualityModel.fetchHistory({ force }) : null") &&
+      viewModelText.includes("targetTabs.has('flow') ? FlowModel.fetchHistoryRange(previousCalendarDate(date), date) : null") &&
+      viewModelText.includes("targetTabs.has('medicine') ? MedicineModel.fetchHistoryRange(date) : null") &&
+      viewModelText.includes("targetTabs.has('kit') ? KitModel.fetchHistoryRange(date) : null") &&
+      viewModelText.includes("targetTabs.has('water') ? WaterQualityModel.fetchHistoryRange(date) : null") &&
       parentManagementViews.every(([, source]) => (
         source.includes('pendingParentRefreshRef.current = true;') &&
         source.includes('const handleModalClose = () =>') &&
