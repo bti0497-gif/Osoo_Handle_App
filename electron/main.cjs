@@ -51,6 +51,7 @@ let serverHealthFailures = 0;
 let serverInstanceToken = null;
 let serverLaunchedAt = 0;
 let watchdogHeartbeatTimer = null;
+let embeddedServerRecoveryInProgress = false;
 const appStartedAt = new Date().toISOString();
 
 const FULL_EXIT_LOCK_TTL_MS = 8 * 60 * 60 * 1000;
@@ -241,6 +242,11 @@ function scheduleServerRestart(delayMs = 500) {
   }, delayMs);
 }
 
+function notifyRendererServerRecovery(phase) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('server:recovery-progress', { phase });
+}
+
 function checkEmbeddedServerHealth() {
   if (!shouldKeepEmbeddedServerAlive() || !serverProcess || !serverInstanceToken) {
     return Promise.resolve(false);
@@ -280,12 +286,18 @@ function startServerGuard() {
     const healthy = await checkEmbeddedServerHealth();
     if (healthy) {
       serverHealthFailures = 0;
+      if (embeddedServerRecoveryInProgress) {
+        embeddedServerRecoveryInProgress = false;
+        notifyRendererServerRecovery('server-ready');
+      }
       return;
     }
     if (serverProcess && Date.now() - serverLaunchedAt < SERVER_STARTUP_GRACE_MS) return;
     serverHealthFailures += 1;
     if (serverHealthFailures < SERVER_HEALTH_FAILURE_LIMIT) return;
     serverHealthFailures = 0;
+    embeddedServerRecoveryInProgress = true;
+    notifyRendererServerRecovery('server-restarting');
     console.error('[Electron] Embedded server health lost; forcing clean restart on port 18731.');
     const failedProcess = serverProcess;
     serverProcess = null;
@@ -392,6 +404,8 @@ function startServer() {
     if (serverInstanceToken === launchedToken) serverInstanceToken = null;
     serverLaunchedAt = 0;
     if (shouldKeepEmbeddedServerAlive()) {
+      embeddedServerRecoveryInProgress = true;
+      notifyRendererServerRecovery('server-restarting');
       scheduleServerRestart();
     }
   });

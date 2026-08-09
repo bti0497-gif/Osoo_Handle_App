@@ -359,6 +359,21 @@ check(
 );
 
 check(
+  containsAll(authVmText, [
+    'const restoreServerSession = useCallback',
+    'AuthModel.restoreSession(savedSession.sessionToken)',
+    "new CustomEvent('osoo:server-session-invalid')",
+  ]) && containsAll(appText, [
+    'onServerRecoveryProgress',
+    'restoreServerSession()',
+    '서버를 안전하게 다시 준비하고 있습니다...',
+    '저장된 업무 세션을 안전하게 복원하고 있습니다...',
+  ]),
+  'embedded server restart restores the signed field session while preserving the mounted app',
+  'embedded-server recovery may leave the renderer authenticated but the server session missing'
+);
+
+check(
   containsAll(appText, [
     'if (isLoading)',
     '<SplashLoadingView percent={0} label="" showProgress={false} />',

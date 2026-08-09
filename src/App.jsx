@@ -81,7 +81,7 @@ const PlaceholderView = ({ title }) => (
 );
 
 function App() {
-    const { user: authenticatedUser, loginHintName, isAuthenticated, isLoading, locationStatus, login, logout, resetAfterPasswordChange } = useAuthViewModel();
+    const { user: authenticatedUser, loginHintName, isAuthenticated, isLoading, locationStatus, login, logout, resetAfterPasswordChange, restoreServerSession } = useAuthViewModel();
     const [multiSiteRuntime, setMultiSiteRuntime] = useState(null);
     const windowSiteId = new URLSearchParams(window.location.search).get('siteId') || '';
     const user = useMemo(() => {
@@ -118,10 +118,30 @@ function App() {
     const [preloadedUserId, setPreloadedUserId] = useState(null);
     const [forcedUpdateNotice, setForcedUpdateNotice] = useState(null);
     const [directionToast, setDirectionToast] = useState('');
+    const [serverRecoveryPhase, setServerRecoveryPhase] = useState('');
     const directionToastTimerRef = useRef(null);
     const forcedUpdateActiveRef = useRef(false);
     const loginUpdateCheckKeyRef = useRef(null);
     const recordGridSessionsRef = useRef({ flow: {}, medicine: {}, kit: {}, water: {} });
+
+    useEffect(() => {
+        const unsubscribe = window.electronAPI?.onServerRecoveryProgress?.(async ({ phase }) => {
+            if (phase === 'server-restarting') {
+                setServerRecoveryPhase('서버를 안전하게 다시 준비하고 있습니다...');
+                return;
+            }
+            if (phase !== 'server-ready') return;
+            setServerRecoveryPhase('저장된 업무 세션을 안전하게 복원하고 있습니다...');
+            const result = await restoreServerSession();
+            if (result?.restored) {
+                setServerRecoveryPhase('업무 세션 복원이 완료되었습니다.');
+                window.setTimeout(() => setServerRecoveryPhase(''), 900);
+            } else if (result?.reason === 'no-field-session') {
+                setServerRecoveryPhase('');
+            }
+        });
+        return typeof unsubscribe === 'function' ? unsubscribe : undefined;
+    }, [restoreServerSession]);
 
     useEffect(() => {
         if (!isAuthenticated || !user?.multi_site_enabled || !user?.site_name1) return undefined;
@@ -675,6 +695,12 @@ function App() {
                 helpText={getHelpText()}
                 locationStatus={locationStatus}
             />
+
+            {serverRecoveryPhase ? (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 10030 }} aria-live="polite">
+                    <SplashLoadingView percent={0} label={serverRecoveryPhase} showProgress={false} />
+                </div>
+            ) : null}
 
             {directionToast ? (
                 <div style={{

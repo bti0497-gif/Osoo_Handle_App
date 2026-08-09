@@ -225,6 +225,26 @@ export const useAuthViewModel = () => {
         });
     }, []);
 
+    // The Electron renderer can survive an embedded-server restart. Rebuild
+    // only the server's in-memory active session from the signed field token;
+    // a password is never retained or used for this recovery.
+    const restoreServerSession = useCallback(async () => {
+        const savedSession = AuthModel.loadSession();
+        if (!savedSession?.sessionToken || !savedSession?.user?.id || !isFieldWorker(savedSession.user)) {
+            return { restored: false, reason: 'no-field-session' };
+        }
+        const restored = await AuthModel.restoreSession(savedSession.sessionToken).catch(() => null);
+        if (!restored?.member) {
+            window.dispatchEvent(new CustomEvent('osoo:server-session-invalid'));
+            return { restored: false, reason: 'token-invalid' };
+        }
+        const restoredUser = { ...savedSession.user, ...restored.member };
+        AuthModel.saveSession(restoredUser, restored.sessionToken || savedSession.sessionToken);
+        userRef.current = restoredUser;
+        setUser(restoredUser);
+        return { restored: true };
+    }, []);
+
     useEffect(() => {
         const restoreSession = async () => {
             if (restoringRef.current) return;
@@ -478,5 +498,6 @@ export const useAuthViewModel = () => {
         logout,
         resetAfterPasswordChange,
         switchActiveSite,
+        restoreServerSession,
     };
 };

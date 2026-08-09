@@ -13,8 +13,8 @@ using System.Threading;
 [assembly: System.Reflection.AssemblyDescription("Background watchdog for Osoo Handle App")]
 [assembly: System.Reflection.AssemblyCompany("Osoo")]
 [assembly: System.Reflection.AssemblyProduct("Osoo Handle App Watchdog")]
-[assembly: System.Reflection.AssemblyVersion("1.0.2.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.2.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.3.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.3.0")]
 
 namespace OsooWatchdog
 {
@@ -55,6 +55,9 @@ namespace OsooWatchdog
         private static readonly TimeSpan RestartWindow = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan Cooldown = TimeSpan.FromMinutes(30);
         private static readonly TimeSpan ServerStartupGrace = TimeSpan.FromMinutes(2);
+        // Electron already restarts its embedded server. Do not compete with
+        // that recovery while the app continues to publish a fresh heartbeat.
+        private static readonly TimeSpan LiveAppServerRecoveryGrace = TimeSpan.FromMinutes(2);
         private static readonly Queue<DateTime> RestartTimes = new Queue<DateTime>();
         private static DateTime cooldownUntil = DateTime.MinValue;
         private static string lastRepeatedLogKey;
@@ -62,6 +65,7 @@ namespace OsooWatchdog
         private static string lastStatusKey;
         private static DateTime lastStatusAt = DateTime.MinValue;
         private static int serverHealthFailures;
+        private static DateTime serverUnavailableSince = DateTime.MinValue;
         private static Options options;
         private static string runtimeDirectory;
         private static string logPath;
@@ -85,7 +89,7 @@ namespace OsooWatchdog
                     return 2;
                 }
 
-                Log("watchdog-start", "ok", "version=1.0.2; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
+                Log("watchdog-start", "ok", "version=1.0.3; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
                 do
                 {
                     try { CheckOnce(); }
@@ -154,18 +158,38 @@ namespace OsooWatchdog
 
         private static void MonitorEmbeddedServer(string appPath)
         {
-            if (IsDedicatedServerReachable())
+            AppHeartbeat heartbeat = ReadAppHeartbeat();
+            // A listening port alone is not a login-ready server. Electron
+            // verifies the private ping token and publishes serverReady only
+            // after DB and all routes have initialized.
+            if (IsDedicatedServerReachable() && IsFreshAppHeartbeat(heartbeat) && heartbeat.ServerReady)
             {
                 serverHealthFailures = 0;
+                serverUnavailableSince = DateTime.MinValue;
                 WriteStatus("running", appPath, null);
                 return;
             }
 
-            AppHeartbeat heartbeat = ReadAppHeartbeat();
             if (IsWithinServerStartupGrace(heartbeat) || IsAppWithinStartupGrace(appPath))
             {
                 WriteStatus("server-starting", appPath, null);
                 return;
+            }
+
+            if (IsFreshAppHeartbeat(heartbeat))
+            {
+                if (serverUnavailableSince == DateTime.MinValue) serverUnavailableSince = DateTime.UtcNow;
+                TimeSpan elapsed = DateTime.UtcNow - serverUnavailableSince;
+                if (elapsed < LiveAppServerRecoveryGrace)
+                {
+                    Log("server-recovery", "waiting", "fresh-app-heartbeat; elapsedSeconds=" + (int)elapsed.TotalSeconds);
+                    WriteStatus("server-recovery-deferred", appPath, null);
+                    return;
+                }
+            }
+            else
+            {
+                serverUnavailableSince = DateTime.MinValue;
             }
 
             serverHealthFailures += 1;
@@ -345,6 +369,14 @@ namespace OsooWatchdog
             DateTime startedAt;
             return DateTime.TryParse(heartbeat.AppStartedAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out startedAt)
                 && DateTime.UtcNow - startedAt.ToUniversalTime() < ServerStartupGrace;
+        }
+
+        private static bool IsFreshAppHeartbeat(AppHeartbeat heartbeat)
+        {
+            if (heartbeat == null || String.IsNullOrWhiteSpace(heartbeat.CheckedAt)) return false;
+            DateTime checkedAt;
+            return DateTime.TryParse(heartbeat.CheckedAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out checkedAt)
+                && DateTime.UtcNow - checkedAt.ToUniversalTime() < TimeSpan.FromSeconds(45);
         }
 
         private static bool TryGetActiveMaintenance(out string reason, out DateTime expiry)
