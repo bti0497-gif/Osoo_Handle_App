@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useKitViewModel } from './useKitViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogContext';
@@ -47,10 +47,13 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
     const {
         history = [],
         loading,
+        loadingOlder,
+        hasOlder,
         kitTypes = [],
         isSyncingAnalysisKits,
         syncAnalysisKits,
-        refresh,
+        refreshDate,
+        loadOlder,
     } = useKitViewModel(currentUser, { showAlert });
 
     const [selectedDate, setSelectedDate] = useState(workspaceSession.selectedKey || null);
@@ -64,6 +67,10 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
     }, [history, onWorkspaceSessionChange, selectedDate, todayStr]);
 
     const selectedRow = history.find((row) => row.date === selectedDate) || null;
+    const handleGridScroll = useCallback((scrollTop) => {
+        onWorkspaceSessionChange?.({ scrollTop });
+        if (scrollTop <= 80 && hasOlder && !loadingOlder) void loadOlder();
+    }, [hasOlder, loadOlder, loadingOlder, onWorkspaceSessionChange]);
 
     const activeKitNames = useMemo(() => {
         if (kitTypes.length > 0) return kitTypes;
@@ -155,7 +162,7 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
         setModalState((prev) => ({ ...prev, open: false }));
         if (pendingParentRefreshRef.current) {
             pendingParentRefreshRef.current = false;
-            refresh({ force: false });
+            void refreshDate(selectedDate);
         }
     };
 
@@ -224,7 +231,7 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
                     defaultSelectedRowKey={workspaceSession.selectedKey || todayStr}
                     scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : (workspaceSession.selectedKey || todayStr)}
                     initialScrollTop={workspaceSession.scrollTop}
-                    onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}
+                    onScrollPositionChange={handleGridScroll}
                     width="100%"
                     height={360}
                     showBottomBar={false}

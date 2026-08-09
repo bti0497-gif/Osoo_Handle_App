@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 152,
-  "digest": "e0a6b8d2d9e21a01657a97b9ec304e1d080da92403dfe90171a9de1a287e9548",
+  "endpointCount": 153,
+  "digest": "8f893687ae13b5774df621f5483b8df732e0b101712e9f12518dbd449c4834a4",
   "endpoints": [
     {
       "method": "GET",
@@ -150,6 +150,14 @@
     {
       "method": "DELETE",
       "path": "/api/auth/members/:id",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/restore-session",
       "module": "./routes/authRoutes.cjs",
       "tier": 0,
       "mutation": true,

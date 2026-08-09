@@ -213,11 +213,20 @@ module.exports = function (db, baseDir) {
 
   router.get('/api/water-quality/history', (req, res) => {
     try {
-      const { site_id } = req.query;
-      const rows = site_id
-        ? db.prepare('SELECT * FROM qntech_water_quality WHERE site_id = ? ORDER BY date ASC, measurement_order ASC, created_at ASC, id ASC, location ASC, item_code ASC').all(String(site_id))
-        : db.prepare('SELECT * FROM qntech_water_quality ORDER BY date ASC, measurement_order ASC, created_at ASC, id ASC, location ASC, item_code ASC').all();
-      res.json({ success: true, history: pivotWaterRows(rows) });
+      const { site_id, fromDate, toDate } = req.query;
+      const clauses = [];
+      const params = [];
+      if (site_id) { clauses.push('site_id = ?'); params.push(String(site_id)); }
+      if (fromDate) { clauses.push('date >= ?'); params.push(String(fromDate)); }
+      if (toDate) { clauses.push('date <= ?'); params.push(String(toDate)); }
+      const whereSql = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+      const rows = db.prepare(`SELECT * FROM qntech_water_quality ${whereSql} ORDER BY date ASC, measurement_order ASC, created_at ASC, id ASC, location ASC, item_code ASC`).all(...params);
+      const hasOlder = fromDate
+        ? Boolean(site_id
+          ? db.prepare('SELECT 1 FROM qntech_water_quality WHERE site_id = ? AND date < ? LIMIT 1').get(String(site_id), String(fromDate))
+          : db.prepare('SELECT 1 FROM qntech_water_quality WHERE date < ? LIMIT 1').get(String(fromDate)))
+        : false;
+      res.json({ success: true, history: pivotWaterRows(rows), fromDate: fromDate || null, toDate: toDate || null, hasOlder });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message, error: err.message });
     }

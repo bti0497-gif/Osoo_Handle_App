@@ -2,9 +2,9 @@ import React from 'react';
 import { useDialog } from '../../components/common/DialogContext';
 import { useMembersViewModel } from './useMembersViewModel';
 
-export function MyInfoView({ currentUser }) {
+export function MyInfoView({ currentUser, onPasswordChanged }) {
     const { showAlert } = useDialog();
-    const vm = useMembersViewModel(currentUser, { showAlert });
+    const vm = useMembersViewModel(currentUser, { showAlert, onPasswordChanged });
     const {
         currentPassword, setCurrentPassword,
         newPassword, setNewPassword,

@@ -29,7 +29,7 @@ assert.match(app, /scheduleCertificateFromLastActivity/);
 assert.match(app, /SyncService\.prepareBackgroundTasks\(\['certificate-cache'\]\)/);
 assert.match(app, /SyncService\.completeBackgroundTask\('certificate-cache', CERTIFICATE_CACHE_REFRESH_MS\)/);
 assert.match(app, /activityEvents\s*=\s*\['keydown', 'pointerdown', 'input', 'change', 'wheel'\]/);
-assert.match(authRoutes, /res\.json\(\{ success: true, member: enrichMemberWithSites\(member\), source: 'local' \}\)/);
+assert.match(authRoutes, /res\.json\(buildFieldLoginResponse\(member, 'local'\)\)/);
 assert.doesNotMatch(authRoutes, /triggerBigQuerySync/);
 assert.doesNotMatch(authRoutes, /auth\/local-login[\s\S]{0,2500}await syncRecentCertificateCacheForSite/);
 assert.match(boardRoutes, /router\.use\('\/api\/board', requireActiveUser\)/);

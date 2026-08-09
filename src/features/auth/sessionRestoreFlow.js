@@ -34,12 +34,13 @@ export async function runStoredSessionRestore() {
         console.log('[세션 복원] 버전 변경 감지 → 같은 날 현장관리자 세션 재검증');
     }
 
-    const savedUser = AuthModel.loadSession();
-    if (!savedUser || !savedUser.id) {
+    const savedSession = AuthModel.loadSession();
+    if (!savedSession?.user?.id || !savedSession.sessionToken) {
         return { outcome: 'none' };
     }
 
-    const freshData = await AuthModel.localLogin(savedUser.name, savedUser.password);
+    const restored = await AuthModel.restoreSession(savedSession.sessionToken).catch(() => null);
+    const freshData = restored?.member;
     if (!freshData) {
         AuthModel.clearSession();
         return { outcome: 'cleared' };
@@ -60,7 +61,7 @@ export async function runStoredSessionRestore() {
 
     const restoredUser = {
         ...freshData,
-        isRemote: savedUser.isRemote ?? false,
+        isRemote: savedSession.user.isRemote ?? false,
     };
 
     if (field && !activeSession) {
@@ -72,6 +73,6 @@ export async function runStoredSessionRestore() {
         }
     }
 
-    AuthModel.saveSession(restoredUser);
+    AuthModel.saveSession(restoredUser, restored.sessionToken);
     return { outcome: 'ok', user: restoredUser, field };
 }

@@ -1,4 +1,5 @@
 import { apiClient } from '../../core/api';
+import { getOlderHistoryRange, getRecentHistoryStart } from '../records/historyRange';
 
 const QNTECH_IMPORT_TIMEOUT_MS = 180000;
 const QNTECH_RANGE_START_TIMEOUT_MS = 30000;
@@ -27,7 +28,7 @@ export const WaterQualityModel = {
         if (!options.force && historyCache) return historyCache;
         if (!options.force && historyPromise) return historyPromise;
 
-        historyPromise = apiClient.get('/api/water-quality/history')
+        historyPromise = apiClient.get('/api/water-quality/history', { fromDate: getRecentHistoryStart() })
             .then((result) => {
                 historyCache = result;
                 return result;
@@ -36,6 +37,14 @@ export const WaterQualityModel = {
                 historyPromise = null;
             });
         return historyPromise;
+    },
+
+    async fetchOlderHistory(beforeDate) {
+        return apiClient.get('/api/water-quality/history', getOlderHistoryRange(beforeDate));
+    },
+
+    async fetchHistoryRange(fromDate, toDate = fromDate) {
+        return apiClient.get('/api/water-quality/history', { fromDate, toDate });
     },
 
     async importFromQntech(date) {

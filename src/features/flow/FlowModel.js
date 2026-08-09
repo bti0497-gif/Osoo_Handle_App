@@ -1,4 +1,5 @@
 import { apiClient } from '../../core/api';
+import { getOlderHistoryRange, getRecentHistoryStart } from '../records/historyRange';
 
 let historyCache = null;
 let historyPromise = null;
@@ -22,7 +23,7 @@ export const FlowModel = {
         if (!options.force && historyCache) return historyCache;
         if (!options.force && historyPromise) return historyPromise;
 
-        historyPromise = apiClient.get('/api/flows/history')
+        historyPromise = apiClient.get('/api/flows/history', { fromDate: getRecentHistoryStart() })
             .then((result) => {
                 historyCache = result;
                 return result;
@@ -31,6 +32,15 @@ export const FlowModel = {
                 historyPromise = null;
             });
         return historyPromise;
+    },
+
+    async fetchOlderHistory(beforeDate) {
+        const range = getOlderHistoryRange(beforeDate);
+        return apiClient.get('/api/flows/history', range);
+    },
+
+    async fetchHistoryRange(fromDate, toDate = fromDate) {
+        return apiClient.get('/api/flows/history', { fromDate, toDate });
     },
 
     async bulkSave(date, items) {

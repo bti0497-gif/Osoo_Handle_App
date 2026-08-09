@@ -108,10 +108,13 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
     const pendingChangesRef = useRef({});
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [loadingOlder, setLoadingOlder] = useState(false);
+    const [hasOlder, setHasOlder] = useState(false);
     const [pendingChanges, setPendingChanges] = useState({});
     const [isImportingFromQntech, setIsImportingFromQntech] = useState(false);
     const [lastImportSummary, setLastImportSummary] = useState(null);
     const [lastRangeImportSummary, setLastRangeImportSummary] = useState(null);
+    const rangeStartRef = useRef('');
 
     const waterTypes = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity'];
 
@@ -152,8 +155,8 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
 
             let hist = sortHistoryRows(Array.from(histMap.values()));
 
-            if (hist.length > 0) {
-                const firstDateStr = hist[0].date > todayStr ? todayStr : hist[0].date;
+            if (historyData.fromDate) {
+                const firstDateStr = String(historyData.fromDate);
                 let currentDate = new Date(firstDateStr);
                 const todayDate = new Date(todayStr);
                 const existingDates = new Set(hist.map((row) => row.date));
@@ -183,6 +186,8 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
 
             hist = applyDisplayLabels(sortHistoryRows(hist));
             commitHistoryState(hist);
+            rangeStartRef.current = String(historyData.fromDate || todayStr);
+            setHasOlder(Boolean(historyData.hasOlder));
             setPendingChanges({});
             pendingChangesRef.current = {};
         } catch (err) {
@@ -192,6 +197,72 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
             setLoading(false);
         }
     }, [showToast]);
+
+    const loadOlder = useCallback(async () => {
+        if (loadingOlder || !hasOlder || !rangeStartRef.current) return;
+        setLoadingOlder(true);
+        try {
+            const result = await WaterQualityModel.fetchOlderHistory(rangeStartRef.current);
+            if (!result?.success) return;
+            const olderMap = new Map();
+            (result.history || []).forEach((record) => {
+                const identity = buildRowIdentity(record);
+                if (!identity.date) return;
+                const row = olderMap.get(identity.rowKey) || { ...identity };
+                const location = record.location || '湲곕낯';
+                WATER_FIELDS.forEach((field) => {
+                    if (record[field] !== null && record[field] !== undefined) {
+                        row[`${field}_${location}`] = normalizeWaterValue(record[field]);
+                    }
+                });
+                olderMap.set(identity.rowKey, row);
+            });
+            const datesWithRows = new Set(Array.from(olderMap.values()).map((row) => row.date));
+            const cursor = new Date(`${result.fromDate}T12:00:00`);
+            const end = new Date(`${result.toDate}T12:00:00`);
+            while (cursor <= end) {
+                const date = cursor.toISOString().split('T')[0];
+                if (!datesWithRows.has(date)) {
+                    const placeholder = createPlaceholderRow(date);
+                    olderMap.set(placeholder.rowKey, placeholder);
+                }
+                cursor.setDate(cursor.getDate() + 1);
+            }
+            const merged = new Map(historyRef.current.map((row) => [row.rowKey, row]));
+            olderMap.forEach((row, key) => merged.set(key, row));
+            commitHistoryState(applyDisplayLabels(sortHistoryRows(Array.from(merged.values()))));
+            rangeStartRef.current = String(result.fromDate || rangeStartRef.current);
+            setHasOlder(Boolean(result.hasOlder));
+        } catch (error) {
+            console.warn('Failed to load older water history:', error);
+        } finally {
+            setLoadingOlder(false);
+        }
+    }, [hasOlder, loadingOlder]);
+
+    const refreshDate = useCallback(async (date) => {
+        if (!date) return;
+        const result = await WaterQualityModel.fetchHistoryRange(date);
+        if (!result?.success) return;
+        const rows = new Map();
+        (result.history || []).forEach((record) => {
+            const identity = buildRowIdentity(record);
+            if (!identity.date) return;
+            const row = rows.get(identity.rowKey) || { ...identity };
+            const location = record.location || '기본';
+            WATER_FIELDS.forEach((field) => { if (record[field] !== null && record[field] !== undefined) row[`${field}_${location}`] = normalizeWaterValue(record[field]); });
+            rows.set(identity.rowKey, row);
+        });
+        if (rows.size === 0) {
+            const placeholder = createPlaceholderRow(date);
+            rows.set(placeholder.rowKey, placeholder);
+        }
+        setHistory((current) => {
+            const next = new Map(current.filter((row) => row.date !== date).map((row) => [row.rowKey, row]));
+            rows.forEach((row, key) => next.set(key, row));
+            return applyDisplayLabels(sortHistoryRows(Array.from(next.values())));
+        });
+    }, []);
 
     useEffect(() => {
         loadReadings();
@@ -503,10 +574,14 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
     return {
         history,
         loading,
+        loadingOlder,
+        hasOlder,
         waterTypes,
         updateReading,
         submitBatch,
         refresh: ({ force = true } = {}) => loadReadings({ force }),
+        refreshDate,
+        loadOlder,
         pendingChanges,
         isImportingFromQntech,
         lastImportSummary,

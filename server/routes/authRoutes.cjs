@@ -1,4 +1,5 @@
 const express = require('express');
+const { issueLocalSessionToken, verifyLocalSessionToken } = require('../services/localSessionTokenService.cjs');
 // Lazy require wrappers keep startup validation light.
 function syncAttendanceLogs(...args) {
   return require('../services/attendanceBigQueryService.cjs').syncAttendanceLogs(...args);
@@ -60,6 +61,16 @@ function cleanupOldDiagnosticsOnVersionStart(...args) {
 
 module.exports = (db, appDataPath) => {
     const router = express.Router();
+    const toSessionMember = (member) => {
+        const { password, ...safeMember } = member || {};
+        return safeMember;
+    };
+    const buildFieldLoginResponse = (member, source) => ({
+        success: true,
+        member: toSessionMember(enrichMemberWithSites(member)),
+        sessionToken: issueLocalSessionToken(member),
+        source,
+    });
     const BACKGROUND_TASK_TYPES = new Set([
         'attendance-sync',
         'data-sync',
@@ -444,7 +455,8 @@ module.exports = (db, appDataPath) => {
 
     // 1. Local login.
     router.post('/local-login', async (req, res) => {
-        const { name, password } = req.body;
+        const normalizedName = String(req.body?.name || '').trim();
+        const submittedPassword = String(req.body?.password || '');
         try {
             recordDiagnostic(db, appDataPath, {
                 level: 'info',
@@ -453,11 +465,15 @@ module.exports = (db, appDataPath) => {
                 result: 'received',
                 message: 'local field login request received',
                 details: {
-                    nameProvided: Boolean(String(name || '').trim()),
-                    passwordProvided: Boolean(String(password || '')),
+                    nameProvided: Boolean(normalizedName),
+                    passwordProvided: Boolean(submittedPassword),
                 },
             });
-            const member = db.prepare('SELECT * FROM members WHERE name = ? AND password = ?').get(name, password);
+            const namedMember = db.prepare('SELECT * FROM members WHERE name = ?').get(normalizedName);
+            const member = namedMember
+                && String(namedMember.password || '') === submittedPassword
+                ? namedMember
+                : null;
             if (member) {
                 if (String(member.role || '').trim() === 'admin' || String(member.role || '').trim() === 'group_admin' || String(member.name || '').trim() === 'admin') {
                     db.prepare('DELETE FROM members WHERE id = ? OR name = ?').run(member.id, member.name);
@@ -473,10 +489,26 @@ module.exports = (db, appDataPath) => {
                     message: 'local field login credential verified',
                     details: { memberId: member.id, role: member.role || 'user' },
                 });
-                res.json({ success: true, member: enrichMemberWithSites(member), source: 'local' });
+                res.json(buildFieldLoginResponse(member, 'local'));
                 // 로그인 응답은 로컬 자격 확인만으로 즉시 끝낸다. Drive/BigQuery는
                 // 응답 이후 별도 작업으로 넘겨 외부 장애가 업무 화면 진입을 막지 않게 한다.
             } else {
+                recordDiagnostic(db, appDataPath, {
+                    level: 'warn',
+                    area: 'auth',
+                    action: 'local-login',
+                    result: 'rejected',
+                    message: 'local field login credential rejected',
+                    details: {
+                        nameMatched: Boolean(namedMember),
+                        submittedPasswordLength: submittedPassword.length,
+                        storedPasswordLength: namedMember
+                            ? String(namedMember.password || '').length
+                            : null,
+                        submittedHasOuterWhitespace:
+                            submittedPassword !== submittedPassword.trim(),
+                    },
+                });
                 res.status(401).json({ success: false, message: '이름 또는 비밀번호가 일치하지 않습니다.' });
             }
         } catch (err) {
@@ -527,11 +559,7 @@ module.exports = (db, appDataPath) => {
             const localMember = db.prepare('SELECT * FROM members WHERE id = ? OR name = ? LIMIT 1').get(member.id, member.name);
             setActiveUser(localMember || member, 'discovery-login');
             closeStaleOpenSessions(localMember || member);
-            res.json({
-                success: true,
-                member: enrichMemberWithSites(localMember || member),
-                source
-            });
+            res.json(buildFieldLoginResponse(localMember || member, source));
             return undefined;
         } catch (err) {
             return res.status(500).json({ success: false, error: err.message });
@@ -566,6 +594,34 @@ module.exports = (db, appDataPath) => {
             details,
         });
         return res.json({ success: true, id });
+    });
+
+    // A same-day field session is restored with an opaque signed token, never
+    // by keeping or resubmitting a password from renderer storage.
+    router.post('/restore-session', (req, res) => {
+        try {
+            const token = String(req.body?.sessionToken || '');
+            const encodedPayload = token.split('.')[0] || '';
+            const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+            const memberId = String(payload?.memberId || '').trim();
+            const member = memberId
+                ? db.prepare('SELECT * FROM members WHERE id = ? LIMIT 1').get(memberId)
+                : null;
+            if (!member || !verifyLocalSessionToken(token, member)) {
+                return res.json({ success: false, message: '저장된 로그인 세션이 만료되었습니다.' });
+            }
+            if (String(member.role || '').trim() === 'admin' || String(member.name || '').trim() === 'admin') {
+                return res.json({ success: false, message: '관리자 세션은 저장할 수 없습니다.' });
+            }
+            setActiveUser(member, 'session-token-restore');
+            return res.json({
+                success: true,
+                member: toSessionMember(enrichMemberWithSites(member)),
+                sessionToken: token,
+            });
+        } catch (_) {
+            return res.json({ success: false, message: '저장된 로그인 세션이 유효하지 않습니다.' });
+        }
     });
 
     router.post('/user-activity', (req, res) => {

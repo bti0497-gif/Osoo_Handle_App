@@ -986,6 +986,31 @@ ipcMain.handle('auth:setSharedUser', (_event, user = null) => {
   return { success: true };
 });
 ipcMain.handle('auth:getSharedUser', () => sharedAuthenticatedUser);
+ipcMain.handle('auth:resetGlobalSession', (_event, options = {}) => {
+  const hideMain = options?.hideMain === true;
+  sharedAuthenticatedUser = null;
+
+  for (const siteWindow of new Set(siteWindows.values())) {
+    if (siteWindow && !siteWindow.isDestroyed() && siteWindow !== mainWindow) {
+      siteWindow.close();
+    }
+  }
+  siteWindows.clear();
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (!mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('app:global-session-reset');
+    }
+    if (hideMain) {
+      mainWindow.hide();
+    } else {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  }
+  return { success: true };
+});
 
 ipcMain.handle('notification:showPopupNotice', (event, rawNotice = {}) => {
   const noticeId = String(rawNotice?.id || '').trim().slice(0, 160);

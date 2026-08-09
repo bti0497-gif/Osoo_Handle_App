@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSiteWindow: (site) => ipcRenderer.invoke('app:openSiteWindow', site),
   setSharedAuthenticatedUser: (user) => ipcRenderer.invoke('auth:setSharedUser', user),
   getSharedAuthenticatedUser: () => ipcRenderer.invoke('auth:getSharedUser'),
+  resetGlobalAuthenticatedSession: (options) => ipcRenderer.invoke('auth:resetGlobalSession', options),
   showPopupNotification: (notice) => ipcRenderer.invoke('notification:showPopupNotice', notice),
   onOpenPopupModal: (callback) => {
     const listener = (_event, payload) => callback(payload || {});
@@ -40,6 +41,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = () => callback();
     ipcRenderer.on('app:session-reset', listener);
     return () => ipcRenderer.removeListener('app:session-reset', listener);
+  },
+  onGlobalSessionReset: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('app:global-session-reset', listener);
+    return () => ipcRenderer.removeListener('app:global-session-reset', listener);
   },
   onWindowRestored: (callback) => {
     const listener = (_event, info) => callback(info || {});

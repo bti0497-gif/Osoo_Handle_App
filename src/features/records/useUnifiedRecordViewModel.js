@@ -236,7 +236,7 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
     const [resolvedDate, setResolvedDate] = useState('');
     const requestSequenceRef = useRef(0);
 
-    const reloadContexts = useCallback(async ({ force = false, tabs = ['flow', 'medicine', 'kit', 'water', 'operation'] } = {}) => {
+    const reloadContexts = useCallback(async ({ tabs = ['flow', 'medicine', 'kit', 'water', 'operation'] } = {}) => {
         if (!date) return;
         const requestSequence = requestSequenceRef.current + 1;
         requestSequenceRef.current = requestSequence;
@@ -254,11 +254,11 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                 medicineDefaults,
                 kitDefaults,
             ] = await Promise.all([
-                targetTabs.has('flow') ? FlowModel.fetchHistory({ force }) : null,
-                targetTabs.has('medicine') ? MedicineModel.fetchHistory({ force }) : null,
-                targetTabs.has('kit') ? KitModel.fetchHistory({ force }) : null,
-                targetTabs.has('water') ? WaterQualityModel.fetchHistory({ force }) : null,
-                targetTabs.has('operation') ? OperationStatusModel.fetchHistory({ force }) : null,
+                targetTabs.has('flow') ? FlowModel.fetchHistoryRange(previousCalendarDate(date), date) : null,
+                targetTabs.has('medicine') ? MedicineModel.fetchHistoryRange(date) : null,
+                targetTabs.has('kit') ? KitModel.fetchHistoryRange(date) : null,
+                targetTabs.has('water') ? WaterQualityModel.fetchHistoryRange(date) : null,
+                targetTabs.has('operation') ? OperationStatusModel.fetchByDate(date) : null,
                 targetTabs.has('medicine')
                     ? SettingsModel.getMedicineDefaults().catch(() => ({ success: false, items: [] }))
                     : null,
@@ -284,7 +284,7 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                     water: mergeWaterContext(baseContexts.water, unwrapHistory(waterResult), date),
                 }),
                 ...(targetTabs.has('operation') && {
-                    operation: mergeOperationContext(baseContexts.operation, unwrapHistory(operationResult), date),
+                    operation: mergeOperationContext(baseContexts.operation, operationResult?.record ? [operationResult.record] : [], date),
                 }),
             }));
             setResolvedDate(requestedDate);

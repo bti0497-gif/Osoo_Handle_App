@@ -25,11 +25,20 @@ module.exports = function (db) {
 
   router.get('/api/medicines/history', (req, res) => {
     try {
-      const { site_id } = req.query;
-      const allRecords = site_id
-        ? db.prepare('SELECT * FROM medicine_logs WHERE site_id = ? ORDER BY date ASC').all(String(site_id))
-        : db.prepare('SELECT * FROM medicine_logs ORDER BY date ASC').all();
-      res.json({ success: true, history: allRecords });
+      const { site_id, fromDate, toDate } = req.query;
+      const clauses = [];
+      const params = [];
+      if (site_id) { clauses.push('site_id = ?'); params.push(String(site_id)); }
+      if (fromDate) { clauses.push('date >= ?'); params.push(String(fromDate)); }
+      if (toDate) { clauses.push('date <= ?'); params.push(String(toDate)); }
+      const whereSql = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+      const allRecords = db.prepare(`SELECT * FROM medicine_logs ${whereSql} ORDER BY date ASC`).all(...params);
+      const hasOlder = fromDate
+        ? Boolean(site_id
+          ? db.prepare('SELECT 1 FROM medicine_logs WHERE site_id = ? AND date < ? LIMIT 1').get(String(site_id), String(fromDate))
+          : db.prepare('SELECT 1 FROM medicine_logs WHERE date < ? LIMIT 1').get(String(fromDate)))
+        : false;
+      res.json({ success: true, history: allRecords, fromDate: fromDate || null, toDate: toDate || null, hasOlder });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }

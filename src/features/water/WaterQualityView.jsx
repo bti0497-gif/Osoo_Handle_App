@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useWaterQualityViewModel } from './useWaterQualityViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogContext';
@@ -142,12 +142,20 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
     const {
         history = [],
         loading,
-        refresh,
+        loadingOlder,
+        hasOlder,
+        refreshDate,
+        loadOlder,
         isImportingFromQntech,
         handleImportFromQntech,
         handleImportRangeFromQntech,
         recordQntechDiagnostic,
     } = useWaterQualityViewModel(currentUser, { showToast });
+
+    const handleGridScroll = useCallback((scrollTop) => {
+        onWorkspaceSessionChange?.({ scrollTop });
+        if (scrollTop <= 80 && hasOlder && !loadingOlder) void loadOlder();
+    }, [hasOlder, loadOlder, loadingOlder, onWorkspaceSessionChange]);
 
     const batchProcess = useBatchProcess();
     const [selectedRowKey, setSelectedRowKey] = useState(workspaceSession.selectedKey || null);
@@ -176,7 +184,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
     }, [history, onWorkspaceSessionChange, selectedRowKey, todayStr]);
 
     const selectedRow = history.find((row) => row.rowKey === selectedRowKey) || null;
-    const modalDate = modalState.date || (modalState.mode === 'add' ? todayStr : (selectedRow?.date || todayStr));
+    const modalDate = modalState.date || selectedRow?.date || todayStr;
     const scrollKey = history.find((row) => row.date === todayStr)?.rowKey || null;
 
     const gridCols = WATER_PARAMS.map((param) => {
@@ -456,7 +464,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
         setModalState((prev) => ({ ...prev, open: false }));
         if (pendingParentRefreshRef.current) {
             pendingParentRefreshRef.current = false;
-            refresh({ force: false });
+            void refreshDate(modalState.date || selectedRow?.date || todayStr);
         }
     };
 
@@ -525,7 +533,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
                     defaultSelectedRowKey={workspaceSession.selectedKey || scrollKey}
                     scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : (workspaceSession.selectedKey || scrollKey)}
                     initialScrollTop={workspaceSession.scrollTop}
-                    onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}
+                    onScrollPositionChange={handleGridScroll}
                     width="100%"
                     height={400}
                     showBottomBar={false}

@@ -81,7 +81,7 @@ const PlaceholderView = ({ title }) => (
 );
 
 function App() {
-    const { user: authenticatedUser, loginHintName, isAuthenticated, isLoading, locationStatus, login, logout } = useAuthViewModel();
+    const { user: authenticatedUser, loginHintName, isAuthenticated, isLoading, locationStatus, login, logout, resetAfterPasswordChange } = useAuthViewModel();
     const [multiSiteRuntime, setMultiSiteRuntime] = useState(null);
     const windowSiteId = new URLSearchParams(window.location.search).get('siteId') || '';
     const user = useMemo(() => {
@@ -160,6 +160,15 @@ function App() {
 
     useEffect(() => {
         const unsubscribe = window.electronAPI?.onSessionReset?.(() => {
+            resetRecordGridSessions();
+            setIsRoadworkMounted(false);
+            setActiveTab(DEFAULT_TAB);
+        });
+        return typeof unsubscribe === 'function' ? unsubscribe : undefined;
+    }, []);
+
+    useEffect(() => {
+        const unsubscribe = window.electronAPI?.onGlobalSessionReset?.(() => {
             resetRecordGridSessions();
             setIsRoadworkMounted(false);
             setActiveTab(DEFAULT_TAB);
@@ -571,7 +580,7 @@ function App() {
             case 'attendance':
                 return <AttendanceView currentUser={user} />;
             case 'myinfo':
-                return <MyInfoView currentUser={user} />;
+                return <MyInfoView currentUser={user} onPasswordChanged={resetAfterPasswordChange} />;
             case 'board':
                 return <BoardView currentUser={user} />;
             case 'dashboard':

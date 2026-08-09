@@ -9,11 +9,31 @@ const credentialService = require('../server/services/settings/externalCredentia
 const root = path.join(__dirname, '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 
+const roadworkView = read('src/features/roadwork-helper/RoadworkHelperView.jsx');
+const roadworkRuntime = read('electron/roadworkDumpHelper.cjs');
+
+// Opening the roadwork helper is a local-only operation. This is an explicit
+// latency and availability contract: a Sheets/settings/server request must
+// never be inserted into the page-open path again.
+assert.doesNotMatch(roadworkView, /import\s+\{?\s*SettingsModel\b/);
+assert.doesNotMatch(roadworkView, /SettingsModel\s*\./);
+assert.match(roadworkView, /invokeRoadwork\('roadwork:getRoadworkUrl'\)/);
+assert.match(roadworkRuntime, /ipcMain\.handle\('roadwork:getRoadworkUrl'[\s\S]*?withLocalDb\(/);
+assert.match(roadworkRuntime, /getScopedCredential\(db, 'road_web', getSiteIdFromSender\(event\)\)/);
+
+const fetchConfigStart = roadworkView.indexOf('const fetchConfig = React.useCallback');
+const fetchConfigEnd = roadworkView.indexOf('const recordRoadworkDiagnostic', fetchConfigStart);
+assert.ok(fetchConfigStart >= 0 && fetchConfigEnd > fetchConfigStart, 'roadwork fetchConfig contract block is missing');
+const fetchConfigBlock = roadworkView.slice(fetchConfigStart, fetchConfigEnd);
+assert.doesNotMatch(fetchConfigBlock, /SettingsModel|apiClient|fetch\s*\(|\/api\/settings|google\s*sheet/i);
+assert.match(fetchConfigBlock, /roadwork:getPreloadPath/);
+assert.match(fetchConfigBlock, /roadwork:getRoadworkUrl/);
+
 assert.match(read('server/database.cjs'), /CREATE TABLE IF NOT EXISTS site_web_app_credentials/);
 assert.match(read('server/database.cjs'), /PRIMARY KEY\s*\(site_id, service_key\)/);
 assert.match(read('server/services/settings/externalCredentialService.cjs'), /WHERE site_id = \? AND service_key = \?/);
-assert.match(read('electron/roadworkDumpHelper.cjs'), /getSiteIdFromRoadworkPartition/);
-assert.match(read('electron/roadworkDumpHelper.cjs'), /getScopedCredential\(db, 'road_web', getSiteIdFromSender\(event\)\)/);
+assert.match(roadworkRuntime, /getSiteIdFromRoadworkPartition/);
+assert.match(roadworkRuntime, /getScopedCredential\(db, 'road_web', getSiteIdFromSender\(event\)\)/);
 assert.match(read('src/features/settings/historyRestore/HistoryRestoreModal.jsx'), /SettingsModel\.getSettings\(\{ force: true \}\)/);
 
 const db = new Database(':memory:');
@@ -65,4 +85,4 @@ assert.equal(credentialService.getCredential(db, 'water_analysis_app', 'busan').
 assert.equal(credentialService.getCredential(db, 'water_analysis_app', 'busan').password, '');
 
 db.close();
-console.log('PASS directional web credentials are isolated by site_id');
+console.log('PASS roadwork opens from local credentials only and directional web credentials are isolated by site_id');

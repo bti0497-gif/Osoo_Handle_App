@@ -133,6 +133,10 @@ export const useAuthViewModel = () => {
         if (hideToTray) hideAppToTray();
     }, [clearAutoLogoutTimer, clearRoadworkRendererSessionUrls]);
 
+    const resetGlobalElectronSession = useCallback(async ({ hideMain = false } = {}) => {
+        await window.electronAPI?.resetGlobalAuthenticatedSession?.({ hideMain });
+    }, []);
+
     useEffect(() => {
         userRef.current = user;
     }, [user]);
@@ -151,11 +155,12 @@ export const useAuthViewModel = () => {
             } catch (err) {
                 console.error('Auto logout failed:', err);
             }
-            await clearLocalAuthenticatedState({ hideToTray: true });
+            await clearLocalAuthenticatedState({ hideToTray: false });
+            await resetGlobalElectronSession({ hideMain: true });
         } finally {
             autoLogoutInProgressRef.current = false;
         }
-    }, [clearLocalAuthenticatedState]);
+    }, [clearLocalAuthenticatedState, resetGlobalElectronSession]);
 
     const setupAutoLogoutTimer = useCallback(
         (userData) => {
@@ -194,7 +199,7 @@ export const useAuthViewModel = () => {
                 };
                 if (backgroundAttendanceRunRef.current === runId && userRef.current?.id === userData.id) {
                     userRef.current = enrichedUser;
-                    AuthModel.saveSession(enrichedUser);
+                    AuthModel.saveSession(enrichedUser, AuthModel.loadSession()?.sessionToken);
                     setUser(enrichedUser);
                 }
 
@@ -240,8 +245,8 @@ export const useAuthViewModel = () => {
                     }
                 }
 
-                const savedUser = AuthModel.loadSession();
-                if (!savedUser || !savedUser.id) {
+                const savedSession = AuthModel.loadSession();
+                if (!savedSession?.user?.id || !savedSession.sessionToken) {
                     const windowSiteId = new URLSearchParams(window.location.search).get('siteId') || '';
                     if (windowSiteId) {
                         const sharedUser = await window.electronAPI?.getSharedAuthenticatedUser?.();
@@ -258,7 +263,8 @@ export const useAuthViewModel = () => {
                     return;
                 }
 
-                const freshData = await AuthModel.localLogin(savedUser.name, savedUser.password);
+                const restored = await AuthModel.restoreSession(savedSession.sessionToken).catch(() => null);
+                const freshData = restored?.member;
                 if (!freshData) {
                     AuthModel.clearSession();
                     return;
@@ -274,15 +280,16 @@ export const useAuthViewModel = () => {
                         console.error('[세션 복원] 자동 퇴근 처리 실패:', err);
                     }
                     await clearLocalAuthenticatedState({ hideToTray: false });
+                    await resetGlobalElectronSession();
                     return;
                 }
 
                 const restoredUser = {
                     ...freshData,
-                    isRemote: savedUser.isRemote ?? false,
+                    isRemote: savedSession.user.isRemote ?? false,
                 };
 
-                AuthModel.saveSession(restoredUser);
+                AuthModel.saveSession(restoredUser, restored.sessionToken);
                 await window.electronAPI?.setSharedAuthenticatedUser?.(restoredUser);
                 userRef.current = restoredUser;
                 setUser(restoredUser);
@@ -306,7 +313,7 @@ export const useAuthViewModel = () => {
 
         restoreSession();
         return () => clearAutoLogoutTimer();
-    }, [setupAutoLogoutTimer, startBackgroundAttendance, clearAutoLogoutTimer, refreshLoginHint, clearLocalAuthenticatedState, clearRoadworkRendererSessionUrls]);
+    }, [setupAutoLogoutTimer, startBackgroundAttendance, clearAutoLogoutTimer, refreshLoginHint, clearLocalAuthenticatedState, clearRoadworkRendererSessionUrls, resetGlobalElectronSession]);
 
     /** 절전 등으로 20시 타이머를 놓친 경우 — 당일 20시 이전 출근·미퇴근만 보정 */
     useEffect(() => {
@@ -336,19 +343,29 @@ export const useAuthViewModel = () => {
 
     useEffect(() => {
         const handleServerSessionInvalid = () => {
-            void clearLocalAuthenticatedState({ hideToTray: false }).then(refreshLoginHint);
+            void clearLocalAuthenticatedState({ hideToTray: false })
+                .then(resetGlobalElectronSession)
+                .then(refreshLoginHint);
         };
         window.addEventListener('osoo:server-session-invalid', handleServerSessionInvalid);
         return () => window.removeEventListener('osoo:server-session-invalid', handleServerSessionInvalid);
+    }, [clearLocalAuthenticatedState, refreshLoginHint, resetGlobalElectronSession]);
+
+    useEffect(() => {
+        const unsubscribe = window.electronAPI?.onGlobalSessionReset?.(() => {
+            void clearLocalAuthenticatedState({ hideToTray: false }).then(refreshLoginHint);
+        });
+        return typeof unsubscribe === 'function' ? unsubscribe : undefined;
     }, [clearLocalAuthenticatedState, refreshLoginHint]);
 
     const login = async (name, password) => {
         try {
             const normalizedName = String(name || '').trim();
             const isPrimaryAdminLogin = normalizedName.toLowerCase() === 'admin';
-            let userData = isPrimaryAdminLogin
+            const loginResult = isPrimaryAdminLogin
                 ? await AuthModel.discoveryLogin(normalizedName, password)
                 : await AuthModel.localLogin(normalizedName, password);
+            const userData = loginResult?.member || null;
 
             // Field users authenticate only against the member information
             // provisioned into the local DB by admin site setup. A failed local
@@ -362,7 +379,7 @@ export const useAuthViewModel = () => {
                 if (field) {
                     const enrichedUser = { ...userData, isRemote: false };
 
-                    AuthModel.saveSession(enrichedUser);
+                    AuthModel.saveSession(enrichedUser, loginResult?.sessionToken);
                     await window.electronAPI?.setSharedAuthenticatedUser?.(enrichedUser);
                     userRef.current = enrichedUser;
                     setUser(enrichedUser);
@@ -386,7 +403,7 @@ export const useAuthViewModel = () => {
             console.error('Login Error:', err);
             return {
                 success: false,
-                message: Number(err?.status) === 401
+                message: Number(err?.status) === 401 && err?.data?.code !== 'LOCAL_API_UNAUTHORIZED'
                     ? '이름 또는 비밀번호가 일치하지 않습니다.'
                     : `로그인 처리 중 오류가 발생했습니다: ${err?.message || '알 수 없는 오류'}`,
             };
@@ -410,8 +427,18 @@ export const useAuthViewModel = () => {
             }
         }
         await clearLocalAuthenticatedState({ hideToTray: false });
+        await resetGlobalElectronSession();
         await refreshLoginHint();
 
+    };
+
+    const resetAfterPasswordChange = async () => {
+        // A changed password invalidates the signed session token. Keep the
+        // attendance row open: the subsequent fresh login will reuse it.
+        await AuthModel.clearServerActiveSession();
+        await clearLocalAuthenticatedState({ hideToTray: false });
+        await resetGlobalElectronSession();
+        await refreshLoginHint();
     };
 
     const switchActiveSite = async (siteId) => {
@@ -428,7 +455,7 @@ export const useAuthViewModel = () => {
                     site_name1: nextSiteName,
                 };
                 if (isFieldWorker(updated)) {
-                    AuthModel.saveSession(updated);
+                    AuthModel.saveSession(updated, AuthModel.loadSession()?.sessionToken);
                 } else {
                     AuthModel.clearSession();
                 }
@@ -449,6 +476,7 @@ export const useAuthViewModel = () => {
         locationStatus,
         login,
         logout,
+        resetAfterPasswordChange,
         switchActiveSite,
     };
 };

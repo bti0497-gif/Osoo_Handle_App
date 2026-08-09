@@ -30,3 +30,6 @@ This file protects the working roadwork input helper. Do not change these rules 
 
 - Any change to `src/features/roadwork-helper/*`, `server/routes/roadworkHelperRoutes.cjs`, or the roadwork preload/IPC integration must be intentional and verified with `npm run validate`.
 - Do not mix roadwork helper changes with unrelated UI, authentication, mapping, report, or updater fixes.
+- Opening the roadwork helper must read its URL and direction-scoped credentials only from the local database through the roadwork IPC handlers.
+- Opening the roadwork helper must never wait for Google Sheets, `SettingsModel`, `/api/settings`, or another network configuration request.
+- A violation of this local-only page-open contract must fail `scripts/validate-directional-web-credentials.cjs` and therefore block the release validation.

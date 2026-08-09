@@ -137,8 +137,11 @@ export const useFlowViewModel = (currentUser, {
 
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [loadingOlder, setLoadingOlder] = useState(false);
+    const [hasOlder, setHasOlder] = useState(false);
     const [pendingChanges, setPendingChanges] = useState({});
     const pendingChangesRef = useRef({});
+    const rangeStartRef = useRef('');
 
     const correctData = useCallback((data) => {
         if (!data) return { reading: null, flow: null, error: null };
@@ -160,8 +163,12 @@ export const useFlowViewModel = (currentUser, {
                 : [];
             hist.sort((a, b) => a.date.localeCompare(b.date));
 
-            if (hist.length > 0) {
-                const firstDateStr = hist[0].date > todayStr ? todayStr : hist[0].date;
+            const requestedStart = String(historyData.fromDate || todayStr);
+            if (requestedStart <= todayStr) {
+                // The server returns only the recent two-month window. Fill
+                // missing days inside that bounded window, never from the
+                // oldest row in the database.
+                const firstDateStr = requestedStart;
                 const existingDates = new Set(hist.map((row) => row.date));
                 const currentDate = new Date(`${firstDateStr}T12:00:00`);
 
@@ -190,6 +197,8 @@ export const useFlowViewModel = (currentUser, {
 
             hist.sort((a, b) => a.date.localeCompare(b.date));
             setHistory(mergeLegacyFlowKeysForDisplay(hist, flowTypesResolved));
+            rangeStartRef.current = requestedStart;
+            setHasOlder(Boolean(historyData.hasOlder));
             setPendingChanges({});
             pendingChangesRef.current = {};
         } catch (err) {
@@ -199,6 +208,57 @@ export const useFlowViewModel = (currentUser, {
             setLoading(false);
         }
     }, [enabled, flowTypesResolved, showAlert]);
+
+    const loadOlder = useCallback(async () => {
+        if (!enabled || loadingOlder || !hasOlder || !rangeStartRef.current) return;
+        setLoadingOlder(true);
+        try {
+            const result = await FlowModel.fetchOlderHistory(rangeStartRef.current);
+            if (!result?.success) return;
+
+            const olderRows = Array.isArray(result.history) ? result.history : [];
+            const olderStart = String(result.fromDate || '');
+            const olderEnd = String(result.toDate || '');
+            const rowsByDate = new Map(olderRows.map((row) => [row.date, row]));
+
+            if (olderStart && olderEnd) {
+                const cursor = new Date(`${olderStart}T12:00:00`);
+                const end = new Date(`${olderEnd}T12:00:00`);
+                while (cursor <= end) {
+                    const date = cursor.toISOString().split('T')[0];
+                    if (!rowsByDate.has(date)) rowsByDate.set(date, buildEmptyRow(date, flowTypesResolved));
+                    cursor.setDate(cursor.getDate() + 1);
+                }
+            }
+
+            setHistory((current) => {
+                const merged = new Map(current.map((row) => [row.date, row]));
+                rowsByDate.forEach((row, date) => merged.set(date, row));
+                return mergeLegacyFlowKeysForDisplay(
+                    Array.from(merged.values()).sort((a, b) => a.date.localeCompare(b.date)),
+                    flowTypesResolved
+                );
+            });
+            if (olderStart) rangeStartRef.current = olderStart;
+            setHasOlder(Boolean(result.hasOlder));
+        } catch (error) {
+            console.warn('Failed to load older flow history:', error);
+        } finally {
+            setLoadingOlder(false);
+        }
+    }, [enabled, flowTypesResolved, hasOlder, loadingOlder]);
+
+    const refreshDate = useCallback(async (date) => {
+        if (!enabled || !date) return;
+        const result = await FlowModel.fetchHistoryRange(date);
+        if (!result?.success) return;
+        const row = (result.history || []).find((item) => item.date === date) || buildEmptyRow(date, flowTypesResolved);
+        setHistory((current) => {
+            const next = new Map(current.map((item) => [item.date, item]));
+            next.set(date, row);
+            return mergeLegacyFlowKeysForDisplay(Array.from(next.values()).sort((a, b) => a.date.localeCompare(b.date)), flowTypesResolved);
+        });
+    }, [enabled, flowTypesResolved]);
 
     useEffect(() => {
         if (enabled) {
@@ -398,6 +458,8 @@ export const useFlowViewModel = (currentUser, {
     return {
         history,
         loading,
+        loadingOlder,
+        hasOlder,
         flowTypes: flowTypesResolved,
         correctData,
         updateReading,
@@ -405,6 +467,8 @@ export const useFlowViewModel = (currentUser, {
         submitBatch,
         saveModalDraft,
         refresh: ({ force = true } = {}) => loadReadings({ force }),
+        refreshDate,
+        loadOlder,
         pendingChanges,
     };
 };

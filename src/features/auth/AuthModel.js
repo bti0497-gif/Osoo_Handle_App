@@ -34,10 +34,12 @@ export const AuthModel = {
                 console.error("Login failed:", data.message);
                 return null;
             }
-            return data.member;
+            return data;
         } catch (e) {
             console.error("Error during localLogin:", e);
-            if (Number(e?.status) === 401) return null;
+            // Credential rejection is expected. A local API token rejection
+            // is a server-readiness fault, not a bad worker password.
+            if (Number(e?.status) === 401 && e?.data?.code !== 'LOCAL_API_UNAUTHORIZED') return null;
             throw e;
         }
     },
@@ -49,7 +51,7 @@ export const AuthModel = {
                 console.error("Discovery login failed:", data.message);
                 return null;
             }
-            return data.member;
+            return data;
         } catch (e) {
             console.error("Error during discoveryLogin:", e);
             throw e;
@@ -122,14 +124,21 @@ export const AuthModel = {
         }
     },
 
-    saveSession(userData) {
+    async restoreSession(sessionToken) {
+        const data = await apiClient.post('/api/auth/restore-session', { sessionToken });
+        return data;
+    },
+
+    saveSession(userData, sessionToken) {
         try {
-            if (isAdminUser(userData)) {
+            if (isAdminUser(userData) || !sessionToken) {
                 localStorage.removeItem(SESSION_KEY);
                 return;
             }
+            const { password: _password, ...sessionUser } = userData || {};
             const session = {
-                user: userData,
+                user: sessionUser,
+                sessionToken,
                 savedAt: new Date().toISOString(),
                 loggedOut: false
             };
@@ -148,13 +157,17 @@ export const AuthModel = {
             const now = new Date();
             const savedAt = new Date(session.savedAt);
 
-            // 날짜가 바뀌면 자동 로그인을 허용하지 않고 다시 비밀번호를 받습니다.
+            // 날짜가 바뀌면 자동 세션 복원을 허용하지 않습니다.
             if (session.loggedOut || now.toDateString() !== savedAt.toDateString()) {
                 this.clearSession();
                 return null;
             }
 
-            return session.user || null;
+            if (!session.sessionToken || !session.user || Object.hasOwn(session.user, 'password')) {
+                this.clearSession();
+                return null;
+            }
+            return session;
         } catch (e) {
             console.warn("세션 복원 실패:", e);
             return null;

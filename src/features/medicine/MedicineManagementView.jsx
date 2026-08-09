@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMedicineViewModel } from './useMedicineViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogContext';
@@ -44,7 +44,7 @@ const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspac
     const { showAlert, showConfirm } = useDialog();
     const { itemState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
-    const { history = [], loading, medicineTypes = [], refresh } = useMedicineViewModel(currentUser, { showAlert });
+    const { history = [], loading, loadingOlder, hasOlder, medicineTypes = [], refreshDate, loadOlder } = useMedicineViewModel(currentUser, { showAlert });
 
     const [selectedDate, setSelectedDate] = useState(workspaceSession.selectedKey || null);
     const [modalState, setModalState] = useState({ open: false, tab: 'medicine', mode: 'add', date: null });
@@ -58,6 +58,10 @@ const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspac
     }, [history, onWorkspaceSessionChange, selectedDate, todayStr]);
 
     const selectedRow = history.find((row) => row.date === selectedDate) || null;
+    const handleGridScroll = useCallback((scrollTop) => {
+        onWorkspaceSessionChange?.({ scrollTop });
+        if (scrollTop <= 80 && hasOlder && !loadingOlder) void loadOlder();
+    }, [hasOlder, loadOlder, loadingOlder, onWorkspaceSessionChange]);
 
     const activeMedicineNames = useMemo(() => {
         if (medicineTypes.length > 0) return medicineTypes;
@@ -149,7 +153,7 @@ const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspac
         setModalState((prev) => ({ ...prev, open: false }));
         if (pendingParentRefreshRef.current) {
             pendingParentRefreshRef.current = false;
-            refresh({ force: false });
+            void refreshDate(selectedDate);
         }
     };
 
@@ -218,7 +222,7 @@ const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspac
                     defaultSelectedRowKey={workspaceSession.selectedKey || todayStr}
                     scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : (workspaceSession.selectedKey || todayStr)}
                     initialScrollTop={workspaceSession.scrollTop}
-                    onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}
+                    onScrollPositionChange={handleGridScroll}
                     width="100%"
                     height={400}
                     showBottomBar={false}

@@ -40,6 +40,7 @@ const contractText = read('AUTH_SESSION_CONTRACT.md');
 const authRoutesText = read('server/routes/authRoutes.cjs');
 const authModelText = read('src/features/auth/AuthModel.js');
 const authVmText = read('src/features/auth/useAuthViewModel.js');
+const loginViewText = read('src/features/auth/LoginView.jsx');
 const sessionRestoreText = read('src/features/auth/sessionRestoreFlow.js');
 const activeUserText = read('server/services/activeUserSessionService.cjs');
 const attendanceBqText = read('server/services/attendanceBigQueryService.cjs');
@@ -50,7 +51,43 @@ const appText = read('src/App.jsx');
 const mainText = read('src/main.jsx');
 const statusBarText = read('src/components/StatusBar.jsx');
 const electronMainText = read('electron/main.cjs');
+const electronPreloadText = read('electron/preload.cjs');
 const updaterText = read('electron/updater.cjs');
+
+check(
+  containsAll(loginViewText, [
+    'type="password"',
+    'autoComplete="current-password"',
+    "setPass('')",
+    'window.requestAnimationFrame(() => passRef.current?.focus())',
+    "setError('')",
+  ]) &&
+    !loginViewText.includes('WebkitTextSecurity') &&
+    !loginViewText.includes('passRef.current?.select()'),
+  'rejected login clears a native password field before retry',
+  'login may preserve a stale hidden password or use CSS-only masking'
+);
+
+check(
+  authModelText.includes("e?.data?.code !== 'LOCAL_API_UNAUTHORIZED'") &&
+    authVmText.includes("err?.data?.code !== 'LOCAL_API_UNAUTHORIZED'"),
+  'local API authorization failure is not mislabeled as a bad password',
+  'local API authorization failure may be shown as an incorrect password'
+);
+
+check(
+  containsAll(authRoutesText, [
+    "const submittedPassword = String(req.body?.password || '')",
+    'submittedPasswordLength: submittedPassword.length',
+    'storedPasswordLength:',
+    'submittedHasOuterWhitespace:',
+    "result: 'rejected'",
+  ]) &&
+    !authRoutesText.includes('submittedPassword: submittedPassword') &&
+    !authRoutesText.includes('passwordValue:'),
+  'local-login rejection records safe mismatch metadata without a raw password',
+  'local-login rejection diagnostics are missing or may expose a raw password'
+);
 
 check(
   containsAll(contractText, [
@@ -198,13 +235,42 @@ check(
   containsAll(authModelText, [
     "const SESSION_KEY = 'osoo_user_session'",
     'const ADMIN_ROLES',
-    'if (isAdminUser(userData))',
+    'isAdminUser(userData) || !sessionToken',
     'localStorage.removeItem(SESSION_KEY)',
     'now.toDateString() !== savedAt.toDateString()',
+    'sessionToken',
     'this.clearSession()',
   ]),
-  'AuthModel persists field sessions only and clears stale/admin sessions',
+  'AuthModel persists only field session tokens and clears stale/admin sessions',
   'AuthModel session persistence contract was changed'
+);
+
+check(
+  containsAll(authVmText, [
+    'AuthModel.saveSession(enrichedUser, AuthModel.loadSession()?.sessionToken)',
+    'AuthModel.saveSession(updated, AuthModel.loadSession()?.sessionToken)',
+  ]),
+  'background attendance and site switching preserve the existing user token',
+  'background attendance or site switching may erase the saved user token'
+);
+
+check(
+  containsAll(authVmText, [
+    'resetGlobalElectronSession',
+    'onGlobalSessionReset',
+  ]) && containsAll(electronPreloadText, [
+    "resetGlobalAuthenticatedSession: (options) => ipcRenderer.invoke('auth:resetGlobalSession', options)",
+    "ipcRenderer.on('app:global-session-reset', listener)",
+  ]) && containsAll(electronMainText, [
+    "ipcMain.handle('auth:resetGlobalSession'",
+    'sharedAuthenticatedUser = null',
+    'siteWindow.close()',
+    "mainWindow.webContents.send('app:global-session-reset')",
+    'const hideMain = options?.hideMain === true',
+    'mainWindow.hide()',
+  ]),
+  'global logout clears shared authentication, closes site windows, and resets the main renderer',
+  'global logout may leave a shared user or an authenticated secondary site window open'
 );
 
 check(
@@ -248,14 +314,14 @@ check(
   containsAll(authVmText, [
     'checkVersionChanged',
     'clearVersionMarker',
-    'const freshData = await AuthModel.localLogin',
+    'AuthModel.restoreSession(savedSession.sessionToken)',
     'const activeSession = await AuthModel.findActiveSession',
-    'AuthModel.saveSession(restoredUser)',
+    'AuthModel.saveSession(restoredUser, restored.sessionToken)',
   ]) && containsAll(sessionRestoreText, [
     '같은 날 현장관리자 세션 재검증',
-    'const savedUser = AuthModel.loadSession()',
+    'const savedSession = AuthModel.loadSession()',
   ]) && !sessionRestoreText.includes('버전 변경 감지 → 새로운 로그인 필요'),
-  'app update preserves and locally revalidates same-day field sessions',
+  'app update preserves and token-revalidates same-day field sessions',
   'an app update may clear the saved field session or bypass local revalidation'
 );
 

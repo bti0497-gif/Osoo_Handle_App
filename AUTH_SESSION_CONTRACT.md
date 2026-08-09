@@ -15,8 +15,11 @@ This file protects login, session restore, and attendance behavior. Do not chang
 - After manual login, the workspace opens immediately. Record-grid preloading continues in the background and must not block the dashboard.
 - Field worker sessions may be saved to `localStorage` only for the same local calendar day.
 - Admin sessions must not be persisted in `localStorage`.
-- Saved field worker sessions must be revalidated through local login before restore.
-- An app update must preserve a same-day field worker session. After restart, the branded intro remains visible while the local server starts and the saved credentials are revalidated, then the workspace opens directly without showing the login screen.
+- Saved field worker sessions must be revalidated through a same-day server-signed session token before restore; passwords must never be stored or resubmitted for session restore.
+- After a password change, the existing signed session must be cleared immediately and the app must return to the login screen; the next login uses the new password and reuses any already-open attendance row.
+- A field worker's signed token belongs to the user, not to a site window. Changing the active site or updating background attendance state must preserve that token.
+- Explicit logout, 20:00 automatic logout, password change, and token invalidation must clear the shared authenticated user, close every secondary site window, and return the main window to its initial login state. This resets authentication only; completed attendance rows remain available for BigQuery synchronization.
+- An app update must preserve a same-day field worker session. After restart, the branded intro remains visible while the local server starts and the saved session token is revalidated, then the workspace opens directly without showing the login screen.
 - A version-change marker is diagnostic state only. It must be acknowledged and cleared without deleting the saved field worker session.
 - Local authentication and session revalidation must enter the workspace without waiting for location lookup or attendance recording.
 

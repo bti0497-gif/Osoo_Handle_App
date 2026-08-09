@@ -144,17 +144,37 @@ module.exports = function (db) {
 
   router.get('/api/flows/history', (req, res) => {
     try {
-      const { site_id } = req.query;
-      const dates = site_id
-        ? db.prepare('SELECT DISTINCT date FROM flow_readings WHERE site_id = ? ORDER BY date ASC').all(String(site_id))
-        : db.prepare('SELECT DISTINCT date FROM flow_readings ORDER BY date ASC').all();
-      const allReadings = site_id
-        ? db.prepare('SELECT * FROM flow_readings WHERE site_id = ? ORDER BY date ASC, type ASC').all(String(site_id))
-        : db.prepare('SELECT * FROM flow_readings ORDER BY date ASC, type ASC').all();
+      const { site_id, fromDate, toDate } = req.query;
+      const clauses = [];
+      const params = [];
+      if (site_id) {
+        clauses.push('site_id = ?');
+        params.push(String(site_id));
+      }
+      if (fromDate) {
+        clauses.push('date >= ?');
+        params.push(String(fromDate));
+      }
+      if (toDate) {
+        clauses.push('date <= ?');
+        params.push(String(toDate));
+      }
+      const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+      const dates = db.prepare(`SELECT DISTINCT date FROM flow_readings ${whereSql} ORDER BY date ASC`).all(...params);
+      const allReadings = db.prepare(`SELECT * FROM flow_readings ${whereSql} ORDER BY date ASC, type ASC`).all(...params);
+
+      // Group once. Filtering the full reading set for every date made this
+      // endpoint O(dates * readings) and was especially slow after restores.
+      const readingsByDate = new Map();
+      allReadings.forEach((reading) => {
+        const dateKey = String(reading.date || '');
+        if (!readingsByDate.has(dateKey)) readingsByDate.set(dateKey, []);
+        readingsByDate.get(dateKey).push(reading);
+      });
 
       const history = dates.map(d => {
         const row = { date: d.date };
-        const dayReadings = allReadings.filter(r => r.date === d.date);
+        const dayReadings = readingsByDate.get(String(d.date || '')) || [];
         dayReadings.forEach(r => {
           row[r.type] = {
             raw: r.raw_value,
@@ -166,7 +186,23 @@ module.exports = function (db) {
         return row;
       });
 
-      res.json({ success: true, history });
+      let hasOlder = false;
+      if (fromDate) {
+        const olderSql = site_id
+          ? 'SELECT 1 FROM flow_readings WHERE site_id = ? AND date < ? LIMIT 1'
+          : 'SELECT 1 FROM flow_readings WHERE date < ? LIMIT 1';
+        hasOlder = Boolean(site_id
+          ? db.prepare(olderSql).get(String(site_id), String(fromDate))
+          : db.prepare(olderSql).get(String(fromDate)));
+      }
+
+      res.json({
+        success: true,
+        history,
+        fromDate: fromDate ? String(fromDate) : null,
+        toDate: toDate ? String(toDate) : null,
+        hasOlder,
+      });
     } catch (err) {
       res.status(500).json({ success: false, error: err.message });
     }

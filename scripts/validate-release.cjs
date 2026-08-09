@@ -975,7 +975,8 @@ function validateRegressionContracts() {
       waterQualityViewText.includes("onCellDoubleClick={(row) => openModal('edit', row)}") &&
       [flowManagementViewText, medicineManagementViewText, kitManagementViewText, waterQualityViewText].every((text) => (
         text.includes('initialScrollTop={workspaceSession.scrollTop}') &&
-        text.includes('onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}') &&
+        text.includes('onScrollPositionChange={handleGridScroll}') &&
+        text.includes('onWorkspaceSessionChange?.({ scrollTop })') &&
         text.includes('onWorkspaceSessionChange?.({ selectedKey:')
       )),
     '통합 모달 선택 날짜 우선 열기 계약 유지',
@@ -1041,7 +1042,7 @@ function validateRegressionContracts() {
       parentManagementViews.every(([, source]) => (
         source.includes('pendingParentRefreshRef.current = true;') &&
         source.includes('const handleModalClose = () =>') &&
-        source.includes('refresh({ force: false });') &&
+        source.includes('void refreshDate(') &&
         source.includes('onClose={handleModalClose}') &&
         !source.includes('await refresh({ force: false });')
       )),
@@ -1072,7 +1073,7 @@ function validateRegressionContracts() {
       modalText.indexOf("{ id: 'operation', label: '운전상태' }") < modalText.indexOf("{ id: 'photos'") &&
       modalText.includes("getDraftForItem('operation', selectedItem)") &&
       modalText.includes('operationRecord,') &&
-      viewModelText.includes("OperationStatusModel.fetchHistory({ force })") &&
+      viewModelText.includes('OperationStatusModel.fetchByDate(date)') &&
       viewModelText.includes('OperationStatusModel.saveRecord(operationRecord)'),
     '통합입력 운전상태 탭·기존 저장 API 연결 보호',
     '운전상태 탭 순서 또는 operation_status_logs 조회·저장 연결이 누락됐습니다.'

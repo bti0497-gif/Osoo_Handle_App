@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { MemberModel } from './MemberModel';
 import { AuthModel } from '../auth/AuthModel';
 
-export const useMembersViewModel = (currentUser) => {
+export const useMembersViewModel = (currentUser, { onPasswordChanged } = {}) => {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -24,11 +24,6 @@ export const useMembersViewModel = (currentUser) => {
     setErrorMsg('');
 
     // 1. 현재 비밀번호 일치 확인
-    if (currentPassword !== currentUser?.password) {
-      setErrorMsg('현재 비밀번호가 정확하지 않습니다.');
-      return;
-    }
-
     // 2. 신규 비밀번호 길이 유효성 검사
     if (!isLengthValid) {
       setErrorMsg('새 비밀번호는 최소 4자 이상이어야 합니다.');
@@ -49,6 +44,11 @@ export const useMembersViewModel = (currentUser) => {
 
     setIsSubmitting(true);
     try {
+      const verification = await AuthModel.localLogin(currentUser?.name, currentPassword);
+      if (!verification?.member) {
+        setErrorMsg('현재 비밀번호가 정확하지 않습니다.');
+        return;
+      }
       const updatedUser = {
         ...currentUser,
         password: newPassword
@@ -57,13 +57,13 @@ export const useMembersViewModel = (currentUser) => {
       // 서버 및 구글 시트에 업데이트 반영
       await MemberModel.saveMember(updatedUser);
 
-      // 로컬 세션 캐시 업데이트 (자동 로그아웃 방지 및 세션 유지용)
-      AuthModel.saveSession(updatedUser);
-
-      setIsSuccess(true);
+      // 비밀번호 변경은 기존 서명 세션을 즉시 무효화하고 새 로그인으로 전환한다.
+      AuthModel.clearSession();
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      await onPasswordChanged?.();
+      setIsSuccess(true);
     } catch (err) {
       console.error('비밀번호 업데이트 실패:', err);
       setErrorMsg(err.message || '비밀번호 변경 중 오류가 발생했습니다.');

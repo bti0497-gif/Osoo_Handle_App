@@ -12,6 +12,8 @@ const toNumberOrZero = (value) => {
 export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [loadingOlder, setLoadingOlder] = useState(false);
+    const [hasOlder, setHasOlder] = useState(false);
     const [pendingChanges, setPendingChanges] = useState({});
     const [medicineTypes, setMedicineTypes] = useState([]);
     const [showPurchaseModal, setShowPurchaseModal] = useState(false);
@@ -19,6 +21,7 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
     const [purchaseItems, setPurchaseItems] = useState([]);
     const [isSavingPurchase, setIsSavingPurchase] = useState(false);
     const pendingChangesRef = useRef({});
+    const rangeStartRef = useRef('');
 
     const toDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -84,8 +87,8 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
                 hist.sort((a, b) => a.date.localeCompare(b.date));
 
                 // 전체 기간(첫 데이터 ~ 오늘)의 빈 날짜 채우기
-                if (hist.length > 0) {
-                    const firstDateStr = hist[0].date > todayStr ? todayStr : hist[0].date;
+                if (historyData.fromDate) {
+                    const firstDateStr = String(historyData.fromDate);
                     let currentDate = new Date(firstDateStr);
                     const todayDate = new Date(todayStr);
                     const existingDates = new Set(hist.map(h => h.date));
@@ -130,6 +133,8 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
                 // });
 
                 setHistory(hist);
+                rangeStartRef.current = String(historyData.fromDate || todayStr);
+                setHasOlder(Boolean(historyData.hasOlder));
                 setPendingChanges({});
                 pendingChangesRef.current = {};
             }
@@ -143,6 +148,70 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
     useEffect(() => {
         loadLogs();
     }, []);
+
+    const loadOlder = async () => {
+        if (loadingOlder || !hasOlder || !rangeStartRef.current) return;
+        setLoadingOlder(true);
+        try {
+            const result = await MedicineModel.fetchOlderHistory(rangeStartRef.current);
+            if (!result?.success) return;
+            const rowsByDate = new Map();
+            (result.history || []).forEach((record) => {
+                if (!rowsByDate.has(record.date)) {
+                    const row = { date: record.date };
+                    medicineTypes.forEach((type) => { row[type] = { purchase: null, usage: null, inventory: null }; });
+                    rowsByDate.set(record.date, row);
+                }
+                if (medicineTypes.includes(record.medicine_name)) {
+                    rowsByDate.get(record.date)[record.medicine_name] = {
+                        purchase: record.purchase_amount,
+                        usage: record.usage_amount,
+                        inventory: record.current_inventory,
+                    };
+                }
+            });
+            const cursor = new Date(`${result.fromDate}T12:00:00`);
+            const end = new Date(`${result.toDate}T12:00:00`);
+            while (cursor <= end) {
+                const date = toDateStr(cursor);
+                if (!rowsByDate.has(date)) {
+                    const row = { date };
+                    medicineTypes.forEach((type) => { row[type] = { purchase: null, usage: null, inventory: null }; });
+                    rowsByDate.set(date, row);
+                }
+                cursor.setDate(cursor.getDate() + 1);
+            }
+            setHistory((current) => {
+                const merged = new Map(current.map((row) => [row.date, row]));
+                rowsByDate.forEach((row, date) => merged.set(date, row));
+                return Array.from(merged.values()).sort((a, b) => a.date.localeCompare(b.date));
+            });
+            rangeStartRef.current = String(result.fromDate || rangeStartRef.current);
+            setHasOlder(Boolean(result.hasOlder));
+        } catch (error) {
+            console.warn('Failed to load older medicine history:', error);
+        } finally {
+            setLoadingOlder(false);
+        }
+    };
+
+    const refreshDate = async (date) => {
+        if (!date) return;
+        const result = await MedicineModel.fetchHistoryRange(date);
+        if (!result?.success) return;
+        const row = { date };
+        medicineTypes.forEach((type) => { row[type] = { purchase: null, usage: null, inventory: null }; });
+        (result.history || []).forEach((record) => {
+            if (medicineTypes.includes(record.medicine_name)) {
+                row[record.medicine_name] = { purchase: record.purchase_amount, usage: record.usage_amount, inventory: record.current_inventory };
+            }
+        });
+        setHistory((current) => {
+            const next = new Map(current.map((item) => [item.date, item]));
+            next.set(date, row);
+            return Array.from(next.values()).sort((a, b) => a.date.localeCompare(b.date));
+        });
+    };
 
     const updateAmount = (rowDate, type, field, val) => {
         const numVal = val === '' ? null : parseFloat(val);
@@ -321,6 +390,8 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
     return {
         history,
         loading,
+        loadingOlder,
+        hasOlder,
         medicineTypes,
         showPurchaseModal, setShowPurchaseModal,
         purchaseDate, setPurchaseDate,
@@ -333,6 +404,8 @@ export const useMedicineViewModel = (currentUser, { showAlert } = {}) => {
         submitBatch,
         saveModalDraft,
         refresh: ({ force = true } = {}) => loadLogs({ force }),
+        refreshDate,
+        loadOlder,
         pendingChanges,
     };
 };

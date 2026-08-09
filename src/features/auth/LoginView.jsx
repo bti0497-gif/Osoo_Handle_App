@@ -25,6 +25,10 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
         const restoreInputFocus = () => {
             if (restoringFocusRef.current) return;
             restoringFocusRef.current = true;
+            // A restored login window is a fresh authentication attempt.
+            // Never carry a password or an old rejection across tray/app restore.
+            setPass('');
+            setError('');
             window.focus();
             window.requestAnimationFrame(() => {
                 const active = document.activeElement;
@@ -73,8 +77,9 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                 localStorage.setItem('lastLoginName', name);
             } else {
                 setError(result.message || '이름 또는 비밀번호를 다시 확인해 주세요.');
-                passRef.current?.focus();
-                passRef.current?.select();
+                // Never retain a hidden stale value after a rejected login.
+                setPass('');
+                window.requestAnimationFrame(() => passRef.current?.focus());
             }
         } finally {
             setSubmitting(false);
@@ -119,11 +124,12 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                     <div className="input-wrapper-new">
                         <span className="material-symbols-outlined input-icon-new">lock</span>
                         <input
-                            type="text"
-                            autoComplete="off"
+                            type="password"
+                            autoComplete="current-password"
+                            autoCapitalize="none"
+                            spellCheck={false}
                             className="form-input-new"
                             placeholder="비밀번호"
-                            style={{ WebkitTextSecurity: 'disc' }}
                             value={pass}
                             ref={passRef}
                             onPointerDown={() => window.focus()}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFlowViewModel } from './useFlowViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogContext';
@@ -82,8 +82,11 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
     const {
         history = [],
         loading,
+        loadingOlder,
+        hasOlder,
         correctData,
-        refresh,
+        refreshDate,
+        loadOlder,
     } = useFlowViewModel(currentUser, {
         showAlert,
         flowTypes: flowMeterTypes,
@@ -104,6 +107,13 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
     const modalDate = modalState.date || selectedDate || todayStr;
     const selectedRow = history.find((row) => row.date === selectedDate) || null;
     const modalRow = history.find((row) => row.date === modalDate) || null;
+
+    const handleGridScroll = useCallback((scrollTop) => {
+        onWorkspaceSessionChange?.({ scrollTop });
+        if (scrollTop <= 80 && hasOlder && !loadingOlder) {
+            void loadOlder();
+        }
+    }, [hasOlder, loadOlder, loadingOlder, onWorkspaceSessionChange]);
 
     const gridCols = useMemo(() => visibleFlowItems.map((item, idx) => {
         const color = FLOW_COLORS[idx % FLOW_COLORS.length];
@@ -250,7 +260,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
         setModalState((prev) => ({ ...prev, open: false }));
         if (pendingParentRefreshRef.current) {
             pendingParentRefreshRef.current = false;
-            refresh({ force: false });
+            void refreshDate(selectedDate);
         }
     };
 
@@ -348,7 +358,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                         defaultSelectedRowKey={workspaceSession.selectedKey || todayStr}
                         scrollToKey={Number.isFinite(workspaceSession.scrollTop) ? null : (workspaceSession.selectedKey || todayStr)}
                         initialScrollTop={workspaceSession.scrollTop}
-                        onScrollPositionChange={(scrollTop) => onWorkspaceSessionChange?.({ scrollTop })}
+                        onScrollPositionChange={handleGridScroll}
                         width="100%"
                         height={400}
                         rowHeaderWidth={84}

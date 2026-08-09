@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { rememberRoadworkSessionUrl } from './roadworkSessionBridge';
+import { getRememberedRoadworkSessionUrl, rememberRoadworkSessionUrl } from './roadworkSessionBridge';
 import { useRoadworkHelperViewModel } from './useRoadworkHelperViewModel';
 import { RoadworkHelperModel } from './RoadworkHelperModel';
 import './components/RoadworkHelperModal.css';
@@ -770,12 +770,12 @@ export default function RoadworkHelperView() {
       const urlRes = await window.electronAPI.invokeRoadwork('roadwork:getRoadworkUrl');
       const targetUrl = String(urlRes?.url || DEFAULT_ROADWORK_URL)
         .replace(':5002//security', ':5002/security');
-      setWebviewUrl(targetUrl);
+      setWebviewUrl(getRememberedRoadworkSessionUrl(roadworkPartition) || targetUrl);
     } catch (err) {
       console.warn('[Roadwork Helper] Failed to resolve config:', err.message);
       setWebviewUrl(DEFAULT_ROADWORK_URL);
     }
-  }, []);
+  }, [roadworkPartition]);
 
   useEffect(() => {
     fetchConfig();
@@ -798,6 +798,9 @@ export default function RoadworkHelperView() {
     wasLoginPageRef.current = true;
     setStatusMessage('도로공사 페이지를 새로 불러오는 중입니다.');
     setRoadworkStatus({ isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false });
+    if (currentUrl && !/\/security\/login\.do(?:[?#]|$)/i.test(currentUrl)) {
+      setWebviewUrl(currentUrl);
+    }
     setWebviewGeneration((value) => value + 1);
     recordRoadworkDiagnostic('webview-refresh', {
       source,
