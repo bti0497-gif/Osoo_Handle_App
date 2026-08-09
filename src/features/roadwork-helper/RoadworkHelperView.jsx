@@ -770,7 +770,8 @@ export default function RoadworkHelperView() {
       const urlRes = await window.electronAPI.invokeRoadwork('roadwork:getRoadworkUrl');
       const targetUrl = String(urlRes?.url || DEFAULT_ROADWORK_URL)
         .replace(':5002//security', ':5002/security');
-      setWebviewUrl(getRememberedRoadworkSessionUrl(roadworkPartition) || targetUrl);
+      const rememberedUrl = getRememberedRoadworkSessionUrl(roadworkPartition);
+      setWebviewUrl(rememberedUrl || targetUrl);
     } catch (err) {
       console.warn('[Roadwork Helper] Failed to resolve config:', err.message);
       setWebviewUrl(DEFAULT_ROADWORK_URL);
@@ -804,6 +805,8 @@ export default function RoadworkHelperView() {
     setWebviewGeneration((value) => value + 1);
     recordRoadworkDiagnostic('webview-refresh', {
       source,
+      partition: roadworkPartition,
+      resumePath: (() => { try { return currentUrl ? new URL(currentUrl).pathname : ''; } catch { return ''; } })(),
       pageOrigin: (() => {
         try {
           return currentUrl ? new URL(currentUrl).origin : '';
@@ -813,7 +816,7 @@ export default function RoadworkHelperView() {
       })(),
     });
     window.setTimeout(() => setStatusMessage(''), 3500);
-  }, [recordRoadworkDiagnostic, webviewUrl]);
+  }, [recordRoadworkDiagnostic, roadworkPartition, webviewUrl]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -898,6 +901,9 @@ export default function RoadworkHelperView() {
         }).catch((error) => console.warn('[Roadwork Helper] 세션 유지 등록 실패:', error));
       }
       recordRoadworkDiagnostic('webview-load-finished', { pageOrigin });
+      if (!wasLoginPageRef.current && isLoginPage) {
+        recordRoadworkDiagnostic('session-unexpected-login-page', { partition: roadworkPartition });
+      }
       if (wasLoginPageRef.current && !isLoginPage) {
         recordRoadworkDiagnostic('webview-login-transition', { result: 'login-page-exited', pageOrigin });
       }
@@ -914,6 +920,9 @@ export default function RoadworkHelperView() {
           partition: roadworkPartition,
           url: currentUrl,
         }).catch((error) => console.warn('[Roadwork Helper] 세션 유지 등록 실패:', error));
+      }
+      if (!wasLoginPageRef.current && isLoginPage) {
+        recordRoadworkDiagnostic('session-unexpected-login-page', { partition: roadworkPartition });
       }
       if (wasLoginPageRef.current && !isLoginPage) {
         let pageOrigin = '';
