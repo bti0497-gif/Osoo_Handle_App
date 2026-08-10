@@ -44,6 +44,8 @@ assert.ok(watchdogSource.includes('server-recovery') && watchdogSource.includes(
 assert.ok(watchdogSource.includes('IsFreshAppHeartbeat') && watchdogSource.includes('LiveAppServerRecoveryGrace'), 'fresh Electron heartbeat is not given a server-only recovery grace period');
 assert.ok(mainProcess.includes('app-heartbeat.json') && mainProcess.includes('startWatchdogHeartbeat()'), 'Electron does not publish its embedded-server heartbeat to the watchdog');
 assert.ok(mainProcess.includes("notifyRendererServerRecovery('server-restarting')") && mainProcess.includes("notifyRendererServerRecovery('server-ready')"), 'Electron server recovery progress is not reported to the renderer');
+assert.ok(mainProcess.includes('app:reportRendererReady') && mainProcess.includes('renderer-clean-boot'), 'Electron does not detect a renderer startup failure or request a clean recovery');
+assert.ok(mainProcess.includes('electron-recovery-events.jsonl'), 'Electron renderer recovery diagnostics are not persisted for later upload');
 assert.ok(serverIndex.includes('setInterval(() =>') && serverIndex.includes('importWatchdogDiagnostics(db, appDataPath)'), 'watchdog diagnostics are not imported while the app remains running');
 
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osoo-watchdog-'));
@@ -128,6 +130,18 @@ try {
     assert.strictEqual(db.prepare("SELECT COUNT(*) count FROM app_diagnostic_logs WHERE area = 'watchdog'").get().count, firstImport.imported);
     const secondImport = importWatchdogDiagnostics(db, importAppData);
     assert.strictEqual(secondImport.imported, 0);
+
+    fs.writeFileSync(path.join(importRuntime, 'electron-recovery-events.jsonl'), `${JSON.stringify({
+      createdAt: new Date().toISOString(),
+      version: 'test',
+      area: 'electron',
+      action: 'renderer-startup',
+      result: 'failed',
+      details: { phase: 'renderer-clean-boot' },
+    })}\n`);
+    const electronImport = importWatchdogDiagnostics(db, importAppData);
+    assert.strictEqual(electronImport.imported, 1);
+    assert.strictEqual(db.prepare("SELECT COUNT(*) count FROM app_diagnostic_logs WHERE area = 'electron'").get().count, 1);
   } finally {
     db.close();
   }

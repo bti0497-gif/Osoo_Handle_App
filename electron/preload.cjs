@@ -4,6 +4,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   getDefaultSiteContext: () => ipcRenderer.invoke('app:getDefaultSiteContext'),
   getServerToken: () => ipcRenderer.invoke('server:getToken'),
+  getStartupRecoveryState: () => ipcRenderer.invoke('app:getStartupRecoveryState'),
+  reportRendererReady: () => ipcRenderer.invoke('app:reportRendererReady'),
+  onStartupRecoveryProgress: (callback) => {
+    const listener = (_event, info) => callback(info || {});
+    ipcRenderer.on('app:startup-recovery-progress', listener);
+    return () => ipcRenderer.removeListener('app:startup-recovery-progress', listener);
+  },
   onServerRecoveryProgress: (callback) => {
     const listener = (_event, info) => callback(info || {});
     ipcRenderer.on('server:recovery-progress', listener);

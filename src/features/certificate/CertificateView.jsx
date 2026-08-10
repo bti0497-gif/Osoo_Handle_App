@@ -205,7 +205,7 @@ const CertificateView = ({ currentUser }) => {
                     ) : (
                         <div style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))',
                             gap: '14px',
                             padding: '14px',
                             alignItems: 'start',
@@ -259,7 +259,7 @@ const CertificateView = ({ currentUser }) => {
                                             title={`${item.fileName} 선택하여 미리보기`}
                                             style={{
                                                 width: '100%',
-                                                height: '340px',
+                                                height: '170px',
                                                 padding: 0,
                                                 border: 0,
                                                 background: '#e2e8f0',

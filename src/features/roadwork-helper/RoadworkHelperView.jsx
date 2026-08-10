@@ -874,6 +874,16 @@ export default function RoadworkHelperView() {
     if (!webview) return undefined;
 
     const handleFailLoad = (event) => {
+      // Chromium ERR_ABORTED(-3)는 로그인 후 리디렉션·화면 전환 중의
+      // 정상 탐색 취소에도 발생한다. 실제 페이지가 뒤에서 계속 표시되는
+      // 경우 오류 오버레이를 띄우지 않고 진단만 남긴다.
+      if (event.errorCode === -3) {
+        recordRoadworkDiagnostic('webview-load-aborted', {
+          errorCode: event.errorCode,
+          isMainFrame: Boolean(event.isMainFrame),
+        });
+        return;
+      }
       const nextError = `도로공사 페이지를 불러오지 못했습니다: ${event.errorDescription} (코드: ${event.errorCode})`;
       console.warn('[Roadwork Helper] Webview failed to load URL:', event.validatedURL, event.errorDescription);
       setLoadError((prev) => (prev === nextError ? prev : nextError));

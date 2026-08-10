@@ -1661,6 +1661,14 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    roadworkViewText.includes('if (event.errorCode === -3)') &&
+      roadworkViewText.includes("recordRoadworkDiagnostic('webview-load-aborted'") &&
+      /if \(event\.errorCode === -3\)\s*\{[\s\S]*?return;/.test(roadworkViewText),
+    '공사입력 도우미 정상 웹뷰 탐색 취소(ERR_ABORTED) 오탐 방지 계약 유지',
+    '정상적인 웹뷰 탐색 취소를 페이지 로드 실패로 표시할 수 있습니다'
+  );
+
+  checkSource(
     roadworkContractText.includes('오늘 하루 그만보기') &&
       roadworkContractText.includes('verification dialogs') &&
       electronMainTextForWindow.includes("popupWindow.getTitle() !== '도로통합플랫폼 안내'") &&

@@ -52,6 +52,10 @@ let serverInstanceToken = null;
 let serverLaunchedAt = 0;
 let watchdogHeartbeatTimer = null;
 let embeddedServerRecoveryInProgress = false;
+let rendererReadyTimer = null;
+let rendererRecoveryAttempts = 0;
+let rendererRecoveryInProgress = false;
+let startupRecoveryState = { phase: 'idle', updatedAt: null };
 const appStartedAt = new Date().toISOString();
 
 const FULL_EXIT_LOCK_TTL_MS = 8 * 60 * 60 * 1000;
@@ -61,6 +65,7 @@ const SERVER_GUARD_INTERVAL_MS = 3000;
 const SERVER_HEALTH_FAILURE_LIMIT = 3;
 const SERVER_STARTUP_GRACE_MS = 120000;
 const WATCHDOG_HEARTBEAT_INTERVAL_MS = 15000;
+const RENDERER_READY_TIMEOUT_MS = 20000;
 
 const isDev = !app.isPackaged;
 const useExternalServer = isDev && process.env.OSOO_EXTERNAL_SERVER === '1';
@@ -245,6 +250,78 @@ function scheduleServerRestart(delayMs = 500) {
 function notifyRendererServerRecovery(phase) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send('server:recovery-progress', { phase });
+}
+
+function appendElectronRecoveryDiagnostic(action, result, details = {}) {
+  try {
+    const runtimeDirectory = path.join(getOsooAppDataPath(), 'runtime');
+    fs.mkdirSync(runtimeDirectory, { recursive: true });
+    fs.appendFileSync(path.join(runtimeDirectory, 'electron-recovery-events.jsonl'), `${JSON.stringify({
+      createdAt: new Date().toISOString(),
+      version: app.getVersion(),
+      area: 'electron',
+      action,
+      result,
+      details,
+    })}\n`, 'utf8');
+  } catch (error) {
+    console.warn('[Electron] Failed to record renderer recovery diagnostic:', error.message);
+  }
+}
+
+function publishStartupRecoveryState(phase, details = {}, { diagnostic = false } = {}) {
+  startupRecoveryState = {
+    phase,
+    details,
+    updatedAt: new Date().toISOString(),
+  };
+  if (diagnostic) {
+    appendElectronRecoveryDiagnostic('renderer-startup', phase === 'renderer-ready' ? 'ok' : 'failed', {
+      phase,
+      ...details,
+    });
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('app:startup-recovery-progress', startupRecoveryState);
+}
+
+function clearRendererReadyTimer() {
+  if (rendererReadyTimer) clearTimeout(rendererReadyTimer);
+  rendererReadyTimer = null;
+}
+
+function startCleanRendererRecovery(reason) {
+  if (rendererRecoveryInProgress || isQuitting || !mainWindow || mainWindow.isDestroyed()) return;
+  rendererRecoveryInProgress = true;
+  rendererRecoveryAttempts += 1;
+  publishStartupRecoveryState('renderer-clean-boot', { reason, attempt: rendererRecoveryAttempts }, { diagnostic: true });
+
+  const failedProcess = serverProcess;
+  serverProcess = null;
+  serverInstanceToken = null;
+  serverLaunchedAt = 0;
+  try { failedProcess?.kill('SIGKILL'); } catch (_) {}
+  scheduleServerRestart(250);
+
+  setTimeout(() => {
+    if (!mainWindow || mainWindow.isDestroyed() || isQuitting) return;
+    publishStartupRecoveryState('renderer-reloading', { reason, attempt: rendererRecoveryAttempts }, { diagnostic: true });
+    mainWindow.webContents.reloadIgnoringCache();
+    rendererRecoveryInProgress = false;
+  }, 1200).unref?.();
+}
+
+function armRendererReadyTimeout() {
+  clearRendererReadyTimer();
+  rendererReadyTimer = setTimeout(() => {
+    rendererReadyTimer = null;
+    if (rendererRecoveryAttempts >= 1) {
+      publishStartupRecoveryState('renderer-recovery-failed', { attempts: rendererRecoveryAttempts }, { diagnostic: true });
+      return;
+    }
+    startCleanRendererRecovery('renderer-ready-timeout');
+  }, RENDERER_READY_TIMEOUT_MS);
+  rendererReadyTimer.unref?.();
 }
 
 function checkEmbeddedServerHealth() {
@@ -469,7 +546,6 @@ function createWindow({ showOnReady = true } = {}) {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'PDF로 저장',
     icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -516,7 +592,24 @@ function createWindow({ showOnReady = true } = {}) {
   });
 
   mainWindow.on('closed', () => {
+    clearRendererReadyTimer();
     mainWindow = null;
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    armRendererReadyTimeout();
+  });
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return;
+    appendElectronRecoveryDiagnostic('renderer-load-failed', 'failed', {
+      errorCode,
+      errorDescription: String(errorDescription || '').slice(0, 160),
+      url: String(validatedURL || '').slice(0, 240),
+    });
+  });
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    clearRendererReadyTimer();
+    startCleanRendererRecovery(`render-process-gone:${String(details?.reason || 'unknown').slice(0, 80)}`);
   });
 
   const emitNativeFocusEvent = (eventName, details = {}) => {
@@ -914,6 +1007,15 @@ ipcMain.handle('app:recoverWindowFocus', async () => {
   };
 });
 ipcMain.handle('server:getToken', () => serverInstanceToken || '');
+ipcMain.handle('app:getStartupRecoveryState', () => startupRecoveryState);
+ipcMain.handle('app:reportRendererReady', () => {
+  clearRendererReadyTimer();
+  const recovered = rendererRecoveryAttempts > 0;
+  rendererRecoveryAttempts = 0;
+  rendererRecoveryInProgress = false;
+  publishStartupRecoveryState('renderer-ready', { recovered }, { diagnostic: recovered });
+  return { ok: true, recovered };
+});
 ipcMain.handle('app:checkVersionChanged', async () => {
   const userDataPath = app.getPath('userData');
   const markerPath = path.join(userDataPath, '.version-changed');

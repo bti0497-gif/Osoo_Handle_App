@@ -19,10 +19,10 @@ function writeCursor(cursorPath, offset) {
   fs.writeFileSync(cursorPath, JSON.stringify({ offset, importedAt: new Date().toISOString() }, null, 2), 'utf8');
 }
 
-function importWatchdogDiagnostics(db, appDataPath) {
+function importRuntimeDiagnostics(db, appDataPath, sourceFileName, fallbackArea) {
   const runtimeDirectory = path.join(appDataPath, 'runtime');
-  const eventPath = path.join(runtimeDirectory, 'watchdog-events.jsonl');
-  const cursorPath = path.join(runtimeDirectory, 'watchdog-import-state.json');
+  const eventPath = path.join(runtimeDirectory, sourceFileName);
+  const cursorPath = path.join(runtimeDirectory, `${sourceFileName}.import-state.json`);
   if (!fs.existsSync(eventPath)) return { success: true, imported: 0, skipped: true };
 
   const fileSize = fs.statSync(eventPath).size;
@@ -52,12 +52,13 @@ function importWatchdogDiagnostics(db, appDataPath) {
       recordDiagnostic(db, appDataPath, {
         createdAt: event.createdAt,
         level: event.result === 'failed' ? 'error' : event.result === 'waiting' ? 'warn' : 'info',
-        area: 'watchdog',
+        area: String(event.area || fallbackArea).slice(0, 80),
         action: String(event.action || 'unknown').slice(0, 100),
         result: String(event.result || '').slice(0, 50),
-        message: `watchdog ${event.action || 'event'}: ${event.result || 'unknown'}`,
+        message: `${fallbackArea} ${event.action || 'event'}: ${event.result || 'unknown'}`,
         details: {
-          watchdogVersion: event.version || null,
+          watchdogVersion: fallbackArea === 'watchdog' ? event.version || null : null,
+          runtimeVersion: event.version || null,
           summary: event.details || null,
         },
       });
@@ -71,6 +72,16 @@ function importWatchdogDiagnostics(db, appDataPath) {
   const nextOffset = readStart + consumedBytes;
   writeCursor(cursorPath, nextOffset);
   return { success: true, imported, malformed, offset: nextOffset };
+}
+
+function importWatchdogDiagnostics(db, appDataPath) {
+  const watchdog = importRuntimeDiagnostics(db, appDataPath, 'watchdog-events.jsonl', 'watchdog');
+  const electron = importRuntimeDiagnostics(db, appDataPath, 'electron-recovery-events.jsonl', 'electron');
+  return {
+    success: Boolean(watchdog.success && electron.success),
+    imported: Number(watchdog.imported || 0) + Number(electron.imported || 0),
+    malformed: Number(watchdog.malformed || 0) + Number(electron.malformed || 0),
+  };
 }
 
 module.exports = { importWatchdogDiagnostics };
