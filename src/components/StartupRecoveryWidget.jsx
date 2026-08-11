@@ -5,6 +5,7 @@ const RECOVERY_LABELS = {
   'renderer-clean-boot': '앱 화면을 안전하게 다시 준비하고 있습니다...',
   'renderer-reloading': '업무 화면을 다시 열고 있습니다...',
   'renderer-recovery-failed': '앱 화면 복구를 확인하고 있습니다. 잠시만 기다려 주세요...',
+  'external-recovery-handoff': '안전 복구를 위해 앱을 다시 시작하고 있습니다...',
 };
 
 const isEmergencyPhase = (phase) => Object.prototype.hasOwnProperty.call(RECOVERY_LABELS, phase);

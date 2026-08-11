@@ -37,7 +37,7 @@ assert.ok(mainProcess.includes("['update', 'full-exit'].forEach((reason) =>"), '
 assert.ok(mainProcess.includes('waitForServerReadyAndClearMaintenanceLocks'), 'server-ready maintenance lock recovery contract is missing');
 assert.ok(/catch\r?\n\s*\{/.test(watchdogSource) && watchdogSource.includes('return true;'), 'watchdog does not fail safe when process path inspection is denied');
 assert.ok(watchdogSource.includes('TimeSpan.FromMinutes(1)') && watchdogSource.includes('lastStatusKey'), 'watchdog status writes are not throttled for always-on field PCs');
-assert.ok(watchdogSource.includes('version=1.0.3'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(watchdogSource.includes('version=1.0.4'), 'watchdog behavioral changes did not bump the diagnostic version');
 assert.ok(watchdogSource.includes('MonitorEmbeddedServer(appPath)') && watchdogSource.includes('IsDedicatedServerReachable()'), 'watchdog does not verify the embedded server port while the app process is alive');
 assert.ok(watchdogSource.includes('heartbeat.ServerReady') && watchdogSource.includes('IsFreshAppHeartbeat(heartbeat)'), 'watchdog may treat a merely listening port as login-ready');
 assert.ok(watchdogSource.includes('server-recovery') && watchdogSource.includes('TryTerminateApp(appPath)'), 'watchdog cannot recover an app whose embedded server remains unavailable');
@@ -46,6 +46,8 @@ assert.ok(mainProcess.includes('app-heartbeat.json') && mainProcess.includes('st
 assert.ok(mainProcess.includes("notifyRendererServerRecovery('server-restarting')") && mainProcess.includes("notifyRendererServerRecovery('server-ready')"), 'Electron server recovery progress is not reported to the renderer');
 assert.ok(mainProcess.includes('app:reportRendererReady') && mainProcess.includes('renderer-clean-boot'), 'Electron does not detect a renderer startup failure or request a clean recovery');
 assert.ok(mainProcess.includes('electron-recovery-events.jsonl'), 'Electron renderer recovery diagnostics are not persisted for later upload');
+assert.ok(mainProcess.includes('emergency-recovery-request.json') && mainProcess.includes('requestExternalEmergencyRecovery'), 'Electron cannot hand off a failed renderer recovery to the external watchdog');
+assert.ok(watchdogSource.includes('TryReadEmergencyRecoveryRequest') && watchdogSource.includes('HandleEmergencyRecovery') && watchdogSource.includes('emergency-recovery'), 'watchdog does not process an explicit emergency recovery handoff');
 assert.ok(serverIndex.includes('setInterval(() =>') && serverIndex.includes('importWatchdogDiagnostics(db, appDataPath)'), 'watchdog diagnostics are not imported while the app remains running');
 
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osoo-watchdog-'));
@@ -97,6 +99,36 @@ try {
   const malformedStatus = run(malformedRuntime);
   assert.strictEqual(malformedStatus.state, 'dry-run-restart');
   assert.ok(!fs.existsSync(path.join(malformedRuntime, 'maintenance.json')));
+
+  const emergencyRuntime = path.join(testRoot, 'emergency');
+  fs.mkdirSync(emergencyRuntime, { recursive: true });
+  fs.writeFileSync(path.join(emergencyRuntime, 'emergency-recovery-request.json'), JSON.stringify({
+    requestId: 'test-emergency-recovery',
+    requestedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    reason: 'renderer-ready-timeout-after-clean-boot',
+  }));
+  const emergencyStatus = run(emergencyRuntime);
+  assert.strictEqual(emergencyStatus.state, 'emergency-recovery-dry-run');
+  assert.ok(!fs.existsSync(path.join(emergencyRuntime, 'emergency-recovery-request.json')));
+
+  const emergencyLockedRuntime = path.join(testRoot, 'emergency-locked');
+  fs.mkdirSync(emergencyLockedRuntime, { recursive: true });
+  fs.writeFileSync(path.join(emergencyLockedRuntime, 'maintenance.json'), JSON.stringify({
+    reason: 'full-exit',
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    requestedBy: 'test',
+  }));
+  fs.writeFileSync(path.join(emergencyLockedRuntime, 'emergency-recovery-request.json'), JSON.stringify({
+    requestId: 'test-emergency-locked',
+    requestedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    reason: 'renderer-ready-timeout-after-clean-boot',
+  }));
+  const emergencyLockedStatus = run(emergencyLockedRuntime);
+  assert.strictEqual(emergencyLockedStatus.state, 'maintenance');
+  assert.ok(fs.existsSync(path.join(emergencyLockedRuntime, 'emergency-recovery-request.json')));
 
   const singletonRuntime = path.join(testRoot, 'singleton');
   const firstInstance = spawn(executable, [

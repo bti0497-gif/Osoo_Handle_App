@@ -1400,10 +1400,16 @@ function validateRegressionContracts() {
 
   checkSource(
     serverIndexText.includes("process.env.DIAGNOSTIC_VERBOSE_INITIAL === 'true'") &&
+      serverIndexText.includes('const STABLE_SUCCESS_MUTATION_PATHS = new Set([') &&
+      serverIndexText.includes("'/api/flows/bulk'") &&
+      serverIndexText.includes("'/api/medicines/bulk'") &&
+      serverIndexText.includes("'/api/kits/bulk'") &&
+      serverIndexText.includes("'/api/water-quality/bulk'") &&
+      serverIndexText.includes("'/api/operation-status'") &&
       serverIndexText.includes('const shouldLogResponse = shouldLogSuccessfulResponse || (shouldInspect && res.statusCode >= 400)') &&
-      serverIndexText.includes('DIAGNOSTIC_VERBOSE_INITIAL || shouldTriggerSync'),
-    '안정화 버전 정상 조회 진단 기본 비활성화·실패/저장 진단 유지 계약',
-    '정상 조회 로그가 다시 폭증하거나 실패·저장 진단이 누락될 수 있습니다'
+      serverIndexText.includes('shouldTriggerSync && !STABLE_SUCCESS_MUTATION_PATHS.has(pathName)'),
+    '안정화 버전 정상 조회·반복 정상 저장 진단 기본 비활성화·실패/동기화 유지 계약',
+    '정상 조회·저장 로그가 다시 폭증하거나 실패·동기화 진단이 누락될 수 있습니다'
   );
 
   checkSource(
@@ -1663,6 +1669,8 @@ function validateRegressionContracts() {
   checkSource(
     roadworkViewText.includes('if (event.errorCode === -3)') &&
       roadworkViewText.includes("recordRoadworkDiagnostic('webview-load-aborted'") &&
+      roadworkViewText.includes('hasLoadedPageRef.current') &&
+      roadworkViewText.includes('clearPendingLoadFailure()') &&
       /if \(event\.errorCode === -3\)\s*\{[\s\S]*?return;/.test(roadworkViewText),
     '공사입력 도우미 정상 웹뷰 탐색 취소(ERR_ABORTED) 오탐 방지 계약 유지',
     '정상적인 웹뷰 탐색 취소를 페이지 로드 실패로 표시할 수 있습니다'

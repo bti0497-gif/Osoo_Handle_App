@@ -743,6 +743,8 @@ export default function RoadworkHelperView() {
   const webviewRef = useRef(null);
   const lastRefreshAtRef = useRef(0);
   const wasLoginPageRef = useRef(true);
+  const hasLoadedPageRef = useRef(false);
+  const loadFailureTimerRef = useRef(null);
   const [loadError, setLoadError] = useState(null);
   const [preloadPath, setPreloadPath] = useState('');
   const [webviewUrl, setWebviewUrl] = useState('');
@@ -788,12 +790,18 @@ export default function RoadworkHelperView() {
     });
   }, []);
 
+  const clearPendingLoadFailure = React.useCallback(() => {
+    if (loadFailureTimerRef.current) window.clearTimeout(loadFailureTimerRef.current);
+    loadFailureTimerRef.current = null;
+  }, []);
+
   const handleRefresh = React.useCallback((source = 'button') => {
     const now = Date.now();
     if (now - lastRefreshAtRef.current < 500) return;
     lastRefreshAtRef.current = now;
 
     const currentUrl = webviewRef.current?.getURL?.() || webviewUrl;
+    clearPendingLoadFailure();
     setLoadError(null);
     setShowRefreshToast(true);
     wasLoginPageRef.current = true;
@@ -816,7 +824,7 @@ export default function RoadworkHelperView() {
       })(),
     });
     window.setTimeout(() => setStatusMessage(''), 3500);
-  }, [recordRoadworkDiagnostic, roadworkPartition, webviewUrl]);
+  }, [clearPendingLoadFailure, recordRoadworkDiagnostic, roadworkPartition, webviewUrl]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -886,14 +894,29 @@ export default function RoadworkHelperView() {
       }
       const nextError = `도로공사 페이지를 불러오지 못했습니다: ${event.errorDescription} (코드: ${event.errorCode})`;
       console.warn('[Roadwork Helper] Webview failed to load URL:', event.validatedURL, event.errorDescription);
-      setLoadError((prev) => (prev === nextError ? prev : nextError));
       recordRoadworkDiagnostic('webview-load-failed', {
         errorCode: event.errorCode,
         errorDescription: event.errorDescription,
       });
+      // 이미 표시된 도로공사 화면이 있으면 일시적인 탐색 실패는 업무를 가리지 않는다.
+      // 첫 화면도 후속 did-finish-load가 올 수 있으므로 잠시 확인한 뒤에만 재시도 카드를 표시한다.
+      if (hasLoadedPageRef.current) {
+        setStatusMessage('도로공사 화면 전환이 지연되었습니다. 현재 화면이 보이면 계속 업무를 진행하세요.');
+        return;
+      }
+      clearPendingLoadFailure();
+      loadFailureTimerRef.current = window.setTimeout(() => {
+        if (!hasLoadedPageRef.current) {
+          setLoadError((prev) => (prev === nextError ? prev : nextError));
+        }
+        loadFailureTimerRef.current = null;
+      }, 1800);
     };
 
     const handleDidFinishLoad = () => {
+      hasLoadedPageRef.current = true;
+      clearPendingLoadFailure();
+      setLoadError(null);
       const currentUrl = webview.getURL();
       rememberRoadworkSessionUrl(roadworkPartition, currentUrl);
       let pageOrigin = '';
@@ -959,13 +982,14 @@ export default function RoadworkHelperView() {
     webview.addEventListener('before-input-event', handleBeforeInput);
 
     return () => {
+      clearPendingLoadFailure();
       webview.removeEventListener('did-fail-load', handleFailLoad);
       webview.removeEventListener('did-finish-load', handleDidFinishLoad);
       webview.removeEventListener('did-navigate', handleNavigate);
       webview.removeEventListener('did-navigate-in-page', handleNavigate);
       webview.removeEventListener('before-input-event', handleBeforeInput);
     };
-  }, [handleRefresh, recordRoadworkDiagnostic, roadworkPartition, webviewGeneration]);
+  }, [clearPendingLoadFailure, handleRefresh, recordRoadworkDiagnostic, roadworkPartition, webviewGeneration]);
 
   const handleAutoFill = React.useCallback(async () => {
     const webview = webviewRef.current;

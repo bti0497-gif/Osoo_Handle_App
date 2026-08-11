@@ -124,6 +124,11 @@ function App() {
     const loginUpdateCheckKeyRef = useRef(null);
     const recordGridSessionsRef = useRef({ flow: {}, medicine: {}, kit: {}, water: {} });
 
+    const isMissingBackgroundFieldSession = (error) => (
+        Number(error?.status) === 401
+        && String(error?.data?.error || error?.message || '').trim() === 'active field session required'
+    );
+
     useEffect(() => {
         const unsubscribe = window.electronAPI?.onServerRecoveryProgress?.(async ({ phase }) => {
             if (phase === 'server-restarting') {
@@ -135,6 +140,7 @@ function App() {
             const result = await restoreServerSession();
             if (result?.restored) {
                 setServerRecoveryPhase('업무 세션 복원이 완료되었습니다.');
+                window.dispatchEvent(new CustomEvent('osoo:background-session-restored'));
                 window.setTimeout(() => setServerRecoveryPhase(''), 900);
             } else if (result?.reason === 'no-field-session') {
                 setServerRecoveryPhase('');
@@ -384,6 +390,18 @@ function App() {
         let idleTimer = null;
         let certificateTimer = null;
         let certificateRunning = false;
+        let backgroundSessionUnavailable = false;
+
+        const suspendBackgroundTasksForMissingSession = (error, source) => {
+            if (!isMissingBackgroundFieldSession(error)) return false;
+            if (!backgroundSessionUnavailable) {
+                backgroundSessionUnavailable = true;
+                // 서버의 활성 현장 세션이 없을 때의 유휴 작업은 사용자 입력과 무관하다.
+                // 실패 작업을 다시 기록하거나 재시도하지 않고, 최초 401 진단만 보존한다.
+                console.warn(`[background-idle] suspended after missing field session (${source})`);
+            }
+            return true;
+        };
         let lastServerNoticeAt = 0;
 
         const scheduleFromLastActivity = () => {
@@ -402,7 +420,7 @@ function App() {
         };
 
         const runCertificateCache = async () => {
-            if (cancelled || certificateRunning) return;
+            if (cancelled || certificateRunning || backgroundSessionUnavailable) return;
             if (Date.now() - lastActivityAt < CERTIFICATE_CACHE_IDLE_DELAY_MS) {
                 scheduleCertificateFromLastActivity();
                 return;
@@ -428,7 +446,9 @@ function App() {
                 window.dispatchEvent(new CustomEvent('osoo:certificate-cache-updated'));
                 await SyncService.completeBackgroundTask('certificate-cache', CERTIFICATE_CACHE_REFRESH_MS);
             } catch (error) {
-                await SyncService.failBackgroundTask('certificate-cache', error).catch(() => {});
+                if (!suspendBackgroundTasksForMissingSession(error, 'certificate-cache')) {
+                    await SyncService.failBackgroundTask('certificate-cache', error).catch(() => {});
+                }
                 console.warn('[background-idle] certificate-cache failed:', error);
             } finally {
                 certificateRunning = false;
@@ -443,7 +463,7 @@ function App() {
         };
 
         const runBackgroundJobs = async () => {
-            if (cancelled || running) return;
+            if (cancelled || running || backgroundSessionUnavailable) return;
             if (Date.now() - lastActivityAt < BACKGROUND_IDLE_DELAY_MS) {
                 scheduleFromLastActivity();
                 return;
@@ -486,6 +506,7 @@ function App() {
                         }
                         await SyncService.completeBackgroundTask(taskType, CERTIFICATE_CACHE_REFRESH_MS);
                     } catch (taskError) {
+                        if (suspendBackgroundTasksForMissingSession(taskError, taskType)) break;
                         await SyncService.failBackgroundTask(taskType, taskError).catch(() => {});
                         console.warn(`[background-idle] ${taskType} failed:`, taskError);
                         // Background failures never interrupt field work or the
@@ -494,6 +515,7 @@ function App() {
                     }
                 }
             } catch (error) {
+                suspendBackgroundTasksForMissingSession(error, 'prepare-or-pending');
                 console.warn('[background-idle] background job failed:', error);
             } finally {
                 running = false;
@@ -521,9 +543,16 @@ function App() {
             scheduleFromLastActivity();
             scheduleCertificateFromLastActivity();
         };
+        const onBackgroundSessionRestored = () => {
+            if (!backgroundSessionUnavailable) return;
+            backgroundSessionUnavailable = false;
+            scheduleFromLastActivity();
+            scheduleCertificateFromLastActivity();
+        };
         const activityEvents = ['keydown', 'pointerdown', 'input', 'change', 'wheel'];
         activityEvents.forEach((eventName) => window.addEventListener(eventName, onUserActivity, true));
         window.addEventListener('osoo:background-sync-wakeup', onWakeup);
+        window.addEventListener('osoo:background-session-restored', onBackgroundSessionRestored);
         // 외부 작업을 시작하지 않고 로컬 투두리스트만 먼저 확보한다.
         void SyncService.prepareBackgroundTasks([
             'attendance-sync',
@@ -533,7 +562,10 @@ function App() {
             'board-cache',
             'diagnostic-sync',
             'update-check',
-        ]).catch((error) => console.warn('[background-idle] task preparation failed:', error));
+        ]).catch((error) => {
+            suspendBackgroundTasksForMissingSession(error, 'initial-prepare');
+            console.warn('[background-idle] task preparation failed:', error);
+        });
         scheduleFromLastActivity();
         scheduleCertificateFromLastActivity();
 
@@ -543,6 +575,7 @@ function App() {
             if (certificateTimer) window.clearTimeout(certificateTimer);
             activityEvents.forEach((eventName) => window.removeEventListener(eventName, onUserActivity, true));
             window.removeEventListener('osoo:background-sync-wakeup', onWakeup);
+            window.removeEventListener('osoo:background-session-restored', onBackgroundSessionRestored);
         };
     }, [isAuthenticated, user]);
 

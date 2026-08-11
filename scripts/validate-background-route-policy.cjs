@@ -27,6 +27,9 @@ assert.match(app, /CERTIFICATE_CACHE_IDLE_DELAY_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000
 assert.match(app, /const taskTypes = \['attendance-sync', 'data-sync', 'file-sync', 'board-cache', 'diagnostic-sync', 'update-check'\]/);
 assert.match(app, /scheduleCertificateFromLastActivity/);
 assert.match(app, /SyncService\.prepareBackgroundTasks\(\['certificate-cache'\]\)/);
+assert.match(app, /active field session required/);
+assert.match(app, /suspendBackgroundTasksForMissingSession/);
+assert.match(app, /osoo:background-session-restored/);
 assert.match(app, /SyncService\.completeBackgroundTask\('certificate-cache', CERTIFICATE_CACHE_REFRESH_MS\)/);
 assert.match(app, /activityEvents\s*=\s*\['keydown', 'pointerdown', 'input', 'change', 'wheel'\]/);
 assert.match(authRoutes, /res\.json\(buildFieldLoginResponse\(member, 'local'\)\)/);

@@ -13,8 +13,8 @@ using System.Threading;
 [assembly: System.Reflection.AssemblyDescription("Background watchdog for Osoo Handle App")]
 [assembly: System.Reflection.AssemblyCompany("Osoo")]
 [assembly: System.Reflection.AssemblyProduct("Osoo Handle App Watchdog")]
-[assembly: System.Reflection.AssemblyVersion("1.0.3.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.3.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.4.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.4.0")]
 
 namespace OsooWatchdog
 {
@@ -32,6 +32,15 @@ namespace OsooWatchdog
         [DataMember(Name = "checkedAt")] public string CheckedAt;
         [DataMember(Name = "serverReady")] public bool ServerReady;
         [DataMember(Name = "serverPort")] public int ServerPort;
+    }
+
+    [DataContract]
+    internal sealed class EmergencyRecoveryRequest
+    {
+        [DataMember(Name = "requestId")] public string RequestId;
+        [DataMember(Name = "requestedAt")] public string RequestedAt;
+        [DataMember(Name = "expiresAt")] public string ExpiresAt;
+        [DataMember(Name = "reason")] public string Reason;
     }
 
     internal sealed class Options
@@ -89,7 +98,7 @@ namespace OsooWatchdog
                     return 2;
                 }
 
-                Log("watchdog-start", "ok", "version=1.0.3; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
+                Log("watchdog-start", "ok", "version=1.0.4; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
                 do
                 {
                     try { CheckOnce(); }
@@ -117,6 +126,13 @@ namespace OsooWatchdog
             {
                 Log("app-resolve", "not-found", null);
                 WriteStatus("app-not-found", null, null);
+                return;
+            }
+
+            EmergencyRecoveryRequest emergencyRequest;
+            if (TryReadEmergencyRecoveryRequest(out emergencyRequest))
+            {
+                HandleEmergencyRecovery(appPath, emergencyRequest);
                 return;
             }
 
@@ -154,6 +170,47 @@ namespace OsooWatchdog
             }
 
             StartApplication(appPath, "app-restart");
+        }
+
+        private static void HandleEmergencyRecovery(string appPath, EmergencyRecoveryRequest request)
+        {
+            if (!CanRestart(appPath))
+            {
+                Log("emergency-recovery", "blocked", "requestId=" + request.RequestId + "; reason=" + request.Reason);
+                WriteStatus("emergency-recovery-blocked", appPath, null);
+                TryDelete(EmergencyRecoveryRequestPath());
+                return;
+            }
+
+            Log("emergency-recovery", "accepted", "requestId=" + request.RequestId + "; reason=" + request.Reason);
+            WriteStatus("emergency-recovery-handoff", appPath, null);
+            if (options.DryRun)
+            {
+                Log("emergency-recovery", "dry-run", "requestId=" + request.RequestId);
+                WriteStatus("emergency-recovery-dry-run", appPath, null);
+                TryDelete(EmergencyRecoveryRequestPath());
+                return;
+            }
+
+            if (IsAppRunning(appPath) && !TryTerminateApp(appPath))
+            {
+                Log("emergency-recovery", "failed", "cannot-terminate-app; requestId=" + request.RequestId);
+                WriteStatus("emergency-recovery-failed", appPath, null);
+                TryDelete(EmergencyRecoveryRequestPath());
+                return;
+            }
+
+            Thread.Sleep(1000);
+            if (IsAppRunning(appPath))
+            {
+                Log("emergency-recovery", "failed", "app-still-running; requestId=" + request.RequestId);
+                WriteStatus("emergency-recovery-failed", appPath, null);
+                TryDelete(EmergencyRecoveryRequestPath());
+                return;
+            }
+
+            TryDelete(EmergencyRecoveryRequestPath());
+            StartApplication(appPath, "emergency-recovery", false);
         }
 
         private static void MonitorEmbeddedServer(string appPath)
@@ -220,12 +277,12 @@ namespace OsooWatchdog
             StartApplication(appPath, "server-recovery");
         }
 
-        private static void StartApplication(string appPath, string action)
+        private static void StartApplication(string appPath, string action, bool background = true)
         {
             var startInfo = new ProcessStartInfo
             {
                 FileName = appPath,
-                Arguments = "--osoo-background-start",
+                Arguments = background ? "--osoo-background-start" : "--osoo-emergency-recovery",
                 WorkingDirectory = Path.GetDirectoryName(appPath),
                 UseShellExecute = true,
                 WindowStyle = ProcessWindowStyle.Hidden
@@ -233,7 +290,7 @@ namespace OsooWatchdog
             Process.Start(startInfo);
             RestartTimes.Enqueue(DateTime.UtcNow);
             Log(action, "started", "path=" + appPath);
-            WriteStatus(action == "server-recovery" ? "server-recovery-started" : "restart-started", appPath, null);
+            WriteStatus(action == "server-recovery" ? "server-recovery-started" : action == "emergency-recovery" ? "emergency-recovery-started" : "restart-started", appPath, null);
         }
 
         private static bool CanRestart(string appPath)
@@ -363,6 +420,43 @@ namespace OsooWatchdog
             catch { return null; }
         }
 
+        private static string EmergencyRecoveryRequestPath()
+        {
+            return Path.Combine(runtimeDirectory, "emergency-recovery-request.json");
+        }
+
+        private static bool TryReadEmergencyRecoveryRequest(out EmergencyRecoveryRequest request)
+        {
+            request = null;
+            string requestPath = EmergencyRecoveryRequestPath();
+            if (!File.Exists(requestPath)) return false;
+            try
+            {
+                using (var stream = File.OpenRead(requestPath))
+                    request = (EmergencyRecoveryRequest)new DataContractJsonSerializer(typeof(EmergencyRecoveryRequest)).ReadObject(stream);
+                DateTime requestedAt;
+                DateTime expiresAt;
+                if (request == null || String.IsNullOrWhiteSpace(request.RequestId) || String.IsNullOrWhiteSpace(request.Reason) ||
+                    !DateTime.TryParse(request.RequestedAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out requestedAt) ||
+                    !DateTime.TryParse(request.ExpiresAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out expiresAt) ||
+                    expiresAt.ToUniversalTime() <= DateTime.UtcNow || requestedAt.ToUniversalTime() > DateTime.UtcNow.AddMinutes(1))
+                {
+                    TryDelete(requestPath);
+                    Log("emergency-recovery", "expired-or-invalid", null);
+                    request = null;
+                    return false;
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                TryDelete(requestPath);
+                Log("emergency-recovery", "invalid", ex.GetType().Name);
+                request = null;
+                return false;
+            }
+        }
+
         private static bool IsWithinServerStartupGrace(AppHeartbeat heartbeat)
         {
             if (heartbeat == null || String.IsNullOrWhiteSpace(heartbeat.AppStartedAt)) return false;
@@ -422,7 +516,7 @@ namespace OsooWatchdog
             if (statusKey == lastStatusKey && now - lastStatusAt < TimeSpan.FromMinutes(1)) return;
             lastStatusKey = statusKey;
             lastStatusAt = now;
-            string json = "{\n  \"version\": \"1.0.1\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
+            string json = "{\n  \"version\": \"1.0.4\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
             AtomicWrite(Path.Combine(runtimeDirectory, "watchdog-status.json"), json);
         }
 
@@ -442,7 +536,7 @@ namespace OsooWatchdog
                 string createdAt = DateTime.UtcNow.ToString("o");
                 string line = createdAt + "\t" + action + "\t" + result + (String.IsNullOrEmpty(details) ? "" : "\t" + details) + Environment.NewLine;
                 File.AppendAllText(logPath, line, new UTF8Encoding(false));
-                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.1\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
+                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.4\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
                 File.AppendAllText(Path.Combine(runtimeDirectory, "watchdog-events.jsonl"), eventJson, new UTF8Encoding(false));
             }
             catch { }

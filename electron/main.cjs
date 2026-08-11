@@ -55,6 +55,8 @@ let embeddedServerRecoveryInProgress = false;
 let rendererReadyTimer = null;
 let rendererRecoveryAttempts = 0;
 let rendererRecoveryInProgress = false;
+let externalRecoveryRequested = false;
+let externalRecoveryRequestId = null;
 let startupRecoveryState = { phase: 'idle', updatedAt: null };
 const appStartedAt = new Date().toISOString();
 
@@ -66,6 +68,7 @@ const SERVER_HEALTH_FAILURE_LIMIT = 3;
 const SERVER_STARTUP_GRACE_MS = 120000;
 const WATCHDOG_HEARTBEAT_INTERVAL_MS = 15000;
 const RENDERER_READY_TIMEOUT_MS = 20000;
+const EXTERNAL_RECOVERY_REQUEST_TTL_MS = 3 * 60 * 1000;
 
 const isDev = !app.isPackaged;
 const useExternalServer = isDev && process.env.OSOO_EXTERNAL_SERVER === '1';
@@ -269,6 +272,54 @@ function appendElectronRecoveryDiagnostic(action, result, details = {}) {
   }
 }
 
+function getExternalRecoveryRequestPath() {
+  return path.join(getOsooAppDataPath(), 'runtime', 'emergency-recovery-request.json');
+}
+
+function clearExternalEmergencyRecoveryRequest(result = 'cancelled') {
+  if (!externalRecoveryRequested) return;
+  try { fs.unlinkSync(getExternalRecoveryRequestPath()); } catch (_) {}
+  appendElectronRecoveryDiagnostic('external-recovery-handoff', result, {
+    requestId: externalRecoveryRequestId,
+  });
+  externalRecoveryRequested = false;
+  externalRecoveryRequestId = null;
+}
+
+function requestExternalEmergencyRecovery(reason) {
+  if (externalRecoveryRequested || isQuitting || isDev) return false;
+  externalRecoveryRequested = true;
+  externalRecoveryRequestId = crypto.randomBytes(12).toString('hex');
+  const requestedAt = new Date();
+  try {
+    const requestPath = getExternalRecoveryRequestPath();
+    fs.mkdirSync(path.dirname(requestPath), { recursive: true });
+    const temporaryPath = `${requestPath}.${process.pid}.tmp`;
+    fs.writeFileSync(temporaryPath, JSON.stringify({
+      version: 1,
+      requestId: externalRecoveryRequestId,
+      requestedAt: requestedAt.toISOString(),
+      expiresAt: new Date(requestedAt.getTime() + EXTERNAL_RECOVERY_REQUEST_TTL_MS).toISOString(),
+      reason,
+    }), 'utf8');
+    fs.renameSync(temporaryPath, requestPath);
+    publishStartupRecoveryState('external-recovery-handoff', { reason, requestId: externalRecoveryRequestId }, { diagnostic: true });
+    appendElectronRecoveryDiagnostic('external-recovery-handoff', 'requested', {
+      reason,
+      requestId: externalRecoveryRequestId,
+    });
+    return true;
+  } catch (error) {
+    appendElectronRecoveryDiagnostic('external-recovery-handoff', 'failed', {
+      reason,
+      message: String(error?.message || error).slice(0, 160),
+    });
+    externalRecoveryRequested = false;
+    externalRecoveryRequestId = null;
+    return false;
+  }
+}
+
 function publishStartupRecoveryState(phase, details = {}, { diagnostic = false } = {}) {
   startupRecoveryState = {
     phase,
@@ -317,6 +368,7 @@ function armRendererReadyTimeout() {
     rendererReadyTimer = null;
     if (rendererRecoveryAttempts >= 1) {
       publishStartupRecoveryState('renderer-recovery-failed', { attempts: rendererRecoveryAttempts }, { diagnostic: true });
+      requestExternalEmergencyRecovery('renderer-ready-timeout-after-clean-boot');
       return;
     }
     startCleanRendererRecovery('renderer-ready-timeout');
@@ -1010,6 +1062,7 @@ ipcMain.handle('server:getToken', () => serverInstanceToken || '');
 ipcMain.handle('app:getStartupRecoveryState', () => startupRecoveryState);
 ipcMain.handle('app:reportRendererReady', () => {
   clearRendererReadyTimer();
+  clearExternalEmergencyRecoveryRequest('cancelled-renderer-ready');
   const recovered = rendererRecoveryAttempts > 0;
   rendererRecoveryAttempts = 0;
   rendererRecoveryInProgress = false;

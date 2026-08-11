@@ -270,6 +270,14 @@ function registerLazyApplication() {
   // The persistent background task stays in place as a recovery safety net.
   setDiagnosticRecordedNotifier(() => requestImmediateDiagnosticUpload());
   requestImmediateDiagnosticUpload();
+  require('./cron/dailyRecordFinalizationScheduler.cjs').start({
+    db,
+    markPending: markBackgroundTaskPending,
+    reportDiagnostic(event) {
+      recordDiagnostic(db, appDataPath, event);
+      scheduleDiagnosticUpload();
+    },
+  });
   try {
     const watchdogImport = importWatchdogDiagnostics(db, appDataPath);
     if (watchdogImport.imported > 0) scheduleDiagnosticUpload();
@@ -308,10 +316,20 @@ function registerLazyApplication() {
 
   // --- 초기 배포 진단 로그 ---
   // 1.0.x 현장 안정화 기간에는 /api/ping을 제외한 API 흐름을 넓게 기록한다.
-  // 운영 기본값은 정상 조회를 생략하고 실패·저장·동기화 요청을 유지한다.
+  // 운영 기본값은 정상 조회를 생략하고 실패·이상 진단을 유지한다.
   const BIGQUERY_IMMEDIATE_SYNC_PREFIXES = routeRegistry
     .filter(r => r.watch)
     .map(r => r.path);
+  // 현장 안정화 로그에서 반복 검증된 일상 저장은 성공 여부가 이미 화면과
+  // BigQuery 동기화 로그로 확인되므로, API 성공 진단만 생략한다.
+  // 실패 응답과 동기화 예약은 아래 공통 흐름에서 그대로 유지한다.
+  const STABLE_SUCCESS_MUTATION_PATHS = new Set([
+    '/api/flows/bulk',
+    '/api/medicines/bulk',
+    '/api/kits/bulk',
+    '/api/water-quality/bulk',
+    '/api/operation-status',
+  ]);
 
   app.use((req, res, next) => {
     const method = String(req.method || '').toUpperCase();
@@ -325,7 +343,8 @@ function registerLazyApplication() {
       && pathName !== '/api/preload-trigger';
     const shouldInspect = isApiPath && pathName !== '/api/ping';
     const shouldLogSuccessfulResponse = shouldInspect
-      && (DIAGNOSTIC_VERBOSE_INITIAL || shouldTriggerSync);
+      && (DIAGNOSTIC_VERBOSE_INITIAL
+        || (shouldTriggerSync && !STABLE_SUCCESS_MUTATION_PATHS.has(pathName)));
 
     if (!shouldInspect && !shouldTriggerSync) return next();
 
