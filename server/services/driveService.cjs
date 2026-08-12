@@ -177,6 +177,13 @@ async function findFileInFolder(parentFolderId, fileName) {
 }
 
 async function getOrCreateFolderPath(rootFolderId, segments = []) {
+  // 관리사진 월 폴더는 여러 사진 작업이 동시에 시작될 수 있다. Drive는 같은
+  // 이름의 폴더 생성을 막지 않으므로, 이 경로만 생성 후 중복을 정리한다.
+  if (segments[0] === '관리사진' && segments.length === 3) {
+    const management = await getOrCreateFolder(rootFolderId, segments[0]);
+    const year = await getOrCreateFolder(management.id, segments[1]);
+    return reconcileManagementMonthFolder(year.id, segments[2]);
+  }
   let currentFolder = { id: rootFolderId, name: '', webViewLink: '' };
 
   for (const segment of segments) {
@@ -184,6 +191,35 @@ async function getOrCreateFolderPath(rootFolderId, segments = []) {
   }
 
   return currentFolder;
+}
+
+async function reconcileManagementMonthFolder(parentFolderId, monthName) {
+  const listFolders = async () => (await drive.files.list({
+    q: ["mimeType='application/vnd.google-apps.folder'", `name='${escapeDriveQueryValue(monthName)}'`, `'${parentFolderId}' in parents`, 'trashed=false'].join(' and '),
+    fields: 'files(id,name,createdTime)', spaces: 'drive', includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 100
+  })).data.files || [];
+  let folders = await listFolders();
+  if (folders.length === 0) {
+    await getOrCreateFolder(parentFolderId, monthName);
+    folders = await listFolders();
+  }
+  const contents = await Promise.all(folders.map(async (folder) => ({
+    folder,
+    files: (await drive.files.list({ q: `'${folder.id}' in parents and trashed=false`, fields: 'files(id,name)', spaces: 'drive', includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 100 })).data.files || []
+  })));
+  contents.sort((a, b) => b.files.length - a.files.length || String(a.folder.createdTime).localeCompare(String(b.folder.createdTime)));
+  const canonical = contents[0];
+  const names = new Set(canonical.files.map((file) => file.name));
+  for (const duplicate of contents.slice(1)) {
+    for (const file of duplicate.files) {
+      if (names.has(file.name)) continue; // 동일 파일명은 원본을 보존하고 자동 덮어쓰지 않는다.
+      await drive.files.update({ fileId: file.id, addParents: canonical.folder.id, removeParents: duplicate.folder.id, supportsAllDrives: true, fields: 'id' });
+      names.add(file.name);
+    }
+    const remaining = (await drive.files.list({ q: `'${duplicate.folder.id}' in parents and trashed=false`, fields: 'files(id)', spaces: 'drive', includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 1 })).data.files || [];
+    if (remaining.length === 0) await drive.files.delete({ fileId: duplicate.folder.id, supportsAllDrives: true });
+  }
+  return canonical.folder;
 }
 
 async function findFolderPath(rootFolderId, segments = []) {
