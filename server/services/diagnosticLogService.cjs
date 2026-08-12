@@ -352,7 +352,13 @@ function recordDiagnostic(db, appDataPath, event = {}) {
 
   if (diagnosticRecordedNotifier) {
     try {
-      diagnosticRecordedNotifier({ id, level: payload.level, area: payload.area });
+      diagnosticRecordedNotifier({
+        id,
+        level: payload.level,
+        area: payload.area,
+        action: payload.action,
+        result: payload.result,
+      });
     } catch (error) {
       console.warn('[diagnostic] immediate upload notification failed:', error.message);
     }

@@ -252,9 +252,36 @@ function registerLazyApplication() {
     }
   };
   const scheduleDiagnosticUpload = () => markBackgroundTaskPending('diagnostic-sync');
+  const NORMAL_DIAGNOSTIC_UPLOAD_DELAY_MS = 30 * 60 * 1000;
   let immediateDiagnosticTimer = null;
   let immediateDiagnosticUploadRunning = false;
   let immediateDiagnosticUploadRequested = false;
+  let normalDiagnosticUploadTimer = null;
+
+  const diagnosticRequiresImmediateUpload = ({ level, result, action } = {}) => {
+    const normalizedLevel = String(level || '').toLowerCase();
+    const normalizedResult = String(result || '').toLowerCase();
+    const normalizedAction = String(action || '').toLowerCase();
+    return normalizedLevel === 'error'
+      || ['failed', 'rejected', 'error'].includes(normalizedResult)
+      || normalizedAction.includes('workspace-render-failed')
+      || normalizedAction.includes('emergency-recovery');
+  };
+
+  const requestNormalDiagnosticUpload = () => {
+    scheduleDiagnosticUpload();
+    if (normalDiagnosticUploadTimer) return;
+
+    normalDiagnosticUploadTimer = setTimeout(async () => {
+      normalDiagnosticUploadTimer = null;
+      try {
+        await uploadPendingDiagnostics(db, appDataPath, { limit: 1000 });
+      } catch (error) {
+        console.warn('[diagnostic] scheduled batch upload failed:', error.message);
+      }
+    }, NORMAL_DIAGNOSTIC_UPLOAD_DELAY_MS);
+    normalDiagnosticUploadTimer.unref?.();
+  };
 
   const requestImmediateDiagnosticUpload = (delayMs = 1500) => {
     immediateDiagnosticUploadRequested = true;
@@ -268,7 +295,7 @@ function registerLazyApplication() {
       immediateDiagnosticUploadRequested = false;
       let retryDelayMs = null;
       try {
-        const result = await uploadPendingDiagnostics(db, appDataPath, { limit: 200 });
+        const result = await uploadPendingDiagnostics(db, appDataPath, { limit: 1000 });
         if (!result?.success && !result?.skipped) {
           retryDelayMs = 60 * 1000;
         }
@@ -287,10 +314,16 @@ function registerLazyApplication() {
     immediateDiagnosticTimer.unref?.();
   };
 
-  // Diagnostic delivery is intentionally independent from the 30-minute idle
-  // queue. Recording remains local-first and Drive upload runs asynchronously.
-  // The persistent background task stays in place as a recovery safety net.
-  setDiagnosticRecordedNotifier(() => requestImmediateDiagnosticUpload());
+  // Normal operations stay local-first and are delivered as one 30-minute
+  // bundle. Errors and recovery/authentication anomalies bypass the bundle so
+  // they can be investigated without delaying field recovery.
+  setDiagnosticRecordedNotifier((event) => {
+    if (diagnosticRequiresImmediateUpload(event)) {
+      requestImmediateDiagnosticUpload();
+      return;
+    }
+    requestNormalDiagnosticUpload();
+  });
   requestImmediateDiagnosticUpload();
   require('./cron/dailyRecordFinalizationScheduler.cjs').start({
     db,
