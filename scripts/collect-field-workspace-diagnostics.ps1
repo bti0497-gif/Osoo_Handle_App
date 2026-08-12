@@ -43,10 +43,12 @@ function Get-AppProcesses {
     } | Select-Object Name, ProcessId, ParentProcessId, CreationDate, ExecutablePath, CommandLine
 }
 
-function Copy-IfExists {
+function Copy-LogTail {
     param([string]$Source, [string]$Name)
     if (Test-Path -LiteralPath $Source) {
-        Copy-Item -LiteralPath $Source -Destination (Join-Path $bundleDir $Name) -Force -ErrorAction SilentlyContinue
+        # 현장 로그가 비정상적으로 커져도 수집 자체가 실패하지 않도록 마지막 3,000줄만 보관한다.
+        Get-Content -LiteralPath $Source -Tail 3000 -ErrorAction SilentlyContinue |
+            Set-Content -LiteralPath (Join-Path $bundleDir $Name) -Encoding utf8 -ErrorAction SilentlyContinue
     }
 }
 
@@ -116,17 +118,17 @@ Write-TextFile 'processes-at-end.txt' (Get-AppProcesses)
 Write-TextFile 'ports-at-end.txt' (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object LocalPort -in 18731,18732,18733,18734 | Select-Object LocalAddress, LocalPort, OwningProcess)
 
 # 로그는 복사본만 수집한다. 오류 직전/직후의 최신 로그가 우선이다.
-Copy-IfExists $runtimeLog 'electron-recovery-events.jsonl'
-Copy-IfExists $updaterLog 'electron-updater.log'
+Copy-LogTail $runtimeLog 'electron-recovery-events.jsonl'
+Copy-LogTail $updaterLog 'electron-updater.log'
 if (Test-Path -LiteralPath $serverLogDir) {
     Get-ChildItem -LiteralPath $serverLogDir -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending | Select-Object -First 20 |
-        ForEach-Object { Copy-IfExists $_.FullName ("server-log_" + $_.Name) }
+        ForEach-Object { Copy-LogTail $_.FullName ("server-log_" + $_.Name) }
 }
 if (Test-Path -LiteralPath $diagnosticLogDir) {
     Get-ChildItem -LiteralPath $diagnosticLogDir -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending | Select-Object -First 12 |
-        ForEach-Object { Copy-IfExists $_.FullName ("diagnostic_" + $_.Name) }
+        ForEach-Object { Copy-LogTail $_.FullName ("diagnostic_" + $_.Name) }
 }
 
 $events = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = $startedAt } -ErrorAction SilentlyContinue |
