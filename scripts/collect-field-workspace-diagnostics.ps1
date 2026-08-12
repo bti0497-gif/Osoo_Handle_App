@@ -16,6 +16,15 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
+$requestedOutputRoot = $OutputRoot
+if (-not (Test-Path -LiteralPath $OutputRoot)) {
+    $oneDriveDesktop = if ($env:OneDrive) { Join-Path $env:OneDrive 'Desktop' } else { $null }
+    if ($oneDriveDesktop -and (Test-Path -LiteralPath $oneDriveDesktop)) {
+        $OutputRoot = $oneDriveDesktop
+    } else {
+        $OutputRoot = $env:TEMP
+    }
+}
 $startedAt = Get-Date
 $stamp = $startedAt.ToString('yyyyMMdd-HHmmss')
 $bundleDir = Join-Path $OutputRoot "Osoo-Workspace-Diagnostics-$stamp"
@@ -50,6 +59,8 @@ $diagnosticLogDir = Join-Path $serverLogDir 'diagnostics'
 
 Write-TextFile 'readme.txt' @"
 시작: $($startedAt.ToString('o'))
+요청 저장 위치: $requestedOutputRoot
+실제 저장 위치: $OutputRoot
 목적: 워크스페이스 렌더링 오류 재현 중의 상태 수집
 수집 범위: 프로세스, localhost 서버 응답, 앱/서버/복구 로그, Windows Application 오류 이벤트
 수집하지 않음: 비밀번호, 토큰, 로컬 DB 원본, 사용자 사진
