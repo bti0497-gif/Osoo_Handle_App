@@ -65,6 +65,7 @@ jobs:
             release/*.exe `
             release/*.blockmap `
             --title "$env:GITHUB_REF_NAME" `
+            --draft `
             --generate-notes
 
       - name: Upload artifacts
