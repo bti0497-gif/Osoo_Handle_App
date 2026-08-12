@@ -52,6 +52,7 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
         kitTypes = [],
         isSyncingAnalysisKits,
         syncAnalysisKits,
+        refresh,
         refreshDate,
         loadOlder,
     } = useKitViewModel(currentUser, { showAlert });

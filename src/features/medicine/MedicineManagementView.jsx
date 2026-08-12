@@ -44,7 +44,7 @@ const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspac
     const { showAlert, showConfirm } = useDialog();
     const { itemState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
-    const { history = [], loading, loadingOlder, hasOlder, medicineTypes = [], refreshDate, loadOlder } = useMedicineViewModel(currentUser, { showAlert });
+    const { history = [], loading, loadingOlder, hasOlder, medicineTypes = [], refresh, refreshDate, loadOlder } = useMedicineViewModel(currentUser, { showAlert });
 
     const [selectedDate, setSelectedDate] = useState(workspaceSession.selectedKey || null);
     const [modalState, setModalState] = useState({ open: false, tab: 'medicine', mode: 'add', date: null });

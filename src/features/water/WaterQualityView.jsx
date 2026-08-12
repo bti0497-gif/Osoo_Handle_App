@@ -144,6 +144,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
         loading,
         loadingOlder,
         hasOlder,
+        refresh,
         refreshDate,
         loadOlder,
         isImportingFromQntech,

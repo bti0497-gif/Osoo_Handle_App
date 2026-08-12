@@ -85,6 +85,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
         loadingOlder,
         hasOlder,
         correctData,
+        refresh,
         refreshDate,
         loadOlder,
     } = useFlowViewModel(currentUser, {
