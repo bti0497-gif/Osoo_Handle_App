@@ -38,6 +38,8 @@ assert.ok(mainProcess.includes('waitForServerReadyAndClearMaintenanceLocks'), 's
 assert.ok(/catch\r?\n\s*\{/.test(watchdogSource) && watchdogSource.includes('return true;'), 'watchdog does not fail safe when process path inspection is denied');
 assert.ok(watchdogSource.includes('TimeSpan.FromMinutes(1)') && watchdogSource.includes('lastStatusKey'), 'watchdog status writes are not throttled for always-on field PCs');
 assert.ok(watchdogSource.includes('version=1.0.4'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(mainProcess.includes("appendElectronRecoveryDiagnostic('runtime-telemetry', 'observed'") && mainProcess.includes('process.getProcessMemoryInfo()'), 'Electron runtime memory telemetry contract is missing');
+assert.ok(serverIndex.includes("action: 'runtime-telemetry'") && serverIndex.includes('process.memoryUsage()'), 'embedded server runtime memory telemetry contract is missing');
 assert.ok(watchdogSource.includes('MonitorEmbeddedServer(appPath)') && watchdogSource.includes('IsDedicatedServerReachable()'), 'watchdog does not verify the embedded server port while the app process is alive');
 assert.ok(watchdogSource.includes('heartbeat.ServerReady') && watchdogSource.includes('IsFreshAppHeartbeat(heartbeat)'), 'watchdog may treat a merely listening port as login-ready');
 assert.ok(watchdogSource.includes('server-recovery') && watchdogSource.includes('TryTerminateApp(appPath)'), 'watchdog cannot recover an app whose embedded server remains unavailable');

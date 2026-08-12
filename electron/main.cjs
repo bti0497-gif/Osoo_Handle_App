@@ -51,6 +51,7 @@ let serverHealthFailures = 0;
 let serverInstanceToken = null;
 let serverLaunchedAt = 0;
 let watchdogHeartbeatTimer = null;
+let runtimeTelemetryTimer = null;
 let embeddedServerRecoveryInProgress = false;
 let rendererReadyTimer = null;
 let rendererRecoveryAttempts = 0;
@@ -270,6 +271,33 @@ function appendElectronRecoveryDiagnostic(action, result, details = {}) {
   } catch (error) {
     console.warn('[Electron] Failed to record renderer recovery diagnostic:', error.message);
   }
+}
+
+function startRuntimeTelemetry() {
+  if (runtimeTelemetryTimer) return;
+  const collect = async () => {
+    try {
+      const memory = await process.getProcessMemoryInfo();
+      appendElectronRecoveryDiagnostic('runtime-telemetry', 'observed', {
+        appUptimeSeconds: Math.round(process.uptime()),
+        pid: process.pid,
+        memory,
+      });
+    } catch (error) {
+      appendElectronRecoveryDiagnostic('runtime-telemetry', 'failed', {
+        message: String(error?.message || error).slice(0, 160),
+      });
+    }
+  };
+  void collect();
+  runtimeTelemetryTimer = setInterval(() => void collect(), 6 * 60 * 60 * 1000);
+  runtimeTelemetryTimer.unref?.();
+}
+
+function stopRuntimeTelemetry() {
+  if (!runtimeTelemetryTimer) return;
+  clearInterval(runtimeTelemetryTimer);
+  runtimeTelemetryTimer = null;
 }
 
 function getExternalRecoveryRequestPath() {
@@ -972,6 +1000,7 @@ app.whenReady().then(() => {
   startServer();
   startServerGuard();
   startWatchdogHeartbeat();
+  startRuntimeTelemetry();
   createWindow({ showOnReady: !isBackgroundStartup });
   createTray();
   waitForServerReadyAndClearMaintenanceLocks().catch((error) => {
@@ -989,6 +1018,7 @@ app.whenReady().then(() => {
         serverGuardTimer = null;
         serverRestartTimer = null;
         stopWatchdogHeartbeat();
+        stopRuntimeTelemetry();
         await stopServerGracefully();
       },
     });
@@ -1008,6 +1038,7 @@ app.on('before-quit', () => {
   serverGuardTimer = null;
   serverRestartTimer = null;
   stopWatchdogHeartbeat();
+  stopRuntimeTelemetry();
   stopServer();
 });
 

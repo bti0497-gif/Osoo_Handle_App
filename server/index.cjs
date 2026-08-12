@@ -208,6 +208,28 @@ function registerLazyApplication() {
   // needs every successful API read. Failures and mutation/sync routes are
   // always recorded regardless of this switch.
   const DIAGNOSTIC_VERBOSE_INITIAL = process.env.DIAGNOSTIC_VERBOSE_INITIAL === 'true';
+  const recordServerRuntimeTelemetry = () => {
+    const memory = process.memoryUsage();
+    recordDiagnostic(db, appDataPath, {
+      level: 'info',
+      area: 'server',
+      action: 'runtime-telemetry',
+      result: 'observed',
+      message: 'local server runtime telemetry',
+      details: {
+        serverUptimeSeconds: Math.round(process.uptime()),
+        pid: process.pid,
+        memory: {
+          rss: memory.rss,
+          heapTotal: memory.heapTotal,
+          heapUsed: memory.heapUsed,
+          external: memory.external,
+          arrayBuffers: memory.arrayBuffers,
+        },
+      },
+    });
+    scheduleDiagnosticUpload();
+  };
   recordDiagnostic(db, appDataPath, {
     level: 'info',
     area: 'server',
@@ -278,6 +300,9 @@ function registerLazyApplication() {
       scheduleDiagnosticUpload();
     },
   });
+  recordServerRuntimeTelemetry();
+  const serverRuntimeTelemetryTimer = setInterval(recordServerRuntimeTelemetry, 6 * 60 * 60 * 1000);
+  serverRuntimeTelemetryTimer.unref?.();
   try {
     const watchdogImport = importWatchdogDiagnostics(db, appDataPath);
     if (watchdogImport.imported > 0) scheduleDiagnosticUpload();
