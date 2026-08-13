@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getTodayKST } from '../../core/constants';
 import { RoadworkHelperModel } from './RoadworkHelperModel';
 
@@ -38,18 +38,23 @@ function toTsv(columns, rows) {
   return body.join('\n');
 }
 
-export function useRoadworkHelperViewModel() {
+export function useRoadworkHelperViewModel(siteId = '') {
   const [date, setDate] = useState(getTodayKST());
   const [data, setData] = useState({ flow: [], electricity: [], medicine: [], kit: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const requestSequenceRef = useRef(0);
 
   const load = useCallback(async (targetDate = date) => {
+    const requestSequence = requestSequenceRef.current + 1;
+    requestSequenceRef.current = requestSequence;
     setLoading(true);
     setError('');
+    setData({ flow: [], electricity: [], medicine: [], kit: [] });
     try {
-      const res = await RoadworkHelperModel.fetchAll(targetDate);
+      const res = await RoadworkHelperModel.fetchAll(targetDate, siteId);
+      if (requestSequence !== requestSequenceRef.current) return;
       setData({
         flow: res.flow || [],
         electricity: res.electricity || [],
@@ -57,11 +62,12 @@ export function useRoadworkHelperViewModel() {
         kit: res.kit || [],
       });
     } catch (err) {
+      if (requestSequence !== requestSequenceRef.current) return;
       setError(err.message || '공사 입력 도우미 데이터를 불러오지 못했습니다.');
     } finally {
-      setLoading(false);
+      if (requestSequence === requestSequenceRef.current) setLoading(false);
     }
-  }, [date]);
+  }, [date, siteId]);
 
   useEffect(() => {
     load(date);

@@ -34,6 +34,19 @@ function getAvailableOutputPath(appDataPath, date) {
   return path.join(outputDir, `일일업무일지_${date}_${Date.now()}.hwp`);
 }
 
+function getPdfOutputPath(appDataPath, fileName) {
+  const outputDir = ensureOutputDirectory(appDataPath);
+  const extension = path.extname(fileName) || '.pdf';
+  const baseName = path.basename(fileName, extension);
+  let suffix = Date.now();
+  let outputPath = path.join(outputDir, `${baseName}_${suffix}${extension}`);
+  while (fs.existsSync(outputPath)) {
+    suffix += 1;
+    outputPath = path.join(outputDir, `${baseName}_${suffix}${extension}`);
+  }
+  return outputPath;
+}
+
 function runPowerShell(script, timeout = 180000) {
   return new Promise((resolve, reject) => {
     execFile(
@@ -171,7 +184,7 @@ async function buildBatchDailyWorkLogPdf({ db, appDataPath, templateInfo, manife
   const fileName = dates.length <= 1
     ? `일일업무일지_${dates[0] || 'output'}.pdf`
     : `일일업무일지_${dates[0]}_${dates[dates.length - 1]}.pdf`;
-  const outputPath = path.join(ensureOutputDirectory(appDataPath), fileName);
+  const outputPath = getPdfOutputPath(appDataPath, fileName);
   const merged = await mergePdfFiles(pdfPaths, outputPath);
   return { ...merged, hwpResults, pdfPaths };
 }

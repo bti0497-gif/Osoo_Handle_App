@@ -277,6 +277,12 @@ async function importQntechWaterAll(db, baseDir, date, siteContext = {}) {
     fallbackDate: context.date
   });
   const persistResult = persistWaterRows(db, mapped.importedRows, siteContext);
+  const persistedMetadata = getCurrentRecordMetadata(db, siteContext);
+  const persistedWaterSummary = db.prepare(`
+    SELECT COUNT(DISTINCT measurement_group) AS measurementGroupCount, COUNT(*) AS rowCount
+    FROM qntech_water_quality
+    WHERE site_id = ? AND date = ?
+  `).get(String(persistedMetadata.siteId || ''), context.date) || {};
   const photoResult = await saveProjectPhotos({
     db,
     baseUrl: context.client.baseUrl,
@@ -311,6 +317,8 @@ async function importQntechWaterAll(db, baseDir, date, siteContext = {}) {
       insertedRowCount: persistResult.insertedRowCount,
       matchedExistingData: persistResult.matchedExistingData,
       matchedRowCount: persistResult.matchedRowCount,
+      dbMeasurementGroupCount: Number(persistedWaterSummary.measurementGroupCount || 0),
+      dbRowCount: Number(persistedWaterSummary.rowCount || 0),
       savedPhotoCount: photoResult.savedPhotos.length,
       driveUploadedPhotoCount: photoResult.driveUploadedPhotos.length,
       driveQueuedPhotoCount: photoResult.driveQueuedPhotos.length,

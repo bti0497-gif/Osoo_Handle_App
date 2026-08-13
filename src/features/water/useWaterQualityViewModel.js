@@ -106,6 +106,7 @@ const normalizeModalSaveValue = (value) => {
 export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
     const historyRef = useRef([]);
     const pendingChangesRef = useRef({});
+    const loadRequestSequenceRef = useRef(0);
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(false);
     const [loadingOlder, setLoadingOlder] = useState(false);
@@ -124,13 +125,17 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
     };
 
     const loadReadings = useCallback(async (options = {}) => {
+        const requestSequence = loadRequestSequenceRef.current + 1;
+        loadRequestSequenceRef.current = requestSequence;
         setLoading(true);
         try {
             const todayStr = getTodayKST();
             const today = new Date(`${todayStr}T12:00:00`);
 
             const historyData = await WaterQualityModel.fetchHistory({ force: options.force });
-            if (!historyData.success) return;
+            if (!historyData.success || requestSequence !== loadRequestSequenceRef.current) {
+                return { applied: false, history: [] };
+            }
 
             const histRaw = Array.isArray(historyData.history)
                 ? historyData.history.filter((record) => String(record?.date || '') <= todayStr)
@@ -190,11 +195,16 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
             setHasOlder(Boolean(historyData.hasOlder));
             setPendingChanges({});
             pendingChangesRef.current = {};
+            return { applied: true, history: hist };
         } catch (err) {
+            if (requestSequence !== loadRequestSequenceRef.current) {
+                return { applied: false, history: [] };
+            }
             console.error(err);
             showToast?.(`수질 데이터 조회 실패: ${err.message}`, 'error');
+            return { applied: false, history: [] };
         } finally {
-            setLoading(false);
+            if (requestSequence === loadRequestSequenceRef.current) setLoading(false);
         }
     }, [showToast]);
 
@@ -363,7 +373,18 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
             // 서버 저장 완료 후 캐시를 다시 비우고 DB 원본을 강제 조회해야
             // 같은 날짜의 모든 측정 회차가 즉시 화면에 반영된다.
             WaterQualityModel.clearHistoryCache();
-            await loadReadings({ force: true });
+            const refreshResult = await loadReadings({ force: true });
+            const gridRoundCount = (refreshResult?.history || []).filter((row) => (
+                row.date === result.date && row.sourceType === 'qntech'
+            )).length;
+            void WaterQualityModel.recordQntechUiDiagnostic('import-completed', {
+                date: result.date,
+                qntechProjectCount: Number(result.projectCount || 0),
+                dbMeasurementGroupCount: Number(result.summary?.dbMeasurementGroupCount || 0),
+                dbRowCount: Number(result.summary?.dbRowCount || 0),
+                gridRoundCount,
+                latestGridResponseApplied: Boolean(refreshResult?.applied),
+            });
             const importedRowCount = result.summary?.importedRowCount || 0;
             const savedPhotoCount = result.summary?.savedPhotoCount || 0;
             const driveUploadErrorCount = result.summary?.driveUploadErrorCount || 0;

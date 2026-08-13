@@ -76,6 +76,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'roadwork:dumpStructure',
       'roadwork:keepSessionAlive',
       'roadwork:clearSessions',
+      'roadwork:getLocalPhotos',
+      'roadwork:setPhotoFile',
     ];
     if (allowed.includes(channel)) {
       return ipcRenderer.invoke(channel, ...args);

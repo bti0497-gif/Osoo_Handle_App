@@ -1379,6 +1379,10 @@ export default function UnifiedRecordModal({
                                                 importResult = await effectiveImportQntech(rangeStartDate);
                                             }
                                             if (importResult?.success) {
+                                                // 부모 화면이 QnTECH 저장 후 그리드를 새로 읽더라도,
+                                                // 이미 열린 모달은 자체 조회 결과를 유지한다. 같은 날짜의
+                                                // 여러 회차를 즉시 선택할 수 있도록 모달 컨텍스트도 갱신한다.
+                                                await reloadContexts({ force: true, tabs: ['water', 'kit'] });
                                                 await onSaveComplete?.({ date, savedTabs: ['water', 'kit'], source: 'qntech' });
                                             }
                                         } catch (error) {

@@ -69,7 +69,7 @@ const ROADWORK_STATUS_SCRIPT = `
 
   const daily = getDailyWindow();
   if (!daily) {
-    return { isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false };
+    return { isDailyLog: false, canAutoFill: false, date: '', isEditableData: false };
   }
 
   const saveButton = daily.document.getElementById('btn_Save');
@@ -79,24 +79,19 @@ const ROADWORK_STATUS_SCRIPT = `
     || dateInput?.value
     || dateInput?.innerText
   );
-  const componentDisabled = Boolean(
-    daily.regDate?.getDisabled?.()
-    || daily.regDate?.getReadOnly?.()
-    || daily.regDate?.disabled
+  const isEditableData = Boolean(
+    isVisible(saveButton)
+    && !saveButton?.disabled
+    && saveButton?.getAttribute?.('disabled') === null
+    && saveButton?.getAttribute?.('aria-disabled') !== 'true'
+    && !saveButton?.closest?.('.w2input_disabled,.disabled')
   );
-  const inputDisabled = Boolean(
-    dateInput?.disabled
-    || dateInput?.getAttribute?.('disabled') !== null
-    || dateInput?.getAttribute?.('aria-disabled') === 'true'
-    || dateInput?.closest?.('.w2input_disabled,.w2calendar_disabled,.disabled')
-  );
-  const isEditableDate = Boolean(date && !componentDisabled && !inputDisabled);
 
   return {
     isDailyLog: true,
-    canAutoFill: isVisible(saveButton) && isEditableDate,
+    canAutoFill: isVisible(saveButton) && isEditableData,
     date,
-    isEditableDate,
+    isEditableData,
   };
 })()
 `;
@@ -733,11 +728,59 @@ function buildRoadworkAutoFillScript(payload) {
 `;
 }
 
-export default function RoadworkHelperView() {
-  const vm = useRoadworkHelperViewModel();
+function buildRoadworkPhotoBoardStatusScript(uploaderIndex) {
+  return `
+(() => {
+  const windows = [];
+  const visit = (target) => {
+    if (!target || windows.includes(target)) return;
+    windows.push(target);
+    let frames = [];
+    try { frames = Array.from(target.document?.querySelectorAll('iframe, frame') || []); } catch { return; }
+    for (const frame of frames) {
+      try { if (frame.contentWindow) visit(frame.contentWindow); } catch {}
+    }
+  };
+  visit(window);
+  const daily = windows.find((target) => {
+    try { return Boolean(target.document?.getElementById('dragDrop${uploaderIndex}_anchor2')); } catch { return false; }
+  });
+  if (!daily) return { found: false, hasPhoto: false, rowCount: 0 };
+  const gridId = 'dragDrop${uploaderIndex}_dragDrop${uploaderIndex}_grd';
+  const component = daily[gridId] || daily.WebSquare?.util?.getComponentById?.(gridId);
+  let rowCount = 0;
+  try {
+    const candidate = component?.getDataList?.();
+    const dataList = typeof candidate === 'string'
+      ? daily[candidate] || daily.WebSquare?.util?.getComponentById?.(candidate)
+      : candidate;
+    rowCount = Number(dataList?.getRowCount?.() || dataList?.getTotalRow?.() || 0);
+  } catch {}
+  const table = daily.document.getElementById(gridId + '_body_table');
+  const rowTexts = Array.from(table?.querySelectorAll('tr') || [])
+    .map((row) => String(row.innerText || row.textContent || '').replace(/\\s+/g, ' ').trim())
+    .filter((text) => text && !/^파일명\\s*용량\\s*비고$/.test(text));
+  const visibleRows = rowTexts.filter((text) => /\\.(?:jpe?g|png|webp)\\b|image\\/(?:jpeg|png|webp)|\\d+(?:\\.\\d+)?KB/i.test(text));
+  return { found: true, hasPhoto: rowCount > 0 || visibleRows.length > 0, rowCount: Math.max(rowCount, visibleRows.length) };
+})()
+`;
+}
+
+async function waitForRoadworkPhotoRow(webview, uploaderIndex, beforeCount) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 200));
+    const status = await webview.executeJavaScript(buildRoadworkPhotoBoardStatusScript(uploaderIndex));
+    if (status?.hasPhoto && Number(status.rowCount || 0) > Number(beforeCount || 0)) return status;
+  }
+  return null;
+}
+
+export default function RoadworkHelperView({ currentUser }) {
   const windowSiteId = new URLSearchParams(window.location.search).get('siteId') || '';
-  const roadworkPartition = windowSiteId
-    ? `persist:osoo-roadwork-${windowSiteId.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+  const activeSiteId = String(currentUser?.site_id || windowSiteId || '').trim();
+  const vm = useRoadworkHelperViewModel(activeSiteId);
+  const roadworkPartition = activeSiteId
+    ? `persist:osoo-roadwork-${activeSiteId.replace(/[^a-zA-Z0-9_-]/g, '_')}`
     : 'persist:osoo-roadwork';
   const rootRef = useRef(null);
   const webviewRef = useRef(null);
@@ -750,10 +793,9 @@ export default function RoadworkHelperView() {
   const [webviewUrl, setWebviewUrl] = useState('');
   const [webviewGeneration, setWebviewGeneration] = useState(0);
   const [showRefreshToast, setShowRefreshToast] = useState(true);
-  const [roadworkStatus, setRoadworkStatus] = useState({ isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false });
+  const [roadworkStatus, setRoadworkStatus] = useState({ isDailyLog: false, canAutoFill: false, date: '', isEditableData: false });
   const [statusMessage, setStatusMessage] = useState('');
   const [isFilling, setIsFilling] = useState(false);
-  const [isDumpingStructure, setIsDumpingStructure] = useState(false);
 
   const fetchConfig = React.useCallback(async () => {
     if (!window.electronAPI?.invokeRoadwork) {
@@ -806,7 +848,7 @@ export default function RoadworkHelperView() {
     setShowRefreshToast(true);
     wasLoginPageRef.current = true;
     setStatusMessage('도로공사 페이지를 새로 불러오는 중입니다.');
-    setRoadworkStatus({ isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false });
+    setRoadworkStatus({ isDailyLog: false, canAutoFill: false, date: '', isEditableData: false });
     if (currentUrl && !/\/security\/login\.do(?:[?#]|$)/i.test(currentUrl)) {
       setWebviewUrl(currentUrl);
     }
@@ -855,9 +897,9 @@ export default function RoadworkHelperView() {
 
       try {
         const nextStatus = await webview.executeJavaScript(ROADWORK_STATUS_SCRIPT);
-        setRoadworkStatus(nextStatus || { isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false });
+        setRoadworkStatus(nextStatus || { isDailyLog: false, canAutoFill: false, date: '', isEditableData: false });
       } catch {
-        setRoadworkStatus({ isDailyLog: false, canAutoFill: false, date: '', isEditableDate: false });
+        setRoadworkStatus({ isDailyLog: false, canAutoFill: false, date: '', isEditableData: false });
       }
     }, 1200);
 
@@ -995,10 +1037,11 @@ export default function RoadworkHelperView() {
     const webview = webviewRef.current;
     if (!webview || isFilling || !roadworkStatus.canAutoFill || roadworkStatus.date !== vm.date || !vm.hasFillData) return;
 
+    let currentPhase = 'data-fill';
     try {
       setIsFilling(true);
       setStatusMessage('');
-      const latestPayload = await RoadworkHelperModel.fetchAll(roadworkStatus.date);
+      const latestPayload = await RoadworkHelperModel.fetchAll(roadworkStatus.date, activeSiteId);
       const result = await webview.executeJavaScript(buildRoadworkAutoFillScript({
         flow: latestPayload.flow || [],
         electricity: latestPayload.electricity || [],
@@ -1006,37 +1049,92 @@ export default function RoadworkHelperView() {
         kit: latestPayload.kit || [],
       }));
       if (result?.success) {
-        setStatusMessage(result.message || '자동 채우기가 완료되었습니다. 화면을 확인한 뒤 직접 저장하세요.');
+        setStatusMessage('데이터 업로드 완료. 100%');
       } else {
         setStatusMessage(result?.message || '자동 채우기에 실패했습니다.');
       }
+
+      currentPhase = 'photo-discovery';
+      const photoResponse = await window.electronAPI?.invokeRoadwork?.('roadwork:getLocalPhotos', {
+        date: roadworkStatus.date,
+      });
+      const photos = Array.isArray(photoResponse?.photos) ? photoResponse.photos : [];
+      recordRoadworkDiagnostic('photo-stage-started', {
+        date: roadworkStatus.date,
+        itemCount: photos.length,
+        localAvailableCount: photos.filter((photo) => photo.available).length,
+        discoverySuccess: Boolean(photoResponse?.success),
+      });
+      const photoResults = [];
+      for (let index = 0; index < photos.length; index += 1) {
+        currentPhase = `photo-stage-${index + 1}`;
+        const photo = photos[index];
+        const uploaderIndex = index + 1;
+        const progress = Math.round(((index + 1) / Math.max(photos.length, 1)) * 100);
+        const board = await webview.executeJavaScript(buildRoadworkPhotoBoardStatusScript(uploaderIndex));
+        if (!board?.found) {
+          photoResults.push({ key: photo.key, result: 'board-not-found' });
+          recordRoadworkDiagnostic('photo-stage-item', { date: roadworkStatus.date, item: photo.key, result: 'board-not-found' });
+          continue;
+        }
+        if (board.hasPhoto) {
+          setStatusMessage(`사진 올리는 중.. ${photo.label} ${progress}% (기존 사진 유지)`);
+          photoResults.push({ key: photo.key, result: 'existing-photo-skipped' });
+          recordRoadworkDiagnostic('photo-stage-item', { date: roadworkStatus.date, item: photo.key, result: 'existing-photo-skipped' });
+          continue;
+        }
+        if (!photo.available || !photo.token) {
+          setStatusMessage(`사진 올리는 중.. ${photo.label} ${progress}% (사진 없음)`);
+          photoResults.push({ key: photo.key, result: 'local-photo-missing' });
+          recordRoadworkDiagnostic('photo-stage-item', { date: roadworkStatus.date, item: photo.key, result: 'local-photo-missing' });
+          continue;
+        }
+        setStatusMessage(`사진 올리는 중.. ${photo.label} ${progress}%`);
+        const injected = await window.electronAPI.invokeRoadwork('roadwork:setPhotoFile', {
+          webContentsId: webview.getWebContentsId(),
+          uploaderIndex,
+          token: photo.token,
+        });
+        if (!injected?.success) {
+          photoResults.push({ key: photo.key, result: 'file-injection-failed' });
+          recordRoadworkDiagnostic('photo-stage-item', {
+            date: roadworkStatus.date,
+            item: photo.key,
+            result: 'file-injection-failed',
+            reason: String(injected?.errorCode || injected?.error || '').slice(0, 100),
+          });
+          continue;
+        }
+        const added = await waitForRoadworkPhotoRow(webview, uploaderIndex, board.rowCount);
+        const itemResult = added ? 'photo-row-added' : 'photo-row-timeout';
+        photoResults.push({ key: photo.key, result: itemResult });
+        recordRoadworkDiagnostic('photo-stage-item', { date: roadworkStatus.date, item: photo.key, result: itemResult });
+      }
+      const addedCount = photoResults.filter((item) => item.result === 'photo-row-added').length;
+      const skippedCount = photoResults.filter((item) => item.result === 'existing-photo-skipped').length;
+      const failedCount = photoResults.filter((item) => ['file-injection-failed', 'photo-row-timeout', 'board-not-found'].includes(item.result)).length;
+      recordRoadworkDiagnostic('photo-stage-completed', {
+        date: roadworkStatus.date,
+        addedCount,
+        skippedCount,
+        failedCount,
+        missingCount: photoResults.filter((item) => item.result === 'local-photo-missing').length,
+      });
+      setStatusMessage(failedCount > 0
+        ? `데이터 입력 완료. 사진 ${addedCount}건 추가, ${failedCount}건은 추가하지 못했습니다. 화면을 확인한 뒤 저장하세요.`
+        : `데이터와 사진 준비 완료. 사진 ${addedCount}건 추가${skippedCount ? `, 기존 ${skippedCount}건 유지` : ''}. 화면을 확인한 뒤 저장하세요.`);
     } catch (error) {
+      recordRoadworkDiagnostic('auto-fill-failed', {
+        date: roadworkStatus.date,
+        phase: currentPhase,
+        reason: String(error?.message || error || '').slice(0, 120),
+      });
       setStatusMessage(error?.message || '자동 채우기 중 오류가 발생했습니다.');
     } finally {
       setIsFilling(false);
       window.setTimeout(() => setStatusMessage(''), 3500);
     }
-  }, [isFilling, roadworkStatus.canAutoFill, roadworkStatus.date, vm]);
-
-  const handleStructureDiagnostic = React.useCallback(async () => {
-    const webview = webviewRef.current;
-    if (!import.meta.env.DEV || !webview || isDumpingStructure) return;
-    try {
-      setIsDumpingStructure(true);
-      const structure = await webview.executeJavaScript(ROADWORK_STRUCTURE_SCRIPT);
-      const result = await window.electronAPI.invokeRoadwork('roadwork:dumpStructure', {
-        label: roadworkStatus.isDailyLog ? 'daily-detail' : 'list-or-menu',
-        pages: structure?.pages || [],
-      });
-      setStatusMessage(result?.success
-        ? `구조 진단 저장 완료: ${result.fileName}`
-        : `구조 진단 저장 실패: ${result?.error || '알 수 없는 오류'}`);
-    } catch (error) {
-      setStatusMessage(`구조 진단 저장 실패: ${error?.message || error}`);
-    } finally {
-      setIsDumpingStructure(false);
-    }
-  }, [isDumpingStructure, roadworkStatus.isDailyLog]);
+  }, [activeSiteId, isFilling, recordRoadworkDiagnostic, roadworkStatus.canAutoFill, roadworkStatus.date, vm]);
 
   const showAutoFill = Boolean(webviewUrl);
   const disableAutoFill = !roadworkStatus.canAutoFill || roadworkStatus.date !== vm.date || vm.loading || isFilling || !vm.hasFillData;
@@ -1088,7 +1186,7 @@ export default function RoadworkHelperView() {
           className="roadwork-autofill-button"
           onClick={handleAutoFill}
           disabled={disableAutoFill}
-          title={vm.hasFillData ? '현재 신규 일지에 로컬 데이터를 채웁니다.' : '이 날짜에 채울 로컬 데이터가 없습니다.'}
+          title={vm.hasFillData ? '현재 수정 가능한 일지에 로컬 데이터와 사진을 채웁니다.' : '이 날짜에 채울 로컬 데이터가 없습니다.'}
         >
           <span className="material-icons">auto_fix_high</span>
           {autoFillLabel}
@@ -1114,17 +1212,6 @@ export default function RoadworkHelperView() {
           새로고침 (F5)
         </button>
         </div>
-      ) : null}
-      {import.meta.env.DEV && webviewUrl ? (
-        <button
-          type="button"
-          className="roadwork-structure-diagnostic-button"
-          onClick={handleStructureDiagnostic}
-          disabled={isDumpingStructure}
-          title="개발용: 도로공사 목록/상세 구조만 저장합니다."
-        >
-          {isDumpingStructure ? '구조 읽는 중…' : '구조 진단 저장'}
-        </button>
       ) : null}
     </div>
   );

@@ -3,7 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
-const { session } = require('electron');
+const crypto = require('crypto');
+const { session, webContents } = require('electron');
 
 const DEFAULT_ROADWORK_URL = 'https://nwpo.ex.co.kr:5002/security/login.do';
 const APP_DATA_DIR_NAME = 'Osoo_Handle_App';
@@ -11,6 +12,14 @@ const ROADWORK_PARTITION_PREFIX = 'persist:osoo-roadwork';
 const ROADWORK_KEEP_ALIVE_MS = 4 * 60 * 1000;
 const roadworkKeepAliveTimers = new Map();
 const registeredRoadworkPartitions = new Set();
+const roadworkPhotoTokens = new Map();
+
+const ROADWORK_PHOTO_ITEMS = [
+  { key: 'alkalinity', label: '알칼리도', keywords: ['알칼리도', '알칼리'] },
+  { key: 'nh3_n', label: '암모니아성질소', keywords: ['암모니아성질소', '암모니아성 질소', '암모니아'] },
+  { key: 'no3_n', label: '질산성질소', keywords: ['질산성질소', '질산성 질소', '질산'] },
+  { key: 'po4_p', label: '인산염인', keywords: ['오르토인산염', '오르토 인산염', '인산염인', '인산염'] },
+];
 
 function normalizeRoadworkPartition(value) {
   const partition = String(value || ROADWORK_PARTITION_PREFIX).trim();
@@ -99,7 +108,187 @@ function withLocalDb(app, fallback, reader) {
   }
 }
 
+function listFilesRecursive(rootPath, maxDepth = 4) {
+  const files = [];
+  const visit = (currentPath, depth) => {
+    if (depth > maxDepth || !fs.existsSync(currentPath)) return;
+    for (const entry of fs.readdirSync(currentPath, { withFileTypes: true })) {
+      const targetPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) visit(targetPath, depth + 1);
+      else if (entry.isFile()) files.push(targetPath);
+    }
+  };
+  visit(rootPath, 0);
+  return files;
+}
+
+function resolveRoadworkPhotos(db, app, date, siteId) {
+  const scoped = siteId
+    ? db.prepare('SELECT qntech_photo_root FROM site_settings WHERE site_id = ?').get(siteId)
+    : null;
+  const global = db.prepare('SELECT qntech_photo_root FROM app_settings WHERE id = 1').get();
+  const configuredRoot = String(scoped?.qntech_photo_root || global?.qntech_photo_root || '').trim();
+  const photoRoot = configuredRoot
+    ? (path.isAbsolute(configuredRoot) ? configuredRoot : path.join(getCanonicalAppDataPath(app), configuredRoot))
+    : path.join(getCanonicalAppDataPath(app), '사진관리', '수질분석');
+  const monthRoot = path.join(photoRoot, date.slice(0, 4), date.slice(5, 7));
+  const candidates = listFilesRecursive(monthRoot)
+    .filter((filePath) => path.basename(filePath).includes(date))
+    .filter((filePath) => /\.(jpe?g|png|webp)$/i.test(filePath));
+
+  let firstRowId = '';
+  try {
+    const row = db.prepare(`
+      SELECT id FROM qntech_water_quality
+      WHERE date = ? AND source_type = 'qntech'
+        AND (? = '' OR site_id = ?)
+      ORDER BY measurement_order ASC, id ASC LIMIT 1
+    `).get(date, siteId, siteId);
+    firstRowId = String(row?.id || '');
+  } catch {
+    firstRowId = '';
+  }
+
+  return ROADWORK_PHOTO_ITEMS.map((item) => {
+    const matches = candidates.filter((filePath) => {
+      const compactName = path.basename(filePath).replace(/\s+/g, '');
+      return item.keywords.some((keyword) => compactName.includes(keyword.replace(/\s+/g, '')));
+    }).sort((left, right) => {
+      const leftFirst = firstRowId && path.basename(left).startsWith(`${firstRowId}_`) ? 0 : 1;
+      const rightFirst = firstRowId && path.basename(right).startsWith(`${firstRowId}_`) ? 0 : 1;
+      return leftFirst - rightFirst || path.basename(left).localeCompare(path.basename(right), 'ko');
+    });
+    return { key: item.key, label: item.label, filePath: matches[0] || '' };
+  });
+}
+
+function collectFileInputNodes(node, ancestors = [], result = []) {
+  if (!node || typeof node !== 'object') return result;
+  const attributes = Array.isArray(node.attributes) ? node.attributes : [];
+  const attributeText = attributes.join(' ');
+  const nextAncestors = [...ancestors.slice(-10), `${node.nodeName || ''} ${attributeText}`];
+  if (String(node.nodeName || '').toUpperCase() === 'INPUT' && /(?:^|\s)type\s+file(?:\s|$)/i.test(attributeText)) {
+    result.push({ nodeId: node.nodeId, context: nextAncestors.join(' ') });
+  }
+  for (const child of node.children || []) collectFileInputNodes(child, nextAncestors, result);
+  for (const shadowRoot of node.shadowRoots || []) collectFileInputNodes(shadowRoot, nextAncestors, result);
+  for (const contentDocument of node.contentDocument ? [node.contentDocument] : []) collectFileInputNodes(contentDocument, nextAncestors, result);
+  return result;
+}
+
 function registerRuntimeHandlers(ipcMain, app) {
+  ipcMain.handle('roadwork:getLocalPhotos', async (event, payload = {}) => withLocalDb(
+    app,
+    { success: false, photos: [] },
+    (db) => {
+      const date = String(payload.date || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { success: false, photos: [], error: 'invalid date' };
+      const senderId = event.sender.id;
+      const siteId = getSiteIdFromSender(event);
+      const photos = resolveRoadworkPhotos(db, app, date, siteId).map(({ key, label, filePath }) => {
+        if (!filePath) return { key, label, available: false, token: '' };
+        const token = crypto.randomBytes(18).toString('hex');
+        roadworkPhotoTokens.set(token, { senderId, filePath, expiresAt: Date.now() + (10 * 60 * 1000) });
+        return { key, label, available: true, token };
+      });
+      return { success: true, date, photos };
+    },
+  ));
+
+  ipcMain.handle('roadwork:setPhotoFile', async (event, payload = {}) => {
+    const tokenEntry = roadworkPhotoTokens.get(String(payload.token || ''));
+    roadworkPhotoTokens.delete(String(payload.token || ''));
+    if (!tokenEntry || tokenEntry.senderId !== event.sender.id || tokenEntry.expiresAt < Date.now()) {
+      return { success: false, error: 'invalid or expired photo token' };
+    }
+    if (!fs.existsSync(tokenEntry.filePath)) return { success: false, error: 'local photo not found' };
+    const target = webContents.fromId(Number(payload.webContentsId));
+    if (!target || target.isDestroyed() || target.hostWebContents?.id !== event.sender.id) {
+      return { success: false, error: 'invalid roadwork webview' };
+    }
+    if (!/^https:\/\/nwpo\.ex\.co\.kr(?::\d+)?\//i.test(target.getURL())) {
+      return { success: false, error: 'unexpected roadwork origin' };
+    }
+
+    const uploaderIndex = Number(payload.uploaderIndex);
+    const debuggerApi = target.debugger;
+    const wasAttached = debuggerApi.isAttached();
+    let fileChooserHandler = null;
+    try {
+      if (!wasAttached) debuggerApi.attach('1.3');
+      await debuggerApi.sendCommand('DOM.enable');
+      await debuggerApi.sendCommand('Page.enable');
+      await debuggerApi.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true });
+
+      const chooserPromise = new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          if (fileChooserHandler) debuggerApi.removeListener('message', fileChooserHandler);
+          fileChooserHandler = null;
+          resolve(null);
+        }, 4000);
+        fileChooserHandler = (_event, method, params) => {
+          if (method !== 'Page.fileChooserOpened') return;
+          clearTimeout(timeout);
+          debuggerApi.removeListener('message', fileChooserHandler);
+          fileChooserHandler = null;
+          resolve(params || null);
+        };
+        debuggerApi.on('message', fileChooserHandler);
+      });
+
+      const clickResult = await debuggerApi.sendCommand('Runtime.evaluate', {
+        expression: `(() => {
+          const visited = [];
+          const visit = (targetWindow) => {
+            if (!targetWindow || visited.includes(targetWindow)) return null;
+            visited.push(targetWindow);
+            try {
+              const button = targetWindow.document?.getElementById('dragDrop${uploaderIndex}_anchor2');
+              if (button) {
+                button.click();
+                return true;
+              }
+              for (const frame of targetWindow.document?.querySelectorAll('iframe') || []) {
+                try {
+                  const clicked = visit(frame.contentWindow);
+                  if (clicked) return true;
+                } catch {}
+              }
+            } catch {}
+            return false;
+          };
+          return visit(window);
+        })()`,
+        returnByValue: true,
+        awaitPromise: true,
+      });
+      if (!clickResult?.result?.value) {
+        return { success: false, error: 'roadwork photo add button not found', errorCode: 'PHOTO_ADD_BUTTON_NOT_FOUND' };
+      }
+
+      const chooser = await chooserPromise;
+      if (!chooser?.backendNodeId) {
+        return { success: false, error: 'roadwork file chooser not opened', errorCode: 'PHOTO_CHOOSER_NOT_OPENED' };
+      }
+      await debuggerApi.sendCommand('DOM.setFileInputFiles', {
+        files: [tokenEntry.filePath],
+        backendNodeId: chooser.backendNodeId,
+      });
+      return { success: true };
+    } catch (error) {
+      console.warn('[Roadwork Photo] File input injection failed:', error?.message || error);
+      return { success: false, error: 'roadwork photo injection failed', errorCode: 'CDP_FILE_INPUT_FAILED' };
+    } finally {
+      if (fileChooserHandler) debuggerApi.removeListener('message', fileChooserHandler);
+      if (debuggerApi.isAttached()) {
+        try {
+          await debuggerApi.sendCommand('Page.setInterceptFileChooserDialog', { enabled: false });
+        } catch {}
+      }
+      if (!wasAttached && debuggerApi.isAttached()) debuggerApi.detach();
+    }
+  });
+
   ipcMain.handle('roadwork:keepSessionAlive', async (_event, payload = {}) => {
     const partition = normalizeRoadworkPartition(payload.partition);
     const targetUrl = String(payload.url || '').trim();

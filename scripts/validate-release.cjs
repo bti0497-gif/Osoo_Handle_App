@@ -1591,7 +1591,7 @@ function validateRegressionContracts() {
       modalText.includes("progress.status === 'error'") &&
       modalText.includes("typeof onImportQntech === 'function' ? onImportQntech : runInternalQntechImport") &&
       modalText.includes("typeof onImportQntechRange === 'function' ? onImportQntechRange : runInternalQntechRangeImport") &&
-      modalText.includes("reloadContexts({ force: true, tabs: ['water', 'kit'] })") &&
+      (modalText.match(/reloadContexts\(\{ force: true, tabs: \['water', 'kit'\] \}\)/g) || []).length >= 3 &&
       modalText.includes("import { BatchProgressDialog } from '../../components/common'") &&
       modalText.includes('usesInternalQntechProgress && internalQntechProgress') &&
       modalText.includes('isProcessing={isInternalQntechImporting}') &&
@@ -1634,7 +1634,7 @@ function validateRegressionContracts() {
   const electronMainTextForWindow = readText(path.join(BASE_DIR, 'electron', 'main.cjs'));
 
   checkSource(
-    roadworkContractText.includes('Auto-fill may populate only a newly editable daily-log screen') &&
+    roadworkContractText.includes('Auto-fill may populate only an editable daily-log screen') &&
       roadworkContractText.includes("must never invoke the roadwork site's save action") &&
       roadworkContractText.includes('A date mismatch must disable auto-fill') &&
       roadworkContractText.includes('GET /api/roadwork-helper/all?date=YYYY-MM-DD'),
@@ -1643,7 +1643,7 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    roadworkModelText.includes("apiClient.get('/api/roadwork-helper/all', { date })") &&
+    roadworkModelText.includes("apiClient.get('/api/roadwork-helper/all', { date, siteId })") &&
       roadworkViewModelText.includes('flow: res.flow || []') &&
       roadworkViewModelText.includes('electricity: res.electricity || []') &&
       roadworkViewModelText.includes('medicine: res.medicine || []') &&
@@ -1655,12 +1655,22 @@ function validateRegressionContracts() {
   checkSource(
     roadworkViewText.includes('nodeintegration="false"') &&
       roadworkViewText.includes('enableremotemodule="false"') &&
-      roadworkViewText.includes("const roadworkPartition = windowSiteId") &&
+      roadworkViewText.includes("const roadworkPartition = activeSiteId") &&
       roadworkViewText.includes("partition={roadworkPartition}") &&
       roadworkViewText.includes("'persist:osoo-roadwork'") &&
       roadworkViewText.includes('roadworkStatus.date !== vm.date') &&
-      roadworkViewText.includes('RoadworkHelperModel.fetchAll(roadworkStatus.date)') &&
+      roadworkViewText.includes('RoadworkHelperModel.fetchAll(roadworkStatus.date, activeSiteId)') &&
       roadworkViewText.includes("document.getElementById('btn_Save')") &&
+      roadworkViewText.includes('isVisible(saveButton) && isEditableData') &&
+      roadworkViewText.includes("saveButton?.getAttribute?.('disabled') === null") &&
+      !roadworkViewText.includes('isEditableDate') &&
+      roadworkViewText.includes("roadwork:getLocalPhotos") &&
+      roadworkViewText.includes("roadwork:setPhotoFile") &&
+      roadworkViewText.includes("result: 'existing-photo-skipped'") &&
+      roadworkRuntimeText.includes("ipcMain.handle('roadwork:getLocalPhotos'") &&
+      roadworkRuntimeText.includes("ipcMain.handle('roadwork:setPhotoFile'") &&
+      roadworkRuntimeText.includes("DOM.setFileInputFiles") &&
+      roadworkRuntimeText.includes("target.hostWebContents?.id !== event.sender.id") &&
       !roadworkViewText.includes('saveButton.click'),
     '공사입력 도우미 웹뷰·날짜·비저장 보호 계약 유지',
     '공사입력 도우미가 웹뷰 보안, 날짜 불일치 차단 또는 비저장 원칙을 위반할 수 있습니다'

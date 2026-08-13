@@ -193,6 +193,19 @@ function normalizeMeasurementValue(value) {
   return normalized;
 }
 
+function applyDilutionFactor(value, dilution) {
+  const normalizedValue = normalizeMeasurementValue(value);
+  if (normalizedValue === null || normalizedValue === '초과') return normalizedValue;
+
+  const numericValue = Number(normalizedValue);
+  const numericDilution = Number(dilution);
+  if (!Number.isFinite(numericValue) || !Number.isInteger(numericDilution) || numericDilution <= 1) {
+    return normalizedValue;
+  }
+
+  return (Math.round((numericValue * numericDilution + Number.EPSILON) * 10) / 10).toFixed(1);
+}
+
 function toNumericMeasurementValue(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -305,7 +318,7 @@ function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappi
         unit: definition.unit
       };
 
-      row.result_value = normalizeMeasurementValue(measurement.ppm);
+      row.result_value = applyDilutionFactor(measurement.ppm, measurement.dilution);
       row.result_numeric = toNumericMeasurementValue(row.result_value);
       rowMap.set(rowKey, row);
     });

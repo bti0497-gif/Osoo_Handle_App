@@ -74,7 +74,8 @@ const normalizeDisplayWaterValue = (value) => {
     if (typeof value === 'number' && Number.isNaN(value)) return '초과';
     const normalized = String(value).trim();
     if (['-1', '-1.0', '-1.00', 'NaN', 'nan'].includes(normalized)) return '초과';
-    return normalized;
+    const numericValue = Number(normalized);
+    return Number.isFinite(numericValue) ? numericValue.toFixed(1) : normalized;
 };
 
 const getShortName = (name) => {
