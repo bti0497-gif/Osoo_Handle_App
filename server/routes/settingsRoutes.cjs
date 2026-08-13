@@ -253,7 +253,9 @@ module.exports = function (db, baseDir, appDataPath) {
   // 사이트 목록 조회 API
   router.get('/api/settings/sites', async (req, res) => {
     try {
-      const result = await siteSettingsService.listSites(db);
+      const result = await siteSettingsService.listSites(db, {
+        localOnly: String(req.query?.source || '').toLowerCase() === 'local'
+      });
       res.json({ success: true, ...result });
     } catch (e) {
       res.status(e.statusCode || 500).json({ success: false, message: e.message });

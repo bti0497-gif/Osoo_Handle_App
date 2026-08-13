@@ -21,6 +21,7 @@ const SettingsView = ({ currentUser, onMultiSiteModeChanged }) => {
         showAlert,
         showConfirm,
         onMultiSiteModeChanged,
+        loadRemoteSiteList: true,
     });
     const [showHistoryRestore, setShowHistoryRestore] = React.useState(false);
     const bigQueryRestoreState = useBigQueryRestore({ showAlert, showConfirm });

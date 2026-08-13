@@ -39,8 +39,8 @@ export const SettingsModel = {
         clearSettingsCache();
     },
 
-    async getSites() {
-        return apiClient.get('/api/settings/sites');
+    async getSites({ localOnly = false } = {}) {
+        return apiClient.get('/api/settings/sites', localOnly ? { source: 'local' } : undefined);
     },
 
     async selectSite(siteId) {

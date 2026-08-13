@@ -86,11 +86,11 @@ function getFlowOptionForSite(db, series) {
   return 'single1';
 }
 
-async function listSites(db) {
+async function listSites(db, { localOnly = false } = {}) {
   let sites = [];
   let source = 'local';
 
-  if (isSheetsConfigured() && process.env.OSOO_API_VALIDATION !== '1') {
+  if (!localOnly && isSheetsConfigured() && process.env.OSOO_API_VALIDATION !== '1') {
     try {
       const sheetSites = await withTimeout(getSitesFromSheets(), 3000, '현장 목록 조회');
       const activeSheetSites = sheetSites

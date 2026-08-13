@@ -19,7 +19,7 @@ import {
 
 export const useSettingsViewModel = (
     currentUser,
-    { showAlert, showConfirm, onMultiSiteModeChanged } = {}
+    { showAlert, showConfirm, onMultiSiteModeChanged, loadRemoteSiteList = false } = {}
 ) => {
     const [activeTab, setActiveTab] = useState('basic');
     const [isLoading, setIsLoading] = useState(true);
@@ -293,21 +293,23 @@ export const useSettingsViewModel = (
 
     async function loadSettings(options = {}) {
         try {
-            setIsSiteListLoading(true);
-            const [data, sitesData] = await Promise.all([
-                SettingsModel.getSettings({ force: options.force }),
-                SettingsModel.getSites().catch(() => null)
-            ]);
+            const data = await SettingsModel.getSettings({ force: options.force });
+            const hasSavedSiteIdentity = Boolean(
+                String(data?.settings?.site_id || '').trim() || String(data?.settings?.site_name || '').trim()
+            );
+            // 현장이 저장된 현장 전용 앱은 로컬 설정만 사용한다. 구글시트
+            // 현장목록은 최초 현장 지정이 필요한 경우에만 조회한다.
+            const shouldLoadRemoteSiteList = loadRemoteSiteList && !hasSavedSiteIdentity;
+            setIsSiteListLoading(shouldLoadRemoteSiteList);
+            const sitesData = loadRemoteSiteList
+                ? await SettingsModel.getSites({ localOnly: !shouldLoadRemoteSiteList }).catch(() => null)
+                : null;
 
             const siteList = Array.isArray(sitesData?.sites) ? sitesData.sites : [];
             setAvailableSites(siteList);
 
             if (data?.success && data.settings) {
                 setMultiSiteEnabled(Number(data.settings.multi_site_enabled || 0) === 1);
-                const hasSavedSiteIdentity = Boolean(
-                    String(data.settings.site_id || '').trim() || String(data.settings.site_name || '').trim()
-                );
-
                 setIsAppSiteConfigured(hasSavedSiteIdentity);
 
                 if (data.settings.site_name || data.settings.excel_template_path) setHasLoadedSettings(true);
