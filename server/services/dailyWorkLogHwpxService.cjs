@@ -304,7 +304,7 @@ function getSludgeDetails(db, date, amount, monthlyTotal, context = {}) {
       반출업체: '',
       반출량: '',
       계근량: '',
-      월간누계: '',
+      월간누계: monthlyTotal ?? '',
     };
   }
   const filter = getSiteFilter(db, context);

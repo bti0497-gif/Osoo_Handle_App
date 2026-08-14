@@ -36,6 +36,24 @@ function getRowSiteInfo(row, defaults) {
   };
 }
 
+function summarizeRowsBySite(rows, defaults) {
+  const counts = new Map();
+
+  rows.forEach((row) => {
+    const site = getRowSiteInfo(row, defaults);
+    const siteId = String(site.siteId || '').trim();
+    const siteName = String(site.siteName || '').trim();
+    const key = `${siteId}|${siteName}`;
+    const current = counts.get(key) || { siteId, siteName, count: 0 };
+    current.count += 1;
+    counts.set(key, current);
+  });
+
+  return Array.from(counts.values()).sort((left, right) => (
+    left.siteName.localeCompare(right.siteName, 'ko-KR') || left.siteId.localeCompare(right.siteId)
+  ));
+}
+
 function buildInsertId(tableName, row, defaults) {
   const { siteName } = getRowSiteInfo(row, defaults);
   const basis = [
@@ -282,11 +300,12 @@ async function syncTable(tableName) {
   const rows = db.prepare(`SELECT * FROM ${tableName} WHERE is_synced = 2`).all();
   if (rows.length === 0) return { success: true, count: 0 };
 
-  const { siteName, authorName, siteId } = getSiteInfo();
+  const defaultSiteInfo = getSiteInfo();
+  const siteBreakdown = summarizeRowsBySite(rows, defaultSiteInfo);
   
   // 5-3. 데이터 변환
   const bqRows = rows.map(row => {
-    const rowSiteInfo = getRowSiteInfo(row, { siteName, authorName, siteId });
+    const rowSiteInfo = getRowSiteInfo(row, defaultSiteInfo);
     return mapper(row, rowSiteInfo.siteName, rowSiteInfo.authorName, rowSiteInfo.siteId);
   });
   const rowIds = rows.map(r => r.id);
@@ -371,7 +390,7 @@ async function syncTable(tableName) {
       action: `sync:${tableName}`,
       result: 'ok',
       message: `${tableName} ${rows.length} rows synced`,
-      details: { tableName, count: rows.length },
+      details: { tableName, count: rows.length, siteBreakdown },
     });
     return { success: true, count: rows.length };
 
@@ -395,7 +414,7 @@ async function syncTable(tableName) {
       action: `sync:${tableName}`,
       result: 'failed',
       message: errorMsg,
-      details: { tableName, rowCount: rows.length, error: err },
+      details: { tableName, rowCount: rows.length, siteBreakdown, error: err },
     });
     return { success: false, error: errorMsg };
   }
