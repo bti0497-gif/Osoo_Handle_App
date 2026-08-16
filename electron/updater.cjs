@@ -150,6 +150,15 @@ function setupAutoUpdater(mainWindow, options = {}) {
 
   autoUpdater.on('error', (err) => {
     writeUpdateLog('updater-error', { message: err.message });
+    try {
+      options.onUpdaterDiagnostic?.({
+        action: 'updater-error',
+        result: 'failed',
+        message: String(err?.message || err || 'unknown updater error').slice(0, 300),
+      });
+    } catch (diagnosticError) {
+      console.warn('[Updater] Failed to record updater diagnostic:', diagnosticError.message);
+    }
     sendUpdateEvent(mainWindow, 'update:error', err.message);
   });
 

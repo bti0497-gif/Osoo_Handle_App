@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const http = require('http');
 const crypto = require('crypto');
 const { fork, spawnSync } = require('child_process');
@@ -86,6 +87,110 @@ function getWatchdogHeartbeatPath() {
   return path.join(getOsooAppDataPath(), 'runtime', 'app-heartbeat.json');
 }
 
+function getEnvironmentBaselineMarkerPath() {
+  const version = String(app.getVersion() || 'unknown').replace(/[^0-9A-Za-z._-]/g, '_');
+  return path.join(getOsooAppDataPath(), 'runtime', `.environment-baseline-${version}.done`);
+}
+
+function classifyInstallationScope() {
+  const executablePath = String(process.execPath || '').toLowerCase();
+  if (executablePath.includes('\\program files\\')) return 'machine-program-files';
+  if (executablePath.includes('\\appdata\\')) return 'user-appdata';
+  return 'other';
+}
+
+function readAppDataDiskSnapshot() {
+  try {
+    if (typeof fs.statfsSync !== 'function') return { available: false, reason: 'statfs-unavailable' };
+    const stats = fs.statfsSync(getOsooAppDataPath());
+    const blockSize = Number(stats.bsize || 0);
+    const totalBlocks = Number(stats.blocks || 0);
+    const freeBlocks = Number(stats.bavail ?? stats.bfree ?? 0);
+    if (!blockSize || !totalBlocks) return { available: false, reason: 'statfs-empty' };
+    return {
+      available: true,
+      totalBytes: blockSize * totalBlocks,
+      freeBytes: blockSize * freeBlocks,
+    };
+  } catch (error) {
+    return { available: false, reason: String(error?.code || error?.message || 'statfs-failed').slice(0, 80) };
+  }
+}
+
+function readWatchdogEnvironmentStatus() {
+  const statusPath = path.join(getOsooAppDataPath(), 'runtime', 'watchdog-status.json');
+  let status = {};
+  try {
+    status = JSON.parse(fs.readFileSync(statusPath, 'utf8')) || {};
+  } catch (_) {
+    // The watchdog can be starting independently. Its absence is diagnostic data,
+    // not an application failure.
+  }
+  return {
+    packagedBinaryPresent: !isDev && fs.existsSync(path.join(process.resourcesPath, 'watchdog', 'OsooWatchdog.exe')),
+    version: String(status.version || '').trim() || null,
+    state: String(status.state || '').trim() || null,
+    checkedAt: String(status.checkedAt || '').trim() || null,
+    maintenanceReason: String(status.maintenanceReason || '').trim() || null,
+  };
+}
+
+function recordEnvironmentBaseline() {
+  if (isDev) return;
+  const markerPath = getEnvironmentBaselineMarkerPath();
+  if (fs.existsSync(markerPath)) return;
+
+  let systemMemory = null;
+  try {
+    systemMemory = process.getSystemMemoryInfo?.() || null;
+  } catch (_) {
+    // Memory collection is optional and must never affect application startup.
+  }
+
+  const dbPath = path.join(getOsooAppDataPath(), 'osoo.db');
+  const details = {
+    schemaVersion: 1,
+    app: {
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      installationScope: classifyInstallationScope(),
+      architecture: process.arch,
+      runtime: {
+        electron: process.versions.electron || null,
+        chrome: process.versions.chrome || null,
+        node: process.versions.node || null,
+      },
+    },
+    operatingSystem: {
+      platform: process.platform,
+      systemVersion: process.getSystemVersion?.() || os.release(),
+      kernelRelease: os.release(),
+      architecture: os.arch(),
+    },
+    resources: {
+      systemMemory,
+      appDataVolume: readAppDataDiskSnapshot(),
+    },
+    localRuntime: {
+      localDatabasePresent: fs.existsSync(dbPath),
+      serverReadyAtCollection: true,
+      watchdog: readWatchdogEnvironmentStatus(),
+    },
+  };
+
+  if (!appendElectronRecoveryDiagnostic('environment-baseline', 'observed', details)) return;
+  try {
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    fs.writeFileSync(markerPath, JSON.stringify({
+      schemaVersion: 1,
+      appVersion: app.getVersion(),
+      recordedAt: new Date().toISOString(),
+    }, null, 2), 'utf8');
+  } catch (error) {
+    console.warn('[Electron] Failed to write environment baseline marker:', error.message);
+  }
+}
+
 function writeWatchdogHeartbeat(serverReady) {
   try {
     const targetPath = getWatchdogHeartbeatPath();
@@ -158,6 +263,7 @@ async function waitForServerReadyAndClearMaintenanceLocks(timeoutMs = SERVER_STA
   while (Date.now() - startedAt < timeoutMs) {
     const healthy = await checkEmbeddedServerHealth();
     if (healthy) {
+      recordEnvironmentBaseline();
       ['update', 'full-exit'].forEach((reason) => {
         const cleared = clearMaintenanceLockIfReason(reason, {
           onlyIfNotExpired: true,
@@ -268,8 +374,10 @@ function appendElectronRecoveryDiagnostic(action, result, details = {}) {
       result,
       details,
     })}\n`, 'utf8');
+    return true;
   } catch (error) {
     console.warn('[Electron] Failed to record renderer recovery diagnostic:', error.message);
+    return false;
   }
 }
 
@@ -1010,6 +1118,9 @@ app.whenReady().then(() => {
   if (!isDev) {
     setupAutoUpdater(mainWindow, {
       logFilePath: path.join(app.getPath('appData'), 'Osoo_Handle_App', 'logs', 'electron-updater.log'),
+      onUpdaterDiagnostic: ({ action, result, message }) => {
+        appendElectronRecoveryDiagnostic(action, result, { message });
+      },
       onBeforeInstall: async () => {
         isUpdateInstalling = true;
         isQuitting = true;
