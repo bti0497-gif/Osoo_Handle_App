@@ -15,6 +15,7 @@ const {
 } = require('../services/dailyLogPreviewService.cjs');
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
 const { getHtmlTemplatePath } = require('../services/excelTemplateHtmlService.cjs');
+const { recordDiagnostic } = require('../services/diagnosticLogService.cjs');
 const router = express.Router();
 
 function buildMissingTemplateResponse(templateName) {
@@ -31,6 +32,68 @@ function getReportSiteScope(req) {
     siteId: String(req.query.siteId || req.query.site_id || req.siteContext?.siteId || '').trim(),
     siteName: String(req.query.siteName || req.query.site_name || req.siteContext?.siteName || '').trim(),
   };
+}
+
+function recordPreviewPageMissDiagnostic(db, appDataPath, req, {
+  operation,
+  templateName,
+  range,
+  pageKey,
+  manifest,
+} = {}) {
+  const settings = db.prepare(`
+    SELECT site_id, site_name, multi_site_enabled, primary_site_id, secondary_site_id
+    FROM app_settings WHERE id = 1
+  `).get() || {};
+  const configuredSiteIds = [settings.primary_site_id, settings.secondary_site_id]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  const configuredSites = configuredSiteIds.map((siteId) => {
+    const site = db.prepare('SELECT id, site_name FROM sites WHERE id = ?').get(siteId) || {};
+    return { siteId, siteName: String(site.site_name || '').trim() };
+  });
+  const resolvedSite = getReportSiteScope(req);
+  const parsedPage = parsePageKey(pageKey);
+
+  recordDiagnostic(db, appDataPath, {
+    level: 'error',
+    area: 'report-preview',
+    action: 'preview-page-not-found',
+    result: 'failed',
+    message: 'report preview page is absent from the resolved site manifest',
+    siteId: resolvedSite.siteId,
+    siteName: resolvedSite.siteName,
+    details: {
+      operation,
+      request: {
+        method: req.method,
+        path: req.path,
+        sourceMenu: String(templateName || '수질분석일지').trim() || '수질분석일지',
+      },
+      activeWindowSiteId: String(req.get('x-osoo-site-id') || '').trim(),
+      resolvedSite,
+      localSiteName: String(req.query.localSiteName || req.query.local_site_name || '').trim(),
+      multiSiteEnabled: Number(settings.multi_site_enabled || 0) === 1,
+      primarySite: {
+        siteId: String(settings.primary_site_id || settings.site_id || '').trim(),
+        siteName: String(settings.site_name || '').trim(),
+      },
+      configuredSites,
+      report: {
+        templateName: String(templateName || '').trim(),
+        startDate: range?.startDate || '',
+        endDate: range?.endDate || '',
+        requestedPage: parsedPage || null,
+        manifestPageCount: Array.isArray(manifest?.pages) ? manifest.pages.length : 0,
+        manifestPages: (manifest?.pages || []).map((page) => ({
+          date: page.date,
+          measurementGroup: page.measurementGroup || '',
+          pageNumberForDate: page.pageNumberForDate || 0,
+          totalPagesForDate: page.totalPagesForDate || 0,
+        })),
+      },
+    },
+  });
 }
 
 module.exports = function(db, baseDir, appDataPath) {
@@ -118,6 +181,7 @@ module.exports = function(db, baseDir, appDataPath) {
       const targetPage = findPageInManifest(manifest, pageKey);
 
       if (!targetPage) {
+        recordPreviewPageMissDiagnostic(db, appDataPath, req, { operation: 'preview-pdf', templateName, range, pageKey, manifest });
         return res.status(404).json({ error: 'Preview page not found' });
       }
 
@@ -161,6 +225,7 @@ module.exports = function(db, baseDir, appDataPath) {
       const targetPage = findPageInManifest(manifest, pageKey);
 
       if (!targetPage) {
+        recordPreviewPageMissDiagnostic(db, appDataPath, req, { operation: 'preview-page-data', templateName, range, pageKey, manifest });
         return res.status(404).json({ error: 'Preview page not found' });
       }
 
@@ -208,6 +273,7 @@ module.exports = function(db, baseDir, appDataPath) {
       const targetPage = findPageInManifest(manifest, pageKey || (parsedPageKey ? pageKey : ''));
 
       if (!targetPage) {
+        recordPreviewPageMissDiagnostic(db, appDataPath, req, { operation: 'preview-photo', templateName, range, pageKey, manifest });
         return res.status(404).json({ error: 'Preview page not found' });
       }
 
