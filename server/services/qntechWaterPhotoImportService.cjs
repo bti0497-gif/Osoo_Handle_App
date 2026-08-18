@@ -113,11 +113,14 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
 
   const selectedFiles = [];
   const totalProjects = sourceProjects.length;
+  const projectsWithRecognizedPhotos = new Set();
   sourceProjects.forEach((project, projectIndex) => {
     const sourceLabel = buildProjectSourceLabel(project, projectIndex, totalProjects);
+    const projectKey = String(project?.id || `index-${projectIndex}`);
     for (const file of project.files || []) {
       const matchedItem = matchTargetItem(file?.item?.name);
       if (!matchedItem) continue;
+      projectsWithRecognizedPhotos.add(projectKey);
       selectedFiles.push({
         itemName: matchedItem,
         sourceLabel,
@@ -204,7 +207,11 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
     driveUploadedPhotos: [],
     driveQueuedPhotos,
     driveUploadErrors,
-    identifiedPhotos: selectedFiles.length
+    identifiedPhotos: selectedFiles.length,
+    photoSourceProjectCount: totalProjects,
+    photoProjectsWithRecognizedFiles: projectsWithRecognizedPhotos.size,
+    photoProjectsWithoutRecognizedFiles: Math.max(0, totalProjects - projectsWithRecognizedPhotos.size),
+    photoDownloadFailureCount: 0,
   };
 }
 

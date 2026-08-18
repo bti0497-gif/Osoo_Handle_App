@@ -111,7 +111,7 @@ export const useAuthViewModel = () => {
     const clearRoadworkRendererSessionUrls = useCallback(() => {
         try {
             Object.keys(window.sessionStorage)
-                .filter((key) => key.startsWith('osoo:roadwork-session-url:'))
+                .filter((key) => key.startsWith('osoo:roadwork-session-url:') || key.startsWith('osoo:roadwork-daily-url:v2:'))
                 .forEach((key) => window.sessionStorage.removeItem(key));
         } catch {
             // 로그아웃 자체는 브라우저 저장소 접근 실패와 무관하게 계속 진행합니다.

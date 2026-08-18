@@ -69,10 +69,11 @@ const ROADWORK_STATUS_SCRIPT = `
 
   const daily = getDailyWindow();
   if (!daily) {
-    return { isDailyLog: false, canAutoFill: false, date: '', isEditableData: false };
+    return { isDailyLog: false, canAutoFill: false, date: '', isEditableData: false, newButtonRect: null };
   }
 
   const saveButton = daily.document.getElementById('btn_Save');
+  const newButton = daily.document.getElementById('btn_New');
   const dateInput = daily.document.getElementById('regDate_input') || daily.document.getElementById('regDate');
   const date = normalizeDate(
     daily.regDate?.getValue?.()
@@ -86,12 +87,45 @@ const ROADWORK_STATUS_SCRIPT = `
     && saveButton?.getAttribute?.('aria-disabled') !== 'true'
     && !saveButton?.closest?.('.w2input_disabled,.disabled')
   );
+  const dailyUrl = (() => {
+    try {
+      return String(daily.location?.href || '');
+    } catch {
+      return '';
+    }
+  })();
+  const getViewportRect = (target, element) => {
+    if (!isVisible(element)) return null;
+    try {
+      const rect = element.getBoundingClientRect();
+      let left = rect.left;
+      let top = rect.top;
+      let current = target;
+      while (current && current !== current.top) {
+        const frame = current.frameElement;
+        if (!frame) break;
+        const frameRect = frame.getBoundingClientRect();
+        left += frameRect.left;
+        top += frameRect.top;
+        current = current.parent;
+      }
+      return {
+        left: Math.round(left),
+        top: Math.round(top),
+        height: Math.round(rect.height),
+      };
+    } catch {
+      return null;
+    }
+  };
 
   return {
     isDailyLog: true,
     canAutoFill: isVisible(saveButton) && isEditableData,
     date,
     isEditableData,
+    dailyUrl,
+    newButtonRect: getViewportRect(daily, newButton),
   };
 })()
 `;
@@ -791,14 +825,16 @@ export default function RoadworkHelperView({ currentUser }) {
   const [loadError, setLoadError] = useState(null);
   const [preloadPath, setPreloadPath] = useState('');
   const [webviewUrl, setWebviewUrl] = useState('');
+  const [configuredRoadworkUrl, setConfiguredRoadworkUrl] = useState(DEFAULT_ROADWORK_URL);
   const [webviewGeneration, setWebviewGeneration] = useState(0);
   const [showRefreshToast, setShowRefreshToast] = useState(true);
-  const [roadworkStatus, setRoadworkStatus] = useState({ isDailyLog: false, canAutoFill: false, date: '', isEditableData: false });
+  const [roadworkStatus, setRoadworkStatus] = useState({ isDailyLog: false, canAutoFill: false, date: '', isEditableData: false, newButtonRect: null });
   const [statusMessage, setStatusMessage] = useState('');
   const [isFilling, setIsFilling] = useState(false);
 
   const fetchConfig = React.useCallback(async () => {
     if (!window.electronAPI?.invokeRoadwork) {
+      setConfiguredRoadworkUrl(DEFAULT_ROADWORK_URL);
       setWebviewUrl(DEFAULT_ROADWORK_URL);
       return;
     }
@@ -814,10 +850,12 @@ export default function RoadworkHelperView({ currentUser }) {
       const urlRes = await window.electronAPI.invokeRoadwork('roadwork:getRoadworkUrl');
       const targetUrl = String(urlRes?.url || DEFAULT_ROADWORK_URL)
         .replace(':5002//security', ':5002/security');
+      setConfiguredRoadworkUrl(targetUrl);
       const rememberedUrl = getRememberedRoadworkSessionUrl(roadworkPartition);
       setWebviewUrl(rememberedUrl || targetUrl);
     } catch (err) {
       console.warn('[Roadwork Helper] Failed to resolve config:', err.message);
+      setConfiguredRoadworkUrl(DEFAULT_ROADWORK_URL);
       setWebviewUrl(DEFAULT_ROADWORK_URL);
     }
   }, [roadworkPartition]);
@@ -843,20 +881,22 @@ export default function RoadworkHelperView({ currentUser }) {
     lastRefreshAtRef.current = now;
 
     const currentUrl = webviewRef.current?.getURL?.() || webviewUrl;
+    const resumeUrl = getRememberedRoadworkSessionUrl(roadworkPartition)
+      || configuredRoadworkUrl
+      || DEFAULT_ROADWORK_URL;
     clearPendingLoadFailure();
     setLoadError(null);
     setShowRefreshToast(true);
     wasLoginPageRef.current = true;
     setStatusMessage('도로공사 페이지를 새로 불러오는 중입니다.');
-    setRoadworkStatus({ isDailyLog: false, canAutoFill: false, date: '', isEditableData: false });
-    if (currentUrl && !/\/security\/login\.do(?:[?#]|$)/i.test(currentUrl)) {
-      setWebviewUrl(currentUrl);
-    }
+    setRoadworkStatus({ isDailyLog: false, canAutoFill: false, date: '', isEditableData: false, newButtonRect: null });
+    setWebviewUrl(resumeUrl);
     setWebviewGeneration((value) => value + 1);
     recordRoadworkDiagnostic('webview-refresh', {
       source,
       partition: roadworkPartition,
-      resumePath: (() => { try { return currentUrl ? new URL(currentUrl).pathname : ''; } catch { return ''; } })(),
+      previousPath: (() => { try { return currentUrl ? new URL(currentUrl).pathname : ''; } catch { return ''; } })(),
+      resumePath: (() => { try { return new URL(resumeUrl).pathname; } catch { return ''; } })(),
       pageOrigin: (() => {
         try {
           return currentUrl ? new URL(currentUrl).origin : '';
@@ -866,7 +906,7 @@ export default function RoadworkHelperView({ currentUser }) {
       })(),
     });
     window.setTimeout(() => setStatusMessage(''), 3500);
-  }, [clearPendingLoadFailure, recordRoadworkDiagnostic, roadworkPartition, webviewUrl]);
+  }, [clearPendingLoadFailure, configuredRoadworkUrl, recordRoadworkDiagnostic, roadworkPartition, webviewUrl]);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -897,9 +937,16 @@ export default function RoadworkHelperView({ currentUser }) {
 
       try {
         const nextStatus = await webview.executeJavaScript(ROADWORK_STATUS_SCRIPT);
-        setRoadworkStatus(nextStatus || { isDailyLog: false, canAutoFill: false, date: '', isEditableData: false });
+        if (nextStatus?.isDailyLog && nextStatus?.dailyUrl) {
+          rememberRoadworkSessionUrl(roadworkPartition, nextStatus.dailyUrl);
+        }
+        // 로그인 화면뿐 아니라 외부 사이트의 전체 대시보드 등 일지가 아닌
+        // 화면에서도 사용자가 즉시 정상 일지 주소로 복귀할 수 있게 한다.
+        setShowRefreshToast(!nextStatus?.isDailyLog);
+        setRoadworkStatus(nextStatus || { isDailyLog: false, canAutoFill: false, date: '', isEditableData: false, newButtonRect: null });
       } catch {
-        setRoadworkStatus({ isDailyLog: false, canAutoFill: false, date: '', isEditableData: false });
+        setShowRefreshToast(true);
+        setRoadworkStatus({ isDailyLog: false, canAutoFill: false, date: '', isEditableData: false, newButtonRect: null });
       }
     }, 1200);
 
@@ -960,7 +1007,6 @@ export default function RoadworkHelperView({ currentUser }) {
       clearPendingLoadFailure();
       setLoadError(null);
       const currentUrl = webview.getURL();
-      rememberRoadworkSessionUrl(roadworkPartition, currentUrl);
       let pageOrigin = '';
       try {
         pageOrigin = new URL(currentUrl).origin;
@@ -975,7 +1021,10 @@ export default function RoadworkHelperView({ currentUser }) {
           url: currentUrl,
         }).catch((error) => console.warn('[Roadwork Helper] 세션 유지 등록 실패:', error));
       }
-      recordRoadworkDiagnostic('webview-load-finished', { pageOrigin });
+      recordRoadworkDiagnostic('webview-load-finished', {
+        pageOrigin,
+        pagePath: (() => { try { return new URL(currentUrl).pathname; } catch { return ''; } })(),
+      });
       if (!wasLoginPageRef.current && isLoginPage) {
         recordRoadworkDiagnostic('session-unexpected-login-page', { partition: roadworkPartition });
       }
@@ -987,7 +1036,6 @@ export default function RoadworkHelperView({ currentUser }) {
 
     const handleNavigate = (event) => {
       const currentUrl = String(event.url || '');
-      rememberRoadworkSessionUrl(roadworkPartition, currentUrl);
       const isLoginPage = /\/security\/login\.do(?:[?#]|$)/i.test(currentUrl);
       setShowRefreshToast(isLoginPage);
       if (!isLoginPage) {
@@ -1006,7 +1054,11 @@ export default function RoadworkHelperView({ currentUser }) {
         } catch {
           pageOrigin = '';
         }
-        recordRoadworkDiagnostic('webview-login-transition', { result: 'login-page-exited', pageOrigin });
+        recordRoadworkDiagnostic('webview-login-transition', {
+          result: 'login-page-exited',
+          pageOrigin,
+          pagePath: (() => { try { return new URL(currentUrl).pathname; } catch { return ''; } })(),
+        });
       }
       wasLoginPageRef.current = isLoginPage;
     };
@@ -1136,7 +1188,9 @@ export default function RoadworkHelperView({ currentUser }) {
     }
   }, [activeSiteId, isFilling, recordRoadworkDiagnostic, roadworkStatus.canAutoFill, roadworkStatus.date, vm]);
 
-  const showAutoFill = Boolean(webviewUrl);
+  const newButtonRect = roadworkStatus.newButtonRect;
+  const showAutoFill = Boolean(webviewUrl && newButtonRect);
+  const isOutsideDailyLog = Boolean(webviewUrl && !roadworkStatus.isDailyLog);
   const disableAutoFill = !roadworkStatus.canAutoFill || roadworkStatus.date !== vm.date || vm.loading || isFilling || !vm.hasFillData;
   const autoFillLabel = vm.loading
     ? '데이터 확인 중'
@@ -1187,8 +1241,12 @@ export default function RoadworkHelperView({ currentUser }) {
           onClick={handleAutoFill}
           disabled={disableAutoFill}
           title={vm.hasFillData ? '현재 수정 가능한 일지에 로컬 데이터와 사진을 채웁니다.' : '이 날짜에 채울 로컬 데이터가 없습니다.'}
+          style={{
+            top: `${Math.max(8, Number(newButtonRect.top || 0))}px`,
+            left: `${Math.max(8, Number(newButtonRect.left || 0) - 116)}px`,
+            height: `${Math.max(30, Number(newButtonRect.height || 34))}px`,
+          }}
         >
-          <span className="material-icons">auto_fix_high</span>
           {autoFillLabel}
         </button>
       ) : null}
@@ -1206,10 +1264,10 @@ export default function RoadworkHelperView({ currentUser }) {
           className="roadwork-refresh-button"
           onClick={() => handleRefresh('button')}
           disabled={!webviewUrl}
-          title="도로공사 페이지를 초기 상태로 다시 불러옵니다."
+          title={isOutsideDailyLog ? '마지막 정상 일지 주소가 있으면 그 주소로, 없으면 현장 설정의 시작 주소로 다시 엽니다.' : '도로공사 페이지를 초기 상태로 다시 불러옵니다.'}
         >
           <span className="material-icons" aria-hidden="true">refresh</span>
-          새로고침 (F5)
+          {isOutsideDailyLog ? '일지 화면 다시 열기' : '새로고침 (F5)'}
         </button>
         </div>
       ) : null}

@@ -319,7 +319,12 @@ async function importQntechWaterAll(db, baseDir, date, siteContext = {}) {
       matchedRowCount: persistResult.matchedRowCount,
       dbMeasurementGroupCount: Number(persistedWaterSummary.measurementGroupCount || 0),
       dbRowCount: Number(persistedWaterSummary.rowCount || 0),
+      identifiedPhotoCount: photoResult.identifiedPhotos,
       savedPhotoCount: photoResult.savedPhotos.length,
+      photoSourceProjectCount: photoResult.photoSourceProjectCount,
+      photoProjectsWithRecognizedFiles: photoResult.photoProjectsWithRecognizedFiles,
+      photoProjectsWithoutRecognizedFiles: photoResult.photoProjectsWithoutRecognizedFiles,
+      photoDownloadFailureCount: photoResult.photoDownloadFailureCount,
       driveUploadedPhotoCount: photoResult.driveUploadedPhotos.length,
       driveQueuedPhotoCount: photoResult.driveQueuedPhotos.length,
       driveUploadErrorCount: photoResult.driveUploadErrors.length

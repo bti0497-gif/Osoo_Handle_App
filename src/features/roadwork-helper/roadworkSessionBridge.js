@@ -1,4 +1,6 @@
-const STORAGE_PREFIX = 'osoo:roadwork-session-url:';
+// v2 deliberately stores only a URL confirmed by the daily-log DOM probe.
+// The old key could retain the external site's main dashboard and trap reloads there.
+const STORAGE_PREFIX = 'osoo:roadwork-daily-url:v2:';
 const LOGIN_PATH_PATTERN = /\/security\/login\.do(?:[?#]|$)/i;
 
 function storageKey(partition) {
@@ -24,4 +26,3 @@ export function getRememberedRoadworkSessionUrl(partition) {
     return '';
   }
 }
-

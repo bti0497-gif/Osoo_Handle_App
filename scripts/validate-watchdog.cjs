@@ -37,7 +37,9 @@ assert.ok(mainProcess.includes("['update', 'full-exit'].forEach((reason) =>"), '
 assert.ok(mainProcess.includes('waitForServerReadyAndClearMaintenanceLocks'), 'server-ready maintenance lock recovery contract is missing');
 assert.ok(/catch\r?\n\s*\{/.test(watchdogSource) && watchdogSource.includes('return true;'), 'watchdog does not fail safe when process path inspection is denied');
 assert.ok(watchdogSource.includes('TimeSpan.FromMinutes(1)') && watchdogSource.includes('lastStatusKey'), 'watchdog status writes are not throttled for always-on field PCs');
-assert.ok(watchdogSource.includes('version=1.0.4'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(watchdogSource.includes('version=1.0.5'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(watchdogSource.includes('update-uac-observation') && watchdogSource.includes('UpdateUacObservationPath'), 'watchdog does not persist update/UAC observation state');
+assert.ok(watchdogSource.includes('Process.GetProcessesByName("Consent")'), 'watchdog does not observe the Windows UAC consent process during update maintenance');
 assert.ok(mainProcess.includes("appendElectronRecoveryDiagnostic('runtime-telemetry', 'observed'") && mainProcess.includes('process.getProcessMemoryInfo()'), 'Electron runtime memory telemetry contract is missing');
 assert.ok(serverIndex.includes("action: 'runtime-telemetry'") && serverIndex.includes('process.memoryUsage()'), 'embedded server runtime memory telemetry contract is missing');
 assert.ok(watchdogSource.includes('MonitorEmbeddedServer(appPath)') && watchdogSource.includes('IsDedicatedServerReachable()'), 'watchdog does not verify the embedded server port while the app process is alive');
@@ -70,6 +72,12 @@ try {
   const restartRuntime = path.join(testRoot, 'restart');
   const restartStatus = run(restartRuntime);
   assert.strictEqual(restartStatus.state, 'dry-run-restart');
+  const restartEvents = fs.readFileSync(path.join(restartRuntime, 'watchdog-events.jsonl'), 'utf8')
+    .trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  const restartDiagnostic = restartEvents.find((event) => event.action === 'app-restart' && event.result === 'dry-run');
+  assert.ok(restartDiagnostic?.details.includes('trigger=simulate-app-absent'), 'app restart diagnostic does not record its trigger');
+  assert.ok(restartDiagnostic?.details.includes('observedAppProcesses='), 'app restart diagnostic does not record observed processes');
+  assert.ok(restartDiagnostic?.details.includes('heartbeat='), 'app restart diagnostic does not record heartbeat state');
 
   const lockedRuntime = path.join(testRoot, 'locked');
   fs.mkdirSync(lockedRuntime, { recursive: true });
@@ -82,6 +90,10 @@ try {
   const lockedStatus = run(lockedRuntime);
   assert.strictEqual(lockedStatus.state, 'maintenance');
   assert.strictEqual(lockedStatus.maintenanceReason, 'update');
+  assert.ok(fs.existsSync(path.join(lockedRuntime, 'update-uac-observation.json')), 'update maintenance did not persist UAC observation state');
+  const lockedEvents = fs.readFileSync(path.join(lockedRuntime, 'watchdog-events.jsonl'), 'utf8')
+    .trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  assert.ok(lockedEvents.some((event) => event.action === 'update-uac-observation' && event.result === 'started'), 'update/UAC observation did not start under the update maintenance lock');
 
   const expiredRuntime = path.join(testRoot, 'expired');
   fs.mkdirSync(expiredRuntime, { recursive: true });

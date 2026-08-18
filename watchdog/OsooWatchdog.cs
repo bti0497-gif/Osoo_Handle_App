@@ -13,8 +13,8 @@ using System.Threading;
 [assembly: System.Reflection.AssemblyDescription("Background watchdog for Osoo Handle App")]
 [assembly: System.Reflection.AssemblyCompany("Osoo")]
 [assembly: System.Reflection.AssemblyProduct("Osoo Handle App Watchdog")]
-[assembly: System.Reflection.AssemblyVersion("1.0.4.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.4.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.5.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.5.0")]
 
 namespace OsooWatchdog
 {
@@ -26,9 +26,19 @@ namespace OsooWatchdog
     }
 
     [DataContract]
-    internal sealed class AppHeartbeat
+    internal sealed class UpdateUacObservationState
     {
-        [DataMember(Name = "appStartedAt")] public string AppStartedAt;
+        [DataMember(Name = "startedAt")] public string StartedAt;
+        [DataMember(Name = "initialAppVersion")] public string InitialAppVersion;
+        [DataMember(Name = "uacPromptObserved")] public bool UacPromptObserved;
+        [DataMember(Name = "uacPromptObservedAt")] public string UacPromptObservedAt;
+    }
+
+    [DataContract]
+        internal sealed class AppHeartbeat
+        {
+            [DataMember(Name = "appPid")] public int AppPid;
+            [DataMember(Name = "appStartedAt")] public string AppStartedAt;
         [DataMember(Name = "checkedAt")] public string CheckedAt;
         [DataMember(Name = "serverReady")] public bool ServerReady;
         [DataMember(Name = "serverPort")] public int ServerPort;
@@ -67,6 +77,7 @@ namespace OsooWatchdog
         // Electron already restarts its embedded server. Do not compete with
         // that recovery while the app continues to publish a fresh heartbeat.
         private static readonly TimeSpan LiveAppServerRecoveryGrace = TimeSpan.FromMinutes(2);
+        private static readonly TimeSpan UpdateUacObservationMaxAge = TimeSpan.FromMinutes(45);
         private static readonly Queue<DateTime> RestartTimes = new Queue<DateTime>();
         private static DateTime cooldownUntil = DateTime.MinValue;
         private static string lastRepeatedLogKey;
@@ -98,13 +109,15 @@ namespace OsooWatchdog
                     return 2;
                 }
 
-                Log("watchdog-start", "ok", "version=1.0.4; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
+                Log("watchdog-start", "ok", "version=1.0.5; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
                 do
                 {
                     try { CheckOnce(); }
                     catch (Exception ex) { Log("watchdog-check", "failed", ex.GetType().Name + ": " + ex.Message); }
                     if (options.Once) break;
-                    Thread.Sleep(Math.Max(1, options.IntervalSeconds) * 1000);
+                    // UAC 창은 짧게 나타날 수 있다. 업데이트 잠금 관찰 중에만
+                    // 1초 단위로 확인하고, 평상시에는 기존 간격을 유지한다.
+                    Thread.Sleep((HasPendingUpdateUacObservation() ? 1 : Math.Max(1, options.IntervalSeconds)) * 1000);
                 } while (true);
             }
             return 0;
@@ -116,6 +129,7 @@ namespace OsooWatchdog
             DateTime maintenanceExpiry;
             if (TryGetActiveMaintenance(out maintenanceReason, out maintenanceExpiry))
             {
+                if (maintenanceReason == "update") ObserveUpdateUacPrompt();
                 Log("maintenance-lock", "waiting", "reason=" + maintenanceReason + "; expiresAt=" + maintenanceExpiry.ToUniversalTime().ToString("o"));
                 WriteStatus("maintenance", null, maintenanceReason);
                 return;
@@ -128,6 +142,8 @@ namespace OsooWatchdog
                 WriteStatus("app-not-found", null, null);
                 return;
             }
+
+            CompleteUpdateUacObservationIfAppRestarted(appPath);
 
             EmergencyRecoveryRequest emergencyRequest;
             if (TryReadEmergencyRecoveryRequest(out emergencyRequest))
@@ -164,12 +180,12 @@ namespace OsooWatchdog
 
             if (options.DryRun)
             {
-                Log("app-restart", "dry-run", "path=" + appPath);
+                Log("app-restart", "dry-run", BuildRestartDiagnostic(appPath, options.SimulateAbsent ? "trigger=simulate-app-absent" : "trigger=app-process-absent", null));
                 WriteStatus("dry-run-restart", appPath, null);
                 return;
             }
 
-            StartApplication(appPath, "app-restart");
+            StartApplication(appPath, "app-restart", true, options.SimulateAbsent ? "trigger=simulate-app-absent" : "trigger=app-process-absent");
         }
 
         private static void HandleEmergencyRecovery(string appPath, EmergencyRecoveryRequest request)
@@ -210,7 +226,7 @@ namespace OsooWatchdog
             }
 
             TryDelete(EmergencyRecoveryRequestPath());
-            StartApplication(appPath, "emergency-recovery", false);
+            StartApplication(appPath, "emergency-recovery", false, "trigger=emergency-request; requestId=" + request.RequestId + "; reason=" + request.Reason);
         }
 
         private static void MonitorEmbeddedServer(string appPath)
@@ -274,10 +290,10 @@ namespace OsooWatchdog
                 WriteStatus("server-recovery-failed", appPath, null);
                 return;
             }
-            StartApplication(appPath, "server-recovery");
+            StartApplication(appPath, "server-recovery", true, "trigger=server-health-failure; failures=" + ServerHealthFailureLimit);
         }
 
-        private static void StartApplication(string appPath, string action, bool background = true)
+        private static void StartApplication(string appPath, string action, bool background = true, string trigger = null)
         {
             var startInfo = new ProcessStartInfo
             {
@@ -287,10 +303,61 @@ namespace OsooWatchdog
                 UseShellExecute = true,
                 WindowStyle = ProcessWindowStyle.Hidden
             };
-            Process.Start(startInfo);
-            RestartTimes.Enqueue(DateTime.UtcNow);
-            Log(action, "started", "path=" + appPath);
-            WriteStatus(action == "server-recovery" ? "server-recovery-started" : action == "emergency-recovery" ? "emergency-recovery-started" : "restart-started", appPath, null);
+            try
+            {
+                Process startedProcess = Process.Start(startInfo);
+                RestartTimes.Enqueue(DateTime.UtcNow);
+                string launchedPid = startedProcess == null ? "unknown" : startedProcess.Id.ToString(CultureInfo.InvariantCulture);
+                if (startedProcess != null) startedProcess.Dispose();
+                Log(action, "started", BuildRestartDiagnostic(appPath, trigger, launchedPid));
+                WriteStatus(action == "server-recovery" ? "server-recovery-started" : action == "emergency-recovery" ? "emergency-recovery-started" : "restart-started", appPath, null);
+            }
+            catch (Exception ex)
+            {
+                Log(action, "failed", BuildRestartDiagnostic(appPath, trigger, null) + "; launchError=" + ex.GetType().Name);
+                WriteStatus("restart-failed", appPath, action);
+            }
+        }
+
+        private static string BuildRestartDiagnostic(string appPath, string trigger, string launchedPid)
+        {
+            AppHeartbeat heartbeat = ReadAppHeartbeat();
+            string heartbeatSummary = heartbeat == null
+                ? "missing"
+                : "pid=" + heartbeat.AppPid.ToString(CultureInfo.InvariantCulture)
+                    + ",serverReady=" + heartbeat.ServerReady.ToString(CultureInfo.InvariantCulture)
+                    + ",serverPort=" + heartbeat.ServerPort.ToString(CultureInfo.InvariantCulture)
+                    + ",checkedAt=" + (heartbeat.CheckedAt ?? "missing");
+            return (trigger ?? "trigger=unknown")
+                + "; path=" + appPath
+                + "; observedAppProcesses=" + DescribeAppProcesses(appPath)
+                + "; heartbeat=" + heartbeatSummary
+                + "; port=" + DedicatedServerPort.ToString(CultureInfo.InvariantCulture)
+                + "; portReachable=" + IsDedicatedServerReachable().ToString(CultureInfo.InvariantCulture)
+                + "; restartWindowCount=" + RestartTimes.Count.ToString(CultureInfo.InvariantCulture)
+                + (String.IsNullOrWhiteSpace(launchedPid) ? "" : "; launchedPid=" + launchedPid);
+        }
+
+        private static string DescribeAppProcesses(string expectedPath)
+        {
+            var descriptions = new List<string>();
+            foreach (Process process in Process.GetProcessesByName("Osoo Handle App"))
+            {
+                try
+                {
+                    string actualPath = process.MainModule.FileName;
+                    bool pathMatch = String.Equals(Path.GetFullPath(actualPath), Path.GetFullPath(expectedPath), StringComparison.OrdinalIgnoreCase);
+                    descriptions.Add("pid=" + process.Id.ToString(CultureInfo.InvariantCulture)
+                        + ",pathMatch=" + pathMatch.ToString(CultureInfo.InvariantCulture)
+                        + ",startedAt=" + process.StartTime.ToUniversalTime().ToString("o"));
+                }
+                catch
+                {
+                    descriptions.Add("pid=" + process.Id.ToString(CultureInfo.InvariantCulture) + ",inspect=denied");
+                }
+                finally { process.Dispose(); }
+            }
+            return descriptions.Count == 0 ? "none" : String.Join("|", descriptions.ToArray());
         }
 
         private static bool CanRestart(string appPath)
@@ -509,6 +576,118 @@ namespace OsooWatchdog
             return reason == "update" || reason == "full-exit" || reason == "installer" || reason == "maintenance";
         }
 
+        private static string UpdateUacObservationPath()
+        {
+            return Path.Combine(runtimeDirectory, "update-uac-observation.json");
+        }
+
+        private static bool HasPendingUpdateUacObservation()
+        {
+            return File.Exists(UpdateUacObservationPath());
+        }
+
+        private static UpdateUacObservationState ReadUpdateUacObservation()
+        {
+            string filePath = UpdateUacObservationPath();
+            if (!File.Exists(filePath)) return null;
+            try
+            {
+                using (var stream = File.OpenRead(filePath))
+                    return (UpdateUacObservationState)new DataContractJsonSerializer(typeof(UpdateUacObservationState)).ReadObject(stream);
+            }
+            catch
+            {
+                TryDelete(filePath);
+                return null;
+            }
+        }
+
+        private static void WriteUpdateUacObservation(UpdateUacObservationState state)
+        {
+            string json = "{\n  \"startedAt\": " + JsonString(state.StartedAt)
+                + ",\n  \"initialAppVersion\": " + JsonString(state.InitialAppVersion)
+                + ",\n  \"uacPromptObserved\": " + (state.UacPromptObserved ? "true" : "false")
+                + ",\n  \"uacPromptObservedAt\": " + JsonString(state.UacPromptObservedAt)
+                + "\n}";
+            AtomicWrite(UpdateUacObservationPath(), json);
+        }
+
+        private static void ObserveUpdateUacPrompt()
+        {
+            UpdateUacObservationState state = ReadUpdateUacObservation();
+            if (state == null)
+            {
+                state = new UpdateUacObservationState
+                {
+                    StartedAt = DateTime.UtcNow.ToString("o"),
+                    InitialAppVersion = ReadAppFileVersion(ResolveAppPath()),
+                    UacPromptObserved = false,
+                    UacPromptObservedAt = null,
+                };
+                WriteUpdateUacObservation(state);
+                Log("update-uac-observation", "started", "initialAppVersion=" + (state.InitialAppVersion ?? "unknown"));
+            }
+
+            if (state.UacPromptObserved || !IsConsentProcessRunning()) return;
+            state.UacPromptObserved = true;
+            state.UacPromptObservedAt = DateTime.UtcNow.ToString("o");
+            WriteUpdateUacObservation(state);
+            // Consent.exe is a Windows secure-desktop process. This is an
+            // observation only; the watchdog never interacts with the prompt.
+            Log("update-uac-observation", "uac-prompt-observed", "process=Consent.exe");
+        }
+
+        private static void CompleteUpdateUacObservationIfAppRestarted(string appPath)
+        {
+            UpdateUacObservationState state = ReadUpdateUacObservation();
+            if (state == null) return;
+            DateTime startedAt;
+            if (!DateTime.TryParse(state.StartedAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out startedAt)
+                || DateTime.UtcNow - startedAt.ToUniversalTime() > UpdateUacObservationMaxAge)
+            {
+                Log("update-uac-observation", "expired", "appRestarted=" + IsAppRunning(appPath));
+                TryDelete(UpdateUacObservationPath());
+                return;
+            }
+            if (!IsAppRunning(appPath)) return;
+
+            string currentVersion = ReadAppFileVersion(appPath);
+            bool versionChanged = !String.IsNullOrWhiteSpace(state.InitialAppVersion)
+                && !String.IsNullOrWhiteSpace(currentVersion)
+                && state.InitialAppVersion != currentVersion;
+            Log("update-uac-observation", "app-restarted",
+                "uacPromptObserved=" + state.UacPromptObserved
+                + "; initialAppVersion=" + (state.InitialAppVersion ?? "unknown")
+                + "; currentAppVersion=" + (currentVersion ?? "unknown")
+                + "; versionChanged=" + versionChanged);
+            TryDelete(UpdateUacObservationPath());
+        }
+
+        private static bool IsConsentProcessRunning()
+        {
+            try
+            {
+                foreach (Process process in Process.GetProcessesByName("Consent"))
+                {
+                    try
+                    {
+                        if (!process.HasExited) return true;
+                    }
+                    catch { }
+                    finally { process.Dispose(); }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        private static string ReadAppFileVersion(string appPath)
+        {
+            if (String.IsNullOrWhiteSpace(appPath) || !File.Exists(appPath)) return null;
+            try { return FileVersionInfo.GetVersionInfo(appPath).FileVersion; }
+            catch { return null; }
+        }
+
         private static void WriteStatus(string state, string appPath, string reason)
         {
             DateTime now = DateTime.UtcNow;
@@ -516,7 +695,7 @@ namespace OsooWatchdog
             if (statusKey == lastStatusKey && now - lastStatusAt < TimeSpan.FromMinutes(1)) return;
             lastStatusKey = statusKey;
             lastStatusAt = now;
-            string json = "{\n  \"version\": \"1.0.4\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
+            string json = "{\n  \"version\": \"1.0.5\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
             AtomicWrite(Path.Combine(runtimeDirectory, "watchdog-status.json"), json);
         }
 
@@ -536,7 +715,7 @@ namespace OsooWatchdog
                 string createdAt = DateTime.UtcNow.ToString("o");
                 string line = createdAt + "\t" + action + "\t" + result + (String.IsNullOrEmpty(details) ? "" : "\t" + details) + Environment.NewLine;
                 File.AppendAllText(logPath, line, new UTF8Encoding(false));
-                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.4\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
+                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.5\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
                 File.AppendAllText(Path.Combine(runtimeDirectory, "watchdog-events.jsonl"), eventJson, new UTF8Encoding(false));
             }
             catch { }

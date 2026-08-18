@@ -382,6 +382,12 @@ export const useWaterQualityViewModel = (currentUser, { showToast } = {}) => {
                 qntechProjectCount: Number(result.projectCount || 0),
                 dbMeasurementGroupCount: Number(result.summary?.dbMeasurementGroupCount || 0),
                 dbRowCount: Number(result.summary?.dbRowCount || 0),
+                identifiedPhotoCount: Number(result.summary?.identifiedPhotoCount || 0),
+                savedPhotoCount: Number(result.summary?.savedPhotoCount || 0),
+                photoSourceProjectCount: Number(result.summary?.photoSourceProjectCount || 0),
+                photoProjectsWithRecognizedFiles: Number(result.summary?.photoProjectsWithRecognizedFiles || 0),
+                photoProjectsWithoutRecognizedFiles: Number(result.summary?.photoProjectsWithoutRecognizedFiles || 0),
+                photoDownloadFailureCount: Number(result.summary?.photoDownloadFailureCount || 0),
                 gridRoundCount,
                 latestGridResponseApplied: Boolean(refreshResult?.applied),
             });

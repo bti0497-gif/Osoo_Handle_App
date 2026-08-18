@@ -940,7 +940,9 @@ export default function UnifiedRecordModal({
         if (targetTabs.has('flow')) {
             (resolvedContexts.flow?.items || []).forEach((item) => {
                 const isDrafted = hasDraftForItem('flow', item);
-                if (effectiveSaveStatusMode === 'baseline' && !isDrafted) {
+                // 수동 저장은 사용자가 입력·수정한 검침기만 저장한다.
+                // 남은 검침기는 20시 미입력 자동 처리 전까지 빈 상태로 유지한다.
+                if (!isDrafted) {
                     return;
                 }
                 const values = getDraftForItem('flow', item);
@@ -1028,6 +1030,8 @@ export default function UnifiedRecordModal({
         const collectInventoryItems = (tab, nameField, target) => {
             (resolvedContexts[tab]?.items || []).forEach((item) => {
                 const isDrafted = hasDraftForItem(tab, item);
+                // 약품·키트도 선택한 항목만 독립적으로 저장할 수 있어야 한다.
+                if (!isDrafted) return;
 
                 const values = getDraftForItem(tab, item);
                 const purchase = toNumberOrNull(values.purchase);
@@ -1213,8 +1217,10 @@ export default function UnifiedRecordModal({
         if (isDateContextPending || isSaving || isUploadingSludgePhotos) return;
         const plan = buildSavePlan({
             tabIds: [activeTab],
-            validateFlow: activeTab === 'flow',
-            allowFlowDefaults: activeTab === 'flow',
+            // 통합입력창의 수동 저장은 부분 저장을 허용한다. 유량 미입력분을
+            // 즉시 0 처리하는 정책은 저장 버튼이 아니라 20시 자동 처리에서만 적용한다.
+            validateFlow: false,
+            allowFlowDefaults: false,
         });
 
         if (plan.flowMissing.length > 0) {

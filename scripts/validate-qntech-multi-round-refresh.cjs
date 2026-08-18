@@ -54,7 +54,11 @@ if (dilutionRows.find((row) => row.location === '유량조정조')?.result_value
 if (!source.includes("recordQntechUiDiagnostic('import-completed'") ||
     !source.includes('dbMeasurementGroupCount') ||
     !source.includes('gridRoundCount') ||
-    !source.includes('loadRequestSequenceRef')) {
+    !source.includes('loadRequestSequenceRef') ||
+    !source.includes('identifiedPhotoCount') ||
+    !source.includes('savedPhotoCount') ||
+    !source.includes('photoProjectsWithoutRecognizedFiles') ||
+    !source.includes('photoDownloadFailureCount')) {
   throw new Error('QnTECH 다회차 저장·그리드 반영 진단 또는 최신 조회 보호가 누락되었습니다.');
 }
 
