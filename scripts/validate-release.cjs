@@ -947,10 +947,10 @@ function validateRegressionContracts() {
     unifiedRecordModalContractText.includes('If a user selects a date and clicks the open-input button') &&
       unifiedRecordModalContractText.includes('The modal body must not use a blanket `pointer-events: none`') &&
       unifiedRecordModalContractText.includes('Editing inventory marks that date as a manual inventory baseline') &&
-      unifiedRecordModalContractText.includes('flow save includes only flow items the administrator actually edited') &&
-      unifiedRecordModalContractText.includes('Untouched flow items must not block an admin baseline save') &&
+      unifiedRecordModalContractText.includes('manual flow save includes only flow items the user actually edited') &&
+      unifiedRecordModalContractText.includes('Untouched flow items must not block a manual flow save') &&
       modalText.includes("const isDrafted = hasDraftForItem('flow', item)") &&
-      modalText.includes("if (effectiveSaveStatusMode === 'baseline' && !isDrafted)") &&
+      modalText.includes('if (!isDrafted)') &&
       unifiedRecordModalContractText.includes('inventory must be clamped at zero') &&
       unifiedRecordModalContractText.includes('Flow server save must upsert by `(date, type)`') &&
       unifiedRecordModalContractText.includes('After a successful save, the modal must force reload only the saved tabs') &&
