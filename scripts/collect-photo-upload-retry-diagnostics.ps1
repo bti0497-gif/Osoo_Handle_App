@@ -52,7 +52,8 @@ function Get-LogLinesSinceStart {
 }
 
 $appData = Join-Path $env:APPDATA "Osoo_Handle_App"
-$photoRoot = Join-Path $appData ([string]::Concat([char]0xC0AC, [char]0xC9C4, [char]0xAD00, [char]0xB9AC))
+$photoFolderName = -join @([char]0xC0AC, [char]0xC9C4, [char]0xAD00, [char]0xB9AC)
+$photoRoot = Join-Path $appData $photoFolderName
 $diagnosticRoot = Join-Path $appData "logs\diagnostics"
 $beforeFiles = Get-PhotoFiles $photoRoot
 $beforeIndex = @{}
