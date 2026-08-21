@@ -52,8 +52,38 @@ function enqueueBackgroundFileTask(db, { taskType, dedupeKey, payload }) {
   }
 }
 
+function cancelBackgroundFileTask(db, dedupeKey) {
+  ensureTable(db);
+  return db.prepare('DELETE FROM background_file_tasks WHERE dedupe_key = ?')
+    .run(String(dedupeKey || '')).changes;
+}
+
 async function executeTask(db, task) {
   const payload = JSON.parse(task.payload_json || '{}');
+  if (task.task_type === 'management-photo-delete') {
+    const {
+      drive,
+      isDriveConfigured,
+      getDriveRootFolderId,
+      findFolderPath,
+      findFileInFolder,
+    } = require('./driveService.cjs');
+    const { managementPhotoName, managementPhotoSegments } = require('./drivePathService.cjs');
+    if (!isDriveConfigured() || !drive) return { skipped: true, reason: 'drive-not-configured' };
+    const folder = await findFolderPath(getDriveRootFolderId(), managementPhotoSegments(payload.date));
+    if (!folder?.id) return { skipped: true, reason: 'folder-not-found' };
+    const fileName = managementPhotoName(
+      payload.date,
+      payload.siteName || 'Unknown Site',
+      payload.itemLabel,
+      Number(payload.photoIndex) || 0,
+      '.jpg'
+    );
+    const file = await findFileInFolder(folder.id, fileName);
+    if (!file?.id) return { skipped: true, reason: 'file-not-found', fileName };
+    await drive.files.delete({ fileId: file.id, supportsAllDrives: true });
+    return { deleted: true, fileId: file.id, fileName };
+  }
   if (!payload.localPath || !fs.existsSync(payload.localPath)) {
     throw new Error(`로컬 사진 파일을 찾을 수 없습니다: ${payload.localPath || '(없음)'}`);
   }
@@ -152,5 +182,6 @@ async function processPendingBackgroundFileTasks(db, { shouldContinue = () => tr
 module.exports = {
   ensureBackgroundFileTaskTable: ensureTable,
   enqueueBackgroundFileTask,
+  cancelBackgroundFileTask,
   processPendingBackgroundFileTasks,
 };

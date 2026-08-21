@@ -31,6 +31,9 @@ This file protects the working roadwork input helper. Do not change these rules 
 ## Change Discipline
 
 - Any change to `src/features/roadwork-helper/*`, `server/routes/roadworkHelperRoutes.cjs`, or the roadwork preload/IPC integration must be intentional and verified with `npm run validate`.
+- Until field evidence confirms the photo workflow is stable, `photo-stage-started`, every per-item outcome, and `photo-stage-completed` must remain explicit diagnostics and must not be removed by generic successful-API log suppression.
+- Successful, existing-photo, and missing-photo outcomes are delivered in the normal 30-minute diagnostic bundle. File-injection failure, missing board, row timeout, discovery failure, and a completed stage with failures must request immediate diagnostic upload.
+- Photo diagnostics may contain only the date, logical item key, counts, and result. They must never contain a local path, opaque file token, file contents, or roadwork credentials.
 - Do not mix roadwork helper changes with unrelated UI, authentication, mapping, report, or updater fixes.
 - Opening the roadwork helper must read its URL and direction-scoped credentials only from the local database through the roadwork IPC handlers.
 - Opening the roadwork helper must never wait for Google Sheets, `SettingsModel`, `/api/settings`, or another network configuration request.

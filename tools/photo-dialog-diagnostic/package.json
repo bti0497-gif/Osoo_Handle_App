@@ -1,0 +1,8 @@
+{
+  "name": "osoo-photo-dialog-diagnostic",
+  "version": "1.0.1",
+  "private": true,
+  "description": "Portable diagnostic harness for Osoo photo file selection",
+  "author": "Osoo Handle App",
+  "main": "electron/main.cjs"
+}

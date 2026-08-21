@@ -13,8 +13,8 @@ using System.Threading;
 [assembly: System.Reflection.AssemblyDescription("Background watchdog for Osoo Handle App")]
 [assembly: System.Reflection.AssemblyCompany("Osoo")]
 [assembly: System.Reflection.AssemblyProduct("Osoo Handle App Watchdog")]
-[assembly: System.Reflection.AssemblyVersion("1.0.5.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.5.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.6.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.6.0")]
 
 namespace OsooWatchdog
 {
@@ -35,13 +35,18 @@ namespace OsooWatchdog
     }
 
     [DataContract]
-        internal sealed class AppHeartbeat
-        {
-            [DataMember(Name = "appPid")] public int AppPid;
-            [DataMember(Name = "appStartedAt")] public string AppStartedAt;
+    internal sealed class AppHeartbeat
+    {
+        [DataMember(Name = "appPid")] public int AppPid;
+        [DataMember(Name = "appStartedAt")] public string AppStartedAt;
         [DataMember(Name = "checkedAt")] public string CheckedAt;
         [DataMember(Name = "serverReady")] public bool ServerReady;
         [DataMember(Name = "serverPort")] public int ServerPort;
+        [DataMember(Name = "serverPid")] public int ServerPid;
+        [DataMember(Name = "serverStartedAt")] public string ServerStartedAt;
+        [DataMember(Name = "serverRecoveryInProgress")] public bool ServerRecoveryInProgress;
+        [DataMember(Name = "sessionActive")] public bool SessionActive;
+        [DataMember(Name = "windowVisible")] public bool WindowVisible;
     }
 
     [DataContract]
@@ -109,7 +114,7 @@ namespace OsooWatchdog
                     return 2;
                 }
 
-                Log("watchdog-start", "ok", "version=1.0.5; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
+                Log("watchdog-start", "ok", "version=1.0.6; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
                 do
                 {
                     try { CheckOnce(); }
@@ -239,6 +244,7 @@ namespace OsooWatchdog
             {
                 serverHealthFailures = 0;
                 serverUnavailableSince = DateTime.MinValue;
+                TryDelete(ServerRecoveryRequestPath());
                 WriteStatus("running", appPath, null);
                 return;
             }
@@ -253,9 +259,16 @@ namespace OsooWatchdog
             {
                 if (serverUnavailableSince == DateTime.MinValue) serverUnavailableSince = DateTime.UtcNow;
                 TimeSpan elapsed = DateTime.UtcNow - serverUnavailableSince;
+                RequestEmbeddedServerRecovery(heartbeat, elapsed);
+                if (heartbeat.SessionActive || heartbeat.WindowVisible)
+                {
+                    Log("server-recovery", "waiting", "server-only; active-workflow=true; elapsedSeconds=" + (int)elapsed.TotalSeconds);
+                    WriteStatus("server-only-recovery", appPath, null);
+                    return;
+                }
                 if (elapsed < LiveAppServerRecoveryGrace)
                 {
-                    Log("server-recovery", "waiting", "fresh-app-heartbeat; elapsedSeconds=" + (int)elapsed.TotalSeconds);
+                    Log("server-recovery", "waiting", "server-only; idle-preparation=true; elapsedSeconds=" + (int)elapsed.TotalSeconds);
                     WriteStatus("server-recovery-deferred", appPath, null);
                     return;
                 }
@@ -492,6 +505,38 @@ namespace OsooWatchdog
             return Path.Combine(runtimeDirectory, "emergency-recovery-request.json");
         }
 
+        private static string ServerRecoveryRequestPath()
+        {
+            return Path.Combine(runtimeDirectory, "server-recovery-request.json");
+        }
+
+        private static void RequestEmbeddedServerRecovery(AppHeartbeat heartbeat, TimeSpan elapsed)
+        {
+            string requestPath = ServerRecoveryRequestPath();
+            try
+            {
+                if (File.Exists(requestPath) && DateTime.UtcNow - File.GetLastWriteTimeUtc(requestPath) < TimeSpan.FromSeconds(30)) return;
+                string requestId = Guid.NewGuid().ToString("N");
+                DateTime now = DateTime.UtcNow;
+                string json = "{\n  \"requestId\": \"" + requestId
+                    + "\",\n  \"requestedAt\": \"" + now.ToString("o")
+                    + "\",\n  \"expiresAt\": \"" + now.AddMinutes(2).ToString("o")
+                    + "\",\n  \"reason\": \"watchdog-server-health-failure\"\n}";
+                AtomicWrite(requestPath, json);
+                Log("server-only-recovery", "requested",
+                    "requestId=" + requestId
+                    + "; serverPid=" + (heartbeat == null ? "0" : heartbeat.ServerPid.ToString(CultureInfo.InvariantCulture))
+                    + "; electronRecovery=" + (heartbeat != null && heartbeat.ServerRecoveryInProgress).ToString(CultureInfo.InvariantCulture)
+                    + "; sessionActive=" + (heartbeat != null && heartbeat.SessionActive).ToString(CultureInfo.InvariantCulture)
+                    + "; windowVisible=" + (heartbeat != null && heartbeat.WindowVisible).ToString(CultureInfo.InvariantCulture)
+                    + "; elapsedSeconds=" + (int)elapsed.TotalSeconds);
+            }
+            catch (Exception ex)
+            {
+                Log("server-only-recovery", "failed", ex.GetType().Name);
+            }
+        }
+
         private static bool TryReadEmergencyRecoveryRequest(out EmergencyRecoveryRequest request)
         {
             request = null;
@@ -526,9 +571,13 @@ namespace OsooWatchdog
 
         private static bool IsWithinServerStartupGrace(AppHeartbeat heartbeat)
         {
-            if (heartbeat == null || String.IsNullOrWhiteSpace(heartbeat.AppStartedAt)) return false;
+            if (heartbeat == null) return false;
+            string startedAtText = !String.IsNullOrWhiteSpace(heartbeat.ServerStartedAt)
+                ? heartbeat.ServerStartedAt
+                : heartbeat.AppStartedAt;
+            if (String.IsNullOrWhiteSpace(startedAtText)) return false;
             DateTime startedAt;
-            return DateTime.TryParse(heartbeat.AppStartedAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out startedAt)
+            return DateTime.TryParse(startedAtText, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out startedAt)
                 && DateTime.UtcNow - startedAt.ToUniversalTime() < ServerStartupGrace;
         }
 
@@ -695,7 +744,7 @@ namespace OsooWatchdog
             if (statusKey == lastStatusKey && now - lastStatusAt < TimeSpan.FromMinutes(1)) return;
             lastStatusKey = statusKey;
             lastStatusAt = now;
-            string json = "{\n  \"version\": \"1.0.5\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
+            string json = "{\n  \"version\": \"1.0.6\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
             AtomicWrite(Path.Combine(runtimeDirectory, "watchdog-status.json"), json);
         }
 
@@ -715,7 +764,7 @@ namespace OsooWatchdog
                 string createdAt = DateTime.UtcNow.ToString("o");
                 string line = createdAt + "\t" + action + "\t" + result + (String.IsNullOrEmpty(details) ? "" : "\t" + details) + Environment.NewLine;
                 File.AppendAllText(logPath, line, new UTF8Encoding(false));
-                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.5\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
+                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.6\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
                 File.AppendAllText(Path.Combine(runtimeDirectory, "watchdog-events.jsonl"), eventJson, new UTF8Encoding(false));
             }
             catch { }

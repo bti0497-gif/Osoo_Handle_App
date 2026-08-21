@@ -2,10 +2,14 @@ import { apiClient } from '../../core/api';
 
 let settingsCache = null;
 let settingsPromise = null;
+let localSettingsCache = null;
+let localSettingsPromise = null;
 
 const clearSettingsCache = () => {
     settingsCache = null;
     settingsPromise = null;
+    localSettingsCache = null;
+    localSettingsPromise = null;
 };
 
 const mutateSettings = async (request) => {
@@ -15,24 +19,36 @@ const mutateSettings = async (request) => {
 
 export const SettingsModel = {
     async getSettings(options = {}) {
-        if (!options.force && settingsCache) {
-            return settingsCache;
+        const localOnly = options.localOnly === true;
+        const cached = localOnly ? localSettingsCache : settingsCache;
+        const pending = localOnly ? localSettingsPromise : settingsPromise;
+
+        if (!options.force && cached) {
+            return cached;
         }
 
-        if (!options.force && settingsPromise) {
-            return settingsPromise;
+        if (!options.force && pending) {
+            return pending;
         }
 
-        settingsPromise = apiClient.get('/api/settings')
+        const request = apiClient.get('/api/settings', localOnly ? { source: 'local' } : undefined)
             .then((result) => {
-                settingsCache = result;
+                if (localOnly) {
+                    localSettingsCache = result;
+                } else {
+                    settingsCache = result;
+                    localSettingsCache = result;
+                }
                 return result;
             })
             .finally(() => {
-                settingsPromise = null;
+                if (localOnly) localSettingsPromise = null;
+                else settingsPromise = null;
             });
 
-        return settingsPromise;
+        if (localOnly) localSettingsPromise = request;
+        else settingsPromise = request;
+        return request;
     },
 
     clearSettingsCache() {

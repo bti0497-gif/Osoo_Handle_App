@@ -7,7 +7,7 @@ import { OperationStatusModel } from '../operation/OperationStatusModel';
 import { CertificateModel } from '../certificate/CertificateModel';
 
 const PRELOAD_TASKS = [
-    { key: 'settings', label: '설정 데이터', load: (options) => SettingsModel.getSettings(options) },
+    { key: 'settings', label: '설정 데이터', load: (options) => SettingsModel.getSettings({ ...options, localOnly: true }) },
     { key: 'flow', label: '유량 데이터', load: (options) => FlowModel.fetchHistory(options) },
     { key: 'medicine', label: '약품 데이터', load: (options) => MedicineModel.fetchHistory(options) },
     { key: 'water', label: '수질분석 데이터', load: (options) => WaterQualityModel.fetchHistory(options) },

@@ -293,7 +293,10 @@ export const useSettingsViewModel = (
 
     async function loadSettings(options = {}) {
         try {
-            const data = await SettingsModel.getSettings({ force: options.force });
+            const data = await SettingsModel.getSettings({
+                force: options.force,
+                localOnly: !loadRemoteSiteList,
+            });
             const hasSavedSiteIdentity = Boolean(
                 String(data?.settings?.site_id || '').trim() || String(data?.settings?.site_name || '').trim()
             );

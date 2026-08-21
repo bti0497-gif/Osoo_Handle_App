@@ -179,7 +179,12 @@ function schedulePostStartupTasks() {
 }
 
 function registerLazyApplication() {
+  const initializationStartedAt = Date.now();
+  const initializationTimings = {};
+  let phaseStartedAt = Date.now();
   const { db, appDataPath } = require('./database.cjs');
+  initializationTimings.databaseLoadMs = Date.now() - phaseStartedAt;
+  phaseStartedAt = Date.now();
   const quickCheck = db.pragma('quick_check');
   if (!Array.isArray(quickCheck) || quickCheck.some((row) => String(row.quick_check || '').toLowerCase() !== 'ok')) {
     throw new Error(`SQLite quick_check 실패: ${JSON.stringify(quickCheck)}`);
@@ -191,6 +196,8 @@ function registerLazyApplication() {
     throw new Error(`필수 SQLite 테이블 누락: ${missingTables.join(', ')}`);
   }
   db.exec('BEGIN IMMEDIATE; ROLLBACK;');
+  initializationTimings.databaseValidationMs = Date.now() - phaseStartedAt;
+  phaseStartedAt = Date.now();
   const { warmUpExcelPdfConverter } = require('./services/excelPdfService.cjs');
   const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
   const {
@@ -200,6 +207,7 @@ function registerLazyApplication() {
     setDiagnosticRecordedNotifier,
     uploadPendingDiagnostics,
   } = require('./services/diagnosticLogService.cjs');
+  initializationTimings.coreServiceLoadMs = Date.now() - phaseStartedAt;
   const ctx = { db, appDataPath, BASE_DIR };
   const { createSiteContextMiddleware } = require('./middleware/siteContext.cjs');
   const { importWatchdogDiagnostics } = require('./services/watchdogDiagnosticImportService.cjs');
@@ -262,8 +270,13 @@ function registerLazyApplication() {
     const normalizedLevel = String(level || '').toLowerCase();
     const normalizedResult = String(result || '').toLowerCase();
     const normalizedAction = String(action || '').toLowerCase();
+    const actionSignalsFailure = normalizedAction.includes('failed')
+      || normalizedAction.includes('failure')
+      || normalizedAction.includes('timeout')
+      || normalizedAction.includes('unexpected-login-page');
     return normalizedLevel === 'error'
       || ['failed', 'rejected', 'error'].includes(normalizedResult)
+      || actionSignalsFailure
       || normalizedAction.includes('workspace-render-failed')
       || normalizedAction.includes('emergency-recovery');
   };
@@ -393,6 +406,8 @@ function registerLazyApplication() {
     const method = String(req.method || '').toUpperCase();
     const pathName = String(req.path || '');
     const isApiPath = pathName.startsWith('/api/');
+    const isRoadworkDiagnosticRequest = method === 'POST'
+      && pathName === '/api/roadwork-helper/diagnostic';
     const shouldWatchMethod = method === 'POST' || method === 'PUT' || method === 'DELETE';
     const shouldWatchPath = BIGQUERY_IMMEDIATE_SYNC_PREFIXES.some((prefix) => pathName.startsWith(prefix));
     const shouldTriggerSync = shouldWatchMethod
@@ -402,6 +417,7 @@ function registerLazyApplication() {
     const shouldInspect = isApiPath && pathName !== '/api/ping';
     const shouldLogSuccessfulResponse = shouldInspect
       && (DIAGNOSTIC_VERBOSE_INITIAL
+        || isRoadworkDiagnosticRequest
         || (shouldTriggerSync && !STABLE_SUCCESS_MUTATION_PATHS.has(pathName)));
 
     if (!shouldInspect && !shouldTriggerSync) return next();
@@ -436,21 +452,50 @@ function registerLazyApplication() {
           } catch (_) {
             responseCount = undefined;
           }
-          recordDiagnostic(db, appDataPath, {
-            level: res.statusCode >= 400 ? 'error' : 'info',
-            area: 'api',
-            action: `${method} ${pathName}`,
-            result: res.statusCode >= 400 ? 'failed' : 'ok',
-            message: `${method} ${pathName} -> ${res.statusCode}`,
-            details: {
-              statusCode: res.statusCode,
-              durationMs: Date.now() - startedAt,
-              responseCount,
-              query: sanitize(req.query || {}),
-              body: requestBody,
-              response: DIAGNOSTIC_VERBOSE_INITIAL || res.statusCode >= 400 ? responseText : undefined,
-            },
-          });
+          const roadworkDiagnosticEvent = isRoadworkDiagnosticRequest
+            ? String(requestBody?.event || '').trim().slice(0, 80)
+            : '';
+          if (roadworkDiagnosticEvent && res.statusCode >= 200 && res.statusCode < 400) {
+            const eventDetails = requestBody?.details && typeof requestBody.details === 'object'
+              ? requestBody.details
+              : {};
+            const itemResult = String(eventDetails.result || '').trim().toLowerCase();
+            const roadworkDiagnosticFailed = roadworkDiagnosticEvent.endsWith('-failed')
+              || roadworkDiagnosticEvent === 'session-unexpected-login-page'
+              || ['board-not-found', 'file-injection-failed', 'photo-row-timeout'].includes(itemResult)
+              || (roadworkDiagnosticEvent === 'photo-stage-started' && eventDetails.discoverySuccess === false)
+              || (roadworkDiagnosticEvent === 'photo-stage-completed' && Number(eventDetails.failedCount || 0) > 0);
+            recordDiagnostic(db, appDataPath, {
+              level: roadworkDiagnosticFailed ? 'warn' : 'info',
+              area: 'roadwork-helper',
+              action: roadworkDiagnosticEvent,
+              result: roadworkDiagnosticFailed
+                ? 'failed'
+                : (roadworkDiagnosticEvent === 'photo-stage-completed' ? 'ok' : (itemResult || 'observed')),
+              message: 'roadwork helper diagnostic event',
+              details: {
+                statusCode: res.statusCode,
+                durationMs: Date.now() - startedAt,
+                ...eventDetails,
+              },
+            });
+          } else {
+            recordDiagnostic(db, appDataPath, {
+              level: res.statusCode >= 400 ? 'error' : 'info',
+              area: 'api',
+              action: `${method} ${pathName}`,
+              result: res.statusCode >= 400 ? 'failed' : 'ok',
+              message: `${method} ${pathName} -> ${res.statusCode}`,
+              details: {
+                statusCode: res.statusCode,
+                durationMs: Date.now() - startedAt,
+                responseCount,
+                query: sanitize(req.query || {}),
+                body: requestBody,
+                response: DIAGNOSTIC_VERBOSE_INITIAL || res.statusCode >= 400 ? responseText : undefined,
+              },
+            });
+          }
           scheduleDiagnosticUpload();
         } catch (error) {
           console.warn('[diagnostic] request log failed:', error.message);
@@ -462,7 +507,8 @@ function registerLazyApplication() {
   });
 
   // --- Tier 0: 즉시 등록 (registry 기반) ---
-  for (const entry of routeRegistry.filter(r => r.tier === 0)) {
+  const tier0Entries = routeRegistry.filter(r => r.tier === 0);
+  for (const entry of tier0Entries) {
     const router = require(entry.module)(...resolveArgs(entry.args, ctx));
     app.use(entry.path, router);
   }
@@ -529,6 +575,22 @@ function registerLazyApplication() {
 
   const { uploadErrorMiddleware } = require('./middleware/uploadSecurity.cjs');
   app.use(uploadErrorMiddleware);
+
+  initializationTimings.totalMs = Date.now() - initializationStartedAt;
+  recordDiagnostic(db, appDataPath, {
+    level: 'info',
+    area: 'server',
+    action: 'startup-ready',
+    result: 'ok',
+    message: 'local server routes ready',
+    details: {
+      pid: process.pid,
+      timings: initializationTimings,
+      tier0RouteCount: tier0Entries.length,
+      tier1RouteCount: tier1Entries.length,
+    },
+  });
+  scheduleDiagnosticUpload();
 
   return { appDataPath, warmUpExcelPdfConverter, normalizeLegacyPhotoFiles };
 }

@@ -81,6 +81,12 @@ check(
     'submittedPasswordLength: submittedPassword.length',
     'storedPasswordLength:',
     'submittedHasOuterWhitespace:',
+    'inputLength: submittedPassword.length',
+    'savedLength:',
+    'lengthMatched:',
+    'requestPurpose,',
+    'stateMatchesNative:',
+    'lastInputResetTrigger,',
     "result: 'rejected'",
   ]) &&
     !authRoutesText.includes('submittedPassword: submittedPassword') &&
@@ -129,6 +135,8 @@ check(
     'function getMembersFromDriveBackup',
     'function findMemberInDriveBackup',
     'getMembersWithDriveFallback',
+    'MEMBER_SHEETS_LOOKUP_TIMEOUT_MS = 8000',
+    'getMembersWithTimeout',
     "return { members, source: 'sheets' }",
     "return { members: driveMembers, source: 'drive-json', sheetsError }",
   ]),
@@ -277,7 +285,8 @@ check(
   containsAll(authVmText, [
     'const isPrimaryAdminLogin',
     '? await AuthModel.discoveryLogin(normalizedName, password)',
-    ': await AuthModel.localLogin(normalizedName, password)',
+    ': await AuthModel.localLogin(normalizedName, password, {',
+    "requestPurpose: 'login-screen'",
   ]) &&
     !authVmText.includes('if (!userData && !isPrimaryAdminLogin)') &&
     !authVmText.includes('userData = await AuthModel.discoveryLogin(normalizedName, password)'),
@@ -366,7 +375,7 @@ check(
   ]) && containsAll(appText, [
     'onServerRecoveryProgress',
     'restoreServerSession()',
-    '서버를 안전하게 다시 준비하고 있습니다...',
+    '서버 연결을 복구하고 있습니다. 현재 화면과 입력 내용은 유지됩니다.',
     '저장된 업무 세션을 안전하게 복원하고 있습니다...',
   ]),
   'embedded server restart restores the signed field session while preserving the mounted app',

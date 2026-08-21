@@ -88,7 +88,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
 
     // 사이트 이름 설정 가져오기
     useEffect(() => {
-        SettingsModel.getSettings().then(res => {
+        SettingsModel.getSettings({ localOnly: true }).then(res => {
             if (res.success && res.settings?.site_name) {
                 const nextLocalSite = {
                     id: String(res.settings.site_id || currentUser?.site_id || ''),

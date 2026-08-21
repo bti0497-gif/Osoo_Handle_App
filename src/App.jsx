@@ -132,7 +132,7 @@ function App() {
     useEffect(() => {
         const unsubscribe = window.electronAPI?.onServerRecoveryProgress?.(async ({ phase }) => {
             if (phase === 'server-restarting') {
-                setServerRecoveryPhase('서버를 안전하게 다시 준비하고 있습니다...');
+                setServerRecoveryPhase('서버 연결을 복구하고 있습니다. 현재 화면과 입력 내용은 유지됩니다.');
                 return;
             }
             if (phase !== 'server-ready') return;
@@ -144,9 +144,14 @@ function App() {
                 window.setTimeout(() => setServerRecoveryPhase(''), 900);
             } else if (result?.reason === 'no-field-session') {
                 setServerRecoveryPhase('');
+            } else {
+                setServerRecoveryPhase('서버 복구가 완료되었습니다.');
+                window.setTimeout(() => setServerRecoveryPhase(''), 1500);
             }
         });
-        return typeof unsubscribe === 'function' ? unsubscribe : undefined;
+        return () => {
+            if (typeof unsubscribe === 'function') unsubscribe();
+        };
     }, [restoreServerSession]);
 
     useEffect(() => {
@@ -730,8 +735,21 @@ function App() {
             />
 
             {serverRecoveryPhase ? (
-                <div style={{ position: 'fixed', inset: 0, zIndex: 10030 }} aria-live="polite">
-                    <SplashLoadingView percent={0} label={serverRecoveryPhase} showProgress={false} />
+                <div style={{
+                    position: 'fixed',
+                    right: '1rem',
+                    bottom: '3.25rem',
+                    zIndex: 10030,
+                    maxWidth: '34rem',
+                    padding: '0.8rem 1rem',
+                    borderRadius: '10px',
+                    background: 'rgba(15, 23, 42, 0.94)',
+                    color: '#fff',
+                    fontWeight: 700,
+                    boxShadow: '0 10px 30px rgba(15, 23, 42, 0.24)',
+                    pointerEvents: 'none',
+                }} aria-live="polite">
+                    {serverRecoveryPhase}
                 </div>
             ) : null}
 

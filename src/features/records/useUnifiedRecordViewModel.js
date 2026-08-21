@@ -94,6 +94,7 @@ const mergeFlowContext = (baseContext = {}, history = [], date) => {
                 previous: {
                     ...basePrevious,
                     reading: !isDefaulted(previous) && hasValue(previous.raw) ? previous.raw : '',
+                    displayReading: hasValue(previous.raw) ? previous.raw : '',
                     flow: !isDefaulted(previous) && hasValue(previous.diff) ? previous.diff : '',
                     readingUnit: previous.reading_unit || '',
                     ...(isSludge && {

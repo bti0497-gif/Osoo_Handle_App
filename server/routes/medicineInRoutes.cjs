@@ -14,7 +14,10 @@ const { openExcelFile } = require('../services/excelOpenService.cjs');
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const { recalculateInventoryCascade } = require('../services/inventoryCascadeService.cjs');
-const { enqueueBackgroundFileTask } = require('../services/backgroundFileTaskService.cjs');
+const {
+  enqueueBackgroundFileTask,
+  cancelBackgroundFileTask,
+} = require('../services/backgroundFileTaskService.cjs');
 const {
   isDriveConfigured,
   drive,
@@ -945,6 +948,69 @@ module.exports = function (db, baseDir, appDataPath) {
       return res.status(404).send('Not found');
     }
     res.sendFile(resolved);
+  });
+
+  /** DELETE /api/medicine-in/photo?p=<scoped relative path> */
+  router.delete('/api/medicine-in/photo', (req, res) => {
+    try {
+      const relPath = String(req.query.p || '');
+      if (!relPath || relPath.includes('..') || path.isAbsolute(relPath)) {
+        return res.status(403).json({ success: false, error: '유효하지 않은 사진 경로입니다.' });
+      }
+      const segments = relPath.split('/').filter(Boolean);
+      const photoScope = getMedicinePhotoScope(db, req.siteContext?.siteId);
+      if (photoScope.multiSiteEnabled) {
+        const requestedScope = String(segments[0] || '');
+        const ownScope = sanitizeName(photoScope.siteId);
+        const isOwnScopedPath = requestedScope === ownScope;
+        const isPrimaryLegacyPath = photoScope.isPrimary && /^\d{4}$/.test(requestedScope);
+        if (!isOwnScopedPath && !isPrimaryLegacyPath) {
+          return res.status(403).json({ success: false, error: '다른 현장의 사진은 삭제할 수 없습니다.' });
+        }
+      }
+      const resolved = path.resolve(path.join(appDataPath, '사진관리', '약품입고', ...segments));
+      const root = path.resolve(path.join(appDataPath, '사진관리', '약품입고'));
+      if (!resolved.startsWith(root + path.sep)) {
+        return res.status(403).json({ success: false, error: '유효하지 않은 사진 경로입니다.' });
+      }
+      const parsed = parseMedicinePhotoFileName(path.basename(resolved));
+      if (!parsed) {
+        return res.status(400).json({ success: false, error: '사진 파일명을 확인할 수 없습니다.' });
+      }
+      if (!fs.existsSync(resolved)) {
+        return res.status(404).json({ success: false, error: '삭제할 로컬 사진을 찾을 수 없습니다.' });
+      }
+
+      fs.unlinkSync(resolved);
+      cancelBackgroundFileTask(db, `medicine:${resolved}`);
+
+      const date = `${parsed.y}-${parsed.m}-${parsed.d}`;
+      const itemName = sanitizeName(parsed.rawName).replace(/-\d+$/, '');
+      const sequence = String(parsed.rawName || '').match(/-(\d+)$/);
+      const photoIndex = sequence ? Math.max(0, Number(sequence[1]) - 1) : 0;
+      enqueueBackgroundFileTask(db, {
+        taskType: 'management-photo-delete',
+        dedupeKey: `photo-delete:${date}:${req.siteContext?.siteName || ''}:${itemName}:${photoIndex}`,
+        payload: {
+          date,
+          siteName: req.siteContext?.siteName || '',
+          itemLabel: itemName,
+          photoIndex,
+        },
+      });
+      const remaining = scanMedicinePhotoEntries(appDataPath, parsed.y, parsed.m, photoScope)
+        .filter((photo) => photo.date === date && photo.name === itemName);
+      const replacementUrl = remaining.at(-1)?.url || null;
+      db.prepare('UPDATE medicine_logs SET photo_url = ?, is_synced = 0 WHERE medicine_name = ? AND date = ? AND site_id = ?')
+        .run(replacementUrl, itemName, date, req.siteContext?.siteId);
+      db.prepare('UPDATE kit_logs SET photo_url = ?, is_synced = 0 WHERE kit_name = ? AND date = ? AND site_id = ?')
+        .run(replacementUrl, itemName, date, req.siteContext?.siteId);
+
+      return res.json({ success: true, deleted: relPath, remainingCount: remaining.length });
+    } catch (err) {
+      console.error('[medicine-in photo DELETE]', err);
+      return res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   return router;

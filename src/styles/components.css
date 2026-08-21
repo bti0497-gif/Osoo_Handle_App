@@ -507,3 +507,24 @@
 .unified-record-scroll-area::-webkit-scrollbar-thumb:hover {
   background: #64748b;
 }
+
+/* Dragging keeps only the modal shell/header paintable. The form returns as-is on drop. */
+.unified-record-modal__panel--dragging {
+  outline: 2px solid #2563eb;
+  background: rgba(255, 255, 255, 0.94) !important;
+}
+
+.unified-record-modal__panel--dragging .unified-record-modal__body,
+.unified-record-modal__panel--dragging .unified-record-modal__footer {
+  visibility: hidden;
+}
+
+.unified-record-modal__panel--collapsed {
+  height: auto !important;
+}
+
+.unified-record-modal__panel--collapsed .unified-record-modal__body,
+.unified-record-modal__panel--collapsed .unified-record-modal__footer,
+.unified-record-modal__panel--collapsed .unified-record-modal__tabs {
+  display: none;
+}

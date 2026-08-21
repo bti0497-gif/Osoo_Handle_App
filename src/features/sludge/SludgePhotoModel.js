@@ -28,6 +28,12 @@ export const SludgePhotoModel = {
     return apiClient.post('/api/sludge-photos/upload-photo', formData);
   },
 
+  async deletePhoto(date, fileName) {
+    return apiClient.delete(
+      `/api/sludge-photos/photo?date=${encodeURIComponent(date)}&file=${encodeURIComponent(fileName)}`
+    );
+  },
+
   async checkRemotePhotos(payload) {
     return apiClient.post('/api/sludge-photos/remote-photos/check', payload);
   },

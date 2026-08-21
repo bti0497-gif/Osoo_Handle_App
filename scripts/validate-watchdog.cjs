@@ -37,7 +37,7 @@ assert.ok(mainProcess.includes("['update', 'full-exit'].forEach((reason) =>"), '
 assert.ok(mainProcess.includes('waitForServerReadyAndClearMaintenanceLocks'), 'server-ready maintenance lock recovery contract is missing');
 assert.ok(/catch\r?\n\s*\{/.test(watchdogSource) && watchdogSource.includes('return true;'), 'watchdog does not fail safe when process path inspection is denied');
 assert.ok(watchdogSource.includes('TimeSpan.FromMinutes(1)') && watchdogSource.includes('lastStatusKey'), 'watchdog status writes are not throttled for always-on field PCs');
-assert.ok(watchdogSource.includes('version=1.0.5'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(watchdogSource.includes('version=1.0.6'), 'watchdog behavioral changes did not bump the diagnostic version');
 assert.ok(watchdogSource.includes('update-uac-observation') && watchdogSource.includes('UpdateUacObservationPath'), 'watchdog does not persist update/UAC observation state');
 assert.ok(watchdogSource.includes('Process.GetProcessesByName("Consent")'), 'watchdog does not observe the Windows UAC consent process during update maintenance');
 assert.ok(mainProcess.includes("appendElectronRecoveryDiagnostic('runtime-telemetry', 'observed'") && mainProcess.includes('process.getProcessMemoryInfo()'), 'Electron runtime memory telemetry contract is missing');
@@ -46,6 +46,8 @@ assert.ok(watchdogSource.includes('MonitorEmbeddedServer(appPath)') && watchdogS
 assert.ok(watchdogSource.includes('heartbeat.ServerReady') && watchdogSource.includes('IsFreshAppHeartbeat(heartbeat)'), 'watchdog may treat a merely listening port as login-ready');
 assert.ok(watchdogSource.includes('server-recovery') && watchdogSource.includes('TryTerminateApp(appPath)'), 'watchdog cannot recover an app whose embedded server remains unavailable');
 assert.ok(watchdogSource.includes('IsFreshAppHeartbeat') && watchdogSource.includes('LiveAppServerRecoveryGrace'), 'fresh Electron heartbeat is not given a server-only recovery grace period');
+assert.ok(watchdogSource.includes('server-recovery-request.json') && watchdogSource.includes('RequestEmbeddedServerRecovery'), 'watchdog does not request server-only recovery before restarting Electron');
+assert.ok(watchdogSource.includes('heartbeat.SessionActive || heartbeat.WindowVisible'), 'watchdog may restart Electron during an active field workflow');
 assert.ok(mainProcess.includes('app-heartbeat.json') && mainProcess.includes('startWatchdogHeartbeat()'), 'Electron does not publish its embedded-server heartbeat to the watchdog');
 assert.ok(mainProcess.includes("notifyRendererServerRecovery('server-restarting')") && mainProcess.includes("notifyRendererServerRecovery('server-ready')"), 'Electron server recovery progress is not reported to the renderer');
 assert.ok(mainProcess.includes('app:reportRendererReady') && mainProcess.includes('renderer-clean-boot'), 'Electron does not detect a renderer startup failure or request a clean recovery');

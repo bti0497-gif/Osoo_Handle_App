@@ -6,6 +6,7 @@ import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
 import { ADVANCED_DATAGRID_READ_ONLY_PROPS } from '../../components/common/advancedDataGridPresets';
 import UnifiedRecordModal from '../records/UnifiedRecordModal';
 import { getTodayKST } from '../../core/constants';
+import { useResponsiveGridHeight } from '../../hooks/useResponsiveGridHeight';
 
 const COLORS = ['#1e3a8a', '#047857', '#b45309', '#4338ca', '#57534e'];
 
@@ -42,6 +43,7 @@ const ManagementFooter = ({ count, loading, onOpen }) => (
 
 const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSessionChange }) => {
     const { showAlert, showConfirm } = useDialog();
+    const gridHeight = useResponsiveGridHeight();
     const { itemState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
     const {
@@ -181,8 +183,10 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
                 alignItems: 'center',
                 justifyContent: 'flex-end',
                 padding: '0 6px',
-                fontSize: 11,
+                fontSize: 13,
                 fontWeight: 800,
+                fontVariantNumeric: 'tabular-nums',
+                fontFeatureSettings: '"tnum" 1',
                 color: cell.error ? '#dc2626' : isLowInventory ? '#dc2626' : '#1e293b',
                 background: row.isFuture ? '#fafafa' : 'transparent',
             }} title={cell.error || ''}>
@@ -211,7 +215,9 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
             alignItems: 'center',
             justifyContent: 'center',
             fontWeight: row.date === todayStr ? 900 : 800,
-            fontSize: 10.5,
+            fontSize: 12,
+            fontVariantNumeric: 'tabular-nums',
+            fontFeatureSettings: '"tnum" 1',
             color: row.date === selectedDate ? '#92400e' : row.date === todayStr ? '#1d4ed8' : row.isFuture ? '#a0aec0' : '#475569',
             background: row.date === selectedDate ? '#fde68a' : row.date === todayStr ? '#dbeafe' : '#f8fafc',
         }}>
@@ -234,7 +240,7 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
                     initialScrollTop={workspaceSession.scrollTop}
                     onScrollPositionChange={handleGridScroll}
                     width="100%"
-                    height={360}
+                    height={gridHeight}
                     showBottomBar={false}
                     selectionMode="row"
                     contextMenu={false}

@@ -5,6 +5,7 @@ import { useDialog } from '../../components/common/DialogContext';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
 import { ADVANCED_DATAGRID_READ_ONLY_PROPS } from '../../components/common/advancedDataGridPresets';
 import { getTodayKST } from '../../core/constants';
+import { useResponsiveGridHeight } from '../../hooks/useResponsiveGridHeight';
 import UnifiedRecordModal from '../records/UnifiedRecordModal';
 
 const DEFAULT_FLOW_VIEW_ITEMS = [
@@ -21,6 +22,15 @@ const FLOW_COLORS = ['#1e3a8a', '#047857', '#b45309', '#4338ca', '#57534e', '#0e
 const formatNumber = (value) => {
     if (value === null || value === undefined || value === '' || Number.isNaN(Number(value))) return '';
     return Number(value).toLocaleString();
+};
+
+const getNumericColumnWidth = (rows, itemName, field, minimumWidth) => {
+    const maxLength = rows.reduce((longest, row) => {
+        const formatted = formatNumber(row?.[itemName]?.[field]);
+        return Math.max(longest, formatted.length);
+    }, 0);
+
+    return Math.min(132, Math.max(minimumWidth, Math.ceil(maxLength * 7.5 + 14)));
 };
 
 const toNumberOrNull = (value) => {
@@ -68,6 +78,7 @@ const ManagementFooter = ({ count, loading, onOpen }) => (
 
 const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSessionChange }) => {
     const { showAlert, showConfirm } = useDialog();
+    const gridHeight = useResponsiveGridHeight();
     const { itemState = {}, shellState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
     const settingsReady = shellState.isLoading === false;
@@ -127,20 +138,20 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                 {
                     id: `${item.name}_raw`,
                     label: item.name === '슬러지' ? '반출량' : '검침값',
-                    width: 72,
+                    width: getNumericColumnWidth(history, item.name, 'raw', 72),
                     headerBgColor: color,
                     headerTextColor: '#fff',
                 },
                 {
                     id: `${item.name}_diff`,
                     label: item.name === '슬러지' ? '누계' : '유량',
-                    width: 58,
+                    width: getNumericColumnWidth(history, item.name, 'diff', 58),
                     headerBgColor: '#fff',
                     headerTextColor: '#1e40af',
                 },
             ],
         };
-    }), [visibleFlowItems]);
+    }), [history, visibleFlowItems]);
 
     const buildModalContexts = () => ({
         flow: {
@@ -283,8 +294,10 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                 justifyContent: 'flex-end',
                 padding: '0 6px',
                 color: data.error ? '#dc2626' : '#1e293b',
-                fontSize: col.id.endsWith('_raw') ? 11 : 10.5,
+                fontSize: 13,
                 fontWeight: col.id.endsWith('_raw') ? 800 : 700,
+                fontVariantNumeric: 'tabular-nums',
+                fontFeatureSettings: '"tnum" 1',
                 background: row.isFuture ? '#fafafa' : 'transparent',
             }} title={data.error || ''}>
                 {formatNumber(value)}
@@ -317,7 +330,9 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontWeight: isToday ? 900 : 800,
-                fontSize: 10.5,
+                fontSize: 12,
+                fontVariantNumeric: 'tabular-nums',
+                fontFeatureSettings: '"tnum" 1',
                 color: isSelected ? '#92400e' : isToday ? '#1d4ed8' : isFuture ? '#a0aec0' : '#475569',
                 background: isSelected ? '#fde68a' : isToday ? '#dbeafe' : '#f8fafc',
             }}>
@@ -346,7 +361,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                             fontWeight: 800,
                         }}
                     >
-                        현장 유량 설정을 준비하고 있습니다...
+                        로컬 유량 설정을 확인하고 있습니다...
                     </div>
                 ) : (
                     <AdvancedDataGrid
@@ -361,7 +376,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
                         initialScrollTop={workspaceSession.scrollTop}
                         onScrollPositionChange={handleGridScroll}
                         width="100%"
-                        height={400}
+                        height={gridHeight}
                         rowHeaderWidth={84}
                         rowHeaderLabel="날짜"
                         showBottomBar={false}

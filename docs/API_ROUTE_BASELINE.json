@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 153,
-  "digest": "8f893687ae13b5774df621f5483b8df732e0b101712e9f12518dbd449c4834a4",
+  "endpointCount": 155,
+  "digest": "21be91ae0563b69608a5ae7fb0f7ef5bd7004e0e0f1c077d31b2997e2b575115",
   "endpoints": [
     {
       "method": "GET",
@@ -548,6 +548,14 @@
       "syncWatch": true
     },
     {
+      "method": "DELETE",
+      "path": "/api/medicine-in/photo",
+      "module": "./routes/medicineInRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
       "method": "GET",
       "path": "/api/medicine-in/photo",
       "module": "./routes/medicineInRoutes.cjs",
@@ -1057,6 +1065,14 @@
       "module": "./routes/sludgePhotoRoutes.cjs",
       "tier": 2,
       "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/sludge-photos/photo",
+      "module": "./routes/sludgePhotoRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
       "syncWatch": true
     },
     {

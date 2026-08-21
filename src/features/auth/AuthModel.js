@@ -27,9 +27,9 @@ export const AuthModel = {
         }
     },
 
-    async localLogin(name, password) {
+    async localLogin(name, password, diagnosticContext = {}) {
         try {
-            const data = await apiClient.post('/api/auth/local-login', { name, password });
+            const data = await apiClient.post('/api/auth/local-login', { name, password, diagnosticContext });
             if (!data.success) {
                 console.error("Login failed:", data.message);
                 return null;

@@ -170,26 +170,31 @@ module.exports = function (db, baseDir, appDataPath) {
   // 설정 조회 API
   router.get('/api/settings', async (req, res) => {
     try {
-      try {
-        if (process.env.OSOO_API_VALIDATION === '1') throw new Error('API 검증에서는 외부 설정 동기화를 생략합니다.');
-        await withTimeout(
-          externalCredentialService.syncCommonAppSettingsToLocal(db),
-          1500,
-          '공통 설정 동기화'
-        );
-      } catch (sheetErr) {
-        console.warn('[Settings] App settings sheets lookup failed, keeping local credentials:', sheetErr.message);
+      const localOnly = String(req.query?.source || '').trim().toLowerCase() === 'local';
+      if (!localOnly) {
+        try {
+          if (process.env.OSOO_API_VALIDATION === '1') throw new Error('API 검증에서는 외부 설정 동기화를 생략합니다.');
+          await withTimeout(
+            externalCredentialService.syncCommonAppSettingsToLocal(db),
+            1500,
+            '공통 설정 동기화'
+          );
+        } catch (sheetErr) {
+          console.warn('[Settings] App settings sheets lookup failed, keeping local credentials:', sheetErr.message);
+        }
+        try {
+          await withTimeout(
+            externalCredentialService.syncSiteCredentialForSite(db, req.siteContext?.siteId),
+            1500,
+            '현장별 웹 계정 동기화'
+          );
+        } catch (sheetErr) {
+          console.warn('[Settings] Site web credential lookup failed, keeping local credentials:', sheetErr.message);
+        }
       }
-      try {
-        await withTimeout(
-          externalCredentialService.syncSiteCredentialForSite(db, req.siteContext?.siteId),
-          1500,
-          '현장별 웹 계정 동기화'
-        );
-      } catch (sheetErr) {
-        console.warn('[Settings] Site web credential lookup failed, keeping local credentials:', sheetErr.message);
-      }
-      const qntechIntegrity = process.env.OSOO_API_VALIDATION === '1'
+      const qntechIntegrity = localOnly
+        ? { qntechSiteId: '', repaired: false, source: 'local-only' }
+        : process.env.OSOO_API_VALIDATION === '1'
         ? { qntechSiteId: '', repaired: false, source: 'local-validation' }
         : await withTimeout(
           verifyQntechSettingsIntegrity(req.siteContext || {}),

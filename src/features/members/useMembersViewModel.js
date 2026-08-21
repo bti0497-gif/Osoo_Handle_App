@@ -44,7 +44,9 @@ export const useMembersViewModel = (currentUser, { onPasswordChanged } = {}) => 
 
     setIsSubmitting(true);
     try {
-      const verification = await AuthModel.localLogin(currentUser?.name, currentPassword);
+      const verification = await AuthModel.localLogin(currentUser?.name, currentPassword, {
+        requestPurpose: 'current-entry-verification',
+      });
       if (!verification?.member) {
         setErrorMsg('현재 비밀번호가 정확하지 않습니다.');
         return;

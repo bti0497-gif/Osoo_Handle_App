@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MedicineInModel } from '../../medicine/MedicineInModel';
 import { SludgePhotoModel } from '../../sludge/SludgePhotoModel';
 import SludgePhotoButton from '../../sludge/SludgePhotoButton';
 import { apiClient } from '../../../core/api';
+import { useDialog } from '../../../components/common/DialogContext';
 
 const CATEGORIES = [
     { id: 'sludge', label: '슬러지 사진' },
@@ -14,14 +15,46 @@ const amount = (value) => Number(value || 0).toLocaleString();
 const normalizeLocalPhotoUrl = (url) => {
     const raw = String(url || '');
     if (raw.startsWith('/api/')) return raw;
-    const match = raw.match(/\/(\d{4})\/(\d{8}-(?:슬러지\d+|청소필증)\.jpg)$/);
+    const match = raw.match(/\/(\d{4})\/(\d{8}-(?:슬러지\d+|청소필증\d*)\.jpg)$/);
     if (!match) return raw.replace(/^\/사진관리슬러지\//, '/사진관리/슬러지/');
     const stamp = match[2].slice(0, 8);
     const date = `${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6, 8)}`;
     return `/api/sludge-photos/photo?date=${encodeURIComponent(date)}&file=${encodeURIComponent(match[2])}`;
 };
 
+const emitPhotoDiagnostic = (event, details = {}) => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('osoo:focus-diagnostic', {
+        detail: { event: `photo-${event}`, details },
+    }));
+};
+
+const describePhotoFiles = (files) => {
+    const list = Array.from(files || []);
+    return {
+        fileCount: list.length,
+        totalBytes: list.reduce((sum, file) => sum + Number(file?.size || 0), 0),
+    };
+};
+
+const nextInventoryPhotoIndex = (row) => {
+    const urls = row?.photoUrls?.length ? row.photoUrls : row?.photoUrl ? [row.photoUrl] : [];
+    if (urls.length === 0) return 0;
+    const maxIndex = urls.reduce((currentMax, photoUrl) => {
+        try {
+            const relativePath = new URL(photoUrl, window.location.origin).searchParams.get('p') || '';
+            const fileName = relativePath.split('/').pop() || '';
+            const suffix = fileName.match(/-(\d+)\.[^.]+$/);
+            return Math.max(currentMax, suffix ? Math.max(0, Number(suffix[1]) - 1) : 0);
+        } catch {
+            return currentMax;
+        }
+    }, 0);
+    return maxIndex + 1;
+};
+
 export default function PhotoManagementTab({ date, onError }) {
+    const { showConfirm, showToast } = useDialog();
     const [category, setCategory] = useState('sludge');
     const [data, setData] = useState({
         sludge: [], medicines: [], kits: [], tradePhotoDates: [], tradePhotoUrl: null, tradePhotoDate: null, tradePhotos: [],
@@ -35,6 +68,12 @@ export default function PhotoManagementTab({ date, onError }) {
     const [previewRotation, setPreviewRotation] = useState(0);
     const [localPhotoUrls, setLocalPhotoUrls] = useState({});
     const [photoLoadError, setPhotoLoadError] = useState('');
+    const [isDeletingPhoto, setIsDeletingPhoto] = useState(false);
+    const onErrorRef = useRef(onError);
+
+    useEffect(() => {
+        onErrorRef.current = onError;
+    }, [onError]);
 
     const [year, month] = useMemo(
         () => String(date || '').split('-').map(Number),
@@ -61,11 +100,11 @@ export default function PhotoManagementTab({ date, onError }) {
                 tradePhotos: inventory.tradePhotos || [],
             });
         } catch (error) {
-            onError?.(error.message);
+            onErrorRef.current?.(error.message);
         } finally {
             setLoading(false);
         }
-    }, [month, onError, year]);
+    }, [month, year]);
 
     useEffect(() => {
         reload();
@@ -75,14 +114,18 @@ export default function PhotoManagementTab({ date, onError }) {
         const list = Array.from(files || []);
         if (!list.length) return;
         const key = `${row.date}:${type}`;
+        emitPhotoDiagnostic('upload-handler-started', { category: 'sludge', date: row.date, type, ...describePhotoFiles(list) });
         setBusyKey(key);
         try {
             for (const file of list) {
+                emitPhotoDiagnostic('upload-api-requested', { category: 'sludge', date: row.date, type, ...describePhotoFiles([file]) });
                 const result = await SludgePhotoModel.uploadPhoto(row.date, type, file);
                 if (!result?.success) throw new Error(result?.error || '사진 저장에 실패했습니다.');
+                emitPhotoDiagnostic('upload-api-succeeded', { category: 'sludge', date: row.date, type });
             }
             await reload();
         } catch (error) {
+            emitPhotoDiagnostic('upload-failed', { category: 'sludge', date: row.date, type, message: String(error?.message || error).slice(0, 240) });
             onError?.(error.message);
         } finally {
             setBusyKey('');
@@ -93,33 +136,44 @@ export default function PhotoManagementTab({ date, onError }) {
         const list = Array.from(files || []);
         if (!list.length) return;
         const key = `${row.date}:${itemName}`;
+        emitPhotoDiagnostic('upload-handler-started', { category: isKit ? 'kit' : 'medicine', date: row.date, itemName, ...describePhotoFiles(list) });
         setBusyKey(key);
         try {
             const uploadedUrls = [];
+            const indexedRow = itemName === '거래명세서'
+                ? {
+                    ...row,
+                    photoUrls: data.tradePhotos
+                        .filter((photo) => photo.date === row.date)
+                        .map((photo) => photo.url),
+                }
+                : row;
+            const nextPhotoIndex = nextInventoryPhotoIndex(indexedRow);
             for (let index = 0; index < list.length; index += 1) {
+                emitPhotoDiagnostic('upload-api-requested', { category: isKit ? 'kit' : 'medicine', date: row.date, itemName, ...describePhotoFiles([list[index]]) });
                 const result = await MedicineInModel.uploadPhoto(
                     row.date,
                     itemName,
                     list[index],
-                    isKit ? index : 0
+                    nextPhotoIndex + index
                 );
                 if (!result?.success) throw new Error(result?.error || '사진 저장에 실패했습니다.');
+                emitPhotoDiagnostic('upload-api-succeeded', { category: isKit ? 'kit' : 'medicine', date: row.date, itemName });
                 if (result.url) uploadedUrls.push(result.url);
             }
             await reload();
             if (uploadedUrls.length > 0) {
                 setData((current) => {
                     if (itemName === '거래명세서') {
-                        const withoutSameDate = current.tradePhotos.filter((photo) => photo.date !== row.date);
                         return {
                             ...current,
                             tradePhotoDates: [...new Set([...current.tradePhotoDates, row.date])],
                             tradePhotoDate: row.date,
                             tradePhotoUrl: uploadedUrls[uploadedUrls.length - 1],
-                            tradePhotos: [
-                                ...withoutSameDate,
+                            tradePhotos: [...new Map([
+                                ...current.tradePhotos,
                                 ...uploadedUrls.map((url) => ({ date: row.date, name: '거래명세서', url })),
-                            ],
+                            ].map((photo) => [photo.url, photo])).values()],
                         };
                     }
                     const collection = isKit ? 'kits' : 'medicines';
@@ -127,13 +181,18 @@ export default function PhotoManagementTab({ date, onError }) {
                         ...current,
                         [collection]: current[collection].map((item) => (
                             item.date === row.date && item.name === itemName
-                                ? { ...item, photoUrl: uploadedUrls.at(-1), photoUrls: uploadedUrls }
+                                ? {
+                                    ...item,
+                                    photoUrl: uploadedUrls.at(-1),
+                                    photoUrls: [...new Set([...(item.photoUrls || []), ...uploadedUrls])],
+                                }
                                 : item
                         )),
                     };
                 });
             }
         } catch (error) {
+            emitPhotoDiagnostic('upload-failed', { category: isKit ? 'kit' : 'medicine', date: row.date, itemName, message: String(error?.message || error).slice(0, 240) });
             onError?.(error.message);
         } finally {
             setBusyKey('');
@@ -161,7 +220,12 @@ export default function PhotoManagementTab({ date, onError }) {
             return data.sludge.flatMap((row) => [
                 ...(row.sludge_photo_urls?.length ? row.sludge_photo_urls : row.sludge_photo_url ? [row.sludge_photo_url] : [])
                     .map((url) => ({ date: row.date, label: '반출사진', url })),
-                ...(row.certificate_photo_url ? [{ date: row.date, label: '청소필증', url: row.certificate_photo_url }] : []),
+                ...(row.certificate_photo_urls?.length
+                    ? row.certificate_photo_urls
+                    : row.certificate_photo_url
+                        ? [row.certificate_photo_url]
+                        : [])
+                    .map((url) => ({ date: row.date, label: '청소필증', url })),
             ]);
         }
         const sourceRows = category === 'medicine' ? data.medicines : data.kits;
@@ -222,6 +286,7 @@ export default function PhotoManagementTab({ date, onError }) {
         setPreviewIndex(normalizedIndex);
         setPreviewPhoto({
             ...photo,
+            sourceUrl: photo.url,
             date: photo.date || selectedRow?.date || '',
             url: loadedUrl,
         });
@@ -245,6 +310,49 @@ export default function PhotoManagementTab({ date, onError }) {
         link.remove();
     };
 
+    const deletePreviewPhoto = async () => {
+        if (!previewPhoto?.sourceUrl || isDeletingPhoto) return;
+        const confirmed = await showConfirm(
+            `${previewPhoto.date} ${previewPhoto.label} 사진을 삭제할까요?\n수치와 입고·반출 기록은 삭제되지 않습니다.`,
+            '사진 삭제'
+        );
+        if (!confirmed) return;
+
+        setIsDeletingPhoto(true);
+        try {
+            let result;
+            if (previewPhoto.sourceUrl.startsWith('/api/sludge-photos/photo')) {
+                const url = new URL(previewPhoto.sourceUrl, window.location.origin);
+                result = await SludgePhotoModel.deletePhoto(
+                    url.searchParams.get('date') || previewPhoto.date,
+                    url.searchParams.get('file') || ''
+                );
+            } else {
+                const url = new URL(previewPhoto.sourceUrl, window.location.origin);
+                result = await MedicineInModel.deletePhoto(url.searchParams.get('p') || '');
+            }
+            if (!result?.success) throw new Error(result?.error || '사진을 삭제하지 못했습니다.');
+            emitPhotoDiagnostic('delete-succeeded', {
+                category,
+                date: previewPhoto.date,
+                label: previewPhoto.label,
+            });
+            closePreview();
+            await reload();
+            showToast('선택한 사진을 삭제했습니다.', 'success');
+        } catch (error) {
+            emitPhotoDiagnostic('delete-failed', {
+                category,
+                date: previewPhoto.date,
+                label: previewPhoto.label,
+                message: String(error?.message || error).slice(0, 240),
+            });
+            onErrorRef.current?.(error.message || '사진을 삭제하지 못했습니다.');
+        } finally {
+            setIsDeletingPhoto(false);
+        }
+    };
+
     return (
         <div className="unified-photo-management">
             <aside className="unified-photo-management__menu">
@@ -266,9 +374,11 @@ export default function PhotoManagementTab({ date, onError }) {
                         {category === 'medicine' && rows.length > 0 && (
                             <SludgePhotoButton
                                 label="거래명세표"
+                                multiple
                                 busy={busyKey === `${rows[0].date}:거래명세서`}
                                 hasPhoto={data.tradePhotoDates.length > 0}
-                                onFile={(file) => uploadInventory(rows[0], [file], false, '거래명세서')}
+                                onDiagnostic={(event, details) => emitPhotoDiagnostic(event, { category: 'medicine', date: rows[0].date, itemName: '거래명세서', ...details })}
+                                onFiles={(files) => uploadInventory(rows[0], files, false, '거래명세서')}
                             />
                         )}
                     </div>
@@ -293,13 +403,16 @@ export default function PhotoManagementTab({ date, onError }) {
                                         multiple
                                         busy={busyKey === `${row.date}:sludge`}
                                         hasPhoto={Boolean(row.sludge_photo_url)}
+                                        onDiagnostic={(event, details) => emitPhotoDiagnostic(event, { category: 'sludge', date: row.date, type: 'sludge', ...details })}
                                         onFiles={(files) => uploadSludge(row, 'sludge', files)}
                                     />
                                     <SludgePhotoButton
                                         label="청소필증"
+                                        multiple
                                         busy={busyKey === `${row.date}:certificate`}
-                                        hasPhoto={Boolean(row.certificate_photo_url)}
-                                        onFile={(file) => uploadSludge(row, 'certificate', [file])}
+                                        hasPhoto={Boolean(row.certificate_photo_urls?.length || row.certificate_photo_url)}
+                                        onDiagnostic={(event, details) => emitPhotoDiagnostic(event, { category: 'sludge', date: row.date, type: 'certificate', ...details })}
+                                        onFiles={(files) => uploadSludge(row, 'certificate', files)}
                                     />
                                 </div>
                             </div>
@@ -314,9 +427,11 @@ export default function PhotoManagementTab({ date, onError }) {
                                 <div className="unified-photo-management__actions">
                                     <SludgePhotoButton
                                         label="입고사진"
+                                        multiple
                                         busy={busyKey === `${row.date}:${row.name}`}
                                         hasPhoto={Boolean(row.photoUrl)}
-                                        onFile={(file) => uploadInventory(row, [file])}
+                                        onDiagnostic={(event, details) => emitPhotoDiagnostic(event, { category: 'medicine', date: row.date, itemName: row.name, ...details })}
+                                        onFiles={(files) => uploadInventory(row, files)}
                                     />
                                 </div>
                             </div>
@@ -334,6 +449,7 @@ export default function PhotoManagementTab({ date, onError }) {
                                         multiple
                                         busy={busyKey === `${row.date}:${row.name}`}
                                         hasPhoto={Boolean(row.photoUrl)}
+                                        onDiagnostic={(event, details) => emitPhotoDiagnostic(event, { category: 'kit', date: row.date, itemName: row.name, ...details })}
                                         onFiles={(files) => uploadInventory(row, files, true)}
                                     />
                                 </div>
@@ -393,6 +509,9 @@ export default function PhotoManagementTab({ date, onError }) {
                             </div>
                             <div className="unified-photo-viewer__tools">
                                 {galleryPhotos.length > 1 && <span>{previewIndex + 1} / {galleryPhotos.length}</span>}
+                                <button type="button" className="is-danger" onClick={deletePreviewPhoto} disabled={isDeletingPhoto}>
+                                    {isDeletingPhoto ? '삭제 중…' : '삭제'}
+                                </button>
                                 <button type="button" onClick={downloadPreview}>원본 저장</button>
                                 <button type="button" onClick={closePreview}>닫기</button>
                             </div>

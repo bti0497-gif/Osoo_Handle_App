@@ -1653,6 +1653,25 @@ function validateRegressionContracts() {
   );
 
   checkSource(
+    roadworkModelText.includes("apiClient.post('/api/roadwork-helper/diagnostic', { event, details })") &&
+      roadworkViewText.includes("recordRoadworkDiagnostic('photo-stage-started'") &&
+      roadworkViewText.includes("recordRoadworkDiagnostic('photo-stage-item'") &&
+      roadworkViewText.includes("recordRoadworkDiagnostic('photo-stage-completed'") &&
+      serverIndexText.includes("pathName === '/api/roadwork-helper/diagnostic'") &&
+      serverIndexText.includes('action: roadworkDiagnosticEvent') &&
+      /result:\s*roadworkDiagnosticFailed\s*\?\s*'failed'/.test(serverIndexText) &&
+      serverIndexText.includes("['board-not-found', 'file-injection-failed', 'photo-row-timeout'].includes(itemResult)") &&
+      serverIndexText.includes("roadworkDiagnosticEvent === 'photo-stage-completed'") &&
+      serverIndexText.includes('actionSignalsFailure') &&
+      roadworkContractText.includes('must remain explicit diagnostics') &&
+      roadworkContractText.includes('normal 30-minute diagnostic bundle') &&
+      roadworkContractText.includes('must request immediate diagnostic upload') &&
+      !serverIndexText.includes("normalizedAction.startsWith('photo-')"),
+    '공사입력도우미 신규 사진 진단 성공 묶음·실패 즉시 전송 계약 유지',
+    '공사입력도우미 사진 성공/누락/실패 진단이 저장되지 않거나 정상 성공 로그가 즉시 폭증할 수 있습니다'
+  );
+
+  checkSource(
     roadworkViewText.includes('nodeintegration="false"') &&
       roadworkViewText.includes('enableremotemodule="false"') &&
       roadworkViewText.includes("const roadworkPartition = activeSiteId") &&
@@ -1747,7 +1766,9 @@ function validateRegressionContracts() {
       electronMainTextForWindow.includes('const SERVER_STARTUP_GRACE_MS = 120000') &&
       electronMainTextForWindow.includes('OSOO_SERVER_TOKEN: launchedToken') &&
       electronMainTextForWindow.includes('if (serverProcess === launchedProcess) serverProcess = null') &&
-      electronMainTextForWindow.includes('if (shouldKeepEmbeddedServerAlive())') &&
+      electronMainTextForWindow.includes('function forceEmbeddedServerRecovery(reason, requestId = null)') &&
+      electronMainTextForWindow.includes("forceEmbeddedServerRecovery('electron-health-failure')") &&
+      electronMainTextForWindow.includes('if (shouldKeepEmbeddedServerAlive() && !serverProcess && !serverRestartTimer)') &&
       electronMainTextForWindow.includes('isQuitting = true;') &&
       electronMainTextForWindow.includes('Embedded server health lost; forcing clean restart') &&
       /handleVersionMigration\(\);\s*startServer\(\);\s*startServerGuard\(\);/.test(electronMainTextForWindow),

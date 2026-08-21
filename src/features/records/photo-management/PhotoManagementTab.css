@@ -289,6 +289,17 @@
     cursor: pointer;
 }
 
+.unified-photo-viewer__tools button.is-danger {
+    border-color: #fecaca;
+    background: #fff1f2;
+    color: #dc2626;
+}
+
+.unified-photo-viewer__tools button:disabled {
+    cursor: wait;
+    opacity: 0.62;
+}
+
 .unified-photo-viewer__tools span {
     min-width: 48px;
     color: #64748b;

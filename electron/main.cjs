@@ -48,9 +48,13 @@ let isQuitting = false;
 let isUpdateInstalling = false;
 let serverGuardTimer = null;
 let serverRestartTimer = null;
+let serverRecoveryRequestTimer = null;
 let serverHealthFailures = 0;
 let serverInstanceToken = null;
 let serverLaunchedAt = 0;
+let lastReadyServerPid = null;
+let lastServerStderr = '';
+const plannedServerStopPids = new Set();
 let watchdogHeartbeatTimer = null;
 let runtimeTelemetryTimer = null;
 let embeddedServerRecoveryInProgress = false;
@@ -69,6 +73,7 @@ const SERVER_GUARD_INTERVAL_MS = 3000;
 const SERVER_HEALTH_FAILURE_LIMIT = 3;
 const SERVER_STARTUP_GRACE_MS = 120000;
 const WATCHDOG_HEARTBEAT_INTERVAL_MS = 15000;
+const SERVER_RECOVERY_REQUEST_INTERVAL_MS = 2000;
 const RENDERER_READY_TIMEOUT_MS = 20000;
 const EXTERNAL_RECOVERY_REQUEST_TTL_MS = 3 * 60 * 1000;
 
@@ -85,6 +90,10 @@ function getOsooAppDataPath() {
 
 function getWatchdogHeartbeatPath() {
   return path.join(getOsooAppDataPath(), 'runtime', 'app-heartbeat.json');
+}
+
+function getWatchdogServerRecoveryRequestPath() {
+  return path.join(getOsooAppDataPath(), 'runtime', 'server-recovery-request.json');
 }
 
 function getEnvironmentBaselineMarkerPath() {
@@ -203,6 +212,11 @@ function writeWatchdogHeartbeat(serverReady) {
       checkedAt: new Date().toISOString(),
       serverReady: Boolean(serverReady),
       serverPort: DEDICATED_SERVER_PORT,
+      serverPid: serverProcess?.pid || 0,
+      serverStartedAt: serverLaunchedAt ? new Date(serverLaunchedAt).toISOString() : null,
+      serverRecoveryInProgress: Boolean(embeddedServerRecoveryInProgress || serverRestartTimer),
+      sessionActive: Boolean(sharedAuthenticatedUser?.id),
+      windowVisible: BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && window.isVisible()),
     }), 'utf8');
     fs.renameSync(temporaryPath, targetPath);
   } catch (error) {
@@ -226,6 +240,15 @@ function stopWatchdogHeartbeat() {
   if (watchdogHeartbeatTimer) clearInterval(watchdogHeartbeatTimer);
   watchdogHeartbeatTimer = null;
   try { fs.unlinkSync(getWatchdogHeartbeatPath()); } catch (_) {}
+}
+
+function sanitizeRuntimeMessage(value) {
+  return String(value || '')
+    .replace(/([A-Za-z]:\\Users\\)[^\\\s]+/gi, '$1<user>')
+    .replace(/(password|token|secret|authorization)\s*[:=]\s*[^\s,;]+/gi, '$1=<redacted>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(-500);
 }
 
 function resolveDefaultWindowSiteId() {
@@ -358,8 +381,9 @@ function scheduleServerRestart(delayMs = 500) {
 }
 
 function notifyRendererServerRecovery(phase) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send('server:recovery-progress', { phase });
+  BrowserWindow.getAllWindows().forEach((window) => {
+    if (!window.isDestroyed()) window.webContents.send('server:recovery-progress', { phase });
+  });
 }
 
 function appendElectronRecoveryDiagnostic(action, result, details = {}) {
@@ -512,11 +536,24 @@ function armRendererReadyTimeout() {
   rendererReadyTimer.unref?.();
 }
 
-function checkEmbeddedServerHealth() {
-  if (!shouldKeepEmbeddedServerAlive() || !serverProcess || !serverInstanceToken) {
-    return Promise.resolve(false);
+function inspectEmbeddedServerHealth() {
+  const startedAt = Date.now();
+  if (!shouldKeepEmbeddedServerAlive()) {
+    return Promise.resolve({ healthy: false, reason: 'server-not-required', durationMs: 0 });
+  }
+  if (!serverProcess) {
+    return Promise.resolve({ healthy: false, reason: 'server-process-missing', durationMs: 0 });
+  }
+  if (!serverInstanceToken) {
+    return Promise.resolve({ healthy: false, reason: 'server-token-missing', durationMs: 0 });
   }
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve({ ...result, durationMs: Date.now() - startedAt });
+    };
     const request = http.get({
       hostname: '127.0.0.1',
       port: DEDICATED_SERVER_PORT,
@@ -530,27 +567,142 @@ function checkEmbeddedServerHealth() {
       response.on('end', () => {
         try {
           const payload = JSON.parse(body);
-          resolve(response.statusCode === 200
+          const healthy = response.statusCode === 200
             && payload?.app === 'osoo-handle-app'
             && payload?.ready === true
-            && payload?.instanceVerified === true);
+            && payload?.instanceVerified === true;
+          let reason = 'ok';
+          if (response.statusCode !== 200) reason = `status-${response.statusCode}`;
+          else if (payload?.app !== 'osoo-handle-app') reason = 'unexpected-server';
+          else if (payload?.ready !== true) reason = 'server-not-ready';
+          else if (payload?.instanceVerified !== true) reason = 'instance-token-mismatch';
+          finish({ healthy, reason, statusCode: response.statusCode });
         } catch (_) {
-          resolve(false);
+          finish({ healthy: false, reason: 'invalid-ping-response', statusCode: response.statusCode });
         }
       });
     });
-    request.on('timeout', () => request.destroy());
-    request.on('error', () => resolve(false));
+    request.on('timeout', () => {
+      finish({ healthy: false, reason: 'ping-timeout' });
+      request.destroy();
+    });
+    request.on('error', (error) => {
+      finish({ healthy: false, reason: `request-error-${error?.code || 'unknown'}` });
+    });
   });
+}
+
+function checkEmbeddedServerHealth() {
+  return inspectEmbeddedServerHealth().then((result) => result.healthy);
+}
+
+function forceEmbeddedServerRecovery(reason, requestId = null) {
+  if (!shouldKeepEmbeddedServerAlive()) return false;
+  if (embeddedServerRecoveryInProgress) {
+    const recoveryServerIsStarting = serverRestartTimer
+      || !serverProcess
+      || (serverLaunchedAt && Date.now() - serverLaunchedAt < SERVER_STARTUP_GRACE_MS);
+    if (recoveryServerIsStarting) return true;
+  }
+
+  embeddedServerRecoveryInProgress = true;
+  notifyRendererServerRecovery('server-restarting');
+  const failedProcess = serverProcess;
+  const failedPid = failedProcess?.pid || null;
+  if (failedPid) plannedServerStopPids.add(failedPid);
+  serverProcess = null;
+  serverInstanceToken = null;
+  serverLaunchedAt = 0;
+  lastReadyServerPid = null;
+  appendElectronRecoveryDiagnostic('embedded-server-recovery', 'started', {
+    reason,
+    requestId,
+    failedPid,
+    sessionActive: Boolean(sharedAuthenticatedUser?.id),
+    windowVisible: BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && window.isVisible()),
+  });
+  try { failedProcess?.kill('SIGKILL'); } catch (_) {}
+  scheduleServerRestart(250);
+  return true;
+}
+
+async function processWatchdogServerRecoveryRequest() {
+  if (useExternalServer || isQuitting) return;
+  const requestPath = getWatchdogServerRecoveryRequestPath();
+  if (!fs.existsSync(requestPath)) return;
+
+  let request;
+  try {
+    request = JSON.parse(fs.readFileSync(requestPath, 'utf8'));
+  } catch (error) {
+    try { fs.unlinkSync(requestPath); } catch (_) {}
+    appendElectronRecoveryDiagnostic('watchdog-server-recovery-request', 'failed', {
+      reason: 'invalid-request',
+      errorName: error?.name || 'Error',
+    });
+    return;
+  }
+
+  const expiresAt = new Date(request?.expiresAt || 0).getTime();
+  if (!Number.isFinite(expiresAt) || expiresAt < Date.now()) {
+    try { fs.unlinkSync(requestPath); } catch (_) {}
+    appendElectronRecoveryDiagnostic('watchdog-server-recovery-request', 'failed', {
+      reason: 'expired-request',
+      requestId: String(request?.requestId || '').slice(0, 80),
+    });
+    return;
+  }
+
+  const health = await inspectEmbeddedServerHealth();
+  try { fs.unlinkSync(requestPath); } catch (_) {}
+  if (health.healthy) {
+    appendElectronRecoveryDiagnostic('watchdog-server-recovery-request', 'ignored', {
+      reason: 'server-already-ready',
+      requestId: String(request?.requestId || '').slice(0, 80),
+      serverPid: serverProcess?.pid || null,
+    });
+    return;
+  }
+
+  appendElectronRecoveryDiagnostic('watchdog-server-recovery-request', 'accepted', {
+    reason: String(request?.reason || 'watchdog-health-failure').slice(0, 120),
+    requestId: String(request?.requestId || '').slice(0, 80),
+    healthReason: health.reason,
+  });
+  forceEmbeddedServerRecovery('watchdog-server-only-request', String(request?.requestId || '').slice(0, 80));
+}
+
+function startWatchdogServerRecoveryRequestMonitor() {
+  if (useExternalServer || serverRecoveryRequestTimer) return;
+  void processWatchdogServerRecoveryRequest();
+  serverRecoveryRequestTimer = setInterval(() => {
+    void processWatchdogServerRecoveryRequest();
+  }, SERVER_RECOVERY_REQUEST_INTERVAL_MS);
+  serverRecoveryRequestTimer.unref?.();
+}
+
+function stopWatchdogServerRecoveryRequestMonitor() {
+  if (serverRecoveryRequestTimer) clearInterval(serverRecoveryRequestTimer);
+  serverRecoveryRequestTimer = null;
+  try { fs.unlinkSync(getWatchdogServerRecoveryRequestPath()); } catch (_) {}
 }
 
 function startServerGuard() {
   if (useExternalServer || serverGuardTimer) return;
   serverGuardTimer = setInterval(async () => {
     if (!shouldKeepEmbeddedServerAlive()) return;
-    const healthy = await checkEmbeddedServerHealth();
-    if (healthy) {
+    const health = await inspectEmbeddedServerHealth();
+    if (health.healthy) {
       serverHealthFailures = 0;
+      const readyPid = serverProcess?.pid || null;
+      if (readyPid && readyPid !== lastReadyServerPid) {
+        lastReadyServerPid = readyPid;
+        appendElectronRecoveryDiagnostic('embedded-server-ready', 'ok', {
+          pid: readyPid,
+          readyElapsedMs: serverLaunchedAt ? Date.now() - serverLaunchedAt : null,
+          recovery: embeddedServerRecoveryInProgress,
+        });
+      }
       if (embeddedServerRecoveryInProgress) {
         embeddedServerRecoveryInProgress = false;
         notifyRendererServerRecovery('server-ready');
@@ -560,15 +712,19 @@ function startServerGuard() {
     if (serverProcess && Date.now() - serverLaunchedAt < SERVER_STARTUP_GRACE_MS) return;
     serverHealthFailures += 1;
     if (serverHealthFailures < SERVER_HEALTH_FAILURE_LIMIT) return;
+    const failureCount = serverHealthFailures;
     serverHealthFailures = 0;
-    embeddedServerRecoveryInProgress = true;
-    notifyRendererServerRecovery('server-restarting');
     console.error('[Electron] Embedded server health lost; forcing clean restart on port 18731.');
-    const failedProcess = serverProcess;
-    serverProcess = null;
-    serverInstanceToken = null;
-    try { failedProcess?.kill('SIGKILL'); } catch (_) {}
-    scheduleServerRestart();
+    appendElectronRecoveryDiagnostic('embedded-server-health-failed', 'failed', {
+      reason: health.reason,
+      statusCode: health.statusCode || null,
+      durationMs: health.durationMs,
+      failureCount,
+      serverPid: serverProcess?.pid || null,
+      serverUptimeMs: serverLaunchedAt ? Date.now() - serverLaunchedAt : null,
+      lastServerStderr,
+    });
+    forceEmbeddedServerRecovery('electron-health-failure');
   }, SERVER_GUARD_INTERVAL_MS);
   serverGuardTimer.unref?.();
 }
@@ -638,6 +794,8 @@ function startServer() {
 
   serverInstanceToken = crypto.randomUUID();
   serverLaunchedAt = Date.now();
+  const launchedAt = serverLaunchedAt;
+  lastServerStderr = '';
   const launchedToken = serverInstanceToken;
   serverProcess = fork(serverScriptPath, [], {
     cwd: serverWorkingDirectory,
@@ -654,21 +812,40 @@ function startServer() {
     }
   });
   const launchedProcess = serverProcess;
+  let launchedStderr = '';
+  appendElectronRecoveryDiagnostic('embedded-server-process', 'started', {
+    pid: launchedProcess.pid,
+    recovery: embeddedServerRecoveryInProgress,
+  });
 
   serverProcess.stdout?.on('data', (data) => {
     console.log(`[Server] ${data.toString().trim()}`);
   });
 
   serverProcess.stderr?.on('data', (data) => {
+    const message = sanitizeRuntimeMessage(data.toString());
+    if (message) {
+      launchedStderr = message;
+      if (serverProcess === launchedProcess) lastServerStderr = message;
+    }
     console.error(`[Server Error] ${data.toString().trim()}`);
   });
 
-  launchedProcess.on('exit', (code) => {
-    console.log(`[Server] Process exited with code ${code}`);
+  launchedProcess.on('exit', (code, signal) => {
+    const planned = plannedServerStopPids.delete(launchedProcess.pid);
+    console.log(`[Server] Process exited with code ${code} signal ${signal || 'none'}`);
+    appendElectronRecoveryDiagnostic('embedded-server-process', planned ? 'stopped' : 'failed', {
+      pid: launchedProcess.pid,
+      code,
+      signal: signal || null,
+      planned,
+      uptimeMs: Date.now() - launchedAt,
+      lastStderr: launchedStderr,
+    });
     if (serverProcess === launchedProcess) serverProcess = null;
     if (serverInstanceToken === launchedToken) serverInstanceToken = null;
-    serverLaunchedAt = 0;
-    if (shouldKeepEmbeddedServerAlive()) {
+    if (serverProcess === null) serverLaunchedAt = 0;
+    if (shouldKeepEmbeddedServerAlive() && !serverProcess && !serverRestartTimer) {
       embeddedServerRecoveryInProgress = true;
       notifyRendererServerRecovery('server-restarting');
       scheduleServerRestart();
@@ -681,6 +858,7 @@ function startServer() {
 function stopServer() {
   if (useExternalServer) return;
   if (serverProcess) {
+    plannedServerStopPids.add(serverProcess.pid);
     serverProcess.kill();
     serverProcess = null;
     serverInstanceToken = null;
@@ -691,6 +869,7 @@ function stopServer() {
 function stopServerGracefully(timeoutMs = 3000) {
   if (useExternalServer || !serverProcess) return Promise.resolve();
   const proc = serverProcess;
+  plannedServerStopPids.add(proc.pid);
 
   return new Promise((resolve) => {
     let settled = false;
@@ -1107,6 +1286,7 @@ app.whenReady().then(() => {
   handleVersionMigration();
   startServer();
   startServerGuard();
+  startWatchdogServerRecoveryRequestMonitor();
   startWatchdogHeartbeat();
   startRuntimeTelemetry();
   createWindow({ showOnReady: !isBackgroundStartup });
@@ -1128,6 +1308,7 @@ app.whenReady().then(() => {
         if (serverRestartTimer) clearTimeout(serverRestartTimer);
         serverGuardTimer = null;
         serverRestartTimer = null;
+        stopWatchdogServerRecoveryRequestMonitor();
         stopWatchdogHeartbeat();
         stopRuntimeTelemetry();
         await stopServerGracefully();
@@ -1148,6 +1329,7 @@ app.on('before-quit', () => {
   if (serverRestartTimer) clearTimeout(serverRestartTimer);
   serverGuardTimer = null;
   serverRestartTimer = null;
+  stopWatchdogServerRecoveryRequestMonitor();
   stopWatchdogHeartbeat();
   stopRuntimeTelemetry();
   stopServer();

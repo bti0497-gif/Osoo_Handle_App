@@ -193,11 +193,30 @@ module.exports = (db, appDataPath) => {
         }
     });
 
+    const MEMBER_SHEETS_LOOKUP_TIMEOUT_MS = 8000;
+    const getMembersWithTimeout = () => new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            callback(value);
+        };
+        const timer = setTimeout(() => {
+            finish(reject, new Error(`Google Sheets 회원 조회 시간 초과 (${MEMBER_SHEETS_LOOKUP_TIMEOUT_MS}ms)`));
+        }, MEMBER_SHEETS_LOOKUP_TIMEOUT_MS);
+        timer.unref?.();
+        Promise.resolve()
+            .then(() => getMembers())
+            .then((members) => finish(resolve, members))
+            .catch((error) => finish(reject, error));
+    });
+
     const getMembersWithDriveFallback = async () => {
         let sheetsError = null;
         if (isSheetsConfigured()) {
             try {
-                const members = await getMembers();
+                const members = await getMembersWithTimeout();
                 if (Array.isArray(members) && members.length > 0) {
                     return { members, source: 'sheets' };
                 }
@@ -457,6 +476,33 @@ module.exports = (db, appDataPath) => {
     router.post('/local-login', async (req, res) => {
         const normalizedName = String(req.body?.name || '').trim();
         const submittedPassword = String(req.body?.password || '');
+        const rawDiagnosticContext = req.body?.diagnosticContext;
+        const diagnosticContext = rawDiagnosticContext && typeof rawDiagnosticContext === 'object'
+            ? rawDiagnosticContext
+            : {};
+        const safeCount = (value) => {
+            const count = Number(value);
+            return Number.isInteger(count) && count >= 0 && count <= 1000 ? count : null;
+        };
+        const requestPurpose = ['login-screen', 'current-entry-verification'].includes(diagnosticContext.requestPurpose)
+            ? diagnosticContext.requestPurpose
+            : 'unspecified';
+        const lastInputResetTrigger = ['none', 'electron-restored', 'window-focus'].includes(diagnosticContext.lastInputResetTrigger)
+            ? diagnosticContext.lastInputResetTrigger
+            : 'unknown';
+        const safeClientContext = {
+            requestPurpose,
+            clientStateLength: safeCount(diagnosticContext.clientStateLength),
+            nativeFieldLength: safeCount(diagnosticContext.nativeFieldLength),
+            stateMatchesNative: typeof diagnosticContext.stateMatchesNative === 'boolean'
+                ? diagnosticContext.stateMatchesNative
+                : null,
+            windowFocused: typeof diagnosticContext.windowFocused === 'boolean'
+                ? diagnosticContext.windowFocused
+                : null,
+            inputResetCount: safeCount(diagnosticContext.inputResetCount),
+            lastInputResetTrigger,
+        };
         try {
             recordDiagnostic(db, appDataPath, {
                 level: 'info',
@@ -467,6 +513,9 @@ module.exports = (db, appDataPath) => {
                 details: {
                     nameProvided: Boolean(normalizedName),
                     passwordProvided: Boolean(submittedPassword),
+                    inputPresent: Boolean(submittedPassword),
+                    inputLength: submittedPassword.length,
+                    ...safeClientContext,
                 },
             });
             const namedMember = db.prepare('SELECT * FROM members WHERE name = ?').get(normalizedName);
@@ -487,7 +536,11 @@ module.exports = (db, appDataPath) => {
                     action: 'local-login',
                     result: 'accepted',
                     message: 'local field login credential verified',
-                    details: { memberId: member.id, role: member.role || 'user' },
+                    details: {
+                        memberId: member.id,
+                        role: member.role || 'user',
+                        ...safeClientContext,
+                    },
                 });
                 res.json(buildFieldLoginResponse(member, 'local'));
                 // 로그인 응답은 로컬 자격 확인만으로 즉시 끝낸다. Drive/BigQuery는
@@ -507,6 +560,17 @@ module.exports = (db, appDataPath) => {
                             : null,
                         submittedHasOuterWhitespace:
                             submittedPassword !== submittedPassword.trim(),
+                        inputPresent: Boolean(submittedPassword),
+                        inputLength: submittedPassword.length,
+                        savedLength: namedMember
+                            ? String(namedMember.password || '').length
+                            : null,
+                        lengthMatched: namedMember
+                            ? submittedPassword.length === String(namedMember.password || '').length
+                            : null,
+                        outerWhitespaceDetected:
+                            submittedPassword !== submittedPassword.trim(),
+                        ...safeClientContext,
                     },
                 });
                 res.status(401).json({ success: false, message: '이름 또는 비밀번호가 일치하지 않습니다.' });

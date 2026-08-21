@@ -356,13 +356,17 @@ export default function UnifiedRecordModal({
     const [sludgePhotoDraft, setSludgePhotoDraft] = useState({
         date: '',
         sludgeFiles: [],
-        certificateFile: null,
+        certificateFiles: [],
         sludgePhotoUrl: null,
         certificatePhotoUrl: null,
     });
     const [isLoadingSludgePhotos, setIsLoadingSludgePhotos] = useState(false);
     const [isUploadingSludgePhotos, setIsUploadingSludgePhotos] = useState(false);
+    const [modalOffset, setModalOffset] = useState({ x: 0, y: 0 });
+    const [isModalCollapsed, setIsModalCollapsed] = useState(false);
     const wasOpenRef = useRef(false);
+    const modalRef = useRef(null);
+    const modalDragRef = useRef(null);
     const initialWaterSignature = JSON.stringify({
         measurementOrder: contexts.water?.measurementOrder || 1,
         rounds: contexts.water?.rounds || [],
@@ -504,6 +508,8 @@ export default function UnifiedRecordModal({
             setWaterRounds(rounds);
             setSelectedWaterRound(rounds[0]?.value || 1);
             setWaterInputMode('manual');
+            setModalOffset({ x: 0, y: 0 });
+            setIsModalCollapsed(false);
         }, 0);
         return () => clearTimeout(timer);
     }, [isOpen, initialTab, initialDate, initialWaterSignature]);
@@ -525,7 +531,7 @@ export default function UnifiedRecordModal({
         if (!isOpen || !date) return undefined;
         let cancelled = false;
         const [year, month] = date.split('-').map(Number);
-        setSludgePhotoDraft({ date, sludgeFiles: [], certificateFile: null, sludgePhotoUrl: null, certificatePhotoUrl: null });
+        setSludgePhotoDraft({ date, sludgeFiles: [], certificateFiles: [], sludgePhotoUrl: null, certificatePhotoUrl: null });
         setIsLoadingSludgePhotos(true);
         SludgePhotoModel.fetchByMonth(year, month)
             .then((result) => {
@@ -564,6 +570,64 @@ export default function UnifiedRecordModal({
         ))
     ), [resolvedContexts.water?.items]);
     const isWaterMbrLayout = !waterLocationNameSet.has('침전조');
+
+    const handleModalHeaderPointerDown = (event) => {
+        if (event.button !== 0 || !modalRef.current) return;
+        const target = event.target;
+        if (target instanceof Element && target.closest('button, input, select, textarea, [data-no-drag]')) return;
+
+        const rect = modalRef.current.getBoundingClientRect();
+        modalDragRef.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            startOffset: modalOffset,
+            nextOffset: modalOffset,
+            minDeltaX: -(rect.width / 2) - rect.left,
+            maxDeltaX: window.innerWidth + (rect.width / 2) - rect.right,
+            minDeltaY: 8 - rect.top,
+            maxDeltaY: window.innerHeight + (rect.height / 2) - rect.bottom,
+        };
+        modalRef.current.classList.add('unified-record-modal__panel--dragging');
+        modalRef.current.style.willChange = 'transform';
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+    };
+
+    const handleModalHeaderPointerMove = (event) => {
+        const drag = modalDragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        const deltaX = Math.min(drag.maxDeltaX, Math.max(drag.minDeltaX, event.clientX - drag.startX));
+        const deltaY = Math.min(drag.maxDeltaY, Math.max(drag.minDeltaY, event.clientY - drag.startY));
+        const nextOffset = {
+            x: drag.startOffset.x + deltaX,
+            y: drag.startOffset.y + deltaY,
+        };
+        drag.nextOffset = nextOffset;
+        if (modalRef.current) {
+            modalRef.current.style.transform = `translate3d(${nextOffset.x}px, ${nextOffset.y - 6}px, 0)`;
+        }
+    };
+
+    const handleModalHeaderPointerUp = (event) => {
+        const drag = modalDragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        modalDragRef.current = null;
+        if (modalRef.current) {
+            modalRef.current.classList.remove('unified-record-modal__panel--dragging');
+            modalRef.current.style.willChange = '';
+        }
+        setModalOffset(drag.nextOffset || drag.startOffset);
+        if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+    };
+
+    const handleModalHeaderDoubleClick = (event) => {
+        const target = event.target;
+        if (target instanceof Element && target.closest('button, input, select, textarea, [data-no-drag]')) return;
+        setIsModalCollapsed((current) => !current);
+    };
 
     const isPo4pInputEnabled = (item) => {
         if (!item) return false;
@@ -839,7 +903,7 @@ export default function UnifiedRecordModal({
     };
 
     const hasPendingSludgePhotos = sludgePhotoDraft.date === date
-        && Boolean(sludgePhotoDraft.sludgeFiles.length || sludgePhotoDraft.certificateFile);
+        && Boolean(sludgePhotoDraft.sludgeFiles.length || sludgePhotoDraft.certificateFiles.length);
 
     const handleSludgePhotoFiles = (files) => {
         setSludgePhotoDraft((current) => ({
@@ -849,8 +913,12 @@ export default function UnifiedRecordModal({
         }));
     };
 
-    const handleCertificatePhotoFile = (file) => {
-        setSludgePhotoDraft((current) => ({ ...current, date, certificateFile: file }));
+    const handleCertificatePhotoFiles = (files) => {
+        setSludgePhotoDraft((current) => ({
+            ...current,
+            date,
+            certificateFiles: [...current.certificateFiles, ...files],
+        }));
     };
 
     const uploadPendingSludgePhotos = async () => {
@@ -861,9 +929,7 @@ export default function UnifiedRecordModal({
             let driveUploadFailed = false;
             const uploadQueue = [
                 ...pending.sludgeFiles.map((file) => ({ type: 'sludge', file, urlKey: 'sludgePhotoUrl' })),
-                ...(pending.certificateFile
-                    ? [{ type: 'certificate', file: pending.certificateFile, urlKey: 'certificatePhotoUrl' }]
-                    : []),
+                ...pending.certificateFiles.map((file) => ({ type: 'certificate', file, urlKey: 'certificatePhotoUrl' })),
             ];
             for (const { type, file, urlKey } of uploadQueue) {
                 const result = await SludgePhotoModel.uploadPhoto(date, type, file);
@@ -874,7 +940,9 @@ export default function UnifiedRecordModal({
                     sludgeFiles: type === 'sludge'
                         ? current.sludgeFiles.filter((candidate) => candidate !== file)
                         : current.sludgeFiles,
-                    certificateFile: type === 'certificate' ? null : current.certificateFile,
+                    certificateFiles: type === 'certificate'
+                        ? current.certificateFiles.filter((candidate) => candidate !== file)
+                        : current.certificateFiles,
                     [urlKey]: result.url || current[urlKey] || true,
                 } : current);
             }
@@ -1519,7 +1587,7 @@ export default function UnifiedRecordModal({
                     {visibleFlowItems.map((item) => {
                         const values = getDraftForItem('flow', item);
                         const isSludge = isSludgeFlowItem(item);
-                        const previousReading = toNumberOrNull(item?.previous?.reading);
+                        const previousReading = toNumberOrNull(item?.previous?.displayReading ?? item?.previous?.reading);
                         const fieldLabels = isSludge
                             ? [
                                 ['reading', '반출량'],
@@ -1608,11 +1676,12 @@ export default function UnifiedRecordModal({
                                 onFiles={handleSludgePhotoFiles}
                             />
                             <SludgePhotoButton
-                                label="청소필증"
+                                label={`청소필증${sludgePhotoDraft.certificateFiles.length ? ` (${sludgePhotoDraft.certificateFiles.length}장)` : ''}`}
                                 disabled={!hasSludgeAmount || isLoadingSludgePhotos}
                                 busy={isUploadingSludgePhotos}
-                                hasPhoto={Boolean(sludgePhotoDraft.certificateFile || sludgePhotoDraft.certificatePhotoUrl)}
-                                onFile={handleCertificatePhotoFile}
+                                multiple
+                                hasPhoto={Boolean(sludgePhotoDraft.certificateFiles.length || sludgePhotoDraft.certificatePhotoUrl)}
+                                onFiles={handleCertificatePhotoFiles}
                             />
                             {!hasSludgeAmount && (
                                 <span style={{ color: '#94a3b8', fontSize: 12, fontWeight: 700 }}>
@@ -1872,7 +1941,10 @@ export default function UnifiedRecordModal({
             justifyContent: 'center',
             padding: 24,
         }}>
-            <div style={{
+            <div
+                ref={modalRef}
+                className={`unified-record-modal__panel${isModalCollapsed ? ' unified-record-modal__panel--collapsed' : ''}`}
+                style={{
                 width: activeTab === 'water'
                     ? `min(${Math.max(860, 380 + currentItems.length * 100)}px, calc(100vw - 32px))`
                     : 'min(860px, calc(100vw - 32px))',
@@ -1885,16 +1957,35 @@ export default function UnifiedRecordModal({
                 minWidth: 0,
                 minHeight: 0,
                 overflow: 'hidden',
-                transform: 'translateY(-6px)',
-            }}>
-                <div style={{ display: 'grid', gap: 10, padding: '12px 16px 10px', borderBottom: '1px solid #e2e8f0' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(170px, 1fr) auto', gap: 12, alignItems: 'center', minWidth: 0 }}>
+                transform: `translate3d(${modalOffset.x}px, ${modalOffset.y - 6}px, 0)`,
+                }}
+            >
+                <div className="unified-record-modal__header" style={{ display: 'grid', gap: 10, padding: '12px 16px 10px', borderBottom: '1px solid #e2e8f0' }}>
+                    <div
+                        onPointerDown={handleModalHeaderPointerDown}
+                        onPointerMove={handleModalHeaderPointerMove}
+                        onPointerUp={handleModalHeaderPointerUp}
+                        onPointerCancel={handleModalHeaderPointerUp}
+                        onDoubleClick={handleModalHeaderDoubleClick}
+                        style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'minmax(170px, 1fr) auto',
+                            gap: 12,
+                            alignItems: 'center',
+                            minWidth: 0,
+                            cursor: 'grab',
+                            touchAction: 'none',
+                            userSelect: 'none',
+                        }}
+                    >
                         <div style={{ minWidth: 0 }}>
                             <div style={{ fontSize: 19, fontWeight: 900, color: '#0f172a', whiteSpace: 'nowrap' }}>
                                 통합 데이터 입력
                             </div>
                             <div style={{ fontSize: 13, fontWeight: 700, color: '#64748b', marginTop: 2 }}>
-                                {mode === 'edit' ? '선택 행 수정' : '새 데이터 추가'}
+                                {isModalCollapsed
+                                    ? '더블클릭하여 입력창 펼치기'
+                                    : (mode === 'edit' ? '선택 행 수정' : '새 데이터 추가')}
                             </div>
                         </div>
 
@@ -1931,7 +2022,7 @@ export default function UnifiedRecordModal({
                         </div>
                     </div>
 
-                    <div style={{ display: 'flex', gap: 6, minWidth: 0, overflowX: 'auto', paddingBottom: 2 }}>
+                    <div className="unified-record-modal__tabs" style={{ display: 'flex', gap: 6, minWidth: 0, overflowX: 'auto', paddingBottom: 2 }}>
                         {TAB_META.map((tab) => {
                             const isActive = tab.id === activeTab;
                             return (
@@ -1960,7 +2051,7 @@ export default function UnifiedRecordModal({
                     </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: (activeTab === 'flow' || activeTab === 'medicine' || activeTab === 'kit' || activeTab === 'photos') ? '1fr' : '210px 1fr', gap: 0, minHeight: 0, flex: 1 }}>
+                <div className="unified-record-modal__body" style={{ display: 'grid', gridTemplateColumns: (activeTab === 'flow' || activeTab === 'medicine' || activeTab === 'kit' || activeTab === 'photos') ? '1fr' : '210px 1fr', gap: 0, minHeight: 0, flex: 1 }}>
                     {activeTab !== 'flow' && activeTab !== 'medicine' && activeTab !== 'kit' && activeTab !== 'photos' && (
                     <aside style={{ borderRight: '1px solid #e2e8f0', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                         {activeTab === 'water' ? renderWaterSidebar() : (
@@ -2040,7 +2131,7 @@ export default function UnifiedRecordModal({
                     </main>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '12px 18px', borderTop: '1px solid #e2e8f0' }}>
+                <div className="unified-record-modal__footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '12px 18px', borderTop: '1px solid #e2e8f0' }}>
                     <button type="button" onClick={handleClose} style={{ padding: '8px 16px', borderRadius: 7, border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer', fontWeight: 800, color: '#475569' }}>
                         닫기
                     </button>

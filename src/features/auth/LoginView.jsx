@@ -11,6 +11,8 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
     const passRef = useRef(null);
     const hasEditedNameRef = useRef(false);
     const restoringFocusRef = useRef(false);
+    const inputResetCountRef = useRef(0);
+    const lastInputResetTriggerRef = useRef('none');
 
     useEffect(() => {
         const hasPrefilledName = Boolean(nameRef.current?.value);
@@ -22,9 +24,11 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
     }, []);
 
     useEffect(() => {
-        const restoreInputFocus = () => {
+        const restoreInputFocus = (trigger = 'electron-restored') => {
             if (restoringFocusRef.current) return;
             restoringFocusRef.current = true;
+            inputResetCountRef.current += 1;
+            lastInputResetTriggerRef.current = trigger;
             // A restored login window is a fresh authentication attempt.
             // Never carry a password or an old rejection across tray/app restore.
             setPass('');
@@ -41,8 +45,8 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
             });
         };
 
-        const unsubscribe = window.electronAPI?.onWindowRestored?.(restoreInputFocus);
-        const handleWindowFocus = () => restoreInputFocus();
+        const unsubscribe = window.electronAPI?.onWindowRestored?.(() => restoreInputFocus('electron-restored'));
+        const handleWindowFocus = () => restoreInputFocus('window-focus');
         window.addEventListener('focus', handleWindowFocus);
 
         return () => {
@@ -72,7 +76,16 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
         setSubmitting(true);
         setError('');
         try {
-            const result = await onLogin(name, pass);
+            const nativeInput = String(passRef.current?.value || '');
+            const stateInput = String(pass || '');
+            const result = await onLogin(name, pass, {
+                clientStateLength: stateInput.length,
+                nativeFieldLength: nativeInput.length,
+                stateMatchesNative: stateInput === nativeInput,
+                windowFocused: document.hasFocus(),
+                inputResetCount: inputResetCountRef.current,
+                lastInputResetTrigger: lastInputResetTriggerRef.current,
+            });
             if (result.success) {
                 localStorage.setItem('lastLoginName', name);
             } else {

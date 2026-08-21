@@ -22,6 +22,10 @@ export const MedicineInModel = {
     return apiClient.post('/api/medicine-in/upload-photo', formData);
   },
 
+  async deletePhoto(relativePath) {
+    return apiClient.delete(`/api/medicine-in/photo?p=${encodeURIComponent(relativePath)}`);
+  },
+
   async checkRemotePhotos(payload) {
     return apiClient.post('/api/medicine-in/remote-photos/check', payload);
   },

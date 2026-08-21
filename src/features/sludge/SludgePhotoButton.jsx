@@ -8,6 +8,7 @@ export default function SludgePhotoButton({
   multiple = false,
   onFile,
   onFiles,
+  onDiagnostic,
 }) {
   const ref = useRef(null);
   const isDisabled = disabled || busy;
@@ -17,7 +18,11 @@ export default function SludgePhotoButton({
       <button
         type="button"
         disabled={isDisabled}
-        onClick={() => ref.current?.click()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDiagnostic?.('file-dialog-requested', { multiple });
+          ref.current?.click();
+        }}
         style={{
           padding: '5px 12px',
           borderRadius: 6,
@@ -45,6 +50,11 @@ export default function SludgePhotoButton({
         style={{ display: 'none' }}
         onChange={(event) => {
           const files = Array.from(event.target.files || []);
+          onDiagnostic?.(files.length > 0 ? 'file-selection-received' : 'file-selection-empty', {
+            multiple,
+            fileCount: files.length,
+            totalBytes: files.reduce((sum, file) => sum + Number(file?.size || 0), 0),
+          });
           if (files.length > 0) {
             if (multiple) onFiles?.(files);
             else onFile?.(files[0]);

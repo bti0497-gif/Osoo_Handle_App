@@ -74,7 +74,7 @@ export const useKitViewModel = (currentUser, { showAlert } = {}) => {
             const today = new Date(`${todayStr}T12:00:00`);
 
             // 설정에서 활성화된 키트 항목 가져오기
-            const settingsData = await SettingsModel.getSettings();
+            const settingsData = await SettingsModel.getSettings({ localOnly: true });
             let dynamicTypes = [];
             if (settingsData?.success && settingsData.configItems) {
                 const kits = settingsData.configItems.filter(i => i.category === 'kit' && i.is_active

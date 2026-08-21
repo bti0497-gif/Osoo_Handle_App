@@ -8,6 +8,7 @@ import { BatchProgressDialog } from '../../components/common';
 import AdvancedDataGrid from '../../components/common/AdvancedDataGrid';
 import { ADVANCED_DATAGRID_READ_ONLY_PROPS } from '../../components/common/advancedDataGridPresets';
 import UnifiedRecordModal from '../records/UnifiedRecordModal';
+import { useResponsiveGridHeight } from '../../hooks/useResponsiveGridHeight';
 
 const DEFAULT_WATER_LOCATION_ITEMS = [
     { name: '유량조정조', checked: true },
@@ -136,6 +137,7 @@ const ManagementFooter = ({ count, loading, onOpen }) => (
 );
 
 const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessionChange }) => {
+    const gridHeight = useResponsiveGridHeight();
     const { showToast, showAlert, showConfirm } = useDialog();
     const { itemState = {}, basicSiteState = {} } = useSettingsViewModel();
     const { flowItems = [], medicineItems = [], locationItems = [], kitItems = [] } = itemState;
@@ -492,8 +494,10 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
                 alignItems: 'center',
                 justifyContent: 'flex-end',
                 padding: '0 6px',
-                fontSize: 11,
+                fontSize: 13,
                 fontWeight: 800,
+                fontVariantNumeric: 'tabular-nums',
+                fontFeatureSettings: '"tnum" 1',
                 color: errorMsg ? '#dc2626' : '#1e293b',
                 background: row.isFuture ? '#fafafa' : 'transparent',
             }} title={errorMsg || ''}>
@@ -513,7 +517,9 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
                 justifyContent: 'center',
                 gap: 2,
                 fontWeight: row.date === todayStr ? 900 : 800,
-                fontSize: 10.5,
+                fontSize: 12,
+                fontVariantNumeric: 'tabular-nums',
+                fontFeatureSettings: '"tnum" 1',
                 color: row.rowKey === selectedRowKey ? '#92400e' : row.date === todayStr ? '#1d4ed8' : row.isFuture ? '#a0aec0' : '#475569',
                 background: row.rowKey === selectedRowKey ? '#fde68a' : row.date === todayStr ? '#dbeafe' : '#f8fafc',
             }} title={row.displayLabel || row.sourceLabel || ''}>
@@ -537,7 +543,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
                     initialScrollTop={workspaceSession.scrollTop}
                     onScrollPositionChange={handleGridScroll}
                     width="100%"
-                    height={400}
+                    height={gridHeight}
                     showBottomBar={false}
                     selectionMode="row"
                     contextMenu={false}

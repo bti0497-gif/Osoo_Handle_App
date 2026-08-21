@@ -378,13 +378,16 @@ export const useAuthViewModel = () => {
         return typeof unsubscribe === 'function' ? unsubscribe : undefined;
     }, [clearLocalAuthenticatedState, refreshLoginHint]);
 
-    const login = async (name, password) => {
+    const login = async (name, password, diagnosticContext = {}) => {
         try {
             const normalizedName = String(name || '').trim();
             const isPrimaryAdminLogin = normalizedName.toLowerCase() === 'admin';
             const loginResult = isPrimaryAdminLogin
                 ? await AuthModel.discoveryLogin(normalizedName, password)
-                : await AuthModel.localLogin(normalizedName, password);
+                : await AuthModel.localLogin(normalizedName, password, {
+                    requestPurpose: 'login-screen',
+                    ...diagnosticContext,
+                });
             const userData = loginResult?.member || null;
 
             // Field users authenticate only against the member information
