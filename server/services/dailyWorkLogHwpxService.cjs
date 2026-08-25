@@ -9,6 +9,7 @@ const { PDFDocument } = require('pdf-lib');
 const { buildBindingsForDate } = require('./dailyWorkLogService.cjs');
 const { convertHwpxToPdf } = require('./hwpPdfService.cjs');
 const { getDailyWeather } = require('./weatherHistoryService.cjs');
+const { getAvailableReportOutputPath } = require('./reportOutputPathService.cjs');
 
 const CHECK_MARK = String.fromCodePoint(0x25CB);
 
@@ -467,13 +468,6 @@ function replaceBookmarkText(sectionXml, bookmarkValues) {
   return { xml: output, replacedCount };
 }
 
-function ensureOutputDirectory(appDataPath) {
-  const root = appDataPath || path.join(os.tmpdir(), 'osoo-handle-app');
-  const outputDir = path.join(root, 'temp', 'daily-work-log-hwpx');
-  fs.mkdirSync(outputDir, { recursive: true });
-  return outputDir;
-}
-
 function writeOutputFile(outputPath, buffer) {
   try {
     fs.writeFileSync(outputPath, buffer);
@@ -487,7 +481,14 @@ function writeOutputFile(outputPath, buffer) {
   }
 }
 
-async function buildDailyWorkLogHwpx({ db, appDataPath, templateInfo, date, context = {} }) {
+function getTemporaryOutputPath(appDataPath, date) {
+  const root = appDataPath || path.join(os.tmpdir(), 'osoo-handle-app');
+  const outputDir = path.join(root, 'temp', 'daily-work-log-hwpx');
+  fs.mkdirSync(outputDir, { recursive: true });
+  return path.join(outputDir, `일일업무일지_${date}.hwpx`);
+}
+
+async function buildDailyWorkLogHwpx({ db, appDataPath, templateInfo, date, context = {}, persistOutput = true }) {
   const templateBuffer = fs.readFileSync(templateInfo.absolutePath);
   const zip = await JSZip.loadAsync(templateBuffer);
   const bookmarkValues = await buildHwpxBookmarkValues(db, appDataPath, date, context);
@@ -516,7 +517,16 @@ async function buildDailyWorkLogHwpx({ db, appDataPath, templateInfo, date, cont
     zip.file('mimetype', mimeType, { compression: 'STORE' });
   }
 
-  const requestedOutputPath = path.join(ensureOutputDirectory(appDataPath), `일일업무일지_${date}.hwpx`);
+  const requestedOutputPath = persistOutput
+    ? getAvailableReportOutputPath({
+        reportType: '일일업무일지',
+        siteName: String(
+          context.siteName || db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get()?.site_name || ''
+        ).trim(),
+        startDate: date,
+        extension: '.hwpx',
+      })
+    : getTemporaryOutputPath(appDataPath, date);
   const outputBuffer = await zip.generateAsync({
     type: 'nodebuffer',
     compression: 'DEFLATE',
@@ -527,7 +537,7 @@ async function buildDailyWorkLogHwpx({ db, appDataPath, templateInfo, date, cont
   return { outputPath, replacedCount, bookmarkValues };
 }
 
-async function buildBatchDailyWorkLogHwpx({ db, appDataPath, templateInfo, manifest, context = {} }) {
+async function buildBatchDailyWorkLogHwpx({ db, appDataPath, templateInfo, manifest, context = {}, persistOutput = true }) {
   const results = [];
   const dates = [...new Set(manifest.pages.map((page) => page.date))];
   for (const date of dates) {
@@ -537,6 +547,7 @@ async function buildBatchDailyWorkLogHwpx({ db, appDataPath, templateInfo, manif
       templateInfo,
       date,
       context,
+      persistOutput,
     }));
   }
   return results;
@@ -554,8 +565,14 @@ async function mergePdfFiles(pdfPaths, outputPath) {
 }
 
 async function buildBatchDailyWorkLogPdf({ db, appDataPath, templateInfo, manifest, context = {} }) {
-  const hwpxResults = await buildBatchDailyWorkLogHwpx({ db, appDataPath, templateInfo, manifest, context });
-  const outputDir = ensureOutputDirectory(appDataPath);
+  const hwpxResults = await buildBatchDailyWorkLogHwpx({
+    db,
+    appDataPath,
+    templateInfo,
+    manifest,
+    context,
+    persistOutput: false,
+  });
   const pdfPaths = [];
   for (const result of hwpxResults) {
     const pdfPath = result.outputPath.replace(/\.hwpx$/i, '.pdf');
@@ -563,11 +580,17 @@ async function buildBatchDailyWorkLogPdf({ db, appDataPath, templateInfo, manife
     pdfPaths.push(pdfPath);
   }
 
-  const dates = hwpxResults.map((result) => path.basename(result.outputPath).match(/(\d{4}-\d{2}-\d{2})/)?.[1]).filter(Boolean);
-  const fileName = dates.length <= 1
-    ? `일일업무일지_${dates[0] || 'output'}.pdf`
-    : `일일업무일지_${dates[0]}_${dates[dates.length - 1]}.pdf`;
-  const outputPath = path.join(outputDir, fileName);
+  const dates = [...new Set(manifest.pages.map((page) => page.date))];
+  const outputSiteName = String(
+    context.siteName || db.prepare('SELECT site_name FROM app_settings WHERE id = 1').get()?.site_name || ''
+  ).trim();
+  const outputPath = getAvailableReportOutputPath({
+    reportType: '일일업무일지',
+    siteName: outputSiteName,
+    startDate: dates[0],
+    endDate: dates[dates.length - 1],
+    extension: '.pdf',
+  });
   const merged = await mergePdfFiles(pdfPaths, outputPath);
   return { ...merged, hwpxResults, pdfPaths };
 }

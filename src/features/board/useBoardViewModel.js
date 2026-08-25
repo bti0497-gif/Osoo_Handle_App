@@ -292,6 +292,34 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
         }
     };
 
+    const downloadAttachment = async (attachment) => {
+        const fileName = String(attachment?.name || 'download').trim() || 'download';
+        try {
+            if (window.electronAPI?.saveBoardAttachment) {
+                return await window.electronAPI.saveBoardAttachment({
+                    url: String(attachment?.url || '').trim(),
+                    fileName,
+                });
+            }
+
+            const { blob } = await BoardModel.downloadAttachment(attachment);
+            const objectUrl = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = objectUrl;
+            link.download = fileName;
+            link.rel = 'noreferrer';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+            return { canceled: false };
+        } catch (err) {
+            console.error('Board attachment download error:', err);
+            showAlert?.('첨부파일 다운로드 실패: ' + (err?.message || '알 수 없는 오류'));
+            return { canceled: false, error: err?.message || String(err) };
+        }
+    };
+
     // Filter and Pagination
     const filteredPosts = posts.filter(p =>
         p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -322,6 +350,7 @@ export const useBoardViewModel = (currentUser, { showAlert, showConfirm } = {}) 
         submitComment,
         deleteComment,
         uploadFile,
+        downloadAttachment,
         viewMode,
         setViewMode,
         searchTerm,

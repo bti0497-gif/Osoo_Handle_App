@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFlowViewModel } from './useFlowViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogContext';
@@ -107,7 +107,6 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
 
     const [selectedDate, setSelectedDate] = useState(workspaceSession.selectedKey || null);
     const [modalState, setModalState] = useState({ open: false, tab: 'flow', mode: 'add', date: null });
-    const pendingParentRefreshRef = useRef(false);
     const todayStr = getTodayKST();
 
     useEffect(() => {
@@ -264,16 +263,12 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
         setSelectedDate(date);
         onWorkspaceSessionChange?.({ selectedKey: date });
         if (savedTabs.includes('flow')) {
-            pendingParentRefreshRef.current = true;
+            await refreshDate(date);
         }
     };
 
     const handleModalClose = () => {
         setModalState((prev) => ({ ...prev, open: false }));
-        if (pendingParentRefreshRef.current) {
-            pendingParentRefreshRef.current = false;
-            void refreshDate(selectedDate);
-        }
     };
 
     const renderCell = (row, col) => {

@@ -7,6 +7,7 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const Database = require('better-sqlite3');
 const { importWatchdogDiagnostics } = require('../server/services/watchdogDiagnosticImportService.cjs');
+const { createServerRecoveryPolicy } = require('../electron/serverRecoveryPolicy.cjs');
 
 const root = path.resolve(__dirname, '..');
 const executable = path.join(root, 'watchdog', 'dist', 'OsooWatchdog.exe');
@@ -17,6 +18,7 @@ const installerHooks = fs.readFileSync(path.join(root, 'scripts', 'installer-hoo
 const integratedInstaller = fs.readFileSync(path.join(root, 'scripts', 'build-integrated-installer.ps1'), 'utf8');
 const packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
 const mainProcess = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8');
+const appSource = fs.readFileSync(path.join(root, 'src', 'App.jsx'), 'utf8');
 const watchdogSource = fs.readFileSync(path.join(root, 'watchdog', 'OsooWatchdog.cs'), 'utf8');
 const serverIndex = fs.readFileSync(path.join(root, 'server', 'index.cjs'), 'utf8');
 assert.ok(builderConfig.includes("watchdog/dist/OsooWatchdog.exe"), 'watchdog is not packaged as an extra resource');
@@ -37,7 +39,7 @@ assert.ok(mainProcess.includes("['update', 'full-exit'].forEach((reason) =>"), '
 assert.ok(mainProcess.includes('waitForServerReadyAndClearMaintenanceLocks'), 'server-ready maintenance lock recovery contract is missing');
 assert.ok(/catch\r?\n\s*\{/.test(watchdogSource) && watchdogSource.includes('return true;'), 'watchdog does not fail safe when process path inspection is denied');
 assert.ok(watchdogSource.includes('TimeSpan.FromMinutes(1)') && watchdogSource.includes('lastStatusKey'), 'watchdog status writes are not throttled for always-on field PCs');
-assert.ok(watchdogSource.includes('version=1.0.6'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(watchdogSource.includes('version=1.0.7'), 'watchdog behavioral changes did not bump the diagnostic version');
 assert.ok(watchdogSource.includes('update-uac-observation') && watchdogSource.includes('UpdateUacObservationPath'), 'watchdog does not persist update/UAC observation state');
 assert.ok(watchdogSource.includes('Process.GetProcessesByName("Consent")'), 'watchdog does not observe the Windows UAC consent process during update maintenance');
 assert.ok(mainProcess.includes("appendElectronRecoveryDiagnostic('runtime-telemetry', 'observed'") && mainProcess.includes('process.getProcessMemoryInfo()'), 'Electron runtime memory telemetry contract is missing');
@@ -47,14 +49,79 @@ assert.ok(watchdogSource.includes('heartbeat.ServerReady') && watchdogSource.inc
 assert.ok(watchdogSource.includes('server-recovery') && watchdogSource.includes('TryTerminateApp(appPath)'), 'watchdog cannot recover an app whose embedded server remains unavailable');
 assert.ok(watchdogSource.includes('IsFreshAppHeartbeat') && watchdogSource.includes('LiveAppServerRecoveryGrace'), 'fresh Electron heartbeat is not given a server-only recovery grace period');
 assert.ok(watchdogSource.includes('server-recovery-request.json') && watchdogSource.includes('RequestEmbeddedServerRecovery'), 'watchdog does not request server-only recovery before restarting Electron');
+assert.ok(watchdogSource.includes('server-recovery-response.json') && watchdogSource.includes('ShouldWaitForElectronServerDecision'), 'watchdog does not wait for Electron recovery decisions');
 assert.ok(watchdogSource.includes('heartbeat.SessionActive || heartbeat.WindowVisible'), 'watchdog may restart Electron during an active field workflow');
 assert.ok(mainProcess.includes('app-heartbeat.json') && mainProcess.includes('startWatchdogHeartbeat()'), 'Electron does not publish its embedded-server heartbeat to the watchdog');
+assert.ok(mainProcess.includes('writeWatchdogServerRecoveryResponse') && mainProcess.includes('serverHealthRetryAfterAt'), 'Electron does not answer watchdog recovery requests with retry state');
 assert.ok(mainProcess.includes("notifyRendererServerRecovery('server-restarting')") && mainProcess.includes("notifyRendererServerRecovery('server-ready')"), 'Electron server recovery progress is not reported to the renderer');
+assert.ok(mainProcess.includes('arbitrateEmbeddedServerHealth') && mainProcess.includes("source: 'watchdog-request'") && mainProcess.includes("source: 'electron-guard'"), 'watchdog and Electron health checks do not share one recovery arbiter');
+assert.ok(mainProcess.includes('SERVER_TRANSIENT_HEALTH_GRACE_MS = 60_000'), 'low-spec live server delay grace is missing');
+assert.ok(!/processWatchdogServerRecoveryRequest[\s\S]*?forceEmbeddedServerRecovery\('watchdog-server-only-request'/.test(mainProcess), 'watchdog request bypasses the shared server recovery priority policy');
+assert.ok(appSource.includes("osoo:background-session-suspended") && appSource.includes("osoo:background-session-restored"), 'background tasks are not suspended until the recovered server session is restored');
 assert.ok(mainProcess.includes('app:reportRendererReady') && mainProcess.includes('renderer-clean-boot'), 'Electron does not detect a renderer startup failure or request a clean recovery');
 assert.ok(mainProcess.includes('electron-recovery-events.jsonl'), 'Electron renderer recovery diagnostics are not persisted for later upload');
 assert.ok(mainProcess.includes('emergency-recovery-request.json') && mainProcess.includes('requestExternalEmergencyRecovery'), 'Electron cannot hand off a failed renderer recovery to the external watchdog');
 assert.ok(watchdogSource.includes('TryReadEmergencyRecoveryRequest') && watchdogSource.includes('HandleEmergencyRecovery') && watchdogSource.includes('emergency-recovery'), 'watchdog does not process an explicit emergency recovery handoff');
 assert.ok(serverIndex.includes('setInterval(() =>') && serverIndex.includes('importWatchdogDiagnostics(db, appDataPath)'), 'watchdog diagnostics are not imported while the app remains running');
+assert.ok(serverIndex.includes('createServerPerformanceDiagnosticService') && serverIndex.includes('runtimePerformanceDiagnostics.middleware'), 'server event-loop and slow API diagnostics are not installed');
+assert.ok(serverIndex.includes('excelPdfServiceLoadMs') && serverIndex.includes('diagnosticServiceLoadMs'), 'server startup diagnostics do not identify slow core service loading');
+assert.ok(mainProcess.includes(".slice(-4_000)") && mainProcess.includes("appendElectronRecoveryDiagnostic('embedded-server-process'"), 'server process exit diagnostics do not retain the final stderr trail');
+
+const transientPolicy = createServerRecoveryPolicy({ transientGraceMs: 60_000, startupGraceMs: 120_000 });
+assert.strictEqual(transientPolicy.evaluate({
+  health: { healthy: false, reason: 'ping-timeout' },
+  processAlive: true,
+  serverAgeMs: 300_000,
+  nowMs: 0,
+}).decision, 'defer-transient-delay');
+assert.strictEqual(transientPolicy.evaluate({
+  health: { healthy: false, reason: 'request-error-ETIMEDOUT' },
+  processAlive: true,
+  serverAgeMs: 330_000,
+  nowMs: 30_000,
+}).decision, 'defer-transient-delay');
+assert.strictEqual(transientPolicy.evaluate({
+  health: { healthy: false, reason: 'ping-timeout' },
+  processAlive: true,
+  serverAgeMs: 360_000,
+  nowMs: 60_000,
+}).decision, 'recover-sustained-failure');
+
+const resetPolicy = createServerRecoveryPolicy({ transientGraceMs: 60_000, startupGraceMs: 120_000 });
+resetPolicy.evaluate({ health: { healthy: false, reason: 'ping-timeout' }, processAlive: true, serverAgeMs: 300_000, nowMs: 0 });
+assert.strictEqual(resetPolicy.evaluate({
+  health: { healthy: true, reason: 'ok' },
+  processAlive: true,
+  serverAgeMs: 310_000,
+  nowMs: 10_000,
+}).decision, 'healthy');
+assert.strictEqual(resetPolicy.evaluate({
+  health: { healthy: false, reason: 'ping-timeout' },
+  processAlive: true,
+  serverAgeMs: 370_000,
+  nowMs: 70_000,
+}).decision, 'defer-transient-delay');
+
+const priorityPolicy = createServerRecoveryPolicy({ transientGraceMs: 60_000, startupGraceMs: 120_000 });
+assert.strictEqual(priorityPolicy.evaluate({
+  health: { healthy: false, reason: 'server-not-ready' },
+  processAlive: true,
+  serverAgeMs: 30_000,
+  nowMs: 30_000,
+}).decision, 'defer-startup');
+assert.strictEqual(priorityPolicy.evaluate({
+  health: { healthy: false, reason: 'instance-token-mismatch' },
+  processAlive: true,
+  serverAgeMs: 30_000,
+  nowMs: 30_000,
+}).decision, 'recover-hard-failure');
+assert.strictEqual(priorityPolicy.evaluate({
+  health: { healthy: false, reason: 'server-process-missing' },
+  processAlive: false,
+  serverAgeMs: Number.POSITIVE_INFINITY,
+  recoveryInProgress: true,
+  nowMs: 30_000,
+}).decision, 'defer-recovery-in-progress');
 
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osoo-watchdog-'));
 const fakeApp = path.join(testRoot, 'Osoo Handle App.exe');

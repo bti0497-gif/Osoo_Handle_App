@@ -14,6 +14,7 @@ const { TOKEN_HEADER, tokensMatch, createLocalApiAuthMiddleware, isAllowedLocalO
 
 const BASE_DIR = path.join(__dirname, '..');
 const IS_MINIMAL_BUILD = String(process.env.OSOO_MINIMAL_BUILD || '0') === '1';
+let runtimePerformanceDiagnostics = null;
 
 function resolveAppDataPathForPort() {
   return process.env.OSOO_APP_DATA_PATH
@@ -74,11 +75,16 @@ app.use(createLocalApiAuthMiddleware(process.env.OSOO_SERVER_TOKEN));
 
 process.on('uncaughtException', (err) => {
   serverReady = false;
+  runtimePerformanceDiagnostics?.recordFatal('uncaught-exception', err);
   console.error('[UncaughtException]', err.message);
   console.error(err.stack);
   setTimeout(() => process.exit(1), 100);
 });
 process.on('unhandledRejection', (reason) => {
+  runtimePerformanceDiagnostics?.recordFatal(
+    'unhandled-rejection',
+    reason instanceof Error ? reason : new Error(String(reason))
+  );
   console.error('[UnhandledRejection]', reason instanceof Error ? reason.message : reason);
 });
 
@@ -197,9 +203,14 @@ function registerLazyApplication() {
   }
   db.exec('BEGIN IMMEDIATE; ROLLBACK;');
   initializationTimings.databaseValidationMs = Date.now() - phaseStartedAt;
+  const coreServiceLoadStartedAt = Date.now();
   phaseStartedAt = Date.now();
   const { warmUpExcelPdfConverter } = require('./services/excelPdfService.cjs');
+  initializationTimings.excelPdfServiceLoadMs = Date.now() - phaseStartedAt;
+  phaseStartedAt = Date.now();
   const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
+  initializationTimings.photoNormalizationServiceLoadMs = Date.now() - phaseStartedAt;
+  phaseStartedAt = Date.now();
   const {
     buildDatabaseDiagnosticDetails,
     recordDiagnostic,
@@ -207,7 +218,11 @@ function registerLazyApplication() {
     setDiagnosticRecordedNotifier,
     uploadPendingDiagnostics,
   } = require('./services/diagnosticLogService.cjs');
-  initializationTimings.coreServiceLoadMs = Date.now() - phaseStartedAt;
+  initializationTimings.diagnosticServiceLoadMs = Date.now() - phaseStartedAt;
+  phaseStartedAt = Date.now();
+  const { createServerPerformanceDiagnosticService } = require('./services/serverPerformanceDiagnosticService.cjs');
+  initializationTimings.performanceDiagnosticServiceLoadMs = Date.now() - phaseStartedAt;
+  initializationTimings.coreServiceLoadMs = Date.now() - coreServiceLoadStartedAt;
   const ctx = { db, appDataPath, BASE_DIR };
   const { createSiteContextMiddleware } = require('./middleware/siteContext.cjs');
   const { importWatchdogDiagnostics } = require('./services/watchdogDiagnosticImportService.cjs');
@@ -337,6 +352,13 @@ function registerLazyApplication() {
     }
     requestNormalDiagnosticUpload();
   });
+  runtimePerformanceDiagnostics = createServerPerformanceDiagnosticService({
+    recordDiagnostic,
+    db,
+    appDataPath,
+    scheduleDiagnosticUpload,
+  });
+  runtimePerformanceDiagnostics.start();
   requestImmediateDiagnosticUpload();
   require('./cron/dailyRecordFinalizationScheduler.cjs').start({
     db,
@@ -384,6 +406,7 @@ function registerLazyApplication() {
       scheduleDiagnosticUpload();
     },
   }));
+  app.use(runtimePerformanceDiagnostics.middleware);
 
   // --- 초기 배포 진단 로그 ---
   // 1.0.x 현장 안정화 기간에는 /api/ping을 제외한 API 흐름을 넓게 기록한다.
@@ -610,6 +633,7 @@ function runDeferredFullStack() {
     }
   } catch (e) {
     serverReady = false;
+    runtimePerformanceDiagnostics?.recordFatal('full-stack-initialization-failed', e);
     console.error('[Server] full-stack-init 실패:', e);
     // ping만 살아 있는 반쪽 서버를 정상 서버로 오인하지 않도록 즉시 실패시킨다.
     process.exitCode = 1;
@@ -628,6 +652,7 @@ function startListening(actualPort) {
   });
   server.on('error', (err) => {
     serverReady = false;
+    runtimePerformanceDiagnostics?.recordFatal('server-listen-error', err, { port: actualPort });
     console.error('[Server Error]', err.message);
     if (process.env.ELECTRON === '1') process.exit(1);
   });
@@ -644,6 +669,7 @@ if (process.env.ELECTRON === '1') {
     setImmediate(runDeferredFullStack);
   });
   devServer.on('error', (err) => {
+    runtimePerformanceDiagnostics?.recordFatal('server-listen-error', err, { port: fixedPort });
     console.error('[Server Error]', err.message);
     if (err.code === 'EADDRINUSE') {
       console.error(`[Server Error] 현재 환경에서는 로컬 포트 ${fixedPort}를 고정 사용합니다. 기존 프로세스를 종료하고 다시 시작해 주세요.`);

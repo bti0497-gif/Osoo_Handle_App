@@ -132,6 +132,7 @@ function App() {
     useEffect(() => {
         const unsubscribe = window.electronAPI?.onServerRecoveryProgress?.(async ({ phase }) => {
             if (phase === 'server-restarting') {
+                window.dispatchEvent(new CustomEvent('osoo:background-session-suspended'));
                 setServerRecoveryPhase('서버 연결을 복구하고 있습니다. 현재 화면과 입력 내용은 유지됩니다.');
                 return;
             }
@@ -554,9 +555,13 @@ function App() {
             scheduleFromLastActivity();
             scheduleCertificateFromLastActivity();
         };
+        const onBackgroundSessionSuspended = () => {
+            backgroundSessionUnavailable = true;
+        };
         const activityEvents = ['keydown', 'pointerdown', 'input', 'change', 'wheel'];
         activityEvents.forEach((eventName) => window.addEventListener(eventName, onUserActivity, true));
         window.addEventListener('osoo:background-sync-wakeup', onWakeup);
+        window.addEventListener('osoo:background-session-suspended', onBackgroundSessionSuspended);
         window.addEventListener('osoo:background-session-restored', onBackgroundSessionRestored);
         // 외부 작업을 시작하지 않고 로컬 투두리스트만 먼저 확보한다.
         void SyncService.prepareBackgroundTasks([
@@ -580,6 +585,7 @@ function App() {
             if (certificateTimer) window.clearTimeout(certificateTimer);
             activityEvents.forEach((eventName) => window.removeEventListener(eventName, onUserActivity, true));
             window.removeEventListener('osoo:background-sync-wakeup', onWakeup);
+            window.removeEventListener('osoo:background-session-suspended', onBackgroundSessionSuspended);
             window.removeEventListener('osoo:background-session-restored', onBackgroundSessionRestored);
         };
     }, [isAuthenticated, user]);

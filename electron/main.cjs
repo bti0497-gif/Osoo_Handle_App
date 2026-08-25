@@ -4,9 +4,11 @@ const fs = require('fs');
 const os = require('os');
 const http = require('http');
 const crypto = require('crypto');
+const { pipeline } = require('stream/promises');
 const { fork, spawnSync } = require('child_process');
 const { writeMaintenanceLock, clearMaintenanceLockIfReason } = require('./maintenanceLock.cjs');
 const { setupAutoUpdater, checkForUpdates, installDownloadedUpdateAndQuit, hasDownloadedUpdate } = require('./updater.cjs');
+const { createServerRecoveryPolicy } = require('./serverRecoveryPolicy.cjs');
 
 function isBrokenPipeError(error) {
   return error && (error.code === 'EPIPE' || /EPIPE|broken pipe/i.test(String(error.message || '')));
@@ -49,7 +51,15 @@ let isUpdateInstalling = false;
 let serverGuardTimer = null;
 let serverRestartTimer = null;
 let serverRecoveryRequestTimer = null;
-let serverHealthFailures = 0;
+let serverHealthArbitrationPromise = null;
+let lastServerHealthDecisionLog = { key: '', at: 0 };
+let serverHealthConversationState = {
+  state: 'unknown',
+  decision: null,
+  reason: null,
+  retryAfterAt: null,
+  updatedAt: null,
+};
 let serverInstanceToken = null;
 let serverLaunchedAt = 0;
 let lastReadyServerPid = null;
@@ -70,12 +80,16 @@ const FULL_EXIT_LOCK_TTL_MS = 8 * 60 * 60 * 1000;
 
 const DEDICATED_SERVER_PORT = 18731;
 const SERVER_GUARD_INTERVAL_MS = 3000;
-const SERVER_HEALTH_FAILURE_LIMIT = 3;
 const SERVER_STARTUP_GRACE_MS = 120000;
+const SERVER_TRANSIENT_HEALTH_GRACE_MS = 60_000;
 const WATCHDOG_HEARTBEAT_INTERVAL_MS = 15000;
 const SERVER_RECOVERY_REQUEST_INTERVAL_MS = 2000;
 const RENDERER_READY_TIMEOUT_MS = 20000;
 const EXTERNAL_RECOVERY_REQUEST_TTL_MS = 3 * 60 * 1000;
+const serverRecoveryPolicy = createServerRecoveryPolicy({
+  transientGraceMs: SERVER_TRANSIENT_HEALTH_GRACE_MS,
+  startupGraceMs: SERVER_STARTUP_GRACE_MS,
+});
 
 const isDev = !app.isPackaged;
 const useExternalServer = isDev && process.env.OSOO_EXTERNAL_SERVER === '1';
@@ -94,6 +108,10 @@ function getWatchdogHeartbeatPath() {
 
 function getWatchdogServerRecoveryRequestPath() {
   return path.join(getOsooAppDataPath(), 'runtime', 'server-recovery-request.json');
+}
+
+function getWatchdogServerRecoveryResponsePath() {
+  return path.join(getOsooAppDataPath(), 'runtime', 'server-recovery-response.json');
 }
 
 function getEnvironmentBaselineMarkerPath() {
@@ -215,12 +233,66 @@ function writeWatchdogHeartbeat(serverReady) {
       serverPid: serverProcess?.pid || 0,
       serverStartedAt: serverLaunchedAt ? new Date(serverLaunchedAt).toISOString() : null,
       serverRecoveryInProgress: Boolean(embeddedServerRecoveryInProgress || serverRestartTimer),
+      serverHealthState: serverHealthConversationState.state,
+      serverHealthDecision: serverHealthConversationState.decision,
+      serverHealthReason: serverHealthConversationState.reason,
+      serverHealthRetryAfterAt: serverHealthConversationState.retryAfterAt,
+      serverHealthUpdatedAt: serverHealthConversationState.updatedAt,
       sessionActive: Boolean(sharedAuthenticatedUser?.id),
       windowVisible: BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && window.isVisible()),
     }), 'utf8');
     fs.renameSync(temporaryPath, targetPath);
   } catch (error) {
     console.warn('[Watchdog] Failed to write app heartbeat:', error.message);
+  }
+}
+
+function updateServerHealthConversationState(decision, health) {
+  const now = Date.now();
+  let state = 'degraded';
+  if (decision.decision === 'healthy') state = 'healthy';
+  else if (decision.decision === 'defer-startup') state = 'starting';
+  else if (decision.decision === 'defer-recovery-in-progress') state = 'recovering';
+  else if (decision.decision.startsWith('recover-')) state = 'recovering';
+  const retryAfterMs = decision.decision.startsWith('defer-')
+    ? Math.max(5_000, Math.min(120_000, Number(decision.remainingMs || 15_000)))
+    : 15_000;
+  serverHealthConversationState = {
+    state,
+    decision: decision.decision,
+    reason: health?.reason || decision.reason || null,
+    retryAfterAt: decision.decision === 'healthy' ? null : new Date(now + retryAfterMs).toISOString(),
+    updatedAt: new Date(now).toISOString(),
+  };
+  writeWatchdogHeartbeat(decision.decision === 'healthy');
+  return retryAfterMs;
+}
+
+function writeWatchdogServerRecoveryResponse(requestId, decision, health, retryAfterMs) {
+  try {
+    const responsePath = getWatchdogServerRecoveryResponsePath();
+    fs.mkdirSync(path.dirname(responsePath), { recursive: true });
+    const temporaryPath = `${responsePath}.${process.pid}.tmp`;
+    const respondedAt = new Date();
+    fs.writeFileSync(temporaryPath, JSON.stringify({
+      version: 1,
+      requestId,
+      respondedAt: respondedAt.toISOString(),
+      decision: decision.decision,
+      state: serverHealthConversationState.state,
+      reason: health?.reason || decision.reason || null,
+      retryAfterMs,
+      retryAfterAt: new Date(respondedAt.getTime() + retryAfterMs).toISOString(),
+      serverPid: serverProcess?.pid || 0,
+      serverRecoveryInProgress: Boolean(embeddedServerRecoveryInProgress || serverRestartTimer),
+    }, null, 2), 'utf8');
+    fs.renameSync(temporaryPath, responsePath);
+  } catch (error) {
+    appendElectronRecoveryDiagnostic('watchdog-server-recovery-response', 'failed', {
+      requestId,
+      errorName: error?.name || 'Error',
+      errorMessage: String(error?.message || error).slice(0, 160),
+    });
   }
 }
 
@@ -596,6 +668,114 @@ function checkEmbeddedServerHealth() {
   return inspectEmbeddedServerHealth().then((result) => result.healthy);
 }
 
+function isEmbeddedServerProcessAlive() {
+  return Boolean(
+    serverProcess
+    && serverProcess.exitCode === null
+    && serverProcess.signalCode === null
+    && !serverProcess.killed
+  );
+}
+
+function recordDeferredServerHealthDecision(decision, health, source, requestId) {
+  const key = [decision.decision, health.reason, serverProcess?.pid || 0].join(':');
+  const now = Date.now();
+  if (lastServerHealthDecisionLog.key === key && now - lastServerHealthDecisionLog.at < 30_000) return;
+  lastServerHealthDecisionLog = { key, at: now };
+  appendElectronRecoveryDiagnostic('embedded-server-health-deferred', 'waiting', {
+    source,
+    requestId,
+    decision: decision.decision,
+    priority: decision.priority,
+    reason: health.reason,
+    statusCode: health.statusCode || null,
+    durationMs: health.durationMs,
+    degradedElapsedMs: decision.degradedElapsedMs || 0,
+    remainingMs: decision.remainingMs || 0,
+    serverPid: serverProcess?.pid || null,
+    serverUptimeMs: serverLaunchedAt ? now - serverLaunchedAt : null,
+    sessionActive: Boolean(sharedAuthenticatedUser?.id),
+    windowVisible: BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && window.isVisible()),
+  });
+}
+
+async function arbitrateEmbeddedServerHealth({ source = 'electron-guard', requestId = null } = {}) {
+  if (serverHealthArbitrationPromise) return serverHealthArbitrationPromise;
+
+  serverHealthArbitrationPromise = (async () => {
+    const health = await inspectEmbeddedServerHealth();
+    const now = Date.now();
+    const decision = serverRecoveryPolicy.evaluate({
+      health,
+      processAlive: isEmbeddedServerProcessAlive(),
+      serverAgeMs: serverLaunchedAt ? now - serverLaunchedAt : Number.POSITIVE_INFINITY,
+      recoveryInProgress: embeddedServerRecoveryInProgress,
+      restartScheduled: Boolean(serverRestartTimer),
+      nowMs: now,
+    });
+    const retryAfterMs = updateServerHealthConversationState(decision, health);
+
+    if (decision.decision === 'healthy') {
+      lastServerHealthDecisionLog = { key: '', at: 0 };
+      if (decision.degradedElapsedMs > 0) {
+        appendElectronRecoveryDiagnostic('embedded-server-health-restored', 'ok', {
+          source,
+          previousReason: decision.previousReason,
+          degradedElapsedMs: decision.degradedElapsedMs,
+          serverPid: serverProcess?.pid || null,
+        });
+      }
+      const readyPid = serverProcess?.pid || null;
+      if (readyPid && readyPid !== lastReadyServerPid) {
+        lastReadyServerPid = readyPid;
+        appendElectronRecoveryDiagnostic('embedded-server-ready', 'ok', {
+          pid: readyPid,
+          readyElapsedMs: serverLaunchedAt ? now - serverLaunchedAt : null,
+          recovery: embeddedServerRecoveryInProgress,
+        });
+      }
+      if (embeddedServerRecoveryInProgress) {
+        embeddedServerRecoveryInProgress = false;
+        notifyRendererServerRecovery('server-ready');
+      }
+      return { ...decision, health, retryAfterMs };
+    }
+
+    if (decision.decision.startsWith('defer-')) {
+      recordDeferredServerHealthDecision(decision, health, source, requestId);
+      return { ...decision, health, retryAfterMs };
+    }
+
+    console.error(`[Electron] Embedded server recovery approved (${decision.reason}, ${decision.priority}).`);
+    appendElectronRecoveryDiagnostic('embedded-server-health-failed', 'failed', {
+      source,
+      requestId,
+      decision: decision.decision,
+      priority: decision.priority,
+      reason: health.reason,
+      statusCode: health.statusCode || null,
+      durationMs: health.durationMs,
+      degradedElapsedMs: decision.degradedElapsedMs || 0,
+      serverPid: serverProcess?.pid || null,
+      serverUptimeMs: serverLaunchedAt ? now - serverLaunchedAt : null,
+      lastServerStderr,
+    });
+    forceEmbeddedServerRecovery(
+      decision.decision === 'recover-hard-failure'
+        ? 'priority-hard-server-failure'
+        : 'sustained-server-unresponsive',
+      requestId
+    );
+    return { ...decision, health, retryAfterMs };
+  })();
+
+  try {
+    return await serverHealthArbitrationPromise;
+  } finally {
+    serverHealthArbitrationPromise = null;
+  }
+}
+
 function forceEmbeddedServerRecovery(reason, requestId = null) {
   if (!shouldKeepEmbeddedServerAlive()) return false;
   if (embeddedServerRecoveryInProgress) {
@@ -606,6 +786,8 @@ function forceEmbeddedServerRecovery(reason, requestId = null) {
   }
 
   embeddedServerRecoveryInProgress = true;
+  serverRecoveryPolicy.reset();
+  lastServerHealthDecisionLog = { key: '', at: 0 };
   notifyRendererServerRecovery('server-restarting');
   const failedProcess = serverProcess;
   const failedPid = failedProcess?.pid || null;
@@ -653,23 +835,33 @@ async function processWatchdogServerRecoveryRequest() {
     return;
   }
 
-  const health = await inspectEmbeddedServerHealth();
   try { fs.unlinkSync(requestPath); } catch (_) {}
-  if (health.healthy) {
+  const requestId = String(request?.requestId || '').slice(0, 80);
+  const decision = await arbitrateEmbeddedServerHealth({
+    source: 'watchdog-request',
+    requestId,
+  });
+  writeWatchdogServerRecoveryResponse(
+    requestId,
+    decision,
+    decision.health,
+    Number(decision.retryAfterMs || 15_000)
+  );
+  if (decision.decision === 'healthy') {
     appendElectronRecoveryDiagnostic('watchdog-server-recovery-request', 'ignored', {
       reason: 'server-already-ready',
-      requestId: String(request?.requestId || '').slice(0, 80),
+      requestId,
       serverPid: serverProcess?.pid || null,
     });
     return;
   }
-
-  appendElectronRecoveryDiagnostic('watchdog-server-recovery-request', 'accepted', {
+  appendElectronRecoveryDiagnostic('watchdog-server-recovery-request', decision.decision.startsWith('defer-') ? 'deferred' : 'accepted', {
     reason: String(request?.reason || 'watchdog-health-failure').slice(0, 120),
-    requestId: String(request?.requestId || '').slice(0, 80),
-    healthReason: health.reason,
+    requestId,
+    healthReason: decision.health?.reason || null,
+    decision: decision.decision,
+    priority: decision.priority,
   });
-  forceEmbeddedServerRecovery('watchdog-server-only-request', String(request?.requestId || '').slice(0, 80));
 }
 
 function startWatchdogServerRecoveryRequestMonitor() {
@@ -685,46 +877,14 @@ function stopWatchdogServerRecoveryRequestMonitor() {
   if (serverRecoveryRequestTimer) clearInterval(serverRecoveryRequestTimer);
   serverRecoveryRequestTimer = null;
   try { fs.unlinkSync(getWatchdogServerRecoveryRequestPath()); } catch (_) {}
+  try { fs.unlinkSync(getWatchdogServerRecoveryResponsePath()); } catch (_) {}
 }
 
 function startServerGuard() {
   if (useExternalServer || serverGuardTimer) return;
   serverGuardTimer = setInterval(async () => {
     if (!shouldKeepEmbeddedServerAlive()) return;
-    const health = await inspectEmbeddedServerHealth();
-    if (health.healthy) {
-      serverHealthFailures = 0;
-      const readyPid = serverProcess?.pid || null;
-      if (readyPid && readyPid !== lastReadyServerPid) {
-        lastReadyServerPid = readyPid;
-        appendElectronRecoveryDiagnostic('embedded-server-ready', 'ok', {
-          pid: readyPid,
-          readyElapsedMs: serverLaunchedAt ? Date.now() - serverLaunchedAt : null,
-          recovery: embeddedServerRecoveryInProgress,
-        });
-      }
-      if (embeddedServerRecoveryInProgress) {
-        embeddedServerRecoveryInProgress = false;
-        notifyRendererServerRecovery('server-ready');
-      }
-      return;
-    }
-    if (serverProcess && Date.now() - serverLaunchedAt < SERVER_STARTUP_GRACE_MS) return;
-    serverHealthFailures += 1;
-    if (serverHealthFailures < SERVER_HEALTH_FAILURE_LIMIT) return;
-    const failureCount = serverHealthFailures;
-    serverHealthFailures = 0;
-    console.error('[Electron] Embedded server health lost; forcing clean restart on port 18731.');
-    appendElectronRecoveryDiagnostic('embedded-server-health-failed', 'failed', {
-      reason: health.reason,
-      statusCode: health.statusCode || null,
-      durationMs: health.durationMs,
-      failureCount,
-      serverPid: serverProcess?.pid || null,
-      serverUptimeMs: serverLaunchedAt ? Date.now() - serverLaunchedAt : null,
-      lastServerStderr,
-    });
-    forceEmbeddedServerRecovery('electron-health-failure');
+    await arbitrateEmbeddedServerHealth({ source: 'electron-guard' });
   }, SERVER_GUARD_INTERVAL_MS);
   serverGuardTimer.unref?.();
 }
@@ -794,6 +954,15 @@ function startServer() {
 
   serverInstanceToken = crypto.randomUUID();
   serverLaunchedAt = Date.now();
+  serverRecoveryPolicy.reset();
+  lastServerHealthDecisionLog = { key: '', at: 0 };
+  serverHealthConversationState = {
+    state: 'starting',
+    decision: 'server-process-started',
+    reason: null,
+    retryAfterAt: new Date(serverLaunchedAt + SERVER_STARTUP_GRACE_MS).toISOString(),
+    updatedAt: new Date(serverLaunchedAt).toISOString(),
+  };
   const launchedAt = serverLaunchedAt;
   lastServerStderr = '';
   const launchedToken = serverInstanceToken;
@@ -805,6 +974,7 @@ function startServer() {
       ELECTRON: '1',
       OSOO_PACKAGED: app.isPackaged ? '1' : '0',
       OSOO_APP_DATA_PATH: osooAppDataPath,
+      OSOO_DESKTOP_PATH: app.getPath('desktop'),
       // 진단 로그가 asar 패키징 환경에서도 정확한 버전을 기록하도록 main 프로세스에서 주입.
       OSOO_APP_VERSION: app.getVersion(),
       OSOO_API_PORT: String(DEDICATED_SERVER_PORT),
@@ -825,8 +995,8 @@ function startServer() {
   serverProcess.stderr?.on('data', (data) => {
     const message = sanitizeRuntimeMessage(data.toString());
     if (message) {
-      launchedStderr = message;
-      if (serverProcess === launchedProcess) lastServerStderr = message;
+      launchedStderr = `${launchedStderr}${launchedStderr ? '\n' : ''}${message}`.slice(-4_000);
+      if (serverProcess === launchedProcess) lastServerStderr = launchedStderr;
     }
     console.error(`[Server Error] ${data.toString().trim()}`);
   });
@@ -846,6 +1016,7 @@ function startServer() {
     if (serverInstanceToken === launchedToken) serverInstanceToken = null;
     if (serverProcess === null) serverLaunchedAt = 0;
     if (shouldKeepEmbeddedServerAlive() && !serverProcess && !serverRestartTimer) {
+      serverRecoveryPolicy.reset();
       embeddedServerRecoveryInProgress = true;
       notifyRendererServerRecovery('server-restarting');
       scheduleServerRestart();
@@ -1573,4 +1744,78 @@ ipcMain.handle('pdf:save', async (_event, options = {}) => {
 
   fs.writeFileSync(filePath, pdfBuffer);
   return { canceled: false, filePath };
+});
+
+ipcMain.handle('board:saveAttachment', async (event, options = {}) => {
+  const rawUrl = String(options?.url || '').trim();
+  const requestedName = String(options?.fileName || 'download').trim() || 'download';
+  const safeFileName = path.basename(requestedName).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_') || 'download';
+  if (!rawUrl) throw new Error('첨부파일 주소가 없습니다.');
+  if (!serverInstanceToken) throw new Error('로컬 서버가 아직 준비되지 않았습니다.');
+
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  const extension = path.extname(safeFileName).slice(1).toLowerCase();
+  const dialogOptions = {
+    title: '첨부파일 저장',
+    defaultPath: path.join(app.getPath('downloads'), safeFileName),
+  };
+  if (extension) {
+    dialogOptions.filters = [
+      { name: `${extension.toUpperCase()} 파일`, extensions: [extension] },
+      { name: '모든 파일', extensions: ['*'] },
+    ];
+  }
+
+  const { canceled, filePath } = await dialog.showSaveDialog(ownerWindow, dialogOptions);
+  if (canceled || !filePath) {
+    appendElectronRecoveryDiagnostic('board-attachment-download', 'cancelled', { fileName: safeFileName });
+    return { canceled: true };
+  }
+
+  const temporaryPath = `${filePath}.osoo-download-${process.pid}-${Date.now()}.tmp`;
+  const endpoint = `/api/download?url=${encodeURIComponent(rawUrl)}&name=${encodeURIComponent(safeFileName)}`;
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const request = http.get({
+        hostname: '127.0.0.1',
+        port: DEDICATED_SERVER_PORT,
+        path: endpoint,
+        headers: { 'x-osoo-server-token': serverInstanceToken },
+      }, async (response) => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          response.resume();
+          reject(new Error(`첨부파일을 받지 못했습니다. (${response.statusCode})`));
+          return;
+        }
+
+        const output = fs.createWriteStream(temporaryPath);
+        let receivedBytes = 0;
+        response.on('data', (chunk) => { receivedBytes += chunk.length; });
+        try {
+          await pipeline(response, output);
+          resolve({ receivedBytes });
+        } catch (error) {
+          reject(error);
+        }
+      });
+      request.setTimeout(300000, () => request.destroy(new Error('첨부파일 다운로드 시간이 초과되었습니다.')));
+      request.on('error', reject);
+    });
+
+    fs.copyFileSync(temporaryPath, filePath);
+    fs.unlinkSync(temporaryPath);
+    appendElectronRecoveryDiagnostic('board-attachment-download', 'success', {
+      fileName: safeFileName,
+      receivedBytes: result.receivedBytes,
+    });
+    return { canceled: false, filePath };
+  } catch (error) {
+    try { fs.unlinkSync(temporaryPath); } catch (_) {}
+    appendElectronRecoveryDiagnostic('board-attachment-download', 'failed', {
+      fileName: safeFileName,
+      message: String(error?.message || error).slice(0, 200),
+    });
+    throw error;
+  }
 });

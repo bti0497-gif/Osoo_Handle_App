@@ -13,6 +13,10 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
     const restoringFocusRef = useRef(false);
     const inputResetCountRef = useRef(0);
     const lastInputResetTriggerRef = useRef('none');
+    const lastInputResetAtRef = useRef(0);
+    const lastInputEditAtRef = useRef(0);
+    const lastWindowFocusAtRef = useRef(0);
+    const submitSequenceRef = useRef(0);
 
     useEffect(() => {
         const hasPrefilledName = Boolean(nameRef.current?.value);
@@ -25,10 +29,12 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
 
     useEffect(() => {
         const restoreInputFocus = (trigger = 'electron-restored') => {
+            lastWindowFocusAtRef.current = Date.now();
             if (restoringFocusRef.current) return;
             restoringFocusRef.current = true;
             inputResetCountRef.current += 1;
             lastInputResetTriggerRef.current = trigger;
+            lastInputResetAtRef.current = Date.now();
             // A restored login window is a fresh authentication attempt.
             // Never carry a password or an old rejection across tray/app restore.
             setPass('');
@@ -76,15 +82,27 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
         setSubmitting(true);
         setError('');
         try {
+            const submittedAt = Date.now();
+            const submitSequence = submitSequenceRef.current + 1;
+            submitSequenceRef.current = submitSequence;
+            const ageSince = (timestamp) => timestamp > 0
+                ? Math.max(0, submittedAt - timestamp)
+                : null;
             const nativeInput = String(passRef.current?.value || '');
             const stateInput = String(pass || '');
-            const result = await onLogin(name, pass, {
+            const result = await onLogin(name, nativeInput, {
+                loginAttemptId: `${submittedAt.toString(36)}-${submitSequence}`,
+                submitSequence,
+                inputSource: 'native-field',
                 clientStateLength: stateInput.length,
                 nativeFieldLength: nativeInput.length,
                 stateMatchesNative: stateInput === nativeInput,
                 windowFocused: document.hasFocus(),
                 inputResetCount: inputResetCountRef.current,
                 lastInputResetTrigger: lastInputResetTriggerRef.current,
+                lastInputEditAgeMs: ageSince(lastInputEditAtRef.current),
+                lastInputResetAgeMs: ageSince(lastInputResetAtRef.current),
+                lastWindowFocusAgeMs: ageSince(lastWindowFocusAtRef.current),
             });
             if (result.success) {
                 localStorage.setItem('lastLoginName', name);
@@ -147,6 +165,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                             ref={passRef}
                             onPointerDown={() => window.focus()}
                             onChange={(e) => {
+                                lastInputEditAtRef.current = Date.now();
                                 setPass(e.target.value);
                             }}
                             autoFocus

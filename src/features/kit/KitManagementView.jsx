@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useKitViewModel } from './useKitViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogContext';
@@ -61,7 +61,6 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
 
     const [selectedDate, setSelectedDate] = useState(workspaceSession.selectedKey || null);
     const [modalState, setModalState] = useState({ open: false, tab: 'kit', mode: 'add', date: null });
-    const pendingParentRefreshRef = useRef(false);
     const todayStr = todayText();
     useEffect(() => {
         if (selectedDate || !history.some((row) => row.date === todayStr)) return;
@@ -157,16 +156,12 @@ const KitManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSess
         setSelectedDate(date);
         onWorkspaceSessionChange?.({ selectedKey: date });
         if (savedTabs.includes('kit')) {
-            pendingParentRefreshRef.current = true;
+            await refreshDate(date);
         }
     };
 
     const handleModalClose = () => {
         setModalState((prev) => ({ ...prev, open: false }));
-        if (pendingParentRefreshRef.current) {
-            pendingParentRefreshRef.current = false;
-            void refreshDate(selectedDate);
-        }
     };
 
     const renderCell = (row, col) => {

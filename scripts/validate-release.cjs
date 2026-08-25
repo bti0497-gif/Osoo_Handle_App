@@ -508,9 +508,13 @@ function validateRegressionContracts() {
   const unifiedModalPath = path.join(BASE_DIR, 'src', 'features', 'records', 'UnifiedRecordModal.jsx');
   const dailyWorkLogRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'dailyWorkLogRoutes.cjs');
   const dailyWorkLogServicePath = path.join(BASE_DIR, 'server', 'services', 'dailyWorkLogService.cjs');
+  const dailyLogPreviewServicePath = path.join(BASE_DIR, 'server', 'services', 'dailyLogPreviewService.cjs');
   const dailyWorkLogHwpxServicePath = path.join(BASE_DIR, 'server', 'services', 'dailyWorkLogHwpxService.cjs');
   const dailyWorkLogHwpServicePath = path.join(BASE_DIR, 'server', 'services', 'dailyWorkLogHwpService.cjs');
+  const reportOutputPathServicePath = path.join(BASE_DIR, 'server', 'services', 'reportOutputPathService.cjs');
   const weatherHistoryServicePath = path.join(BASE_DIR, 'server', 'services', 'weatherHistoryService.cjs');
+  const kmaLandForecastServicePath = path.join(BASE_DIR, 'server', 'services', 'kmaLandForecastService.cjs');
+  const kmaLandForecastRegionsPath = path.join(BASE_DIR, 'server', 'config', 'kma-land-forecast-regions.json');
   const reportTemplateServicePath = path.join(BASE_DIR, 'server', 'services', 'reportTemplateService.cjs');
   const flowRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'flowRoutes.cjs');
   const medicineRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineRoutes.cjs');
@@ -559,6 +563,8 @@ function validateRegressionContracts() {
   const dashboardViewModelPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'useDashboardViewModel.js');
   const inventoryLevelWidgetPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'widgets', 'InventoryLevelWidget.jsx');
   const medicineInRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineInRoutes.cjs');
+  const medicineRegisterRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineRegisterRoutes.cjs');
+  const monthlyOperationReportRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'monthlyOperationReportRoutes.cjs');
   const excelRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'excelRoutes.cjs');
   const roadworkHelperRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'roadworkHelperRoutes.cjs');
   const bigQueryRestoreServicePath = path.join(BASE_DIR, 'server', 'services', 'bigQueryRestoreService.cjs');
@@ -593,6 +599,11 @@ function validateRegressionContracts() {
   const boardHtmlSanitizerPath = path.join(BASE_DIR, 'server', 'services', 'boardHtmlSanitizer.cjs');
   const boardClientSanitizerPath = path.join(BASE_DIR, 'src', 'features', 'board', 'sanitizeBoardHtml.js');
   const indexHtmlPath = path.join(BASE_DIR, 'index.html');
+  const styleIndexPath = path.join(BASE_DIR, 'src', 'styles', 'index.css');
+  const iconFontCssPath = path.join(BASE_DIR, 'src', 'styles', 'icon-fonts.css');
+  const materialIconsFontPath = path.join(BASE_DIR, 'src', 'assets', 'fonts', 'material-icons-v145.woff2');
+  const materialSymbolsFontPath = path.join(BASE_DIR, 'src', 'assets', 'fonts', 'material-symbols-outlined-v367.woff2');
+  const materialIconsLicensePath = path.join(BASE_DIR, 'src', 'assets', 'fonts', 'MATERIAL_ICONS_LICENSE.txt');
   const localApiSecurityPath = path.join(BASE_DIR, 'server', 'middleware', 'localApiSecurity.cjs');
   const activeUserSessionServicePath = path.join(BASE_DIR, 'server', 'services', 'activeUserSessionService.cjs');
   const authRoutesSecurityPath = path.join(BASE_DIR, 'server', 'routes', 'authRoutes.cjs');
@@ -637,9 +648,13 @@ function validateRegressionContracts() {
   const sqliteProtectionServiceText = readText(sqliteProtectionServicePath);
   const multiSiteSchemaServiceText = readText(multiSiteSchemaServicePath);
   const dailyWorkLogServiceText = readText(dailyWorkLogServicePath);
+  const dailyLogPreviewServiceText = readText(dailyLogPreviewServicePath);
   const dailyWorkLogHwpxServiceText = readText(dailyWorkLogHwpxServicePath);
   const dailyWorkLogHwpServiceText = readText(dailyWorkLogHwpServicePath);
+  const reportOutputPathServiceText = readText(reportOutputPathServicePath);
   const weatherHistoryServiceText = readText(weatherHistoryServicePath);
+  const kmaLandForecastServiceText = readText(kmaLandForecastServicePath);
+  const kmaLandForecastRegionsText = readText(kmaLandForecastRegionsPath);
   const facilityRoutesText = readText(facilityRoutesPath);
   const facilityModelText = readText(facilityModelPath);
   const facilityViewText = readText(facilityViewPath);
@@ -671,6 +686,8 @@ function validateRegressionContracts() {
   const dashboardViewModelText = readText(dashboardViewModelPath);
   const inventoryLevelWidgetText = readText(inventoryLevelWidgetPath);
   const medicineInRoutesText = readText(medicineInRoutesPath);
+  const medicineRegisterRoutesText = readText(medicineRegisterRoutesPath);
+  const monthlyOperationReportRoutesText = readText(monthlyOperationReportRoutesPath);
   const excelRoutesText = readText(excelRoutesPath);
   const roadworkHelperRoutesText = readText(roadworkHelperRoutesPath);
   const bigQueryRestoreServiceText = readText(bigQueryRestoreServicePath);
@@ -708,6 +725,8 @@ function validateRegressionContracts() {
   const boardHtmlSanitizerText = readText(boardHtmlSanitizerPath);
   const boardClientSanitizerText = readText(boardClientSanitizerPath);
   const indexHtmlText = readText(indexHtmlPath);
+  const styleIndexText = readText(styleIndexPath);
+  const iconFontCssText = readText(iconFontCssPath);
   const localApiSecurityText = readText(localApiSecurityPath);
   const activeUserSessionServiceText = readText(activeUserSessionServicePath);
   const authRoutesSecurityText = readText(authRoutesSecurityPath);
@@ -800,6 +819,39 @@ function validateRegressionContracts() {
       packageText.includes('validate-board-html-security.cjs'),
     '소통게시판 서버·표시 이중 HTML 정화 및 CSP 계약 유지',
     '소통게시판 HTML 정화 또는 CSP 보호가 빠져 스크립트가 실행될 수 있습니다'
+  );
+
+  checkSource(
+    styleIndexText.includes("@import './icon-fonts.css'") &&
+      iconFontCssText.includes("url('../assets/fonts/material-icons-v145.woff2')") &&
+      iconFontCssText.includes("url('../assets/fonts/material-symbols-outlined-v367.woff2')") &&
+      iconFontCssText.includes("font-family: 'Material Icons'") &&
+      iconFontCssText.includes("font-family: 'Material Symbols Outlined'") &&
+      iconFontCssText.includes('max-width: 1em') &&
+      iconFontCssText.includes('overflow: hidden') &&
+      iconFontCssText.includes('flex: 0 0 1em') &&
+      fs.existsSync(materialIconsFontPath) && fs.statSync(materialIconsFontPath).size > 10_000 &&
+      fs.existsSync(materialSymbolsFontPath) && fs.statSync(materialSymbolsFontPath).size > 10_000 &&
+      fs.existsSync(materialIconsLicensePath) &&
+      !indexHtmlText.includes('fonts.googleapis.com/icon?family=Material+Icons') &&
+      !indexHtmlText.includes('family=Material+Symbols+Outlined'),
+    'Material 아이콘 폰트 로컬 패키징·외부망 비의존 계약 유지',
+    'Material 아이콘 폰트가 누락되거나 Google Fonts 장애 시 아이콘명이 글자로 노출될 수 있습니다'
+  );
+
+  checkSource(
+    boardModelText.includes("apiClient.getRaw('/api/download'") &&
+      boardViewModelText.includes('window.electronAPI?.saveBoardAttachment') &&
+      boardViewText.includes('onClick={() => downloadAttachment(att)}') &&
+      !boardViewText.includes('resolveAttachmentHref') &&
+      electronPreloadText.includes("saveBoardAttachment: (options) => ipcRenderer.invoke('board:saveAttachment', options)") &&
+      electronMainText.includes("ipcMain.handle('board:saveAttachment'") &&
+      electronMainText.includes("title: '첨부파일 저장'") &&
+      electronMainText.includes("headers: { 'x-osoo-server-token': serverInstanceToken }") &&
+      electronMainText.includes("appendElectronRecoveryDiagnostic('board-attachment-download', 'success'") &&
+      electronMainText.includes("appendElectronRecoveryDiagnostic('board-attachment-download', 'failed'"),
+    '소통게시판 첨부파일 Windows 저장창·메인 렌더러 비이동 계약 유지',
+    '소통게시판 첨부 다운로드가 file:// 메인 화면 이동을 일으키거나 저장창·진단 연결이 깨졌습니다'
   );
 
   checkSource(
@@ -1040,24 +1092,25 @@ function validateRegressionContracts() {
       viewModelText.includes("targetTabs.has('kit') ? KitModel.fetchHistoryRange(date) : null") &&
       viewModelText.includes("targetTabs.has('water') ? WaterQualityModel.fetchHistoryRange(date) : null") &&
       parentManagementViews.every(([, source]) => (
-        source.includes('pendingParentRefreshRef.current = true;') &&
+        source.includes('await refreshDate(date);') &&
         source.includes('const handleModalClose = () =>') &&
-        source.includes('void refreshDate(') &&
         source.includes('onClose={handleModalClose}') &&
+        !source.includes('pendingParentRefreshRef') &&
         !source.includes('await refresh({ force: false });')
       )),
-    '통합 모달 저장 탭 단일 갱신 및 부모 닫기 시점 갱신 계약 유지',
-    '통합 모달 저장 중 부모 화면이 즉시 재조회되거나 닫기 시점 갱신 계약이 깨졌습니다'
+    '통합 모달 저장 탭의 저장 날짜 행 즉시 갱신 계약 유지',
+    '통합 모달 저장 후 저장 날짜 행을 즉시 다시 읽는 연결이 깨졌습니다'
   );
 
   for (const [label, source] of parentManagementViews) {
     checkSource(
-      source.includes('pendingParentRefreshRef.current = true;') &&
+      source.includes('await refreshDate(date);') &&
         source.includes('const handleModalClose = () =>') &&
         source.includes('onClose={handleModalClose}') &&
+        !source.includes('pendingParentRefreshRef') &&
         !source.includes('await refresh({ force: false });'),
-      `통합 모달 ${label} 부모 화면 닫기 시점 갱신 계약 유지`,
-      `통합 모달 ${label} 부모 화면이 저장 중 재조회하거나 닫기 갱신 연결이 깨졌습니다`
+      `통합 모달 ${label} 저장 날짜 행 즉시 갱신 계약 유지`,
+      `통합 모달 ${label} 저장 날짜 행 즉시 갱신 연결이 깨졌습니다`
     );
   }
 
@@ -1241,9 +1294,41 @@ function validateRegressionContracts() {
       weatherHistoryServiceText.includes('location.latitude.toFixed(4)') &&
       weatherHistoryServiceText.includes('location.longitude.toFixed(4)') &&
       weatherHistoryServiceText.includes("timezone: 'Asia/Seoul'") &&
-      weatherHistoryServiceText.includes("daily: 'weather_code,temperature_2m_mean'"),
+      weatherHistoryServiceText.includes("daily: 'weather_code,temperature_2m_mean'") &&
+      weatherHistoryServiceText.includes("WEATHER_CACHE_VERSION = 'kma-land-v1-open-meteo-fallback'") &&
+      weatherHistoryServiceText.includes('latitude >= 32 && latitude <= 39.5') &&
+      weatherHistoryServiceText.includes('if (date >= today)') &&
+      weatherHistoryServiceText.includes('archive-api.open-meteo.com/v1/archive') &&
+      weatherHistoryServiceText.includes('getKmaLandForecast({ siteName: location.siteName, date })') &&
+      kmaLandForecastServiceText.includes("process.env.KMA_API_HUB_AUTH_KEY") &&
+      kmaLandForecastServiceText.includes("SHARED_AUTH_KEY_SETTING = 'KMA_API_HUB_AUTH_KEY'") &&
+      kmaLandForecastServiceText.includes("require('./sitesSheetsService.cjs')") &&
+      kmaLandForecastServiceText.includes("new TextDecoder('euc-kr')") &&
+      kmaLandForecastServiceText.includes('new Set(issueRows') &&
+      kmaLandForecastRegionsText.includes('"횡성휴게소(강릉방향)"'),
     '일일업무일지 현장별 좌표·날씨·평균기온 바인딩 계약 유지',
-    '일지 날씨 조회가 선택 현장 site_id·좌표·한국 날짜 기준과 분리되지 않을 수 있습니다'
+    '일지 날씨 조회가 선택 현장·기상청 육상예보·한국 날짜 기준과 분리되거나 인증키가 소스에 노출될 수 있습니다'
+  );
+
+  checkSource(
+    electronMainText.includes("OSOO_DESKTOP_PATH: app.getPath('desktop')") &&
+      reportOutputPathServiceText.includes("REPORT_ROOT_NAME = '업무일지류모음'") &&
+      reportOutputPathServiceText.includes('datePart.slice(0, 6)') &&
+      reportOutputPathServiceText.includes('sanitizeReportType(normalizedSiteName)') &&
+      reportOutputPathServiceText.includes('while (fs.existsSync(outputPath))') &&
+      dailyWorkLogServiceText.includes("require('./reportOutputPathService.cjs')") &&
+      dailyLogPreviewServiceText.includes("require('./reportOutputPathService.cjs')") &&
+      dailyWorkLogHwpServiceText.includes("require('./reportOutputPathService.cjs')") &&
+      dailyWorkLogHwpxServiceText.includes("require('./reportOutputPathService.cjs')") &&
+      medicineRegisterRoutesText.includes("reportType: '약품관리대장'") &&
+      medicineInRoutesText.includes("reportType: '약품입고일지'") &&
+      sludgePhotoRoutesText.includes("reportType: '슬러지사진대지'") &&
+      sludgePhotoRoutesText.includes("reportType: '슬러지반출관리대장'") &&
+      monthlyOperationReportRoutesText.includes("reportType: '월운영보고서'") &&
+      dailyWorkLogHwpServiceText.includes('persistOutput: false') &&
+      dailyWorkLogHwpxServiceText.includes('persistOutput: false'),
+    '업무일지류 현장·방향별 파일명·바탕화면 월별 영구보관·기존 파일 비덮어쓰기 계약 유지',
+    '생성한 업무일지가 임시폴더에 남거나 양방향 파일명이 섞이거나 같은 날짜의 사용자 수정본을 덮어쓸 수 있습니다'
   );
 
   checkSource(
@@ -1722,7 +1807,8 @@ function validateRegressionContracts() {
       roadworkRuntimeText.includes("ipcMain.handle('roadwork:clearSessions'") &&
       roadworkRuntimeText.includes('session.getAllPartitions()') &&
       roadworkRuntimeText.includes('session.fromPartition(partition).clearStorageData') &&
-      roadworkViewText.includes("invokeRoadwork?.('roadwork:keepSessionAlive'") &&
+      (roadworkViewText.includes("invokeRoadwork?.('roadwork:keepSessionAlive'") ||
+        roadworkViewText.includes("invokeRoadwork('roadwork:keepSessionAlive'")) &&
       electronPreloadText.includes("'roadwork:keepSessionAlive'") &&
       electronPreloadText.includes("'roadwork:clearSessions'") &&
       authViewModelText.includes('clearLocalAuthenticatedState') &&
@@ -1767,12 +1853,15 @@ function validateRegressionContracts() {
       electronMainTextForWindow.includes('OSOO_SERVER_TOKEN: launchedToken') &&
       electronMainTextForWindow.includes('if (serverProcess === launchedProcess) serverProcess = null') &&
       electronMainTextForWindow.includes('function forceEmbeddedServerRecovery(reason, requestId = null)') &&
-      electronMainTextForWindow.includes("forceEmbeddedServerRecovery('electron-health-failure')") &&
+      electronMainTextForWindow.includes('function arbitrateEmbeddedServerHealth(') &&
+      electronMainTextForWindow.includes('const SERVER_TRANSIENT_HEALTH_GRACE_MS = 60_000') &&
+      electronMainTextForWindow.includes("source: 'watchdog-request'") &&
+      electronMainTextForWindow.includes("source: 'electron-guard'") &&
       electronMainTextForWindow.includes('if (shouldKeepEmbeddedServerAlive() && !serverProcess && !serverRestartTimer)') &&
       electronMainTextForWindow.includes('isQuitting = true;') &&
-      electronMainTextForWindow.includes('Embedded server health lost; forcing clean restart') &&
+      electronMainTextForWindow.includes('Embedded server recovery approved') &&
       /handleVersionMigration\(\);\s*startServer\(\);\s*startServerGuard\(\);/.test(electronMainTextForWindow),
-    '전용 18731 포트 강제 회수·고정 기동·지속 감시 계약 유지',
+    '전용 18731 포트 강제 회수·고정 기동·저사양 우선순위 감시 계약 유지',
     '배포 앱의 전용 포트 클린 부팅 또는 서버 지속 보호 계약이 깨졌습니다'
   );
 

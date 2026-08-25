@@ -13,8 +13,8 @@ using System.Threading;
 [assembly: System.Reflection.AssemblyDescription("Background watchdog for Osoo Handle App")]
 [assembly: System.Reflection.AssemblyCompany("Osoo")]
 [assembly: System.Reflection.AssemblyProduct("Osoo Handle App Watchdog")]
-[assembly: System.Reflection.AssemblyVersion("1.0.6.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.6.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.7.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.7.0")]
 
 namespace OsooWatchdog
 {
@@ -45,8 +45,27 @@ namespace OsooWatchdog
         [DataMember(Name = "serverPid")] public int ServerPid;
         [DataMember(Name = "serverStartedAt")] public string ServerStartedAt;
         [DataMember(Name = "serverRecoveryInProgress")] public bool ServerRecoveryInProgress;
+        [DataMember(Name = "serverHealthState")] public string ServerHealthState;
+        [DataMember(Name = "serverHealthDecision")] public string ServerHealthDecision;
+        [DataMember(Name = "serverHealthReason")] public string ServerHealthReason;
+        [DataMember(Name = "serverHealthRetryAfterAt")] public string ServerHealthRetryAfterAt;
+        [DataMember(Name = "serverHealthUpdatedAt")] public string ServerHealthUpdatedAt;
         [DataMember(Name = "sessionActive")] public bool SessionActive;
         [DataMember(Name = "windowVisible")] public bool WindowVisible;
+    }
+
+    [DataContract]
+    internal sealed class ServerRecoveryResponse
+    {
+        [DataMember(Name = "requestId")] public string RequestId;
+        [DataMember(Name = "respondedAt")] public string RespondedAt;
+        [DataMember(Name = "decision")] public string Decision;
+        [DataMember(Name = "state")] public string State;
+        [DataMember(Name = "reason")] public string Reason;
+        [DataMember(Name = "retryAfterMs")] public int RetryAfterMs;
+        [DataMember(Name = "retryAfterAt")] public string RetryAfterAt;
+        [DataMember(Name = "serverPid")] public int ServerPid;
+        [DataMember(Name = "serverRecoveryInProgress")] public bool ServerRecoveryInProgress;
     }
 
     [DataContract]
@@ -91,6 +110,9 @@ namespace OsooWatchdog
         private static DateTime lastStatusAt = DateTime.MinValue;
         private static int serverHealthFailures;
         private static DateTime serverUnavailableSince = DateTime.MinValue;
+        private static string pendingServerRecoveryRequestId;
+        private static DateTime nextServerRecoveryRequestAt = DateTime.MinValue;
+        private static string lastServerRecoveryResponseId;
         private static Options options;
         private static string runtimeDirectory;
         private static string logPath;
@@ -114,7 +136,7 @@ namespace OsooWatchdog
                     return 2;
                 }
 
-                Log("watchdog-start", "ok", "version=1.0.6; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
+                Log("watchdog-start", "ok", "version=1.0.7; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
                 do
                 {
                     try { CheckOnce(); }
@@ -244,7 +266,11 @@ namespace OsooWatchdog
             {
                 serverHealthFailures = 0;
                 serverUnavailableSince = DateTime.MinValue;
+                pendingServerRecoveryRequestId = null;
+                nextServerRecoveryRequestAt = DateTime.MinValue;
+                lastServerRecoveryResponseId = null;
                 TryDelete(ServerRecoveryRequestPath());
+                TryDelete(ServerRecoveryResponsePath());
                 WriteStatus("running", appPath, null);
                 return;
             }
@@ -259,16 +285,27 @@ namespace OsooWatchdog
             {
                 if (serverUnavailableSince == DateTime.MinValue) serverUnavailableSince = DateTime.UtcNow;
                 TimeSpan elapsed = DateTime.UtcNow - serverUnavailableSince;
-                RequestEmbeddedServerRecovery(heartbeat, elapsed);
+                if (ShouldWaitForElectronServerDecision(heartbeat))
+                {
+                    WriteStatus("server-recovery-conversation", appPath, heartbeat.ServerHealthState);
+                    return;
+                }
+                bool requestCreated = RequestEmbeddedServerRecovery(heartbeat, elapsed);
                 if (heartbeat.SessionActive || heartbeat.WindowVisible)
                 {
-                    Log("server-recovery", "waiting", "server-only; active-workflow=true; elapsedSeconds=" + (int)elapsed.TotalSeconds);
+                    if (requestCreated)
+                    {
+                        Log("server-recovery", "waiting", "server-only; active-workflow=true; requestId=" + pendingServerRecoveryRequestId);
+                    }
                     WriteStatus("server-only-recovery", appPath, null);
                     return;
                 }
                 if (elapsed < LiveAppServerRecoveryGrace)
                 {
-                    Log("server-recovery", "waiting", "server-only; idle-preparation=true; elapsedSeconds=" + (int)elapsed.TotalSeconds);
+                    if (requestCreated)
+                    {
+                        Log("server-recovery", "waiting", "server-only; idle-preparation=true; requestId=" + pendingServerRecoveryRequestId);
+                    }
                     WriteStatus("server-recovery-deferred", appPath, null);
                     return;
                 }
@@ -510,12 +547,87 @@ namespace OsooWatchdog
             return Path.Combine(runtimeDirectory, "server-recovery-request.json");
         }
 
-        private static void RequestEmbeddedServerRecovery(AppHeartbeat heartbeat, TimeSpan elapsed)
+        private static string ServerRecoveryResponsePath()
+        {
+            return Path.Combine(runtimeDirectory, "server-recovery-response.json");
+        }
+
+        private static bool ShouldWaitForElectronServerDecision(AppHeartbeat heartbeat)
+        {
+            ServerRecoveryResponse response;
+            if (TryReadServerRecoveryResponse(out response))
+            {
+                DateTime retryAfterAt;
+                if (!String.IsNullOrWhiteSpace(response.RequestId)
+                    && response.RequestId == pendingServerRecoveryRequestId
+                    && DateTime.TryParse(response.RetryAfterAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out retryAfterAt))
+                {
+                    nextServerRecoveryRequestAt = retryAfterAt.ToUniversalTime();
+                    if (response.RequestId != lastServerRecoveryResponseId)
+                    {
+                        lastServerRecoveryResponseId = response.RequestId;
+                        Log("server-recovery-response", "received",
+                            "requestId=" + response.RequestId
+                            + "; decision=" + (response.Decision ?? "unknown")
+                            + "; state=" + (response.State ?? "unknown")
+                            + "; retryAfterAt=" + nextServerRecoveryRequestAt.ToString("o")
+                            + "; serverPid=" + response.ServerPid.ToString(CultureInfo.InvariantCulture));
+                    }
+                    if (nextServerRecoveryRequestAt > DateTime.UtcNow) return true;
+                }
+            }
+
+            DateTime heartbeatRetryAfterAt;
+            bool conversationState = String.Equals(heartbeat.ServerHealthState, "starting", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(heartbeat.ServerHealthState, "degraded", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(heartbeat.ServerHealthState, "recovering", StringComparison.OrdinalIgnoreCase);
+            if (conversationState
+                && DateTime.TryParse(heartbeat.ServerHealthRetryAfterAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out heartbeatRetryAfterAt)
+                && heartbeatRetryAfterAt.ToUniversalTime() > DateTime.UtcNow)
+            {
+                nextServerRecoveryRequestAt = heartbeatRetryAfterAt.ToUniversalTime();
+                return true;
+            }
+
+            return heartbeat.ServerRecoveryInProgress || nextServerRecoveryRequestAt > DateTime.UtcNow;
+        }
+
+        private static bool TryReadServerRecoveryResponse(out ServerRecoveryResponse response)
+        {
+            response = null;
+            string responsePath = ServerRecoveryResponsePath();
+            if (!File.Exists(responsePath)) return false;
+            try
+            {
+                using (var stream = File.OpenRead(responsePath))
+                    response = (ServerRecoveryResponse)new DataContractJsonSerializer(typeof(ServerRecoveryResponse)).ReadObject(stream);
+                DateTime respondedAt;
+                if (response == null
+                    || String.IsNullOrWhiteSpace(response.RequestId)
+                    || !DateTime.TryParse(response.RespondedAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out respondedAt)
+                    || DateTime.UtcNow - respondedAt.ToUniversalTime() > TimeSpan.FromMinutes(3))
+                {
+                    TryDelete(responsePath);
+                    response = null;
+                    return false;
+                }
+                return true;
+            }
+            catch
+            {
+                TryDelete(responsePath);
+                response = null;
+                return false;
+            }
+        }
+
+        private static bool RequestEmbeddedServerRecovery(AppHeartbeat heartbeat, TimeSpan elapsed)
         {
             string requestPath = ServerRecoveryRequestPath();
             try
             {
-                if (File.Exists(requestPath) && DateTime.UtcNow - File.GetLastWriteTimeUtc(requestPath) < TimeSpan.FromSeconds(30)) return;
+                if (nextServerRecoveryRequestAt > DateTime.UtcNow) return false;
+                if (File.Exists(requestPath) && DateTime.UtcNow - File.GetLastWriteTimeUtc(requestPath) < TimeSpan.FromSeconds(30)) return false;
                 string requestId = Guid.NewGuid().ToString("N");
                 DateTime now = DateTime.UtcNow;
                 string json = "{\n  \"requestId\": \"" + requestId
@@ -523,6 +635,9 @@ namespace OsooWatchdog
                     + "\",\n  \"expiresAt\": \"" + now.AddMinutes(2).ToString("o")
                     + "\",\n  \"reason\": \"watchdog-server-health-failure\"\n}";
                 AtomicWrite(requestPath, json);
+                pendingServerRecoveryRequestId = requestId;
+                nextServerRecoveryRequestAt = now.AddSeconds(30);
+                TryDelete(ServerRecoveryResponsePath());
                 Log("server-only-recovery", "requested",
                     "requestId=" + requestId
                     + "; serverPid=" + (heartbeat == null ? "0" : heartbeat.ServerPid.ToString(CultureInfo.InvariantCulture))
@@ -530,10 +645,12 @@ namespace OsooWatchdog
                     + "; sessionActive=" + (heartbeat != null && heartbeat.SessionActive).ToString(CultureInfo.InvariantCulture)
                     + "; windowVisible=" + (heartbeat != null && heartbeat.WindowVisible).ToString(CultureInfo.InvariantCulture)
                     + "; elapsedSeconds=" + (int)elapsed.TotalSeconds);
+                return true;
             }
             catch (Exception ex)
             {
                 Log("server-only-recovery", "failed", ex.GetType().Name);
+                return false;
             }
         }
 
@@ -744,7 +861,7 @@ namespace OsooWatchdog
             if (statusKey == lastStatusKey && now - lastStatusAt < TimeSpan.FromMinutes(1)) return;
             lastStatusKey = statusKey;
             lastStatusAt = now;
-            string json = "{\n  \"version\": \"1.0.6\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
+            string json = "{\n  \"version\": \"1.0.7\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
             AtomicWrite(Path.Combine(runtimeDirectory, "watchdog-status.json"), json);
         }
 
@@ -764,7 +881,7 @@ namespace OsooWatchdog
                 string createdAt = DateTime.UtcNow.ToString("o");
                 string line = createdAt + "\t" + action + "\t" + result + (String.IsNullOrEmpty(details) ? "" : "\t" + details) + Environment.NewLine;
                 File.AppendAllText(logPath, line, new UTF8Encoding(false));
-                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.6\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
+                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.7\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
                 File.AppendAllText(Path.Combine(runtimeDirectory, "watchdog-events.jsonl"), eventJson, new UTF8Encoding(false));
             }
             catch { }

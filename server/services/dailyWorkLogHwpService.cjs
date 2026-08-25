@@ -8,6 +8,7 @@ const { PDFDocument } = require('pdf-lib');
 
 const { buildHwpxBookmarkValues } = require('./dailyWorkLogHwpxService.cjs');
 const { convertHwpToPdf, ensureHwpSecurityModule } = require('./hwpPdfService.cjs');
+const { getAvailableReportOutputPath } = require('./reportOutputPathService.cjs');
 
 const SECURITY_MODULE_NAME = 'OsooHandleFilePathChecker';
 let conversionQueue = Promise.resolve();
@@ -20,31 +21,33 @@ function buildEncodedCommand(script) {
   return Buffer.from(script, 'utf16le').toString('base64');
 }
 
-function ensureOutputDirectory(appDataPath) {
+function getTemporaryOutputPath(appDataPath, date) {
   const root = appDataPath || path.join(os.tmpdir(), 'osoo-handle-app');
   const outputDir = path.join(root, 'temp', 'daily-work-log-hwp');
   fs.mkdirSync(outputDir, { recursive: true });
-  return outputDir;
-}
-
-function getAvailableOutputPath(appDataPath, date) {
-  const outputDir = ensureOutputDirectory(appDataPath);
   const preferred = path.join(outputDir, `일일업무일지_${date}.hwp`);
   if (!fs.existsSync(preferred)) return preferred;
   return path.join(outputDir, `일일업무일지_${date}_${Date.now()}.hwp`);
 }
 
-function getPdfOutputPath(appDataPath, fileName) {
-  const outputDir = ensureOutputDirectory(appDataPath);
-  const extension = path.extname(fileName) || '.pdf';
-  const baseName = path.basename(fileName, extension);
-  let suffix = Date.now();
-  let outputPath = path.join(outputDir, `${baseName}_${suffix}${extension}`);
-  while (fs.existsSync(outputPath)) {
-    suffix += 1;
-    outputPath = path.join(outputDir, `${baseName}_${suffix}${extension}`);
-  }
-  return outputPath;
+function getAvailableOutputPath(appDataPath, date, persistOutput = true, siteName = '') {
+  if (!persistOutput) return getTemporaryOutputPath(appDataPath, date);
+  return getAvailableReportOutputPath({
+    reportType: '일일업무일지',
+    siteName,
+    startDate: date,
+    extension: '.hwp',
+  });
+}
+
+function getPdfOutputPath(startDate, endDate, siteName = '') {
+  return getAvailableReportOutputPath({
+    reportType: '일일업무일지',
+    siteName,
+    startDate,
+    endDate,
+    extension: '.pdf',
+  });
 }
 
 function runPowerShell(script, timeout = 180000) {
@@ -124,7 +127,7 @@ async function bindHwpTemplate({ templatePath, outputPath, bookmarkValues }) {
   }
 }
 
-async function buildDailyWorkLogHwp({ db, appDataPath, templateInfo, date, context = {} }) {
+async function buildDailyWorkLogHwp({ db, appDataPath, templateInfo, date, context = {}, persistOutput = true }) {
   const bookmarkValues = await buildHwpxBookmarkValues(db, appDataPath, date, context);
   const settings = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get() || {};
   bookmarkValues.현장명 = String(context.siteName || settings.site_name || '').trim();
@@ -132,7 +135,7 @@ async function buildDailyWorkLogHwp({ db, appDataPath, templateInfo, date, conte
     throw new Error('HWP 일지에 바인딩할 현장명이 없습니다.');
   }
 
-  const outputPath = getAvailableOutputPath(appDataPath, date);
+  const outputPath = getAvailableOutputPath(appDataPath, date, persistOutput, bookmarkValues.현장명);
   const replacedCount = await bindHwpTemplate({
     templatePath: templateInfo.absolutePath,
     outputPath,
@@ -147,12 +150,12 @@ function enqueue(task) {
   return queued;
 }
 
-function buildBatchDailyWorkLogHwp({ db, appDataPath, templateInfo, manifest, context = {} }) {
+function buildBatchDailyWorkLogHwp({ db, appDataPath, templateInfo, manifest, context = {}, persistOutput = true }) {
   return enqueue(async () => {
     const results = [];
     const dates = [...new Set(manifest.pages.map((page) => page.date))];
     for (const date of dates) {
-      results.push(await buildDailyWorkLogHwp({ db, appDataPath, templateInfo, date, context }));
+      results.push(await buildDailyWorkLogHwp({ db, appDataPath, templateInfo, date, context, persistOutput }));
     }
     return results;
   });
@@ -170,7 +173,14 @@ async function mergePdfFiles(pdfPaths, outputPath) {
 }
 
 async function buildBatchDailyWorkLogPdf({ db, appDataPath, templateInfo, manifest, context = {} }) {
-  const hwpResults = await buildBatchDailyWorkLogHwp({ db, appDataPath, templateInfo, manifest, context });
+  const hwpResults = await buildBatchDailyWorkLogHwp({
+    db,
+    appDataPath,
+    templateInfo,
+    manifest,
+    context,
+    persistOutput: false,
+  });
   const pdfPaths = [];
   for (const result of hwpResults) {
     const pdfPath = result.outputPath.replace(/\.hwp$/i, '.pdf');
@@ -178,13 +188,12 @@ async function buildBatchDailyWorkLogPdf({ db, appDataPath, templateInfo, manife
     pdfPaths.push(pdfPath);
   }
 
-  const dates = hwpResults
-    .map((result) => path.basename(result.outputPath).match(/(\d{4}-\d{2}-\d{2})/)?.[1])
-    .filter(Boolean);
-  const fileName = dates.length <= 1
-    ? `일일업무일지_${dates[0] || 'output'}.pdf`
-    : `일일업무일지_${dates[0]}_${dates[dates.length - 1]}.pdf`;
-  const outputPath = getPdfOutputPath(appDataPath, fileName);
+  const dates = [...new Set(manifest.pages.map((page) => page.date))];
+  const outputPath = getPdfOutputPath(
+    dates[0],
+    dates[dates.length - 1],
+    hwpResults[0]?.bookmarkValues?.현장명 || context.siteName || ''
+  );
   const merged = await mergePdfFiles(pdfPaths, outputPath);
   return { ...merged, hwpResults, pdfPaths };
 }

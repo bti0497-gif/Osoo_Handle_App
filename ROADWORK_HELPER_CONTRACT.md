@@ -27,6 +27,8 @@ This file protects the working roadwork input helper. Do not change these rules 
 - Only the separate popup titled `도로통합플랫폼 안내` whose body contains `[안전한 PC 사용을 위한 공지]` and `오늘 하루 그만보기` may be dismissed automatically.
 - Login forms and verification dialogs for SMS confirmation codes, OTP, or two-step verification must never be dismissed automatically.
 - App startup, update restart, or a missing app login session must not clear a roadwork persistent partition. Roadwork cookies and storage may be cleared only by the explicit app logout lifecycle.
+- Registering session keep-alive must immediately verify the existing direction-scoped session. Keep-alive diagnostics may contain only the trigger/source, success or safe error type, HTTP status, origin/path, redirect-to-login result, and check time; URL queries, cookies, and credentials must never be recorded.
+- An unexpected return to the roadwork login page must probe the last non-login path and record that safe keep-alive result before asking the user to sign in again. It must not clear the persistent partition automatically.
 
 ## Change Discipline
 

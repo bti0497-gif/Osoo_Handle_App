@@ -484,6 +484,12 @@ module.exports = (db, appDataPath) => {
             const count = Number(value);
             return Number.isInteger(count) && count >= 0 && count <= 1000 ? count : null;
         };
+        const safeDuration = (value) => {
+            const duration = Number(value);
+            return Number.isInteger(duration) && duration >= 0 && duration <= 24 * 60 * 60 * 1000
+                ? duration
+                : null;
+        };
         const requestPurpose = ['login-screen', 'current-entry-verification'].includes(diagnosticContext.requestPurpose)
             ? diagnosticContext.requestPurpose
             : 'unspecified';
@@ -492,6 +498,13 @@ module.exports = (db, appDataPath) => {
             : 'unknown';
         const safeClientContext = {
             requestPurpose,
+            loginAttemptId: /^[a-z0-9-]{1,64}$/i.test(String(diagnosticContext.loginAttemptId || ''))
+                ? String(diagnosticContext.loginAttemptId)
+                : null,
+            submitSequence: safeCount(diagnosticContext.submitSequence),
+            inputSource: diagnosticContext.inputSource === 'native-field'
+                ? 'native-field'
+                : 'unknown',
             clientStateLength: safeCount(diagnosticContext.clientStateLength),
             nativeFieldLength: safeCount(diagnosticContext.nativeFieldLength),
             stateMatchesNative: typeof diagnosticContext.stateMatchesNative === 'boolean'
@@ -502,6 +515,9 @@ module.exports = (db, appDataPath) => {
                 : null,
             inputResetCount: safeCount(diagnosticContext.inputResetCount),
             lastInputResetTrigger,
+            lastInputEditAgeMs: safeDuration(diagnosticContext.lastInputEditAgeMs),
+            lastInputResetAgeMs: safeDuration(diagnosticContext.lastInputResetAgeMs),
+            lastWindowFocusAgeMs: safeDuration(diagnosticContext.lastWindowFocusAgeMs),
         };
         try {
             recordDiagnostic(db, appDataPath, {
@@ -546,6 +562,14 @@ module.exports = (db, appDataPath) => {
                 // 로그인 응답은 로컬 자격 확인만으로 즉시 끝낸다. Drive/BigQuery는
                 // 응답 이후 별도 작업으로 넘겨 외부 장애가 업무 화면 진입을 막지 않게 한다.
             } else {
+                const savedValue = namedMember ? String(namedMember.password || '') : '';
+                const mismatchCategory = !namedMember
+                    ? 'member-not-found'
+                    : !submittedPassword
+                        ? 'empty-input'
+                        : submittedPassword.length !== savedValue.length
+                            ? 'length-mismatch'
+                            : 'same-length-value-mismatch';
                 recordDiagnostic(db, appDataPath, {
                     level: 'warn',
                     area: 'auth',
@@ -562,18 +586,29 @@ module.exports = (db, appDataPath) => {
                             submittedPassword !== submittedPassword.trim(),
                         inputPresent: Boolean(submittedPassword),
                         inputLength: submittedPassword.length,
-                        savedLength: namedMember
-                            ? String(namedMember.password || '').length
-                            : null,
+                        savedValuePresent: Boolean(savedValue),
+                        savedLength: namedMember ? savedValue.length : null,
                         lengthMatched: namedMember
-                            ? submittedPassword.length === String(namedMember.password || '').length
+                            ? submittedPassword.length === savedValue.length
                             : null,
+                        sameLengthDifferentValue: Boolean(
+                            namedMember
+                            && submittedPassword
+                            && submittedPassword.length === savedValue.length
+                        ),
+                        mismatchCategory,
+                        clientValueLagDetected: safeClientContext.stateMatchesNative === false,
                         outerWhitespaceDetected:
                             submittedPassword !== submittedPassword.trim(),
                         ...safeClientContext,
                     },
                 });
-                res.status(401).json({ success: false, message: '이름 또는 비밀번호가 일치하지 않습니다.' });
+                res.status(401).json({
+                    success: false,
+                    code: 'LOCAL_CREDENTIAL_MISMATCH',
+                    attemptId: safeClientContext.loginAttemptId,
+                    message: '이름 또는 비밀번호가 일치하지 않습니다.',
+                });
             }
         } catch (err) {
             res.status(500).json({ success: false, error: err.message });

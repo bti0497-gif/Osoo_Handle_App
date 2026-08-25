@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getKmaLandForecast } = require('./kmaLandForecastService.cjs');
 
 const WEATHER_CODES = {
   0: '맑음',
@@ -33,6 +34,8 @@ const WEATHER_CODES = {
   96: '우박 동반 뇌우',
   99: '강한 우박 동반 뇌우',
 };
+
+const WEATHER_CACHE_VERSION = 'kma-land-v1-open-meteo-fallback';
 
 function ensureDirectory(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -87,6 +90,12 @@ function getSiteRecord(db, context = {}) {
   return row || null;
 }
 
+function isSupportedLocation(latitude, longitude) {
+  return Number.isFinite(latitude) && Number.isFinite(longitude)
+    && latitude >= 32 && latitude <= 39.5
+    && longitude >= 124 && longitude <= 132;
+}
+
 function parseStoredLocation(row, siteId, siteName) {
   if (row?.target_lat === null || row?.target_lat === undefined || row?.target_lat === ''
     || row?.target_lng === null || row?.target_lng === undefined || row?.target_lng === '') {
@@ -94,7 +103,7 @@ function parseStoredLocation(row, siteId, siteName) {
   }
   const latitude = Number(row.target_lat);
   const longitude = Number(row.target_lng);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+  if (!isSupportedLocation(latitude, longitude)) {
     return null;
   }
   return { siteId: row?.id || siteId, siteName: row?.site_name || siteName, latitude, longitude };
@@ -113,7 +122,10 @@ async function geocodeSiteName(appDataPath, row, siteId, siteName) {
   const cache = readCache(appDataPath);
   cache.__locations = cache.__locations || {};
   const locationKey = String(row?.id || siteId || resolvedSiteName);
-  if (cache.__locations[locationKey]) return cache.__locations[locationKey];
+  const cachedLocation = cache.__locations[locationKey];
+  if (cachedLocation && isSupportedLocation(Number(cachedLocation.latitude), Number(cachedLocation.longitude))) {
+    return cachedLocation;
+  }
 
   const params = new URLSearchParams({
     q: `${normalizeSiteSearchName(resolvedSiteName)} 대한민국`,
@@ -129,7 +141,7 @@ async function geocodeSiteName(appDataPath, row, siteId, siteName) {
     );
     const latitude = Number(data?.[0]?.lat);
     const longitude = Number(data?.[0]?.lon);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    if (!isSupportedLocation(latitude, longitude)) return null;
     const location = {
       siteId: row?.id || siteId,
       siteName: resolvedSiteName,
@@ -150,8 +162,23 @@ async function getSiteLocation(db, appDataPath, context = {}) {
   const siteId = String(context.siteId || context.site_id || '').trim();
   const siteName = String(context.siteName || context.site_name || '').trim();
   const row = getSiteRecord(db, context);
-  return parseStoredLocation(row, siteId, siteName)
-    || geocodeSiteName(appDataPath, row, siteId, siteName);
+  const storedLocation = parseStoredLocation(row, siteId, siteName);
+  if (storedLocation) return storedLocation;
+  const hasStoredCoordinates = row?.target_lat !== null && row?.target_lat !== undefined && row?.target_lat !== ''
+    && row?.target_lng !== null && row?.target_lng !== undefined && row?.target_lng !== '';
+  if (hasStoredCoordinates) return null;
+  return geocodeSiteName(appDataPath, row, siteId, siteName);
+}
+
+function getKstDateString() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function daysBetween(leftDate, rightDate) {
@@ -169,7 +196,7 @@ function buildWeatherUrls(location, date) {
     daily: 'weather_code,temperature_2m_mean',
     timezone: 'Asia/Seoul',
   });
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getKstDateString();
   const recent = daysBetween(date, today) <= 90;
   const urls = [];
   if (recent) urls.push(`https://api.open-meteo.com/v1/forecast?${common}`);
@@ -200,11 +227,13 @@ function parseWeatherResponse(data) {
 }
 
 async function getDailyWeather({ db, appDataPath, date, context = {} }) {
+  const today = getKstDateString();
   const location = await getSiteLocation(db, appDataPath, context);
   if (!location) return { weather: '', averageTemperature: null, source: 'missing-location' };
 
   const cache = readCache(appDataPath);
   const cacheKey = [
+    WEATHER_CACHE_VERSION,
     location.siteId || location.siteName || 'site',
     location.latitude.toFixed(4),
     location.longitude.toFixed(4),
@@ -212,11 +241,32 @@ async function getDailyWeather({ db, appDataPath, date, context = {} }) {
   ].join(':');
   if (cache[cacheKey]) return { ...cache[cacheKey], source: 'cache' };
 
+  if (date >= today) {
+    try {
+      const kma = await getKmaLandForecast({ siteName: location.siteName, date });
+      if (kma.result) {
+        cache[cacheKey] = {
+          ...kma.result,
+          fetchedAt: new Date().toISOString(),
+          provider: 'kma-land-forecast',
+        };
+        writeCache(appDataPath, cache);
+        console.info(
+          `[Weather] 기상청 육상예보 사용: site=${location.siteName}, region=${kma.result.regionName}(${kma.result.regionId}), date=${date}, issued=${kma.result.issuedAt}`
+        );
+        return { ...kma.result, source: 'kma-land-forecast' };
+      }
+      console.warn(`[Weather] 기상청 육상예보 대체 조회: site=${location.siteName}, date=${date}, reason=${kma.reason}`);
+    } catch (error) {
+      console.warn(`[Weather] 기상청 육상예보 조회 실패: site=${location.siteName}, date=${date}, error=${error.message}`);
+    }
+  }
+
   for (const url of buildWeatherUrls(location, date)) {
     try {
       const result = parseWeatherResponse(await fetchJsonWithTimeout(url));
       if (!result) continue;
-      cache[cacheKey] = { ...result, fetchedAt: new Date().toISOString() };
+      cache[cacheKey] = { ...result, fetchedAt: new Date().toISOString(), provider: 'open-meteo' };
       writeCache(appDataPath, cache);
       return { ...result, source: 'open-meteo' };
     } catch (error) {

@@ -1,8 +1,9 @@
 ﻿const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const { buildExcelTempPath, openExcelFile } = require('../services/excelOpenService.cjs');
+const { openExcelFile } = require('../services/excelOpenService.cjs');
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
+const { getAvailableReportOutputPath } = require('../services/reportOutputPathService.cjs');
 
 const router = express.Router();
 
@@ -272,7 +273,13 @@ module.exports = function (db, baseDir, appDataPath) {
         ...getAggregate(db, 'kit_logs', 'kit_name', name, startDate, endDate, yearStart, scope),
       }));
 
-      const outputPath = buildExcelTempPath('osoo-medicine-register', `약품관리대장_${y}_${mm}_${Date.now()}.xlsx`);
+      const outputPath = getAvailableReportOutputPath({
+        reportType: '약품관리대장',
+        siteName,
+        startDate,
+        endDate,
+        extension: '.xlsx',
+      });
 
       await exportMedicineRegisterXlsx({
         templatePath: templateInfo.absolutePath,

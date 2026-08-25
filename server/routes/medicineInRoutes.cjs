@@ -1,6 +1,5 @@
 ﻿const express = require('express');
 const path = require('path');
-const os = require('os');
 const fs = require('fs');
 const multer = require('multer');
 const {
@@ -10,6 +9,7 @@ const {
   imageFileFilter,
 } = require('../middleware/uploadSecurity.cjs');
 const { openExcelFile } = require('../services/excelOpenService.cjs');
+const { getAvailableReportOutputPath } = require('../services/reportOutputPathService.cjs');
 
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
@@ -894,10 +894,14 @@ module.exports = function (db, baseDir, appDataPath) {
         }
       }
 
-      const outputDir = path.join(os.tmpdir(), 'osoo-medicine-in');
-      if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-
-      const outputPath = path.join(outputDir, `약품입고일지_${y}_${mm}_${Date.now()}.xlsx`);
+      const lastDay = String(new Date(y, m, 0).getDate()).padStart(2, '0');
+      const outputPath = getAvailableReportOutputPath({
+        reportType: '약품입고일지',
+        siteName: req.siteContext?.siteName || '',
+        startDate: `${y}-${mm}-01`,
+        endDate: `${y}-${mm}-${lastDay}`,
+        extension: '.xlsx',
+      });
       await exportMedicineInXlsx({
         templatePath: templateInfo.absolutePath,
         outputPath,

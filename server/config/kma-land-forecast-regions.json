@@ -1,0 +1,27 @@
+{
+  "source": "KMA village forecast point list (2026-03-24) and village coordinate list (2026-07-01)",
+  "sites": {
+    "고창고인돌휴게소(목포방향)": { "regionId": "21F10601", "regionName": "고창" },
+    "고창고인돌휴게소(서울방향)": { "regionId": "21F10601", "regionName": "고창" },
+    "금왕휴게소(평택방향)": { "regionId": "11C10103", "regionName": "음성" },
+    "동명휴게소(부산방향)": { "regionId": "11H10705", "regionName": "칠곡" },
+    "동명휴게소(춘천방향)": { "regionId": "11H10705", "regionName": "칠곡" },
+    "밀양영남루휴게소(울산방향)": { "regionId": "11H20601", "regionName": "밀양" },
+    "선산휴게소(양평방향)": { "regionId": "11H10602", "regionName": "구미" },
+    "선산휴게소(창원방향)": { "regionId": "11H10602", "regionName": "구미" },
+    "시화호휴게소": { "regionId": "11B20202", "regionName": "시흥" },
+    "안동휴게소(부산방향)": { "regionId": "11H10501", "regionName": "안동" },
+    "여주휴게소(인천방향)": { "regionId": "11B20703", "regionName": "여주" },
+    "외동휴게소(포항방향)": { "regionId": "11H10202", "regionName": "경주" },
+    "죽암휴게소(부산방향)": { "regionId": "11C10301", "regionName": "청주" },
+    "죽암휴게소(서울방향)": { "regionId": "11C10301", "regionName": "청주" },
+    "천등산휴게소(제천방향)": { "regionId": "11C10101", "regionName": "충주" },
+    "천등산휴게소(평택방향)": { "regionId": "11C10101", "regionName": "충주" },
+    "천안휴게소(부산방향)": { "regionId": "11C20301", "regionName": "천안" },
+    "청송휴게소(상주방향)": { "regionId": "11H10503", "regionName": "청송" },
+    "청주휴게소(서울방향)": { "regionId": "11C20301", "regionName": "천안" },
+    "홍천휴게소(양양방향)": { "regionId": "11D10302", "regionName": "홍천" },
+    "횡성휴게소(강릉방향)": { "regionId": "11D10402", "regionName": "횡성" },
+    "횡성휴게소(인천방향)": { "regionId": "11D10402", "regionName": "횡성" }
+  }
+}

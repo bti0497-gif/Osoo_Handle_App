@@ -1,8 +1,9 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { buildExcelTempPath, openExcelFile } = require('../services/excelOpenService.cjs');
+const { openExcelFile } = require('../services/excelOpenService.cjs');
 const { resolveReportTemplatePath } = require('../services/reportTemplateService.cjs');
+const { getAvailableReportOutputPath } = require('../services/reportOutputPathService.cjs');
 const { TEMPLATE_NAME, getMonthlyData, exportMonthlyOperationReport } = require('../services/monthlyOperationReportService.cjs');
 
 module.exports = function monthlyOperationReportRoutes(db, baseDir, appDataPath) {
@@ -17,7 +18,15 @@ module.exports = function monthlyOperationReportRoutes(db, baseDir, appDataPath)
       if (!template?.absolutePath || !fs.existsSync(template.absolutePath)) return res.status(404).json({ success: false, code: 'EXCEL_TEMPLATE_MISSING', userMessage: '월운영보고서 양식을 찾을 수 없습니다. 설정에서 양식을 등록해 주세요.' });
       const year = Number(req.body?.year);
       const month = Number(req.body?.month);
-      const outputPath = buildExcelTempPath('osoo-monthly-operation-report', `월운영보고서_${year}_${String(month).padStart(2, '0')}_${Date.now()}.xlsx`);
+      const mm = String(month).padStart(2, '0');
+      const lastDay = String(new Date(year, month, 0).getDate()).padStart(2, '0');
+      const outputPath = getAvailableReportOutputPath({
+        reportType: '월운영보고서',
+        siteName: req.siteContext?.siteName || req.body?.siteName || '',
+        startDate: `${year}-${mm}-01`,
+        endDate: `${year}-${mm}-${lastDay}`,
+        extension: '.xlsx',
+      });
       const data = await exportMonthlyOperationReport({ db, templatePath: template.absolutePath, outputPath, year, month, ...req.body, ...req.siteContext });
       await openExcelFile(outputPath);
       return res.json({ success: true, file: path.basename(outputPath), siteName: data.siteName });

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useWaterQualityViewModel } from './useWaterQualityViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogContext';
@@ -164,7 +164,6 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
     const batchProcess = useBatchProcess();
     const [selectedRowKey, setSelectedRowKey] = useState(workspaceSession.selectedKey || null);
     const [modalState, setModalState] = useState({ open: false, tab: 'water', mode: 'add', date: null });
-    const pendingParentRefreshRef = useRef(false);
     const todayStr = getTodayKST();
 
     const activeLocations = useMemo(() => {
@@ -454,7 +453,7 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
 
     const handleSaveComplete = async ({ date, savedTabs = [] }) => {
         if (savedTabs.includes('water')) {
-            pendingParentRefreshRef.current = true;
+            await refreshDate(date);
         }
         setModalState((prev) => ({ ...prev, date }));
         const savedRowKey = history.find((row) => row.date === date)?.rowKey;
@@ -466,10 +465,6 @@ const WaterQualityView = ({ currentUser, workspaceSession = {}, onWorkspaceSessi
 
     const handleModalClose = () => {
         setModalState((prev) => ({ ...prev, open: false }));
-        if (pendingParentRefreshRef.current) {
-            pendingParentRefreshRef.current = false;
-            void refreshDate(modalState.date || selectedRow?.date || todayStr);
-        }
     };
 
     const getRowStyle = (row, _selected, isHovered) => {

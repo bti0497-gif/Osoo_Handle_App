@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateError: (callback) => ipcRenderer.on('update:error', (_event, err) => callback(err)),
   onUpdateInstalling: (callback) => ipcRenderer.on('update:installing', (_event, info) => callback(info)),
   savePdf: (options) => ipcRenderer.invoke('pdf:save', options),
+  saveBoardAttachment: (options) => ipcRenderer.invoke('board:saveAttachment', options),
   openFile: (filePath) => ipcRenderer.invoke('shell:openFile', filePath),
   openFolder: (target) => ipcRenderer.invoke('shell:openFolder', target),
   checkVersionChanged: () => ipcRenderer.invoke('app:checkVersionChanged'),

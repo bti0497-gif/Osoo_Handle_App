@@ -53,6 +53,7 @@ const statusBarText = read('src/components/StatusBar.jsx');
 const electronMainText = read('electron/main.cjs');
 const electronPreloadText = read('electron/preload.cjs');
 const updaterText = read('electron/updater.cjs');
+const { sanitize: sanitizeDiagnostic } = require('../server/services/diagnosticLogService.cjs');
 
 check(
   containsAll(loginViewText, [
@@ -61,6 +62,12 @@ check(
     "setPass('')",
     'window.requestAnimationFrame(() => passRef.current?.focus())',
     "setError('')",
+    'const nativeInput = String(passRef.current?.value || \'\')',
+    'await onLogin(name, nativeInput, {',
+    "inputSource: 'native-field'",
+    'lastInputEditAgeMs:',
+    'lastInputResetAgeMs:',
+    'lastWindowFocusAgeMs:',
   ]) &&
     !loginViewText.includes('WebkitTextSecurity') &&
     !loginViewText.includes('passRef.current?.select()'),
@@ -87,12 +94,39 @@ check(
     'requestPurpose,',
     'stateMatchesNative:',
     'lastInputResetTrigger,',
+    'mismatchCategory,',
+    'clientValueLagDetected:',
+    "code: 'LOCAL_CREDENTIAL_MISMATCH'",
+    'loginAttemptId:',
+    'inputSource:',
+    'lastInputEditAgeMs:',
     "result: 'rejected'",
   ]) &&
     !authRoutesText.includes('submittedPassword: submittedPassword') &&
     !authRoutesText.includes('passwordValue:'),
   'local-login rejection records safe mismatch metadata without a raw password',
   'local-login rejection diagnostics are missing or may expose a raw password'
+);
+
+const sanitizedLoginDiagnostic = sanitizeDiagnostic({
+  password: 'must-not-appear',
+  inputLength: 0,
+  savedLength: 4,
+  lengthMatched: false,
+  mismatchCategory: 'empty-input',
+  clientValueLagDetected: true,
+  loginAttemptId: 'attempt-1',
+});
+check(
+  sanitizedLoginDiagnostic.password === '<redacted>' &&
+    sanitizedLoginDiagnostic.inputLength === 0 &&
+    sanitizedLoginDiagnostic.savedLength === 4 &&
+    sanitizedLoginDiagnostic.lengthMatched === false &&
+    sanitizedLoginDiagnostic.mismatchCategory === 'empty-input' &&
+    sanitizedLoginDiagnostic.clientValueLagDetected === true &&
+    sanitizedLoginDiagnostic.loginAttemptId === 'attempt-1',
+  'login 401 diagnostics preserve safe cause fields while redacting the raw password',
+  'login 401 diagnostic sanitization hides required cause fields or exposes the raw password'
 );
 
 check(

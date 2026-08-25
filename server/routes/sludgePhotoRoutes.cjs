@@ -7,9 +7,9 @@ const {
   parseNamedRanges,
   getMergedCellExtent,
   insertImageToCell,
-  buildExcelTempPath,
   openExcelFile,
 } = require('../services/excelOpenService.cjs');
+const { getAvailableReportOutputPath } = require('../services/reportOutputPathService.cjs');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const {
   enqueueBackgroundFileTask,
@@ -939,8 +939,13 @@ module.exports = function (db, baseDir, appDataPath) {
         return toKey(a.date) - toKey(b.date);
       });
 
-      const outputFileName = `슬러지사진대지_${year}_${mm}_${Date.now()}.xlsx`;
-      const outputPath = buildExcelTempPath('osoo-sludge-photo', outputFileName);
+      const outputPath = getAvailableReportOutputPath({
+        reportType: '슬러지사진대지',
+        siteName: req.siteContext?.siteName || '',
+        startDate: start,
+        endDate: end,
+        extension: '.xlsx',
+      });
       await exportSludgePhotoXlsx({
         templatePath, outputPath, year, month, items, siteName: req.siteContext?.siteName || ''
       });
@@ -982,8 +987,13 @@ module.exports = function (db, baseDir, appDataPath) {
         'SELECT company_name, default_amount FROM site_sludge_export_settings WHERE site_id = ?'
       ).get(req.siteContext?.siteId)
         || db.prepare('SELECT company_name, default_amount FROM sludge_export_settings WHERE id = 1').get();
-      const outputFileName = `슬러지반출관리대장_${year}_${mm}_${Date.now()}.xlsx`;
-      const outputPath = buildExcelTempPath('osoo-sludge-ledger', outputFileName);
+      const outputPath = getAvailableReportOutputPath({
+        reportType: '슬러지반출관리대장',
+        siteName: req.siteContext?.siteName || '',
+        startDate: start,
+        endDate: end,
+        extension: '.xlsx',
+      });
 
       await exportSludgeLedgerXlsx({
         templatePath,

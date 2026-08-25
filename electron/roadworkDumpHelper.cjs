@@ -51,12 +51,58 @@ function getScopedCredential(db, serviceKey, siteId) {
     SELECT service_url, user_id, password FROM web_app_credentials WHERE service_key = ?
   `).get(serviceKey);
   if (!global) return null;
-  if (!siteId || !['road_web', 'water_analysis_app'].includes(serviceKey)) return global;
+  if (!siteId || !['road_web', 'water_analysis_app'].includes(serviceKey)) {
+    return {
+      ...global,
+      requested_site_id: String(siteId || ''),
+      credential_source: 'global',
+      scoped_credential_found: false,
+    };
+  }
   const scoped = db.prepare(`
     SELECT user_id, password FROM site_web_app_credentials
     WHERE site_id = ? AND service_key = ?
   `).get(siteId, serviceKey);
-  return scoped ? { ...global, ...scoped } : global;
+  if (scoped) {
+    return {
+      ...global,
+      ...scoped,
+      requested_site_id: siteId,
+      credential_source: 'site-scoped',
+      scoped_credential_found: true,
+    };
+  }
+
+  const multiSite = db.prepare(`
+    SELECT multi_site_enabled, primary_site_id, secondary_site_id
+    FROM app_settings WHERE id = 1
+  `).get();
+  const directionalSiteIds = [multiSite?.primary_site_id, multiSite?.secondary_site_id]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  const isConfiguredDirectionalSite = Number(multiSite?.multi_site_enabled || 0) === 1
+    && directionalSiteIds.includes(siteId);
+
+  // A configured direction must never borrow the legacy/global account.  An
+  // empty result leaves the login page available for manual recovery without
+  // opening another site's authenticated session.
+  if (isConfiguredDirectionalSite) {
+    return {
+      ...global,
+      user_id: '',
+      password: '',
+      requested_site_id: siteId,
+      credential_source: 'missing-site-scoped',
+      scoped_credential_found: false,
+    };
+  }
+
+  return {
+    ...global,
+    requested_site_id: siteId,
+    credential_source: 'legacy-fallback',
+    scoped_credential_found: false,
+  };
 }
 
 function stopRoadworkKeepAlive(partition) {
@@ -66,14 +112,48 @@ function stopRoadworkKeepAlive(partition) {
 }
 
 async function pingRoadworkSession(partition, targetUrl) {
+  const checkedAt = new Date().toISOString();
   try {
     const roadworkSession = session.fromPartition(partition);
     if (typeof roadworkSession.fetch === 'function') {
       const response = await roadworkSession.fetch(targetUrl, { method: 'GET', redirect: 'follow' });
       await response.arrayBuffer();
+      let finalOrigin = '';
+      let finalPath = '';
+      try {
+        const finalUrl = new URL(response.url || targetUrl);
+        finalOrigin = finalUrl.origin;
+        finalPath = finalUrl.pathname;
+      } catch {}
+      return {
+        success: response.ok,
+        statusCode: response.status,
+        finalOrigin,
+        finalPath,
+        redirectedToLogin: /\/security\/login\.do(?:[?#]|$)/i.test(response.url || ''),
+        checkedAt,
+      };
     }
+    return {
+      success: false,
+      statusCode: 0,
+      finalOrigin: '',
+      finalPath: '',
+      redirectedToLogin: false,
+      checkedAt,
+      errorName: 'SessionFetchUnavailable',
+    };
   } catch (error) {
     console.warn('[Roadwork Session] keep-alive failed:', error?.message || error);
+    return {
+      success: false,
+      statusCode: 0,
+      finalOrigin: '',
+      finalPath: '',
+      redirectedToLogin: false,
+      checkedAt,
+      errorName: String(error?.name || 'Error').slice(0, 80),
+    };
   }
 }
 
@@ -301,7 +381,8 @@ function registerRuntimeHandlers(ipcMain, app) {
     roadworkKeepAliveTimers.set(partition, setInterval(() => {
       void pingRoadworkSession(partition, targetUrl);
     }, ROADWORK_KEEP_ALIVE_MS));
-    return { success: true, partition };
+    const check = await pingRoadworkSession(partition, targetUrl);
+    return { success: true, partition, check };
   });
 
   ipcMain.handle('roadwork:clearSessions', async () => {
@@ -346,6 +427,9 @@ function registerRuntimeHandlers(ipcMain, app) {
         success: Boolean(row?.user_id && row?.password),
         userId: row?.user_id || '',
         password: row?.password || '',
+        credentialSource: row?.credential_source || '',
+        requestedSiteId: row?.requested_site_id || '',
+        scopedCredentialFound: row?.scoped_credential_found === true,
       };
     },
   ));
@@ -365,6 +449,9 @@ function registerRuntimeHandlers(ipcMain, app) {
           hasUserId: Boolean(row?.user_id),
           hasPassword: Boolean(row?.password),
           passwordLen: password.length,
+          credentialSource: row?.credential_source || '',
+          requestedSiteId: row?.requested_site_id || '',
+          scopedCredentialFound: row?.scoped_credential_found === true,
         };
       },
     );

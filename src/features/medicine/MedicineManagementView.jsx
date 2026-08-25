@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMedicineViewModel } from './useMedicineViewModel';
 import { useSettingsViewModel } from '../settings/useSettingsViewModel';
 import { useDialog } from '../../components/common/DialogContext';
@@ -50,7 +50,6 @@ const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspac
 
     const [selectedDate, setSelectedDate] = useState(workspaceSession.selectedKey || null);
     const [modalState, setModalState] = useState({ open: false, tab: 'medicine', mode: 'add', date: null });
-    const pendingParentRefreshRef = useRef(false);
     const todayStr = todayText();
 
     useEffect(() => {
@@ -147,16 +146,12 @@ const MedicineManagementView = ({ currentUser, workspaceSession = {}, onWorkspac
         setSelectedDate(date);
         onWorkspaceSessionChange?.({ selectedKey: date });
         if (savedTabs.includes('medicine')) {
-            pendingParentRefreshRef.current = true;
+            await refreshDate(date);
         }
     };
 
     const handleModalClose = () => {
         setModalState((prev) => ({ ...prev, open: false }));
-        if (pendingParentRefreshRef.current) {
-            pendingParentRefreshRef.current = false;
-            void refreshDate(selectedDate);
-        }
     };
 
     const renderCell = (row, col) => {

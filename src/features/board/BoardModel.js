@@ -154,6 +154,19 @@ export const BoardModel = {
         return apiClient.upload('/api/upload', formData);
     },
 
+    async downloadAttachment(attachment = {}) {
+        const url = String(attachment?.url || '').trim();
+        const fileName = String(attachment?.name || 'download').trim() || 'download';
+        if (!url) throw new Error('첨부파일 주소가 없습니다.');
+
+        const response = await apiClient.getRaw('/api/download', { url, name: fileName });
+        if (!response.ok) {
+            const message = await response.text().catch(() => '');
+            throw new Error(message || `첨부파일을 받지 못했습니다. (${response.status})`);
+        }
+        return { blob: await response.blob(), fileName };
+    },
+
     clearPostsCache
 };
 

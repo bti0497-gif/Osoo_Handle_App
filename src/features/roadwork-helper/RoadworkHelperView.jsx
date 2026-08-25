@@ -14,9 +14,52 @@ const ROADWORK_KEEP_ALIVE_SCRIPT = `
     method: 'GET',
     credentials: 'include',
     cache: 'no-store',
-  }).then(() => true).catch(() => false);
+  }).then((response) => {
+    let finalOrigin = '';
+    let finalPath = '';
+    try {
+      const finalUrl = new URL(response.url || url.toString());
+      finalOrigin = finalUrl.origin;
+      finalPath = finalUrl.pathname;
+    } catch {}
+    return {
+      success: response.ok,
+      statusCode: response.status,
+      finalOrigin,
+      finalPath,
+      redirectedToLogin: /\\/security\\/login\\.do(?:[?#]|$)/i.test(response.url || ''),
+      checkedAt: new Date().toISOString(),
+    };
+  }).catch((error) => ({
+    success: false,
+    statusCode: 0,
+    finalOrigin: '',
+    finalPath: '',
+    redirectedToLogin: false,
+    checkedAt: new Date().toISOString(),
+    errorName: String(error?.name || 'Error').slice(0, 80),
+  }));
 })()
 `;
+
+const toRoadworkPagePath = (value) => {
+  try {
+    return value ? new URL(value).pathname : '';
+  } catch {
+    return '';
+  }
+};
+
+const normalizeKeepAliveCheck = (value, source) => ({
+  source,
+  success: value?.success === true,
+  statusCode: Number.isInteger(Number(value?.statusCode)) ? Number(value.statusCode) : 0,
+  finalOrigin: String(value?.finalOrigin || '').slice(0, 160),
+  finalPath: String(value?.finalPath || '').slice(0, 240),
+  redirectedToLogin: value?.redirectedToLogin === true,
+  checkedAt: String(value?.checkedAt || new Date().toISOString()).slice(0, 40),
+  errorName: String(value?.errorName || '').slice(0, 80),
+});
 
 const ROADWORK_STATUS_SCRIPT = `
 (() => {
@@ -811,7 +854,11 @@ async function waitForRoadworkPhotoRow(webview, uploaderIndex, beforeCount) {
 
 export default function RoadworkHelperView({ currentUser }) {
   const windowSiteId = new URLSearchParams(window.location.search).get('siteId') || '';
-  const activeSiteId = String(currentUser?.site_id || windowSiteId || '').trim();
+  // A direction-specific window owns an immutable siteId in its URL.  The
+  // shared auth user can be refreshed while both direction windows are open,
+  // so it must never override the window identity or its webview partition.
+  const currentUserSiteId = String(currentUser?.site_id || '').trim();
+  const activeSiteId = String(windowSiteId || currentUserSiteId).trim();
   const vm = useRoadworkHelperViewModel(activeSiteId);
   const roadworkPartition = activeSiteId
     ? `persist:osoo-roadwork-${activeSiteId.replace(/[^a-zA-Z0-9_-]/g, '_')}`
@@ -822,6 +869,10 @@ export default function RoadworkHelperView({ currentUser }) {
   const wasLoginPageRef = useRef(true);
   const hasLoadedPageRef = useRef(false);
   const loadFailureTimerRef = useRef(null);
+  const lastNonLoginUrlRef = useRef('');
+  const lastKeepAliveCheckRef = useRef(null);
+  const lastKeepAliveRegistrationRef = useRef({ path: '', at: 0 });
+  const lastUnexpectedLoginAtRef = useRef(0);
   const [loadError, setLoadError] = useState(null);
   const [preloadPath, setPreloadPath] = useState('');
   const [webviewUrl, setWebviewUrl] = useState('');
@@ -869,6 +920,104 @@ export default function RoadworkHelperView({ currentUser }) {
       console.warn('[Roadwork Helper] Failed to record diagnostic:', error?.message || error);
     });
   }, []);
+
+  useEffect(() => {
+    if (!activeSiteId) return;
+
+    const identityDetails = {
+      windowSiteId,
+      currentUserSiteId,
+      activeSiteId,
+      partition: roadworkPartition,
+      identityMismatch: Boolean(windowSiteId && currentUserSiteId && windowSiteId !== currentUserSiteId),
+    };
+
+    if (identityDetails.identityMismatch) {
+      recordRoadworkDiagnostic('window-site-identity-mismatch-contained', identityDetails);
+    }
+
+    if (!window.electronAPI?.invokeRoadwork) return;
+    window.electronAPI.invokeRoadwork('roadwork:getCredentialStatus')
+      .then((status) => {
+        recordRoadworkDiagnostic('credential-scope-checked', {
+          ...identityDetails,
+          credentialSource: String(status?.credentialSource || ''),
+          requestedSiteId: String(status?.requestedSiteId || ''),
+          scopedCredentialFound: status?.scopedCredentialFound === true,
+          hasUserId: status?.hasUserId === true,
+          hasPassword: status?.hasPassword === true,
+        });
+      })
+      .catch((error) => {
+        recordRoadworkDiagnostic('credential-scope-check-failed', {
+          ...identityDetails,
+          errorName: String(error?.name || 'Error').slice(0, 80),
+        });
+      });
+  }, [activeSiteId, currentUserSiteId, recordRoadworkDiagnostic, roadworkPartition, windowSiteId]);
+
+  const registerRoadworkKeepAlive = React.useCallback((currentUrl, trigger) => {
+    if (!window.electronAPI?.invokeRoadwork || !currentUrl) return;
+    const currentPath = toRoadworkPagePath(currentUrl);
+    const now = Date.now();
+    if (
+      lastKeepAliveRegistrationRef.current.path === currentPath
+      && now - lastKeepAliveRegistrationRef.current.at < 1500
+    ) return;
+
+    lastKeepAliveRegistrationRef.current = { path: currentPath, at: now };
+    lastNonLoginUrlRef.current = currentUrl;
+    window.electronAPI.invokeRoadwork('roadwork:keepSessionAlive', {
+      partition: roadworkPartition,
+      url: currentUrl,
+    }).then((response) => {
+      const check = normalizeKeepAliveCheck(response?.check, 'electron-session-fetch');
+      lastKeepAliveCheckRef.current = check;
+      recordRoadworkDiagnostic(
+        check.success && !check.redirectedToLogin
+          ? 'session-keepalive-checked'
+          : 'session-keepalive-failed',
+        { trigger, pagePath: currentPath, ...check },
+      );
+    }).catch((error) => {
+      const check = normalizeKeepAliveCheck({ errorName: error?.name || 'Error' }, 'electron-session-fetch');
+      lastKeepAliveCheckRef.current = check;
+      recordRoadworkDiagnostic('session-keepalive-failed', {
+        trigger,
+        pagePath: currentPath,
+        ...check,
+      });
+    });
+  }, [recordRoadworkDiagnostic, roadworkPartition]);
+
+  const recordUnexpectedLogin = React.useCallback(async (source, currentUrl) => {
+    const now = Date.now();
+    if (now - lastUnexpectedLoginAtRef.current < 1500) return;
+    lastUnexpectedLoginAtRef.current = now;
+
+    let check = lastKeepAliveCheckRef.current;
+    const previousUrl = lastNonLoginUrlRef.current;
+    if (window.electronAPI?.invokeRoadwork && previousUrl) {
+      try {
+        const response = await window.electronAPI.invokeRoadwork('roadwork:keepSessionAlive', {
+          partition: roadworkPartition,
+          url: previousUrl,
+        });
+        check = normalizeKeepAliveCheck(response?.check, 'unexpected-login-probe');
+        lastKeepAliveCheckRef.current = check;
+      } catch (error) {
+        check = normalizeKeepAliveCheck({ errorName: error?.name || 'Error' }, 'unexpected-login-probe');
+        lastKeepAliveCheckRef.current = check;
+      }
+    }
+
+    recordRoadworkDiagnostic('session-unexpected-login-page', {
+      source,
+      pagePath: toRoadworkPagePath(currentUrl),
+      previousPagePath: toRoadworkPagePath(previousUrl),
+      keepAlive: check,
+    });
+  }, [recordRoadworkDiagnostic, roadworkPartition]);
 
   const clearPendingLoadFailure = React.useCallback(() => {
     if (loadFailureTimerRef.current) window.clearTimeout(loadFailureTimerRef.current);
@@ -924,11 +1073,29 @@ export default function RoadworkHelperView({ currentUser }) {
     const intervalId = window.setInterval(() => {
       const webview = webviewRef.current;
       if (!webview) return;
-      webview.executeJavaScript(ROADWORK_KEEP_ALIVE_SCRIPT).catch(() => undefined);
+      webview.executeJavaScript(ROADWORK_KEEP_ALIVE_SCRIPT).then((result) => {
+        const check = normalizeKeepAliveCheck(result, 'renderer-fetch');
+        lastKeepAliveCheckRef.current = check;
+        if (!check.success || check.redirectedToLogin) {
+          recordRoadworkDiagnostic('session-keepalive-failed', {
+            trigger: 'interval',
+            pagePath: toRoadworkPagePath(webview.getURL?.()),
+            ...check,
+          });
+        }
+      }).catch((error) => {
+        const check = normalizeKeepAliveCheck({ errorName: error?.name || 'Error' }, 'renderer-fetch');
+        lastKeepAliveCheckRef.current = check;
+        recordRoadworkDiagnostic('session-keepalive-failed', {
+          trigger: 'interval',
+          pagePath: toRoadworkPagePath(webview.getURL?.()),
+          ...check,
+        });
+      });
     }, 4 * 60 * 1000);
 
     return () => window.clearInterval(intervalId);
-  }, []);
+  }, [recordRoadworkDiagnostic]);
 
   useEffect(() => {
     const intervalId = window.setInterval(async () => {
@@ -1016,17 +1183,14 @@ export default function RoadworkHelperView({ currentUser }) {
       const isLoginPage = /\/security\/login\.do(?:[?#]|$)/i.test(currentUrl);
       setShowRefreshToast(isLoginPage);
       if (!isLoginPage) {
-        window.electronAPI?.invokeRoadwork?.('roadwork:keepSessionAlive', {
-          partition: roadworkPartition,
-          url: currentUrl,
-        }).catch((error) => console.warn('[Roadwork Helper] 세션 유지 등록 실패:', error));
+        registerRoadworkKeepAlive(currentUrl, 'did-finish-load');
       }
       recordRoadworkDiagnostic('webview-load-finished', {
         pageOrigin,
         pagePath: (() => { try { return new URL(currentUrl).pathname; } catch { return ''; } })(),
       });
       if (!wasLoginPageRef.current && isLoginPage) {
-        recordRoadworkDiagnostic('session-unexpected-login-page', { partition: roadworkPartition });
+        void recordUnexpectedLogin('did-finish-load', currentUrl);
       }
       if (wasLoginPageRef.current && !isLoginPage) {
         recordRoadworkDiagnostic('webview-login-transition', { result: 'login-page-exited', pageOrigin });
@@ -1039,13 +1203,10 @@ export default function RoadworkHelperView({ currentUser }) {
       const isLoginPage = /\/security\/login\.do(?:[?#]|$)/i.test(currentUrl);
       setShowRefreshToast(isLoginPage);
       if (!isLoginPage) {
-        window.electronAPI?.invokeRoadwork?.('roadwork:keepSessionAlive', {
-          partition: roadworkPartition,
-          url: currentUrl,
-        }).catch((error) => console.warn('[Roadwork Helper] 세션 유지 등록 실패:', error));
+        registerRoadworkKeepAlive(currentUrl, 'did-navigate');
       }
       if (!wasLoginPageRef.current && isLoginPage) {
-        recordRoadworkDiagnostic('session-unexpected-login-page', { partition: roadworkPartition });
+        void recordUnexpectedLogin('did-navigate', currentUrl);
       }
       if (wasLoginPageRef.current && !isLoginPage) {
         let pageOrigin = '';
@@ -1083,7 +1244,14 @@ export default function RoadworkHelperView({ currentUser }) {
       webview.removeEventListener('did-navigate-in-page', handleNavigate);
       webview.removeEventListener('before-input-event', handleBeforeInput);
     };
-  }, [clearPendingLoadFailure, handleRefresh, recordRoadworkDiagnostic, roadworkPartition, webviewGeneration]);
+  }, [
+    clearPendingLoadFailure,
+    handleRefresh,
+    recordRoadworkDiagnostic,
+    recordUnexpectedLogin,
+    registerRoadworkKeepAlive,
+    webviewGeneration,
+  ]);
 
   const handleAutoFill = React.useCallback(async () => {
     const webview = webviewRef.current;
@@ -1220,7 +1388,7 @@ export default function RoadworkHelperView({ currentUser }) {
 
       {webviewUrl ? (
         <webview
-          key={`${webviewUrl}-${preloadPath}-${webviewGeneration}`}
+          key={`${roadworkPartition}-${webviewUrl}-${preloadPath}-${webviewGeneration}`}
           ref={webviewRef}
           src={webviewUrl}
           partition={roadworkPartition}

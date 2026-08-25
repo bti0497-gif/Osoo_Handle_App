@@ -1,7 +1,7 @@
 {
   "name": "wastewater-treatment-plant",
   "private": true,
-  "version": "1.1.36",
+  "version": "1.1.38",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

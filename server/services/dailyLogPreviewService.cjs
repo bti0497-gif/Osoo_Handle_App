@@ -10,6 +10,7 @@ const sharp = require('sharp');
 const { convertExcelToPdf } = require('./excelPdfService.cjs');
 const { getActiveLocations } = require('./qntechWaterValueImportService.cjs');
 const { resolvePhotoRoot } = require('./qntechWaterPhotoImportService.cjs');
+const { getAvailableReportOutputPath } = require('./reportOutputPathService.cjs');
 
 const PREVIEW_RENDER_VERSION = '2026-07-30-six-water-locations-v11';
 
@@ -1003,11 +1004,14 @@ async function buildBatchExportExcel({ db, baseDir, appDataPath, templateInfo, m
 
   console.log(`[Excel Export] 내보내기 시작: 총 ${manifest.pages.length}개 시트 (기간: ${manifest.startDate} ~ ${manifest.endDate}, 사이트: ${siteName || '전체'})`);
 
-  const tempDir = os.tmpdir();
   const baseFileName = path.parse(templateInfo.fileName).name;
-  const dateSuffix = manifest.startDate === manifest.endDate ? manifest.startDate : `${manifest.startDate}_${manifest.endDate}`;
-  const clearFileName = `${baseFileName}-${dateSuffix}-${Date.now()}.xlsx`;
-  const outputPath = path.join(tempDir, clearFileName);
+  const outputPath = getAvailableReportOutputPath({
+    reportType: baseFileName,
+    siteName,
+    startDate: manifest.startDate,
+    endDate: manifest.endDate,
+    extension: '.xlsx',
+  });
 
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(templateInfo.absolutePath);

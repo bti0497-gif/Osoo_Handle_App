@@ -11,6 +11,13 @@ const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'u
 
 const roadworkView = read('src/features/roadwork-helper/RoadworkHelperView.jsx');
 const roadworkRuntime = read('electron/roadworkDumpHelper.cjs');
+const scopedCredentialSource = roadworkRuntime.match(
+  /function getScopedCredential\(db, serviceKey, siteId\) \{[\s\S]*?\n\}\n\nfunction stopRoadworkKeepAlive/,
+)?.[0].replace(/\n\nfunction stopRoadworkKeepAlive$/, '');
+assert.ok(scopedCredentialSource, 'roadwork scoped credential resolver is missing');
+const getRoadworkScopedCredential = new Function(
+  `${scopedCredentialSource}; return getScopedCredential;`,
+)();
 
 // Opening the roadwork helper is a local-only operation. This is an explicit
 // latency and availability contract: a Sheets/settings/server request must
@@ -34,12 +41,32 @@ assert.match(read('server/database.cjs'), /PRIMARY KEY\s*\(site_id, service_key\
 assert.match(read('server/services/settings/externalCredentialService.cjs'), /WHERE site_id = \? AND service_key = \?/);
 assert.match(roadworkRuntime, /getSiteIdFromRoadworkPartition/);
 assert.match(roadworkRuntime, /getScopedCredential\(db, 'road_web', getSiteIdFromSender\(event\)\)/);
+assert.match(roadworkView, /const activeSiteId = String\(windowSiteId \|\| currentUserSiteId\)\.trim\(\)/);
+assert.match(roadworkView, /key={`\$\{roadworkPartition\}-\$\{webviewUrl\}-\$\{preloadPath\}-\$\{webviewGeneration\}`}/);
+assert.match(roadworkView, /window-site-identity-mismatch-contained/);
+assert.match(roadworkView, /credential-scope-checked/);
+assert.match(roadworkRuntime, /credential_source: 'missing-site-scoped'/);
+assert.match(roadworkRuntime, /isConfiguredDirectionalSite/);
+assert.match(roadworkRuntime, /const check = await pingRoadworkSession\(partition, targetUrl\)/);
+assert.match(roadworkRuntime, /finalPath/);
+assert.match(roadworkRuntime, /redirectedToLogin/);
+assert.match(roadworkView, /session-keepalive-checked/);
+assert.match(roadworkView, /session-keepalive-failed/);
+assert.match(roadworkView, /unexpected-login-probe/);
+assert.match(roadworkView, /previousPagePath/);
 assert.match(read('src/features/settings/historyRestore/HistoryRestoreModal.jsx'), /SettingsModel\.getSettings\(\{ force: true \}\)/);
 
 const db = new Database(':memory:');
 db.exec(`
-  CREATE TABLE app_settings (id INTEGER PRIMARY KEY, site_id TEXT, qntech_site_id TEXT);
-  INSERT INTO app_settings VALUES (1, 'chuncheon', '');
+  CREATE TABLE app_settings (
+    id INTEGER PRIMARY KEY,
+    site_id TEXT,
+    qntech_site_id TEXT,
+    multi_site_enabled INTEGER NOT NULL DEFAULT 0,
+    primary_site_id TEXT,
+    secondary_site_id TEXT
+  );
+  INSERT INTO app_settings VALUES (1, 'chuncheon', '', 1, 'chuncheon', 'busan');
   CREATE TABLE web_app_credentials (
     id INTEGER PRIMARY KEY,
     service_key TEXT UNIQUE,
@@ -83,6 +110,20 @@ assert.equal(credentialService.getCredential(db, 'road_web', 'chuncheon').passwo
 assert.equal(credentialService.getCredential(db, 'road_web', 'busan').password, 'busan-password');
 assert.equal(credentialService.getCredential(db, 'water_analysis_app', 'busan').user_id, '');
 assert.equal(credentialService.getCredential(db, 'water_analysis_app', 'busan').password, '');
+
+assert.equal(getRoadworkScopedCredential(db, 'road_web', 'chuncheon').credential_source, 'site-scoped');
+assert.equal(getRoadworkScopedCredential(db, 'road_web', 'busan').credential_source, 'site-scoped');
+db.prepare("DELETE FROM site_web_app_credentials WHERE site_id = 'busan' AND service_key = 'road_web'").run();
+const missingDirectionalCredential = getRoadworkScopedCredential(db, 'road_web', 'busan');
+assert.equal(missingDirectionalCredential.credential_source, 'missing-site-scoped');
+assert.equal(missingDirectionalCredential.user_id, '');
+assert.equal(missingDirectionalCredential.password, '');
+
+db.prepare('UPDATE app_settings SET multi_site_enabled = 0').run();
+const legacyFallbackCredential = getRoadworkScopedCredential(db, 'road_web', 'legacy-single-site');
+assert.equal(legacyFallbackCredential.credential_source, 'legacy-fallback');
+assert.equal(legacyFallbackCredential.user_id, 'legacy');
+assert.equal(legacyFallbackCredential.password, 'legacy');
 
 db.close();
 console.log('PASS roadwork opens from local credentials only and directional web credentials are isolated by site_id');
