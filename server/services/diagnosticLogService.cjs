@@ -14,7 +14,9 @@ function getDriveService() {
 }
 
 function isDriveServiceLoaded() {
-  return Boolean(driveService || require.cache[require.resolve('./driveService.cjs')]);
+  const loadedService = driveService
+    || require.cache[require.resolve('./driveService.cjs')]?.exports;
+  return Boolean(loadedService?.isDriveClientInitialized?.());
 }
 
 const SECRET_KEY_PATTERN = /(password|passwd|pwd|token|secret|key|credential|authorization|cookie|client_secret|refresh_token)/i;

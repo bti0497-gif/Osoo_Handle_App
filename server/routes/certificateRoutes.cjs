@@ -1,14 +1,34 @@
 const express = require('express');
-const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
-const { PDFDocument } = require('pdf-lib');
-const { drive } = require('../services/driveService.cjs');
+const { getDriveClient } = require('../services/driveService.cjs');
 const { isSheetsConfigured: isSitesSheetsConfigured, getSites: getSitesFromSheets } = require('../services/sitesSheetsService.cjs');
 const { db } = require('../database.cjs');
 const { decodeUserContextHeader } = require('../utils/httpUserHeaders.cjs');
 const { getBigQueryClient, DATASET_ID } = require('../services/bigQueryClientService.cjs');
 const { syncCertificateCacheForSiteMonth } = require('../services/certificateCacheSyncService.cjs');
+
+let sharpModule = null;
+let pdfDocumentModule = null;
+
+function sharp(...args) {
+  if (!sharpModule) sharpModule = require('sharp');
+  return sharpModule(...args);
+}
+
+const PDFDocument = new Proxy({}, {
+  get(_target, property) {
+    if (!pdfDocumentModule) ({ PDFDocument: pdfDocumentModule } = require('pdf-lib'));
+    return pdfDocumentModule[property];
+  },
+});
+
+const drive = new Proxy({}, {
+  get(_target, property) {
+    const client = getDriveClient();
+    return client?.[property];
+  },
+});
 
 const router = express.Router();
 
@@ -1165,7 +1185,7 @@ module.exports = function (appDataPath) {
       if (String(req.query.source || 'local').trim().toLowerCase() !== 'drive') {
         return res.json({ success: true, items: localItems, source: 'local' });
       }
-      if (!drive || !CERTIFICATE_ROOT_FOLDER_ID) {
+      if (!getDriveClient() || !CERTIFICATE_ROOT_FOLDER_ID) {
         return res.json({ success: true, items: localItems, offline: true });
       }
 
@@ -1384,7 +1404,7 @@ module.exports = function (appDataPath) {
       if (items.length > 100) {
         return res.status(400).json({ success: false, message: '한 번에 100개 이하만 다운로드할 수 있습니다.' });
       }
-      if (!drive) {
+      if (!getDriveClient()) {
         return res.status(400).json({ success: false, message: 'Drive 설정이 필요합니다.' });
       }
 

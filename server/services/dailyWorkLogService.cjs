@@ -1,8 +1,20 @@
 ﻿const crypto = require('crypto');
-const ExcelJS = require('exceljs');
+let excelJsModule = null;
+const ExcelJS = new Proxy({}, {
+  get(_target, property) {
+    if (!excelJsModule) excelJsModule = require('exceljs');
+    return excelJsModule[property];
+  },
+});
 const fs = require('fs');
 const path = require('path');
-const { PDFDocument } = require('pdf-lib');
+let pdfDocumentModule = null;
+const PDFDocument = new Proxy({}, {
+  get(_target, property) {
+    if (!pdfDocumentModule) ({ PDFDocument: pdfDocumentModule } = require('pdf-lib'));
+    return pdfDocumentModule[property];
+  },
+});
 
 const { convertExcelToPdf } = require('./excelPdfService.cjs');
 const { getAvailableReportOutputPath } = require('./reportOutputPathService.cjs');

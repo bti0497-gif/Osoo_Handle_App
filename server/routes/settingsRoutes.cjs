@@ -170,8 +170,10 @@ module.exports = function (db, baseDir, appDataPath) {
   // 설정 조회 API
   router.get('/api/settings', async (req, res) => {
     try {
-      const localOnly = String(req.query?.source || '').trim().toLowerCase() === 'local';
-      if (!localOnly) {
+      // 일반 화면 조회는 이미 확정된 로컬 설정만 사용한다. Google Sheets
+      // 동기화는 관리자가 source=remote를 명시한 경우에만 수행한다.
+      const remoteSyncRequested = String(req.query?.source || '').trim().toLowerCase() === 'remote';
+      if (remoteSyncRequested) {
         try {
           if (process.env.OSOO_API_VALIDATION === '1') throw new Error('API 검증에서는 외부 설정 동기화를 생략합니다.');
           await withTimeout(
@@ -192,7 +194,7 @@ module.exports = function (db, baseDir, appDataPath) {
           console.warn('[Settings] Site web credential lookup failed, keeping local credentials:', sheetErr.message);
         }
       }
-      const qntechIntegrity = localOnly
+      const qntechIntegrity = !remoteSyncRequested
         ? { qntechSiteId: '', repaired: false, source: 'local-only' }
         : process.env.OSOO_API_VALIDATION === '1'
         ? { qntechSiteId: '', repaired: false, source: 'local-validation' }

@@ -18,7 +18,6 @@
 
 const fs = require('fs');
 const crypto = require('crypto');
-const admin = require('firebase-admin');
 const { getFirebaseServiceAccountPath } = require('../config/runtimeConfig.cjs');
 
 const ADMIN_ROLES = new Set(['admin', 'group_admin', 'super_admin', 'central_admin']);
@@ -28,29 +27,39 @@ const serviceAccountPath = getFirebaseServiceAccountPath();
 
 let db = null;
 let initialized = false;
+let initializationAttempted = false;
+let admin = null;
 
 // ── SDK 초기화 (안전 예외 처리 포함) ──────────────────────────────────
-try {
-  if (fs.existsSync(serviceAccountPath)) {
-    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    db = admin.firestore();
-    initialized = true;
-    console.log('[FirebaseService] Firebase Admin SDK가 성공적으로 초기화되었습니다.');
-  } else {
-    console.warn('\n================================================================');
-    console.warn('[WARNING] Firebase 서비스 계정 키 파일이 누락되었습니다.');
-    console.warn(`위치: ${serviceAccountPath}`);
-    console.warn('소통게시판 Firebase 백엔드가 정상 기동되지 않을 수 있습니다.');
-    console.warn('================================================================\n');
+function initializeFirebase() {
+  if (initializationAttempted) return;
+  initializationAttempted = true;
+  try {
+    if (fs.existsSync(serviceAccountPath)) {
+      admin = require('firebase-admin');
+      const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+      if (admin.apps.length === 0) {
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount)
+        });
+      }
+      db = admin.firestore();
+      initialized = true;
+      console.log('[FirebaseService] Firebase Admin SDK가 성공적으로 초기화되었습니다.');
+    } else {
+      console.warn('\n================================================================');
+      console.warn('[WARNING] Firebase 서비스 계정 키 파일이 누락되었습니다.');
+      console.warn(`위치: ${serviceAccountPath}`);
+      console.warn('소통게시판 Firebase 백엔드가 정상 기동되지 않을 수 있습니다.');
+      console.warn('================================================================\n');
+    }
+  } catch (err) {
+    console.error('[FirebaseService] SDK 초기화 중 치명적 오류 발생:', err.message);
   }
-} catch (err) {
-  console.error('[FirebaseService] SDK 초기화 중 치명적 오류 발생:', err.message);
 }
 
 function ensureInitialized() {
+  initializeFirebase();
   if (!initialized || !db) {
     throw new Error(`Firebase 서비스가 설정되지 않았습니다. 런타임 키 파일을 확인해 주세요: ${serviceAccountPath}`);
   }

@@ -7,7 +7,6 @@
  * BigQuery 클라이언트 싱글톤 + 공통 상수
  */
 
-const { BigQuery } = require('@google-cloud/bigquery');
 const fs = require('fs');
 const { getBigQueryServiceAccountPath } = require('../config/runtimeConfig.cjs');
 
@@ -25,6 +24,7 @@ function getBigQueryClient() {
   }
 
   try {
+    const { BigQuery } = require('@google-cloud/bigquery');
     _client = new BigQuery({ keyFilename: keyFilePath });
     return _client;
   } catch (err) {

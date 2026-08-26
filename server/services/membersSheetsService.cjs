@@ -20,7 +20,6 @@
  *      (osoo-handler-service@gen-lang-client-0937938814.iam.gserviceaccount.com)
  */
 
-const { google } = require('googleapis');
 const { getGoogleServiceAccountPath, loadRuntimeEnv } = require('../config/runtimeConfig.cjs');
 
 loadRuntimeEnv();
@@ -29,13 +28,24 @@ const SHEET_NAME = 'Wastewater_Member';
 const HEADER_ROW = ['id', 'name', 'password', 'role', 'site_name1', 'phone', 'target_lat', 'target_lng', 'radius_m', 'notes'];
 const HEADER_IDX = Object.fromEntries(HEADER_ROW.map((h, i) => [h, i]));
 
-// 서비스 계정 인증
-const auth = new google.auth.GoogleAuth({
-  keyFile: KEY_FILE,
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-});
+let sheetsClient = null;
 
-const sheets = google.sheets({ version: 'v4', auth });
+function getSheetsClient() {
+  if (sheetsClient) return sheetsClient;
+  const { google } = require('googleapis');
+  const auth = new google.auth.GoogleAuth({
+    keyFile: KEY_FILE,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+  sheetsClient = google.sheets({ version: 'v4', auth });
+  return sheetsClient;
+}
+
+const sheets = new Proxy({}, {
+  get(_target, property) {
+    return getSheetsClient()[property];
+  },
+});
 
 function getSheetId() {
   const id = String(process.env.GOOGLE_MEMBERS_SHEET_ID || '').trim();

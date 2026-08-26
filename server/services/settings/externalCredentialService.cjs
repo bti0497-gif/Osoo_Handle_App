@@ -1,12 +1,8 @@
 const fs = require('fs');
 const { normalizeBaseUrl, invalidateQntechSessionCache } = require('../qntechAuthService.cjs');
-const {
-  isSheetsConfigured,
-  getAppSettings,
-  getSites: getSitesFromSheets,
-  upsertAppSettings,
-  upsertSite: upsertSiteToSheets,
-} = require('../sitesSheetsService.cjs');
+function getSitesSheetsService() {
+  return require('../sitesSheetsService.cjs');
+}
 
 const SHEET_CREDENTIAL_FIELDS = {
   road_web: {
@@ -119,6 +115,7 @@ function updateLocalCredential(db, serviceKey, patch = {}, siteId = '') {
 }
 
 async function syncCommonAppSettingsToLocal(db) {
+  const { isSheetsConfigured, getAppSettings } = getSitesSheetsService();
   if (!isSheetsConfigured()) return {};
 
   const appSettings = await getAppSettings();
@@ -132,6 +129,7 @@ async function syncCommonAppSettingsToLocal(db) {
 }
 
 async function syncSiteCredentialForSite(db, siteId = '') {
+  const { isSheetsConfigured, getSites: getSitesFromSheets } = getSitesSheetsService();
   const normalizedSiteId = String(siteId || '').trim();
   if (!normalizedSiteId || !isSheetsConfigured()) return null;
   const sites = await getSitesFromSheets();
@@ -162,6 +160,11 @@ function syncSiteCredentialsToLocal(db, site = {}, { syncQntechSite = true } = {
 }
 
 async function syncCredentialToSheets(db, { serviceKey, serviceUrl, userId, password } = {}, siteId = '') {
+  const {
+    isSheetsConfigured,
+    upsertAppSettings,
+    upsertSite: upsertSiteToSheets,
+  } = getSitesSheetsService();
   if (!isSheetsConfigured()) return;
   const fields = SHEET_CREDENTIAL_FIELDS[serviceKey];
   if (!fields) return;

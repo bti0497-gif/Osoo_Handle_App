@@ -1,5 +1,4 @@
-﻿const { google } = require('googleapis');
-const fs = require('fs');
+﻿const fs = require('fs');
 const { boardUploadsSegments } = require('./drivePathService.cjs');
 const {
   findOAuthClientSecretPath,
@@ -50,7 +49,7 @@ function loadOAuthClientConfig() {
   }
 }
 
-function createDriveAuth() {
+function createDriveAuth(google) {
   const refreshToken = String(process.env.GOOGLE_REFRESH_TOKEN || '').trim();
   const oauthClient = loadOAuthClientConfig();
   if (oauthClient && refreshToken) {
@@ -75,8 +74,28 @@ function createDriveAuth() {
   return { auth: null, mode: 'none' };
 }
 
-const { auth, mode: driveAuthMode } = createDriveAuth();
-const drive = auth ? google.drive({ version: 'v3', auth }) : null;
+let drive = null;
+let driveAuthMode = 'uninitialized';
+let driveInitialized = false;
+
+function getDriveClient() {
+  if (driveInitialized) return drive;
+  const { google } = require('googleapis');
+  const { auth, mode } = createDriveAuth(google);
+  driveAuthMode = mode;
+  drive = auth ? google.drive({ version: 'v3', auth }) : null;
+  driveInitialized = true;
+  return drive;
+}
+
+function getDriveAuthMode() {
+  getDriveClient();
+  return driveAuthMode;
+}
+
+function isDriveClientInitialized() {
+  return driveInitialized;
+}
 
 function escapeDriveQueryValue(value) {
   return String(value || '').replace(/'/g, "\\'");
@@ -88,12 +107,13 @@ function getDriveRootFolderId() {
 
 function isDriveConfigured() {
   return Boolean(
-    drive &&
+    getDriveClient() &&
     getDriveRootFolderId()
   );
 }
 
 async function getOrCreateFolder(parentFolderId, folderName) {
+  const drive = getDriveClient();
   if (!drive) throw new Error('Google Drive 인증 정보가 설정되지 않았습니다.');
   const normalizedParentId = String(parentFolderId || '').trim();
   const normalizedName = String(folderName || '').trim();
@@ -132,6 +152,7 @@ async function getOrCreateFolder(parentFolderId, folderName) {
 }
 
 async function findFolderInFolder(parentFolderId, folderName) {
+  const drive = getDriveClient();
   if (!drive) return null;
   const normalizedParentId = String(parentFolderId || '').trim();
   const normalizedName = String(folderName || '').trim();
@@ -155,6 +176,7 @@ async function findFolderInFolder(parentFolderId, folderName) {
 }
 
 async function findFileInFolder(parentFolderId, fileName) {
+  const drive = getDriveClient();
   if (!drive) return null;
   const normalizedParentId = String(parentFolderId || '').trim();
   const normalizedName = String(fileName || '').trim();
@@ -194,6 +216,8 @@ async function getOrCreateFolderPath(rootFolderId, segments = []) {
 }
 
 async function reconcileManagementMonthFolder(parentFolderId, monthName) {
+  const drive = getDriveClient();
+  if (!drive) throw new Error('Google Drive 인증 정보가 설정되지 않았습니다.');
   const listFolders = async () => (await drive.files.list({
     q: ["mimeType='application/vnd.google-apps.folder'", `name='${escapeDriveQueryValue(monthName)}'`, `'${parentFolderId}' in parents`, 'trashed=false'].join(' and '),
     fields: 'files(id,name,createdTime)', spaces: 'drive', includeItemsFromAllDrives: true, supportsAllDrives: true, pageSize: 100
@@ -232,6 +256,7 @@ async function findFolderPath(rootFolderId, segments = []) {
 }
 
 async function uploadBufferToFolder({ folderId, fileName, buffer, mimeType }) {
+  const drive = getDriveClient();
   if (!drive) throw new Error('Google Drive 인증 정보가 설정되지 않았습니다.');
   if (!folderId) throw new Error('Google Drive folder ID가 필요합니다.');
   if (!fileName) throw new Error('Google Drive file name이 필요합니다.');
@@ -268,9 +293,10 @@ async function getOrCreateBoardUploadsFolder() {
   }
 }
 
-module.exports = {
-  drive,
-  driveAuthMode,
+const exportedDriveService = {
+  getDriveClient,
+  getDriveAuthMode,
+  isDriveClientInitialized,
   isDriveConfigured,
   getDriveRootFolderId,
   getOrCreateFolder,
@@ -281,3 +307,16 @@ module.exports = {
   uploadBufferToFolder,
   getOrCreateBoardUploadsFolder
 };
+
+// 기존 소비자의 속성 접근 계약은 유지하되, 단순 require만으로 googleapis를
+// 초기화하지 않는다. 신규 내부 호출은 getDriveClient()를 사용한다.
+Object.defineProperty(exportedDriveService, 'drive', {
+  enumerable: true,
+  get: getDriveClient,
+});
+Object.defineProperty(exportedDriveService, 'driveAuthMode', {
+  enumerable: true,
+  get: getDriveAuthMode,
+});
+
+module.exports = exportedDriveService;

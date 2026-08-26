@@ -1,7 +1,13 @@
 const fs = require('fs');
 const path = require('path');
 const JSZip = require('jszip');
-const ExcelJS = require('exceljs');
+let excelJsModule = null;
+const ExcelJS = new Proxy({}, {
+  get(_target, property) {
+    if (!excelJsModule) excelJsModule = require('exceljs');
+    return excelJsModule[property];
+  },
+});
 
 function columnNumberToName(n) {
   let value = Number(n);

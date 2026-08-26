@@ -1,7 +1,7 @@
 'use strict';
 
 const {
-  drive,
+  getDriveClient,
   isDriveConfigured,
   getDriveRootFolderId,
   findFileInFolder,
@@ -54,6 +54,8 @@ function normalizeMembersPayload(payload) {
 }
 
 async function readDriveJsonFile(fileId) {
+  const drive = getDriveClient();
+  if (!drive) throw new Error('Google Drive 인증 정보가 설정되지 않았습니다.');
   const response = await drive.files.get(
     { fileId, alt: 'media', supportsAllDrives: true },
     { responseType: 'arraybuffer' }
@@ -64,7 +66,7 @@ async function readDriveJsonFile(fileId) {
 
 async function findMemberBackupFile(fileName) {
   const rootFolderId = getDriveRootFolderId();
-  if (!rootFolderId || !drive) return null;
+  if (!rootFolderId || !getDriveClient()) return null;
 
   for (const segments of MEMBER_BACKUP_FOLDERS) {
     const folder = segments.length

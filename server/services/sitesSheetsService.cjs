@@ -23,7 +23,6 @@
  *   3. 스프레드시트가 이미 서비스 계정과 공유된 상태
  */
 
-const { google } = require('googleapis');
 const { getGoogleServiceAccountPath, loadRuntimeEnv } = require('../config/runtimeConfig.cjs');
 
 loadRuntimeEnv();
@@ -49,13 +48,24 @@ const HEADER_ROW = [
 const APP_SETTINGS_HEADER_ROW = ['setting_key', 'setting_value', 'notes'];
 const SITE_LOCATIONS_HEADER_ROW = ['id', 'site_name', 'target_lat', 'target_lng', 'radius_m', 'map_url', 'notes'];
 
-// 서비스 계정 인증
-const auth = new google.auth.GoogleAuth({
-  keyFile: KEY_FILE,
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-});
+let sheetsClient = null;
 
-const sheets = google.sheets({ version: 'v4', auth });
+function getSheetsClient() {
+  if (sheetsClient) return sheetsClient;
+  const { google } = require('googleapis');
+  const auth = new google.auth.GoogleAuth({
+    keyFile: KEY_FILE,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+  sheetsClient = google.sheets({ version: 'v4', auth });
+  return sheetsClient;
+}
+
+const sheets = new Proxy({}, {
+  get(_target, property) {
+    return getSheetsClient()[property];
+  },
+});
 
 function getSheetId() {
   const id = String(process.env.GOOGLE_MEMBERS_SHEET_ID || '').trim();

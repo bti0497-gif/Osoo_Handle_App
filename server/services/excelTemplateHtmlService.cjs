@@ -1,4 +1,10 @@
-﻿const ExcelJS = require('exceljs');
+﻿let excelJsModule = null;
+const ExcelJS = new Proxy({}, {
+  get(_target, property) {
+    if (!excelJsModule) excelJsModule = require('exceljs');
+    return excelJsModule[property];
+  },
+});
 const fs = require('fs');
 const path = require('path');
 

@@ -1,7 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const { getStoredSheets, hasStoredData, readExcelRow } = require('../excelService.cjs');
-const { isDriveConfigured, getDriveRootFolderId, getOrCreateFolder } = require('../driveService.cjs');
 const { DRIVE_CATEGORY } = require('../drivePathService.cjs');
 const { listReportTemplates } = require('../reportTemplateService.cjs');
 const { listCredentials } = require('./externalCredentialService.cjs');
@@ -184,6 +182,11 @@ async function saveSettings(db, payload, siteStorageRoot, requestedSiteId = '') 
 }
 
 async function ensureSiteStorageFolders(db, settings, siteStorageRoot) {
+  const {
+    isDriveConfigured,
+    getDriveRootFolderId,
+    getOrCreateFolder,
+  } = require('../driveService.cjs');
   let driveSiteFolder = null;
   const driveSubFolders = [];
   let localSiteFolder = null;
@@ -461,6 +464,7 @@ function toggleConfigItem(db, payload, requestedSiteId = '') {
 }
 
 function getExcelStatus(db, requestedSiteId = '') {
+  const { getStoredSheets, hasStoredData } = require('../excelService.cjs');
   const siteId = String(requestedSiteId || '').trim();
   const settings = siteId
     ? db.prepare('SELECT excel_template_path FROM site_settings WHERE site_id = ?').get(siteId)
@@ -482,6 +486,7 @@ function getExcelStatus(db, requestedSiteId = '') {
 }
 
 async function getExcelPreview(db, appDataPath, payload, requestedSiteId = '') {
+  const { hasStoredData, readExcelRow } = require('../excelService.cjs');
   const { sheet, row } = payload || {};
   const siteId = String(requestedSiteId || '').trim();
   if (!hasStoredData(db, siteId)) {

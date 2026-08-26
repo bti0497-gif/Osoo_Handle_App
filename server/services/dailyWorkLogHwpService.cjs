@@ -4,7 +4,13 @@ const { execFile } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { PDFDocument } = require('pdf-lib');
+let pdfDocumentModule = null;
+const PDFDocument = new Proxy({}, {
+  get(_target, property) {
+    if (!pdfDocumentModule) ({ PDFDocument: pdfDocumentModule } = require('pdf-lib'));
+    return pdfDocumentModule[property];
+  },
+});
 
 const { buildHwpxBookmarkValues } = require('./dailyWorkLogHwpxService.cjs');
 const { convertHwpToPdf, ensureHwpSecurityModule } = require('./hwpPdfService.cjs');

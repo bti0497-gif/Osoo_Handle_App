@@ -20,7 +20,7 @@ const {
 } = require('../services/backgroundFileTaskService.cjs');
 const {
   isDriveConfigured,
-  drive,
+  getDriveClient,
   getDriveRootFolderId,
   getOrCreateFolderPath,
   findFolderPath,
@@ -40,6 +40,13 @@ const BASE_MEDICINES = ['중탄산나트륨', '포도당', '팩(PAC)'];
 const BASE_KITS = ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '인산염인(PO4-P)', '알칼리도(ALK)'];
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']);
+
+const drive = new Proxy({}, {
+  get(_target, property) {
+    const client = getDriveClient();
+    return client?.[property];
+  },
+});
 
 /** 파일명에 사용 불가한 문자 제거 */
 function sanitizeName(name) {
@@ -290,7 +297,7 @@ async function findRemoteMedicinePhoto(db, date, medicineName, siteNameOverride 
 }
 
 async function downloadDriveFileBuffer(fileId) {
-  if (!drive || !fileId) return null;
+  if (!getDriveClient() || !fileId) return null;
   const response = await drive.files.get(
     { fileId, alt: 'media', supportsAllDrives: true },
     { responseType: 'arraybuffer' }

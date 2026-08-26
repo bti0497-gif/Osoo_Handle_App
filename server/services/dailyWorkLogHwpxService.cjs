@@ -4,7 +4,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const JSZip = require('jszip');
-const { PDFDocument } = require('pdf-lib');
+let pdfDocumentModule = null;
+const PDFDocument = new Proxy({}, {
+  get(_target, property) {
+    if (!pdfDocumentModule) ({ PDFDocument: pdfDocumentModule } = require('pdf-lib'));
+    return pdfDocumentModule[property];
+  },
+});
 
 const { buildBindingsForDate } = require('./dailyWorkLogService.cjs');
 const { convertHwpxToPdf } = require('./hwpPdfService.cjs');

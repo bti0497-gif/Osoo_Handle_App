@@ -2454,6 +2454,52 @@ function validateSiteRouteRuntimeContract() {
   error(`공사입력도우미/현장 분리 실제 실행 검증 실패${output ? `\n${output}` : ''}`);
 }
 
+function validateHeavyModuleLazyLoadingContract() {
+  const files = [
+    'server/routes/certificateRoutes.cjs',
+    'server/routes/excelRoutes.cjs',
+    'server/routes/medicineInRoutes.cjs',
+    'server/routes/uploadRoutes.cjs',
+    'server/services/bigQueryClientService.cjs',
+    'server/services/boardFirebaseService.cjs',
+    'server/services/dailyLogPreviewService.cjs',
+    'server/services/dailyWorkLogHwpService.cjs',
+    'server/services/dailyWorkLogHwpxService.cjs',
+    'server/services/dailyWorkLogService.cjs',
+    'server/services/driveService.cjs',
+    'server/services/excelService.cjs',
+    'server/services/excelTemplateHtmlService.cjs',
+    'server/services/membersSheetsService.cjs',
+    'server/services/monthlyOperationReportService.cjs',
+    'server/services/sitesSheetsService.cjs',
+  ];
+  const heavyTopLevelRequire = /^(?:\uFEFF)?const\s+.*require\(['"](?:googleapis|firebase-admin|@google-cloud\/bigquery|exceljs|sharp|pdf-lib)['"]\)/m;
+  const offenders = files.filter((relativePath) => {
+    const source = fs.readFileSync(path.join(BASE_DIR, relativePath), 'utf8');
+    return heavyTopLevelRequire.test(source);
+  });
+
+  if (offenders.length === 0) {
+    success('Google/Firebase/Excel/PDF 모듈이 서버·라우터 require 시 즉시 초기화되지 않음');
+  } else {
+    error(`무거운 외부 모듈 최상위 로딩이 남아 있음: ${offenders.join(', ')}`);
+  }
+
+  const settingsRoutes = fs.readFileSync(
+    path.join(BASE_DIR, 'server', 'routes', 'settingsRoutes.cjs'),
+    'utf8'
+  );
+  if (
+    settingsRoutes.includes("=== 'remote'")
+    && settingsRoutes.includes('if (remoteSyncRequested)')
+    && settingsRoutes.includes('const qntechIntegrity = !remoteSyncRequested')
+  ) {
+    success('일반 설정 조회는 로컬 전용이며 명시적 요청에서만 원격 설정을 동기화함');
+  } else {
+    error('일반 설정 조회 경로에 원격 Google Sheets 동기화가 다시 포함되었습니다');
+  }
+}
+
 // ===== 실행 =====
 (async function() {
   console.log(`\n${colors.cyan}🔍 배포 전 검증 스크립트${colors.reset}`);
@@ -2470,6 +2516,7 @@ function validateSiteRouteRuntimeContract() {
   validateInstallerNamingPolicy();
   validateRegressionContracts();
   validateSiteRouteRuntimeContract();
+  validateHeavyModuleLazyLoadingContract();
   validateMonthlyOperationReportContract();
   validateAuthSessionContract();
   validateRouteRegistry();

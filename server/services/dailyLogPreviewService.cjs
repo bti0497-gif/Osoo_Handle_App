@@ -1,11 +1,21 @@
 ﻿const crypto = require('crypto');
-const ExcelJS = require('exceljs');
+let excelJsModule = null;
+const ExcelJS = new Proxy({}, {
+  get(_target, property) {
+    if (!excelJsModule) excelJsModule = require('exceljs');
+    return excelJsModule[property];
+  },
+});
 const fs = require('fs');
 const JSZip = require('jszip');
 const os = require('os');
 const path = require('path');
-const { PDFDocument } = require('pdf-lib');
-const sharp = require('sharp');
+let sharpModule = null;
+
+function sharp(...args) {
+  if (!sharpModule) sharpModule = require('sharp');
+  return sharpModule(...args);
+}
 
 const { convertExcelToPdf } = require('./excelPdfService.cjs');
 const { getActiveLocations } = require('./qntechWaterValueImportService.cjs');

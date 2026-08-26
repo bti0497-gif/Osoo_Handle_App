@@ -1,9 +1,8 @@
 ﻿const express = require('express');
 const multer = require('multer');
-const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
-const { drive, getOrCreateBoardUploadsFolder } = require('../services/driveService.cjs');
+const { getDriveClient, getOrCreateBoardUploadsFolder } = require('../services/driveService.cjs');
 const {
   COMMON_MULTIPART_LIMITS,
   MAX_BOARD_ATTACHMENT_BYTES,
@@ -13,6 +12,20 @@ const {
   imageFileFilter,
 } = require('../middleware/uploadSecurity.cjs');
 const router = express.Router();
+
+let sharpModule = null;
+
+function sharp(...args) {
+  if (!sharpModule) sharpModule = require('sharp');
+  return sharpModule(...args);
+}
+
+const drive = new Proxy({}, {
+  get(_target, property) {
+    const client = getDriveClient();
+    return client?.[property];
+  },
+});
 
 module.exports = function(appDataPath) {
   const uploadDir = path.join(appDataPath, 'uploads');
