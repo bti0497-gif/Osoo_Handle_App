@@ -7,7 +7,10 @@ const Database = require('better-sqlite3');
 const credentialService = require('../server/services/settings/externalCredentialService.cjs');
 
 const root = path.join(__dirname, '..');
-const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
+// Normalize CRLF -> LF so regex contracts below don't depend on the CI
+// runner's git core.autocrlf checkout setting (Windows runners can check
+// out files with CRLF even though the repo stores LF).
+const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8').replace(/\r\n/g, '\n');
 
 const roadworkView = read('src/features/roadwork-helper/RoadworkHelperView.jsx');
 const roadworkRuntime = read('electron/roadworkDumpHelper.cjs');

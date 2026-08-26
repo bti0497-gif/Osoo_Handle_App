@@ -1,0 +1,13 @@
+# Force LF line endings on checkout for all text files regardless of the
+# checking-out machine's git core.autocrlf setting. This keeps CI (Windows
+# runners) and local Windows dev checkouts byte-identical, which several
+# validate-*.cjs contract scripts rely on via literal \n regex matching.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.exe binary
+*.blockmap binary
+*.pen binary
