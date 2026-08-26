@@ -213,6 +213,7 @@ function registerLazyApplication() {
   phaseStartedAt = Date.now();
   const {
     buildDatabaseDiagnosticDetails,
+    isDriveServiceLoaded,
     recordDiagnostic,
     sanitize,
     setDiagnosticRecordedNotifier,
@@ -300,13 +301,11 @@ function registerLazyApplication() {
     scheduleDiagnosticUpload();
     if (normalDiagnosticUploadTimer) return;
 
-    normalDiagnosticUploadTimer = setTimeout(async () => {
+    normalDiagnosticUploadTimer = setTimeout(() => {
       normalDiagnosticUploadTimer = null;
-      try {
-        await uploadPendingDiagnostics(db, appDataPath, { limit: 1000 });
-      } catch (error) {
-        console.warn('[diagnostic] scheduled batch upload failed:', error.message);
-      }
+      // 실제 업로드는 렌더러가 30분 유휴를 확인한 뒤 영구 백그라운드
+      // 작업으로 실행한다. 활동 중인 서버에서 Drive 모듈을 처음 불러오지 않는다.
+      scheduleDiagnosticUpload();
     }, NORMAL_DIAGNOSTIC_UPLOAD_DELAY_MS);
     normalDiagnosticUploadTimer.unref?.();
   };
@@ -342,11 +341,11 @@ function registerLazyApplication() {
     immediateDiagnosticTimer.unref?.();
   };
 
-  // Normal operations stay local-first and are delivered as one 30-minute
-  // bundle. Errors and recovery/authentication anomalies bypass the bundle so
-  // they can be investigated without delaying field recovery.
+  // Normal operations stay local-first and are delivered after the renderer's
+  // 30-minute idle check. Errors bypass the bundle only when Drive is already
+  // loaded; first-time external module loading must never block field recovery.
   setDiagnosticRecordedNotifier((event) => {
-    if (diagnosticRequiresImmediateUpload(event)) {
+    if (diagnosticRequiresImmediateUpload(event) && isDriveServiceLoaded()) {
       requestImmediateDiagnosticUpload();
       return;
     }
@@ -359,7 +358,9 @@ function registerLazyApplication() {
     scheduleDiagnosticUpload,
   });
   runtimePerformanceDiagnostics.start();
-  requestImmediateDiagnosticUpload();
+  // 정상 부팅 진단은 30분 묶음 대상으로 둔다. 서버가 ready가 된 직후
+  // Google Drive 모듈을 동기 로드해 로그인과 첫 업무 요청을 막지 않는다.
+  requestNormalDiagnosticUpload();
   require('./cron/dailyRecordFinalizationScheduler.cjs').start({
     db,
     markPending: markBackgroundTaskPending,

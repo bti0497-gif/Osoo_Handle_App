@@ -1,4 +1,4 @@
-﻿const ExcelJS = require('exceljs');
+﻿'use strict';
 const { execFile } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -7,6 +7,30 @@ const path = require('path');
 let pdfConversionQueue = Promise.resolve();
 let warmupPromise = null;
 let hasWarmedUp = false;
+
+function createWarmupWorkbook(workbookPath) {
+  const bundledTemplatePath = path.join(
+    __dirname,
+    '..',
+    '..',
+    'templates',
+    'reports',
+    '일일업무일지.xlsx'
+  );
+
+  if (fs.existsSync(bundledTemplatePath)) {
+    fs.copyFileSync(bundledTemplatePath, workbookPath);
+    return Promise.resolve();
+  }
+
+  // 정상 설치에서는 패키지에 포함된 실제 일지 템플릿을 사용한다. 개발 중
+  // 템플릿이 누락된 경우에만 ExcelJS를 불러와 기존 워밍업 동작을 보존한다.
+  const ExcelJS = require('exceljs');
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('warmup');
+  worksheet.getCell('A1').value = 'warmup';
+  return workbook.xlsx.writeFile(workbookPath);
+}
 
 function ensureDirectory(dirPath) {
   if (!fs.existsSync(dirPath)) {
@@ -115,10 +139,7 @@ async function warmUpExcelPdfConverter(appDataPath) {
     const workbookPath = path.join(warmupDir, 'excel-pdf-warmup.xlsx');
     const pdfPath = path.join(warmupDir, 'excel-pdf-warmup.pdf');
 
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('warmup');
-    worksheet.getCell('A1').value = 'warmup';
-    await workbook.xlsx.writeFile(workbookPath);
+    await createWarmupWorkbook(workbookPath);
 
     await convertExcelToPdf(workbookPath, pdfPath);
     hasWarmedUp = true;

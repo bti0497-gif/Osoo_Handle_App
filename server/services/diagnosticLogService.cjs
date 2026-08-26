@@ -2,15 +2,20 @@ const fs = require('fs');
 const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
-const {
-  drive,
-  findFolderPath,
-  getOrCreateFolderPath,
-  getDriveRootFolderId,
-  isDriveConfigured,
-  uploadBufferToFolder,
-} = require('./driveService.cjs');
 const { inspectSiteIdentity } = require('./siteIdentityIntegrityService.cjs');
+
+let driveService = null;
+
+function getDriveService() {
+  if (!driveService) {
+    driveService = require('./driveService.cjs');
+  }
+  return driveService;
+}
+
+function isDriveServiceLoaded() {
+  return Boolean(driveService || require.cache[require.resolve('./driveService.cjs')]);
+}
 
 const SECRET_KEY_PATTERN = /(password|passwd|pwd|token|secret|key|credential|authorization|cookie|client_secret|refresh_token)/i;
 const MAX_STRING_LENGTH = 2000;
@@ -173,6 +178,7 @@ function getKstDayStartIso(dateKey) {
 }
 
 async function listDriveChildren(folderId) {
+  const { drive } = getDriveService();
   const items = [];
   let pageToken;
   do {
@@ -192,6 +198,7 @@ async function listDriveChildren(folderId) {
 }
 
 async function deleteOldDriveDiagnosticFiles(folderId, cutoffIso, depth = 0) {
+  const { drive } = getDriveService();
   if (depth > 4) return 0;
   const folderMimeType = 'application/vnd.google-apps.folder';
   const children = await listDriveChildren(folderId);
@@ -235,6 +242,11 @@ async function cleanupOldDiagnosticsOnVersionStart(db, appDataPath) {
   }
 
   let driveFileCount = 0;
+  const {
+    findFolderPath,
+    getDriveRootFolderId,
+    isDriveConfigured,
+  } = getDriveService();
   if (isDriveConfigured()) {
     const diagnosticRoot = await findFolderPath(getDriveRootFolderId(), ['앱진단로그']);
     if (diagnosticRoot?.id) {
@@ -368,6 +380,12 @@ function recordDiagnostic(db, appDataPath, event = {}) {
 }
 
 async function uploadPendingDiagnostics(db, appDataPath, { limit = 200 } = {}) {
+  const {
+    getOrCreateFolderPath,
+    getDriveRootFolderId,
+    isDriveConfigured,
+    uploadBufferToFolder,
+  } = getDriveService();
   if (!isDriveConfigured()) return { success: false, skipped: true, reason: 'drive-not-configured' };
 
   const rows = db.prepare(`
@@ -436,6 +454,7 @@ async function uploadPendingDiagnostics(db, appDataPath, { limit = 200 } = {}) {
 module.exports = {
   buildDatabaseDiagnosticDetails,
   cleanupOldDiagnosticsOnVersionStart,
+  isDriveServiceLoaded,
   recordDiagnostic,
   setDiagnosticRecordedNotifier,
   uploadPendingDiagnostics,

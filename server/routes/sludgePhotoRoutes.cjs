@@ -16,19 +16,19 @@ const {
   cancelBackgroundFileTask,
 } = require('../services/backgroundFileTaskService.cjs');
 const {
-  isDriveConfigured,
-  drive,
-  getDriveRootFolderId,
-  getOrCreateFolderPath,
-  findFolderPath,
-  findFileInFolder,
-  uploadBufferToFolder,
-} = require('../services/driveService.cjs');
-const {
   managementPhotoName,
   managementPhotoSegments,
   sludgePhotoSegments,
 } = require('../services/drivePathService.cjs');
+
+let driveService = null;
+
+function getDriveService() {
+  if (!driveService) {
+    driveService = require('../services/driveService.cjs');
+  }
+  return driveService;
+}
 
 const router = express.Router();
 const {
@@ -98,17 +98,22 @@ function parseSludgePhotoFileName(fileName, date) {
   return null;
 }
 
-function listSludgeSequenceFiles(appDataPath, date, siteId = '') {
+function listPhotoSequenceFiles(appDataPath, date, siteId = '') {
   const dir = getSludgePhotoDir(appDataPath, date, siteId);
-  if (!fs.existsSync(dir)) return [];
-  const files = [];
+  if (!fs.existsSync(dir)) return { sludge: [], certificate: [] };
+  const result = { sludge: [], certificate: [] };
   for (const fileName of fs.readdirSync(dir)) {
     const parsed = parseSludgePhotoFileName(fileName, date);
-    if (!parsed || parsed.kind !== 'sludge') continue;
-    files.push({ fileName, index: parsed.index || 0 });
+    if (!parsed) continue;
+    result[parsed.kind].push({ fileName, index: parsed.index || 0 });
   }
-  files.sort((a, b) => a.index - b.index);
-  return files;
+  result.sludge.sort((a, b) => a.index - b.index);
+  result.certificate.sort((a, b) => a.index - b.index);
+  return result;
+}
+
+function listSludgeSequenceFiles(appDataPath, date, siteId = '') {
+  return listPhotoSequenceFiles(appDataPath, date, siteId).sludge;
 }
 
 function resolveLatestSludgePhotoInfo(appDataPath, date, siteId = '') {
@@ -125,16 +130,7 @@ function resolveLatestSludgePhotoInfo(appDataPath, date, siteId = '') {
 }
 
 function listCertificateSequenceFiles(appDataPath, date, siteId = '') {
-  const dir = getSludgePhotoDir(appDataPath, date, siteId);
-  if (!fs.existsSync(dir)) return [];
-  const files = [];
-  for (const fileName of fs.readdirSync(dir)) {
-    const parsed = parseSludgePhotoFileName(fileName, date);
-    if (!parsed || parsed.kind !== 'certificate') continue;
-    files.push({ fileName, index: parsed.index || 0 });
-  }
-  files.sort((a, b) => a.index - b.index);
-  return files;
+  return listPhotoSequenceFiles(appDataPath, date, siteId).certificate;
 }
 
 function resolveCertificatePhotoInfo(appDataPath, date, siteId = '', latest = false) {
@@ -281,6 +277,12 @@ async function savePhotoToLocal(appDataPath, date, label, srcPath, siteId = '') 
 }
 
 async function uploadSludgePhotoToDrive(db, date, type, localPath, index = 1, siteName = '') {
+  const {
+    getDriveRootFolderId,
+    getOrCreateFolderPath,
+    isDriveConfigured,
+    uploadBufferToFolder,
+  } = getDriveService();
   if (!localPath || !fs.existsSync(localPath) || !isDriveConfigured()) return null;
   try {
     const resolvedSiteName = String(siteName || '').trim() || 'Unknown Site';
@@ -304,6 +306,13 @@ async function uploadSludgePhotoToDrive(db, date, type, localPath, index = 1, si
 }
 
 async function findRemoteSludgePhoto(db, date, type, siteName = '') {
+  const {
+    findFileInFolder,
+    findFolderPath,
+    getDriveRootFolderId,
+    getOrCreateFolderPath,
+    isDriveConfigured,
+  } = getDriveService();
   if (!date || !type || !isDriveConfigured()) return null;
   try {
     const resolvedSiteName = String(siteName || '').trim() || 'Unknown Site';
@@ -340,6 +349,7 @@ async function findRemoteSludgePhoto(db, date, type, siteName = '') {
 }
 
 async function restoreSludgePhotoFromDrive(db, appDataPath, date, type, siteId = '', siteName = '') {
+  const { drive } = getDriveService();
   const remote = await findRemoteSludgePhoto(db, date, type, siteName);
   if (!remote?.id || !drive) return null;
   const response = await drive.files.get(
@@ -462,15 +472,20 @@ module.exports = function (db, baseDir, appDataPath) {
       const lastDay = new Date(year, month, 0).getDate();
       const end     = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
       const rows = getMergedSludgeRows(db, start, end, req.siteContext);
-      const items = rows.map(r => ({
-        ...r,
-        sludge_photo_url      : resolvePhotoUrl(appDataPath, r.date, '반출', req.siteContext?.siteId),
-        sludge_photo_urls     : listSludgeSequenceFiles(appDataPath, r.date, req.siteContext?.siteId)
-          .map((photo) => buildSludgePhotoUrl(r.date, photo.fileName, req.siteContext?.siteId)),
-        certificate_photo_url : resolvePhotoUrl(appDataPath, r.date, '청소필증', req.siteContext?.siteId),
-        certificate_photo_urls: listCertificateSequenceFiles(appDataPath, r.date, req.siteContext?.siteId)
-          .map((photo) => buildSludgePhotoUrl(r.date, photo.fileName, req.siteContext?.siteId)),
-      }));
+      const items = rows.map((r) => {
+        const photoFiles = listPhotoSequenceFiles(appDataPath, r.date, req.siteContext?.siteId);
+        const sludgePhotoUrls = photoFiles.sludge
+          .map((photo) => buildSludgePhotoUrl(r.date, photo.fileName, req.siteContext?.siteId));
+        const certificatePhotoUrls = photoFiles.certificate
+          .map((photo) => buildSludgePhotoUrl(r.date, photo.fileName, req.siteContext?.siteId));
+        return {
+          ...r,
+          sludge_photo_url: sludgePhotoUrls.at(-1) || null,
+          sludge_photo_urls: sludgePhotoUrls,
+          certificate_photo_url: certificatePhotoUrls[0] || null,
+          certificate_photo_urls: certificatePhotoUrls,
+        };
+      });
       res.json({ success: true, items });
     } catch (err) {
       console.error('[sludge-photos GET]', err);
