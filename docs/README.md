@@ -5,6 +5,7 @@
 - [개발 히스토리](DEVELOPMENT_HISTORY.md)
 - [향후 작업 로드맵](ROADMAP.md)
 - [릴리스 및 자동 업데이트 가이드](RELEASE_GUIDE.md)
+- [업무 시나리오 진단 러너 개발계획](DIAGNOSTIC_RUNNER_DEVELOPMENT_PLAN.md)
 
 ## 루트의 필수 운영 문서
 

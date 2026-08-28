@@ -1,0 +1,15 @@
+{
+  "name": "osoo-diagnostic-runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "오수처리장 관리 앱 업무 시나리오 진단 러너 (개발·검증 전용, 배포 금지)",
+  "license": "UNLICENSED",
+  "privatePackageNote": "이 디렉터리는 루트 electron-builder files 화이트리스트에 없으므로 패키징되지 않는다. 의존성을 루트 package.json에 추가하지 않는다.",
+  "scripts": {
+    "start": "node runner.cjs",
+    "leak-check": "node leak-check.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

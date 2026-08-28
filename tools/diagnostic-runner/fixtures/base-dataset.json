@@ -1,0 +1,21 @@
+{
+  "version": "base-v1",
+  "timezone": "Asia/Seoul",
+  "fixedDate": "2026-08-28",
+  "site": {
+    "id": "d1a6b2f0-1111-4111-8111-000000000001",
+    "site_name": "진단종합정수센터",
+    "manager_name": "진단관리자",
+    "method": "A2O",
+    "series": "1계열",
+    "is_active": 1
+  },
+  "settings": {
+    "multi_site_enabled": 0
+  },
+  "memberSites": {
+    "is_primary": 1,
+    "can_manage": 1,
+    "is_bidirectional": 0
+  }
+}

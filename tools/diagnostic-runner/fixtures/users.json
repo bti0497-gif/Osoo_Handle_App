@@ -1,0 +1,21 @@
+{
+  "version": "users-v1",
+  "note": "비밀번호는 서버의 local-login 계약(member.password 평문 비교)에 맞춘 진단 전용 값이다. 운영 자격증명과 무관하다.",
+  "users": [
+    {
+      "id": "diag-member-0001",
+      "name": "진단현장관리자",
+      "password": "diag-pass-user-1234",
+      "role": "user",
+      "localLoginAllowed": true
+    },
+    {
+      "id": "diag-member-admin",
+      "name": "진단총괄관리자",
+      "password": "diag-pass-admin-5678",
+      "role": "admin",
+      "localLoginAllowed": false,
+      "note": "admin 계정은 local-login이 401로 거부되어야 한다는 계약 검증용"
+    }
+  ]
+}
