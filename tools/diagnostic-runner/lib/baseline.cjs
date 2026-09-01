@@ -61,10 +61,14 @@ function diffAgainstBaseline(current, baseline) {
       durationSpikes.push({ step: key, baselineMs: base.durationMs, currentMs: step.durationMs });
     }
   }
+  const scenariosAdded = [...currentScenarios].filter((id) => !baselineScenarios.has(id));
+  const scenariosRemoved = [...baselineScenarios].filter((id) => !currentScenarios.has(id));
   return {
     compared: true,
     baselineRunId: baseline.runId,
     sharedScenarios: shared.length,
+    scenariosAdded,
+    scenariosRemoved,
     newSteps,
     removedSteps,
     durationSpikes,

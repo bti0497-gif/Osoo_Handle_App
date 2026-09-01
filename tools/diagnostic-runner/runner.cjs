@@ -28,7 +28,7 @@ const { listChangedFiles, mapFilesToScenarios } = require('./lib/changed-scope.c
 const { findBaselineRun, diffAgainstBaseline } = require('./lib/baseline.cjs');
 
 const RUNNER_ROOT = __dirname;
-const SCENARIO_ORDER = ['health', 'auth', 'dailylog', 'medicine', 'water-quality', 'kit', 'operation-status', 'facility', 'board', 'menus-light', 'recovery'];
+const SCENARIO_ORDER = ['health', 'auth', 'dailylog', 'medicine', 'water-quality', 'kit', 'operation-status', 'facility', 'board', 'menus-light', 'site-isolation', 'recovery'];
 const EXIT_CODES = { passed: 0, failed: 1, blocked: 2 };
 
 function parseArgs(argv) {
@@ -390,6 +390,8 @@ async function main() {
     if (result.baseline && result.baseline.compared) {
       const b = result.baseline;
       console.log(`      기준선 비교(대상 ${b.baselineRunId}): 신규 단계 ${b.newSteps.length}, 제거 ${b.removedSteps.length}, 소요 급증 ${b.durationSpikes.length}`);
+      if (b.scenariosAdded && b.scenariosAdded.length > 0) console.log(`      신규 시나리오: ${b.scenariosAdded.join(', ')}`);
+      if (b.scenariosRemoved && b.scenariosRemoved.length > 0) console.warn(`      제거된 시나리오: ${b.scenariosRemoved.join(', ')} — 의도된 변경인지 확인하세요.`);
       for (const spike of b.durationSpikes.slice(0, 3)) console.warn(`      [성능] ${spike.step}: ${spike.baselineMs}ms → ${spike.currentMs}ms`);
     }
     writeReports({ result, resultJsonPath: workspace.resultJson, reportHtmlPath: workspace.reportHtml });

@@ -16,7 +16,7 @@
 | 2 | 외부 호출 차단 guard(`NODE_OPTIONS=--require`), fixture 직접 seed | 구현 |
 | 3 | health / auth / dailylog / recovery 시나리오 | 구현 |
 | 4 | Playwright UI·레이아웃 회귀 | 실험적 구현(--ui, 기본 미사용) |
-| 5 | `--changed` 선택 실행 | 미구현 |
+| 5 | `--changed` 선택 실행·기준선 비교 | 구현 |
 | - | `fixture` 모드 mock 주입, `smoke` 모드 | 별도 승인 대상(§2.4) |
 
 ## 사용법
@@ -58,6 +58,7 @@ node tools/diagnostic-runner/leak-check.cjs --win-unpacked release/win-unpacked
 | 설정 | menus-light (읽기 전용) | implemented |
 | 로그인/권한 | auth | implemented |
 | 서버 복구 | recovery | implemented |
+| 양방향 현장 격리 | site-isolation (403/409 포함) | implemented |
 
 - `contract-pending` 항목은 현재 동작을 고정하는 트립와이어다. 계약이 바뀌면 해당 단계가 실패하며 승격을 요구한다.
 - 게시판은 Firebase 키 없이 쓰기·조회 모두 500(로컬 폴백 없음)이 현재 계약이다.
@@ -92,6 +93,18 @@ node tools/diagnostic-runner/runner.cjs --scenario all --lint
   산출물(서버 로그·guard 로그·임시 DB)만 읽고 해당 부분만 수정한다.
 - --ui는 화면(UI) 수정이 있을 때만 붙인다.
 
+
+## 권장 운용 (검증 3단계)
+
+| 상황 | 실행할 검증 |
+|---|---|
+| 일반 기능 수정 직후 | 러너 1회 (`--scenario all --lint --changed`) |
+| Electron·인증·서버 공통·패키징·릴리즈 전 | 러너 + `npm run validate` |
+| 설치파일 생성 후 | 배포 검증 (`validate:asar` 포함) |
+
+러너는 1차 회귀검증기다. `npm run validate`(패키지/asar/설치 계약)를 대체하지 않는다.
+게시판 500·시설 중복 저장 500 등 contract-pending 단계는 정상 판정이 아니라
+현재 동작을 고정하는 감시선이다.
 
 ## 선택 실행과 기준선 비교
 

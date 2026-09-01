@@ -132,6 +132,8 @@ function renderAgentReportMd(result) {
     lines.push('## 기준선 비교(직전 성공 실행)');
     lines.push('');
     lines.push(`- 기준선: ${b.baselineRunId} · 공통 시나리오 ${b.sharedScenarios}개`);
+    if (b.scenariosAdded && b.scenariosAdded.length > 0) lines.push(`- 신규 시나리오: ${b.scenariosAdded.join(', ')}`);
+    if (b.scenariosRemoved && b.scenariosRemoved.length > 0) lines.push(`- 제거된 시나리오: ${b.scenariosRemoved.join(', ')}`);
     if (b.newSteps.length > 0) lines.push(`- 신규 단계: ${b.newSteps.join(', ')}`);
     if (b.removedSteps.length > 0) lines.push(`- 제거된 단계: ${b.removedSteps.join(', ')}`);
     if (b.durationSpikes.length > 0) {

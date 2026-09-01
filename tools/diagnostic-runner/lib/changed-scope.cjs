@@ -46,6 +46,8 @@ const RULES = [
 
   // 문서·로그·에디터 부산물은 검증 대상이 아니다.
   { test: /(^|\/)docs\/|\.(md|pen|log|png|db)$/, scenarios: [] },
+  // 진단 임시산출물/에이전트 스크래치 디렉터는 변경 대상에서 제외한다(--changed 오탐 방지).
+  { test: /(^|\/)tmp\/|^\.tmp-/, scenarios: [] },
 ];
 
 /** 변경 파일 목록. ref를 주면 그 커밋과의 diff, 없으면 작업사본(HEAD+추적안됨). */
