@@ -21,10 +21,12 @@ const RULES = [
   { test: /server\/routes\/flowRoutes\.cjs/, scenarios: ['dailylog'] },
   { test: /src\/features\/dailylog\//, scenarios: ['dailylog'] },
   { test: /server\/routes\/dailyWorkLogRoutes\.cjs|server\/services\/[^]*(hwp|excelPdf|dailyWorkLog)/, scenarios: ['dailylog'] },
+  { test: /server\/services\/[^]*dailyLogPreview/, scenarios: ['dailylog'] },
   { test: /(^|\/)templates\//, scenarios: ['dailylog'] },
 
   { test: /src\/features\/water\//, scenarios: ['water-quality'] },
   { test: /server\/routes\/waterQualityRoutes\.cjs/, scenarios: ['water-quality'] },
+  { test: /server\/services\/[^]*qntech|server\/routes\/roadworkHelperRoutes\.cjs/, scenarios: ['water-quality', 'qntech-photo'] },
 
   { test: /src\/features\/kit\//, scenarios: ['kit'] },
   { test: /server\/routes\/kitRoutes\.cjs/, scenarios: ['kit'] },

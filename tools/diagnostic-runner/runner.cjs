@@ -28,7 +28,7 @@ const { listChangedFiles, mapFilesToScenarios } = require('./lib/changed-scope.c
 const { findBaselineRun, diffAgainstBaseline } = require('./lib/baseline.cjs');
 
 const RUNNER_ROOT = __dirname;
-const SCENARIO_ORDER = ['health', 'auth', 'dailylog', 'medicine', 'water-quality', 'kit', 'operation-status', 'facility', 'board', 'menus-light', 'site-isolation', 'recovery'];
+const SCENARIO_ORDER = ['health', 'auth', 'dailylog', 'medicine', 'water-quality', 'qntech-photo', 'kit', 'operation-status', 'facility', 'board', 'menus-light', 'site-isolation', 'recovery'];
 const EXIT_CODES = { passed: 0, failed: 1, blocked: 2 };
 
 function parseArgs(argv) {

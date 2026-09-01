@@ -49,6 +49,7 @@ node tools/diagnostic-runner/leak-check.cjs --win-unpacked release/win-unpacked
 | 약품관리 | medicine (재고 규칙 포함) | implemented |
 | 수질분석 | water-quality | implemented |
 | 키트관리 | kit | implemented |
+| 큐앤테크 사진 가져오기 | qntech-photo (fail-closed 감시선) | contract-pending |
 | 운전상태 | operation-status | implemented |
 | 성적서 | menus-light (목록 조회) | implemented |
 | 업무사진관리 | facility (업무기록 CRUD) | implemented |
@@ -72,7 +73,6 @@ node tools/diagnostic-runner/leak-check.cjs --win-unpacked release/win-unpacked
 - `OSOO_PACKAGED=1` 로 프로젝트 루트 credential fallback(`.env.local`, `client_secret_*.json`)
   을 차단하고, `NODE_OPTIONS` guard 가 loopback 외 네트워크 호출을 기록·차단한다.
 - 포트는 `OSOO_API_PORT_MIN` 방식(일반 Node 계약, `validate-release --api-test`와 동일)으로 임의 포트에 바인딩한다.
-- 포트는 `OSOO_API_PORT_MIN` 방식(일반 Node 방식, `validate-release --api-test`와 동일)을 쓴다.
 - better-sqlite3 ABI가 Node와 맞지 않으면 시나리오 전에 명확히 실패한다.
   (`electron:build` 직후라면 `npm rebuild better-sqlite3` 후 재실행)
 
