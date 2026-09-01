@@ -70,15 +70,12 @@ OSOO_SERVER_TOKEN=<ephemeral-token>
 NODE_OPTIONS=--require tools/diagnostic-runner/lib/external-call-guard.cjs
 ```
 
-서버 포트 지정 방식은 두 가지다. 일반 Node 방식은 `OSOO_API_PORT_MIN` 하나로 임의 포트에
-바인딩하며(`server/index.cjs`의 `API_PORT_MIN` 정의), `validate-release.cjs --api-test`가
-사용하는 방식이기도 하다. Electron 방식은 `ELECTRON=1`과 `OSOO_API_PORT`를 함께 쓰지만,
-진단 러너는 Electron 검사가 범위 밖이므로 일반 Node 방식을 기본으로 한다. 포트 변수가
-없으면 서버는 18731 고정 바인딩만 시도하고 점유 시 즉시 종료된다. `OSOO_MINIMAL_BUILD=0`은
-전체 라우트 로드를 명시한다. 부모 프로세스에서 Google, Firebase, BigQuery, KMA 관련
-credential 환경변수는 제거하고, 허용목록 방식으로 필요한 시스템 환경변수만 전달한다.
-`OSOO_PACKAGED=1`은 프로젝트 루트 credential fallback을 차단하기 위한 것이며, 이것만으로
-네트워크 차단을 대신하지 않는다.
+포트는 일반 Node 방식인 `OSOO_API_PORT_MIN` 하나로 임의 포트에 바인딩한다
+(`validate-release --api-test`와 동일한 계약). `ELECTRON=1`+`OSOO_API_PORT` 방식은
+범위 밖이므로 사용하지 않는다. 18731은 운영 포트이므로 진단 서버가 점유하지 않는다.
+격리에 필요한 OSSO_* 값은 spawn env와 더불어 guard 복사본이 preload 시점에 읽는
+diagnostic-env.json으로 이중 주입되며, 어느 한쪽이 유실되어도 계약이 유지된다.
+OSOO_MINIMAL_BUILD=0은 전체 라우트 로드를 명시한다.
 
 ### 2.3 앱 운영 코드에 진단 분기를 넣지 않는다
 
@@ -170,7 +167,7 @@ deprecated       이전 시나리오, 호환 기간 동안만 유지
 1. 실행 옵션 검증
 2. 임시 run 디렉터리와 프로필 생성
 3. 외부 네트워크 차단 guard를 자식 프로세스 환경에 주입
-4. 임시 포트와 격리된 환경변수로 앱 서버 실행
+4. 운영 기본 포트(18731)와 격리된 환경변수로 앱 서버 실행
 5. 서버 readiness 확인
 6. 임시 `osoo.db`에 fixture 직접 seed
 7. API 업무 시나리오 실행

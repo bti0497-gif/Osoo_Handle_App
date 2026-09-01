@@ -30,6 +30,7 @@ function redactSensitive(input, parentKey = '') {
 
 function createScenarioContext({ baseUrl, token, siteId, fixtures }) {
   const steps = [];
+  const httpLog = [];
 
   async function request(method, path, { query = {}, body = null, headers = {}, siteHeader = true } = {}) {
     const url = new URL(path, baseUrl);
@@ -42,15 +43,32 @@ function createScenarioContext({ baseUrl, token, siteId, fixtures }) {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...headers,
     };
-    const response = await fetch(url, {
-      method,
-      headers: requestHeaders,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(30 * 1000),
-    });
+    const startedAt = Date.now();
+    let response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers: requestHeaders,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(30 * 1000),
+      });
+    } catch (error) {
+      httpLog.push({ at: new Date().toISOString(), method, path: url.pathname, status: 0, durationMs: Date.now() - startedAt, error: String(error.message).slice(0, 120) });
+      throw error;
+    }
     const text = await response.text();
     let json = null;
     try { json = text ? JSON.parse(text) : null; } catch (_) { /* 비 JSON 응답 허용 */ }
+    // 에이전트 인계용 증거: 요청/응답 요약(민감값은 redactSensitive로 마스킹).
+    httpLog.push({
+      at: new Date().toISOString(),
+      method,
+      path: url.pathname + (url.search || ''),
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+      ...(body ? { reqBody: JSON.stringify(redactSensitive(body)).slice(0, 200) } : {}),
+      ...(json ? { resBody: JSON.stringify(redactSensitive(json)).slice(0, 240) } : { resText: text.slice(0, 120) }),
+    });
     return { status: response.status, ok: response.ok, json, text };
   }
 
@@ -58,6 +76,7 @@ function createScenarioContext({ baseUrl, token, siteId, fixtures }) {
     steps.push({
       name,
       status,
+      at: new Date().toISOString(),
       ...(durationMs !== undefined ? { durationMs } : {}),
       ...(errorCode ? { errorCode } : {}),
       ...(message ? { message: String(message).slice(0, 500) } : {}),
@@ -70,9 +89,10 @@ function createScenarioContext({ baseUrl, token, siteId, fixtures }) {
   /** 하나의 업무 단계를 실행하고 결과를 기록한다. */
   async function step(name, fn) {
     const startedAt = Date.now();
+    const httpStart = httpLog.length;
     try {
       const details = await fn();
-      recordStep({ name, status: 'passed', durationMs: Date.now() - startedAt, details });
+      recordStep({ name, status: 'passed', durationMs: Date.now() - startedAt, details, http: httpLog.slice(httpStart) });
       return true;
     } catch (error) {
       recordStep({
@@ -82,6 +102,7 @@ function createScenarioContext({ baseUrl, token, siteId, fixtures }) {
         errorCode: error.code || error.errorCode || 'STEP_FAILED',
         message: error.message,
         details: error.details || null,
+        http: httpLog.slice(httpStart),
       });
       return false;
     }

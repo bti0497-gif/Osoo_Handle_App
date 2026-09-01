@@ -16,7 +16,6 @@ const crypto = require('crypto');
 // 러너는 루트 node_modules 의 better-sqlite3 를 사용한다(독립 의존성 추가 금지 계약과 무관:
 // better-sqlite3 는 루트 프로덕션 의존성이다).
 // require 경로는 tools/diagnostic-runner/lib -> 루트 node_modules 로 올라가며 해결된다.
-// eslint-disable-next-line import/no-unresolved
 const Database = require('better-sqlite3');
 
 function readJson(file) {
@@ -41,6 +40,8 @@ function tableColumns(db, table) {
 function seedFixtures({ dbPath, fixtures }) {
   const { dataset, users } = fixtures;
   const db = new Database(dbPath);
+  // 서버 초기화(마이그레이션/백업)와 경합할 수 있으므로 잠금 대기를 허용한다.
+  db.pragma('busy_timeout = 10000');
   try {
     const seed = db.transaction(() => {
       const siteColumns = tableColumns(db, 'sites');
@@ -114,6 +115,7 @@ function seedFixtures({ dbPath, fixtures }) {
 /** SQLite quick_check 와 seed 데이터 정합성 요약. 실패 실행 보존 분석에도 사용한다. */
 function inspectDatabase({ dbPath, expected }) {
   const db = new Database(dbPath, { readonly: true });
+  db.pragma('busy_timeout = 10000');
   try {
     const quickCheck = db.prepare('PRAGMA quick_check').all().map((row) => Object.values(row)[0]);
     const counts = {};

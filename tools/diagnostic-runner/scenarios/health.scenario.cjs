@@ -16,6 +16,7 @@ module.exports = {
       ctx.assert(response.ok, `/api/ping 응답이 실패했습니다: HTTP ${response.status}`, 'PING_FAILED');
       ctx.assert(response.json && response.json.app === 'osoo-handle-app', 'ping 응답에 app 식별자가 없습니다.', 'PING_APP_MISMATCH', response.json);
       ctx.assert(response.json.ready === true, 'ping 응답 ready가 true가 아닙니다.', 'PING_NOT_READY', response.json);
+      ctx.assert(response.json.instanceVerified === true, '서버 토큰 계약이 검증되지 않았습니다(토큰 미적용 서버).', 'TOKEN_CONTRACT_UNVERIFIED', response.json);
       return { instanceVerified: response.json.instanceVerified };
     });
 

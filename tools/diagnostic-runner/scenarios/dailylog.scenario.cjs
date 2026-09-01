@@ -1,8 +1,9 @@
 'use strict';
 
 /**
- * dailylog 시나리오: 일일 검침(유량) 입력의 저장·재조회·검침 보정 규칙·거부 규칙을 검증한다.
+ * dailylog 시나리오: 일일 검침(유량) 입력의 저장·재조회·검침 보정 규칙·거부 규칙·수정 경로를 검증한다.
  * 계약 출처: server/routes/flowRoutes.cjs (POST /api/flows 의 전일 대비 증감 계산과 감소 거부)
+ * 단계 순서 주의: 수정(day1 값 상향)은 증분/감소 규칙 검증 뒤에 와야 한다(순서 의존).
  */
 
 function nextDate(dateText, offsetDays) {
@@ -61,6 +62,28 @@ module.exports = {
       });
       ctx.assert(response.status === 400,
         '감소한 검침값이 거부되지 않았습니다.', 'FLOW_DECREASE_NOT_REJECTED', { status: response.status, body: response.json });
+    });
+
+    await ctx.step('flow-update-first-reading', async () => {
+      // 수정 경로: 같은 날짜 재입력은 갱신이어야 하고 중복 행이 생기지 않아야 한다.
+      // (증분/감소 규칙 검증 이후에 실행 — day1 상향이 day2 검증에 영향주지 않도록)
+      const response = await ctx.request('POST', '/api/flows', {
+        body: { date: day1, type: flowType, raw_value: 200, reading_unit: 'KWH', input_status: 'manual' },
+      });
+      ctx.assert(response.ok, `검침 수정 실패: HTTP ${response.status}`, 'FLOW_UPDATE_FAILED', response.json);
+      const reload = await ctx.request('GET', '/api/flows', { query: { date: day1 } });
+      const rows = reload.json && Array.isArray(reload.json.flows) ? reload.json.flows : reload.json;
+      const matching = (rows || []).filter((item) => item.type === flowType);
+      ctx.assert(matching.length === 1, '수정 재입력 후 행이 중복 생성되었습니다.', 'UPDATE_CREATED_DUPLICATE', matching.length);
+      ctx.assert(approxEqual(matching[0].raw_value, 200), '수정한 값이 반영되지 않았습니다.', 'UPDATE_NOT_APPLIED', matching[0]);
+      // 현재 계약(2026-09-01 실측): 과거 검침 수정은 이후 일자 증분을 재계산한다.
+      // day1 200 > day2 150.5 이므로 day2 증분은 음수(-49.5)가 되고 앱은 0으로 기록한다.
+      // 계약이 바뀌면(거부 또는 음수 보존) 이 단계가 실패하며 갱신을 요구한다.
+      const day2Reload = await ctx.request('GET', '/api/flows', { query: { date: day2 } });
+      const day2Row = (day2Reload.json && Array.isArray(day2Reload.json.flows) ? day2Reload.json.flows : day2Reload.json)
+        .find((item) => item.type === flowType);
+      ctx.assert(day2Row && approxEqual(day2Row.calculated_flow, 0),
+        '과거 검침 수정의 재계산 계약이 변했습니다(기대: 음수 증분 0으로 기록).', 'HISTORICAL_RECOMPUTE_CONTRACT', day2Row);
     });
 
     await ctx.step('flow-db-invariant', async () => {

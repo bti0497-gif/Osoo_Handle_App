@@ -65,24 +65,49 @@ function createRunWorkspace(runId = createRunId()) {
  * - success=true 면 result.json 만 남기고 나머지를 지운다(성공 실행 기본 정리).
  * - 실패 실행은 전체를 보존한다.
  */
-function cleanupRunWorkspace(paths, { keep = false, success = false } = {}) {
+async function cleanupRunWorkspace(paths, { keep = false, success = false } = {}) {
   if (!paths || !paths.runDir || keep) return { removed: false, keptDir: paths ? paths.runDir : null };
   if (!success) return { removed: false, keptDir: paths.runDir };
-  try {
-    const entries = fs.readdirSync(paths.runDir);
-    for (const entry of entries) {
-      if (entry === 'result.json') continue;
-      fs.rmSync(path.join(paths.runDir, entry), { recursive: true, force: true });
+  // 성공 실행은 result.json 외 최대한 정리한다. 서버가 띄운 Excel(리포트 사전 준비)이
+  // 임시 프로필 로그를 잡고 있으면 삭제가 막히므로, 항목별로 최선을 다하고 잔존을 보고한다.
+  const removeBestEffort = async () => {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let busy = false;
+      for (const entry of fs.readdirSync(paths.runDir)) {
+        if (entry === 'result.json' || entry === 'agent-report.md') continue;
+        try {
+          fs.rmSync(path.join(paths.runDir, entry), { recursive: true, force: true });
+        } catch (_) { busy = true; }
+      }
+      if (!busy) return true;
+      await new Promise((resolve) => setTimeout(resolve, 600));
     }
-    return { removed: true, keptDir: paths.runDir };
-  } catch (error) {
-    return { removed: false, keptDir: paths.runDir, error: error.message };
+    return fs.readdirSync(paths.runDir).every((entry) => entry === 'result.json' || entry === 'agent-report.md');
+  };
+  const removed = await removeBestEffort();
+  return { removed, keptDir: paths.runDir };
+}
+
+/**
+ * 실행 산출물 보존 정책: 최근 keep개 run 디렉터만 유지하고 나머지를 정리한다.
+ * Excel 등이 잠근 항목은 최선형으로 건너뛴다(수동 정리가 히스토리를 지우는 사고 방지).
+ */
+function pruneOldRuns(diagnosticsBase, keep = 10) {
+  try {
+    const dirs = fs.readdirSync(diagnosticsBase).filter((dir) => /^run-/.test(dir)).sort().reverse();
+    for (const dir of dirs.slice(keep)) {
+      try { fs.rmSync(path.join(diagnosticsBase, dir), { recursive: true, force: true }); } catch (_) {}
+    }
+    return dirs.length;
+  } catch (_) {
+    return 0;
   }
 }
 
 module.exports = {
   PROJECT_ROOT,
   DIAGNOSTICS_BASE,
+  pruneOldRuns,
   createRunId,
   createRunWorkspace,
   cleanupRunWorkspace,

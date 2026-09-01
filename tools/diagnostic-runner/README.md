@@ -15,7 +15,7 @@
 | 1 | 임시 작업 공간, 격리 환경, 서버 spawn/readiness/수명 관리, ABI 프리플라이트 | 구현 |
 | 2 | 외부 호출 차단 guard(`NODE_OPTIONS=--require`), fixture 직접 seed | 구현 |
 | 3 | health / auth / dailylog / recovery 시나리오 | 구현 |
-| 4 | Playwright UI·레이아웃 회귀 | 미구현 |
+| 4 | Playwright UI·레이아웃 회귀 | 실험적 구현(--ui, 기본 미사용) |
 | 5 | `--changed` 선택 실행 | 미구현 |
 | - | `fixture` 모드 mock 주입, `smoke` 모드 | 별도 승인 대상(§2.4) |
 
@@ -24,6 +24,8 @@
 ```powershell
 node tools/diagnostic-runner/runner.cjs --scenario health
 node tools/diagnostic-runner/runner.cjs --scenario all
+node tools/diagnostic-runner/runner.cjs --scenario all --lint   # npm run lint 결과를 리포트에 포함
+node tools/diagnostic-runner/runner.cjs --scenario all --ui    # (실험적) Playwright UI 검사
 node tools/diagnostic-runner/runner.cjs --scenario all --keep-artifacts
 node tools/diagnostic-runner/runner.cjs --list
 
@@ -37,6 +39,29 @@ node tools/diagnostic-runner/leak-check.cjs --win-unpacked release/win-unpacked
 - 성공 실행은 기본적으로 정리되며 `result.json`만 남는다.
 - `result.json`의 `runtime` 블록에는 Node/ABI 정보가 기록된다(ABI 불일치 원인 추적용).
 
+
+## 메뉴 커버리지 (전체 메뉴 자동 회귀검증)
+
+| 메뉴 | 시나리오 | 상태 |
+|---|---|---|
+| 대시보드 | menus-light (집계 GET) | implemented |
+| 유량관리 | dailylog (검침 보정 규칙 포함) | implemented |
+| 약품관리 | medicine (재고 규칙 포함) | implemented |
+| 수질분석 | water-quality | implemented |
+| 키트관리 | kit | implemented |
+| 운전상태 | operation-status | implemented |
+| 성적서 | menus-light (목록 조회) | implemented |
+| 업무사진관리 | facility (업무기록 CRUD) | implemented |
+| 장비이력카드 | menus-light (404 트립와이어) | contract-pending |
+| 일지작성(7개 뷰) | dailylog + 각 원본 데이터 시나리오 | implemented |
+| 소통게시판 | board (Firebase 결합 고정) | contract-pending |
+| 설정 | menus-light (읽기 전용) | implemented |
+| 로그인/권한 | auth | implemented |
+| 서버 복구 | recovery | implemented |
+
+- `contract-pending` 항목은 현재 동작을 고정하는 트립와이어다. 계약이 바뀌면 해당 단계가 실패하며 승격을 요구한다.
+- 게시판은 Firebase 키 없이 쓰기·조회 모두 500(로컬 폴백 없음)이 현재 계약이다.
+
 ## 격리 계약
 
 - `OSOO_APP_DATA_PATH`, `APPDATA`, `LOCALAPPDATA`, `TEMP` 모두 run 디렉터리로 격리되며
@@ -45,9 +70,37 @@ node tools/diagnostic-runner/leak-check.cjs --win-unpacked release/win-unpacked
   자식 프로세스에 유입되지 않는다.
 - `OSOO_PACKAGED=1` 로 프로젝트 루트 credential fallback(`.env.local`, `client_secret_*.json`)
   을 차단하고, `NODE_OPTIONS` guard 가 loopback 외 네트워크 호출을 기록·차단한다.
+- 포트는 `OSOO_API_PORT_MIN` 방식(일반 Node 계약, `validate-release --api-test`와 동일)으로 임의 포트에 바인딩한다.
 - 포트는 `OSOO_API_PORT_MIN` 방식(일반 Node 방식, `validate-release --api-test`와 동일)을 쓴다.
 - better-sqlite3 ABI가 Node와 맞지 않으면 시나리오 전에 명확히 실패한다.
   (`electron:build` 직후라면 `npm rebuild better-sqlite3` 후 재실행)
+
+## 에이전트 워크플로 (쿼터 절감)
+
+기능을 수정하거나 추가한 뒤, 에이전트는 린트·검증·시뮬레이션을 수동으로 반복하지 말고
+한 번의 실행으로 마친다:
+
+```powershell
+node tools/diagnostic-runner/runner.cjs --scenario all --lint
+```
+
+- 결과는 마지막 요약(stdout)과 `tmp/diagnostics/run-*/result.json`, 그리고 코딩 에이전트 인계용
+  `agent-report.md`(단계별 HTTP 증거·타임스탬프·재현 안내 포함, 성공 실행도 보존)로 판정한다.
+- 검증 후에는 `agent-report.md`를 해당 메뉴를 수정할 코딩 에이전트에게 그대로 전달한다.
+  실패 단계에는 errorCode·메시지·요청/응답 요약·재현 명령이 포함되어 있다.
+- status가 passed면 추가 검증 반복 없이 종료한다. failed면 실패 단계·errorCode·보존된
+  산출물(서버 로그·guard 로그·임시 DB)만 읽고 해당 부분만 수정한다.
+- --ui는 화면(UI) 수정이 있을 때만 붙인다.
+
+
+## 선택 실행과 기준선 비교
+
+- `--changed [ref]`: git 변경 파일을 시나리오로 매핑해 관련 것만 실행한다(항상 health 포함).
+  매핑 규칙은 `lib/changed-scope.cjs`에 있다. infra(server 공통/전역 UI)나 미매핑 코드 파일이
+  하나라도 있으면 안전하게 전체 실행으로 돌아간다. 문서·로그는 무시된다.
+- 기준선 비교: 매 실행 직전 성공 실행의 result.json과 비교해 신규/제거 단계와
+  소요시간 급증(500ms 초과 & 2배 이상)을 agent-report.md에 기록한다(경고 수준, 판정 불변).
+- 산출물 보존 정책: 실행마다 최근 10개 run 디렉터만 유지한다(잠긴 항목은 최선형 건너뛰기).
 
 ## 인코딩 규칙
 

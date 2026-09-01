@@ -107,6 +107,34 @@ function readBetterSqlite3Version(projectRoot) {
   }
 }
 
+/** 격리 계약의 OSOO_* 환경값. env 객체와 diagnostic-env.json 양쪽에 동일하게 사용한다.
+ * 포트는 전달하지 않는다: 서버가 운영 기본값 18731로 바인딩하는 것이 계약이며,
+ * env 값 유실에 영향받지 않는다. 격리는 APPDATA/LOCALAPPDATA 오버라이드로 담보된다. */
+function buildOsooValues({ workspace, token }) {
+  return {
+    OSOO_APP_DATA_PATH: workspace.appData,
+    OSOO_MINIMAL_BUILD: '0',
+    OSOO_PACKAGED: '1',
+    OSOO_API_VALIDATION: '1',
+    BIGQUERY_SYNC_ENABLED: 'false',
+    PHOTO_NORMALIZE_ON_STARTUP: 'false',
+    OSOO_SERVER_TOKEN: token,
+    OSOO_DIAG_GUARD_LOG: workspace.guardLog,
+  };
+}
+
+/** 운영 기본 포트 18731가 이미 점유 중인지 확인한다. 점유 시 러너는 중단한다(절대 kill 금지). */
+function isPortBusy(port) {
+  return new Promise((resolve) => {
+    const probe = net.connect(port, '127.0.0.1');
+    probe.on('connect', () => {
+      probe.destroy();
+      resolve(true);
+    });
+    probe.on('error', () => resolve(false));
+  });
+}
+
 /**
  * 격리된 자식 프로세스 환경을 만든다.
  * APPDATA/LOCALAPPDATA를 임시 프로필로 격리하고, NODE_OPTIONS로 외부 호출 guard를 주입한다.
@@ -116,30 +144,32 @@ function buildIsolatedEnv({ projectRoot, workspace, port, token }) {
   for (const key of ALLOWED_SYSTEM_ENV) {
     if (process.env[key] !== undefined) base[key] = process.env[key];
   }
-  const env = {
+  return {
     ...base,
     TEMP: workspace.profileTemp,
     TMP: workspace.profileTemp,
     APPDATA: workspace.profileAppData,
     LOCALAPPDATA: workspace.profileLocalAppData,
-    OSOO_APP_DATA_PATH: workspace.appData,
     OSOO_API_PORT_MIN: String(port),
-    OSOO_MINIMAL_BUILD: '0',
-    OSOO_PACKAGED: '1',
-    OSOO_API_VALIDATION: '1',
-    BIGQUERY_SYNC_ENABLED: 'false',
-    PHOTO_NORMALIZE_ON_STARTUP: 'false',
-    OSOO_SERVER_TOKEN: token,
+    ...buildOsooValues({ workspace, token }),
     // NODE_OPTIONS 는 공백으로 인자를 나누고 따옴표 안의 백슬래시를 이스케이프로 소비한다.
     // 그래서 공백 포함 경로는 따옴표로 감싸고, 구분자는 슬래시로 정규화한다.
     NODE_OPTIONS: `--require "${path.join(projectRoot, 'tools', 'diagnostic-runner', 'lib', 'external-call-guard.cjs').split(path.sep).join('/')}"`,
   };
-  return env;
 }
 
 /** server.cjs 를 spawn 한다. guard는 반드시 이 시점의 환경에 포함되어 있어야 한다(§4 3단계). */
 function startServer({ projectRoot, workspace, port, token }) {
   const env = buildIsolatedEnv({ projectRoot, workspace, port, token });
+  const guardDir = path.join(workspace.runDir, 'guard');
+  fs.mkdirSync(guardDir, { recursive: true });
+  // guard 복사본과 diagnostic-env.json을 run 디렉터에 둔다. guard는 preload 시점에 이 JSON을
+  // 읽어 비어 있는 OSOO_* env를 process.env에 재주입하므로, spawn env 전달이 불안정한 환경에서도
+  // 포트·격리 계약이 유지된다.
+  const guardCopy = path.join(guardDir, 'external-call-guard.cjs');
+  fs.copyFileSync(path.join(projectRoot, 'tools', 'diagnostic-runner', 'lib', 'external-call-guard.cjs'), guardCopy);
+  fs.writeFileSync(path.join(guardDir, 'diagnostic-env.json'), JSON.stringify({ ...buildOsooValues({ workspace, token }), OSOO_API_PORT_MIN: String(port) }, null, 2), 'utf8');
+  env.NODE_OPTIONS = `--require "${guardCopy.split(path.sep).join('/')}"`;
   const stdioStream = fs.createWriteStream(workspace.serverStdioLog, { flags: 'a' });
   const child = spawn(process.execPath, ['server.cjs'], {
     cwd: projectRoot,
@@ -182,6 +212,41 @@ async function waitForReady({ port, token, timeoutMs = READINESS_TIMEOUT_MS }) {
   throw new Error(`서버가 ${Math.round(timeoutMs / 1000)}초 내에 ready 상태가 되지 않았습니다. 마지막 상태: ${lastError}`);
 }
 
+/**
+ * guard 부팅 증거(guard-installed 레코드 또는 guard-boot-<pid>.json)를 기다린다.
+ * 증거가 없어도 치명적이지 않다: guard 기록 경로는 위치 파생으로 항상 기록되며,
+ * 부팅 실패는 readiness 단계에서 잡힌다.
+ */
+async function waitForGuardBoot(guardDir, guardLogPath, { timeoutMs = 8000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let probe = null;
+  while (Date.now() < deadline && !probe) {
+    try {
+      if (fs.existsSync(guardLogPath)) {
+        const logContent = fs.readFileSync(guardLogPath, 'utf8');
+        for (const line of logContent.split('\n')) {
+          if (!line.trim()) continue;
+          try {
+            const record = JSON.parse(line);
+            if (record.type === 'guard-installed' && record.envProbe) { probe = record.envProbe; break; }
+          } catch (_) { /* 부분 라인 무시 */ }
+        }
+      }
+      if (!probe && fs.existsSync(guardDir)) {
+        for (const entry of fs.readdirSync(guardDir)) {
+          if (!entry.startsWith('guard-boot-') || !entry.endsWith('.json')) continue;
+          try {
+            const boot = JSON.parse(fs.readFileSync(path.join(guardDir, entry), 'utf8'));
+            if (boot.envProbe) { probe = boot.envProbe; break; }
+          } catch (_) { /* 부분 파일 무시 */ }
+        }
+      }
+    } catch (_) { /* 읽기 재시도 */ }
+    if (!probe) await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return probe;
+}
+
 function isProcessAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -198,20 +263,45 @@ function isProcessAlive(pid) {
 async function stopServer(serverProcess, { graceMs = EXIT_GRACE_MS } = {}) {
   const { child, pid, stdioStream } = serverProcess;
   if (!child || child.exitCode !== null || child.killed) {
-    await new Promise((resolve) => stdioStream.end(resolve));
-    return { exited: true, orphaned: isProcessAlive(pid) };
+    stdioStream.end();
+    return { exited: !isProcessAlive(pid), orphaned: isProcessAlive(pid) };
   }
   const exited = new Promise((resolve) => child.once('exit', () => resolve()));
   child.kill();
   const timeout = new Promise((resolve) => setTimeout(resolve, graceMs));
   await Promise.race([exited, timeout]);
-  if (child.exitCode === null) {
-    try { child.kill('SIGKILL'); } catch (_) { /* 이미 종료됨 */ }
-    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 3000))]);
+  if (child.exitCode === null || isProcessAlive(pid)) {
+    // Windows에서 kill() 신호가 무시될 수 있으므로 강제 종료(T, 자식 트리 포함)로 확정한다.
+    try { spawnSync('taskkill', ['/PID', String(pid), '/F', '/T'], { windowsHide: true }); } catch (_) {}
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && isProcessAlive(pid)) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 1500))]);
   }
-  await new Promise((resolve) => stdioStream.end(resolve));
-  const orphaned = isProcessAlive(pid);
-  return { exited: !orphaned, orphaned };
+  stdioStream.end();
+  return { exited: !isProcessAlive(pid), orphaned: isProcessAlive(pid) };
+}
+
+/** 포트가 해제될 때까지 대기한다(재시작 시 EADDRINUSE 경합 방지). */
+function waitPortFree(port, { timeoutMs = 8000 } = {}) {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    const attempt = () => {
+      const probe = net.connect(port, '127.0.0.1');
+      probe.setTimeout(800);
+      const settle = (free) => {
+        probe.removeAllListeners();
+        probe.destroy();
+        if (free || Date.now() > deadline) resolve(free);
+        else setTimeout(attempt, 200);
+      };
+      probe.on('connect', () => settle(false));
+      probe.on('error', () => settle(true));
+      probe.on('timeout', () => settle(true));
+    };
+    attempt();
+  });
 }
 
 module.exports = {
@@ -220,6 +310,9 @@ module.exports = {
   buildIsolatedEnv,
   startServer,
   waitForReady,
+  waitForGuardBoot,
+  isPortBusy,
+  waitPortFree,
   stopServer,
   isProcessAlive,
   READINESS_TIMEOUT_MS,
