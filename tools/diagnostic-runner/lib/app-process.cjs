@@ -6,8 +6,7 @@
  * - 임의 포트 확보, 격리된 환경변수 생성, server.cjs spawn, readiness 확인,
  *   종료(PID 기록·timeout·강제 종료·잔존 프로세스 확인)를 담당한다.
  * - 운영 AppData 경로를 절대 사용하지 않으며, 환경변수는 허용목록 방식으로만 전달한다.
- * - Electron 방식(ELECTRON=1 + OSOO_API_PORT)은 범위 밖이므로 일반 Node 방식
- *   (OSOO_API_PORT_MIN)을 사용한다. docs/DIAGNOSTIC_RUNNER_DEVELOPMENT_PLAN.md §2.2.
+ * - 포트는 일반 Node 방식(OSOO_API_PORT_MIN)을 사용한다. docs/DIAGNOSTIC_RUNNER_DEVELOPMENT_PLAN.md §2.2.
  */
 
 const { spawn, spawnSync } = require('child_process');
@@ -19,8 +18,11 @@ const READINESS_TIMEOUT_MS = 90 * 1000;
 const READINESS_INTERVAL_MS = 500;
 const EXIT_GRACE_MS = 10 * 1000;
 
+// lib → diagnostic-runner → tools → 프로젝트 루트
+const PROJECT_ROOT = path.join(__dirname, '..', '..', '..');
+
 // 자식 프로세스에 전달할 시스템 환경변수 허용목록.
-// Google/Firebase/BigQuery/KMA 관련 credential 환경변수는 이 목록에 없으므로 자동으로 제거된다.
+// credential 계열 환경변수는 이 목록에 없으므로 자동으로 제거된다.
 const ALLOWED_SYSTEM_ENV = [
   'ALLUSERSPROFILE',
   'COMMONPROGRAMFILES',
@@ -63,40 +65,6 @@ function resolveFreePort() {
   });
 }
 
-/**
- * better-sqlite3 ABI 프리플라이트.
- * electron:build/@electron/rebuild 직후에는 네이티브 모듈이 Electron ABI로 재빌드되어
- * 순수 Node에서 로드에 실패한다. 업무 시나리오 전에 명확히 실패시킨다(§Phase 1).
- */
-function preflightAbi(projectRoot) {
-  const probeScript = "try { const db = require('better-sqlite3'); const dbi = new db(':memory:'); dbi.exec('CREATE TABLE t(a)'); console.log('OK'); } catch (e) { console.error(e.message); process.exit(1); }";
-  const result = spawnSync(process.execPath, ['-e', probeScript], {
-    cwd: projectRoot,
-    windowsHide: true,
-    encoding: 'utf8',
-    timeout: 30 * 1000,
-  });
-  const betterSqlite3Version = readBetterSqlite3Version(projectRoot);
-  const runtime = {
-    nodeVersion: process.version,
-    nodeModulesAbi: process.versions.modules,
-    betterSqlite3Version,
-    architecture: `${process.arch} / ${process.platform}`,
-    abiPreflight: result.status === 0 ? 'passed' : 'failed',
-  };
-  if (result.status !== 0) {
-    const detail = String(result.stderr || result.stdout || '').trim().slice(0, 500);
-    const error = new Error([
-      'better-sqlite3 네이티브 모듈을 Node에서 로드할 수 없습니다 (ABI 불일치 추정).',
-      `상세: ${detail}`,
-      'electron:build 직후라면 `npm rebuild better-sqlite3` 로 Node ABI로 되돌린 뒤 다시 실행하세요.',
-    ].join('\n'));
-    error.runtime = runtime;
-    throw error;
-  }
-  return runtime;
-}
-
 function readBetterSqlite3Version(projectRoot) {
   try {
     const pkg = JSON.parse(fs.readFileSync(
@@ -107,9 +75,51 @@ function readBetterSqlite3Version(projectRoot) {
   }
 }
 
-/** 격리 계약의 OSOO_* 환경값. env 객체와 diagnostic-env.json 양쪽에 동일하게 사용한다.
- * 포트는 전달하지 않는다: 서버가 운영 기본값 18731로 바인딩하는 것이 계약이며,
- * env 값 유실에 영향받지 않는다. 격리는 APPDATA/LOCALAPPDATA 오버라이드로 담보된다. */
+function probeSqliteLoad(cwd) {
+  const probeScript = "try { const db = require('better-sqlite3'); const dbi = new db(':memory:'); dbi.exec('CREATE TABLE t(a)'); console.log('OK'); } catch (e) { console.error(e.message); process.exit(1); }";
+  return spawnSync(process.execPath, ['-e', probeScript], {
+    cwd,
+    windowsHide: true,
+    encoding: 'utf8',
+    timeout: 30 * 1000,
+  });
+}
+
+/**
+ * better-sqlite3 ABI 프리플라이트(이중 검사).
+ * - 게이트: 러너/시나리오가 require하는 tools 로컬 사본. 실패 시 즉시 중단한다.
+ * - 정보: 루트 사본(서버가 guard 리다이렉트로 우회하므로 게이트에서 제외, 상태만 기록).
+ */
+function preflightAbi() {
+  const runnerRoot = path.join(__dirname, '..');
+  const probeRunner = probeSqliteLoad(runnerRoot);
+  const rootPkgPath = path.join(PROJECT_ROOT, 'node_modules', 'better-sqlite3', 'package.json');
+  let probeRootStatus = null;
+  if (fs.existsSync(rootPkgPath)) probeRootStatus = probe(PROJECT_ROOT).status;
+
+  const betterSqlite3Version = readBetterSqlite3Version(PROJECT_ROOT);
+  const runtime = {
+    nodeVersion: process.version,
+    nodeModulesAbi: process.versions.modules,
+    betterSqlite3Version,
+    architecture: `${process.arch} / ${process.platform}`,
+    abiPreflight: probeRunner.status === 0 ? 'passed' : 'failed',
+    rootAbiPreflight: probeRootStatus === 0 ? 'passed' : (probeRootStatus === null ? 'skipped' : 'failed'),
+  };
+  if (probeRunner.status !== 0) {
+    const detail = String(probeRunner.stderr || probeRunner.stdout || '').trim().slice(0, 500);
+    const error = new Error([
+      'better-sqlite3 네이티브 모듈(tools 로컬)을 Node에서 로드할 수 없습니다 (ABI 불일치 추정).',
+      `상세: ${detail}`,
+      '`tools/diagnostic-runner`에서 `npm rebuild better-sqlite3` 후 다시 실행하세요.',
+    ].join('\n'));
+    error.runtime = runtime;
+    throw error;
+  }
+  return runtime;
+}
+
+/** 격리 계약의 OSOO_* 환경값. env 객체와 diagnostic-env.json 양쪽에 동일하게 사용한다. */
 function buildOsooValues({ workspace, token }) {
   return {
     OSOO_APP_DATA_PATH: workspace.appData,
@@ -121,18 +131,6 @@ function buildOsooValues({ workspace, token }) {
     OSOO_SERVER_TOKEN: token,
     OSOO_DIAG_GUARD_LOG: workspace.guardLog,
   };
-}
-
-/** 운영 기본 포트 18731가 이미 점유 중인지 확인한다. 점유 시 러너는 중단한다(절대 kill 금지). */
-function isPortBusy(port) {
-  return new Promise((resolve) => {
-    const probe = net.connect(port, '127.0.0.1');
-    probe.on('connect', () => {
-      probe.destroy();
-      resolve(true);
-    });
-    probe.on('error', () => resolve(false));
-  });
 }
 
 /**
@@ -270,9 +268,9 @@ async function stopServer(serverProcess, { graceMs = EXIT_GRACE_MS } = {}) {
   child.kill();
   const timeout = new Promise((resolve) => setTimeout(resolve, graceMs));
   await Promise.race([exited, timeout]);
-  if (child.exitCode === null || isProcessAlive(pid)) {
-    // Windows에서 kill() 신호가 무시될 수 있으므로 강제 종료(T, 자식 트리 포함)로 확정한다.
-    try { spawnSync('taskkill', ['/PID', String(pid), '/F', '/T'], { windowsHide: true }); } catch (_) {}
+  if (isProcessAlive(pid)) {
+    // Windows에서 kill() 신호가 무시될 수 있으므로 강제 종료(트리 포함)로 확정한다.
+    try { spawnSync('taskkill', ['/PID', String(pid), '/F', '/T'], { windowsHide: true }); } catch (_) { /* 무시 */ }
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline && isProcessAlive(pid)) {
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -283,36 +281,14 @@ async function stopServer(serverProcess, { graceMs = EXIT_GRACE_MS } = {}) {
   return { exited: !isProcessAlive(pid), orphaned: isProcessAlive(pid) };
 }
 
-/** 포트가 해제될 때까지 대기한다(재시작 시 EADDRINUSE 경합 방지). */
-function waitPortFree(port, { timeoutMs = 8000 } = {}) {
-  return new Promise((resolve) => {
-    const deadline = Date.now() + timeoutMs;
-    const attempt = () => {
-      const probe = net.connect(port, '127.0.0.1');
-      probe.setTimeout(800);
-      const settle = (free) => {
-        probe.removeAllListeners();
-        probe.destroy();
-        if (free || Date.now() > deadline) resolve(free);
-        else setTimeout(attempt, 200);
-      };
-      probe.on('connect', () => settle(false));
-      probe.on('error', () => settle(true));
-      probe.on('timeout', () => settle(true));
-    };
-    attempt();
-  });
-}
-
 module.exports = {
   resolveFreePort,
   preflightAbi,
   buildIsolatedEnv,
+  buildOsooValues,
   startServer,
   waitForReady,
   waitForGuardBoot,
-  isPortBusy,
-  waitPortFree,
   stopServer,
   isProcessAlive,
   READINESS_TIMEOUT_MS,
