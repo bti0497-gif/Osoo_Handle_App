@@ -95,7 +95,7 @@ function preflightAbi() {
   const probeRunner = probeSqliteLoad(runnerRoot);
   const rootPkgPath = path.join(PROJECT_ROOT, 'node_modules', 'better-sqlite3', 'package.json');
   let probeRootStatus = null;
-  if (fs.existsSync(rootPkgPath)) probeRootStatus = probe(PROJECT_ROOT).status;
+  if (fs.existsSync(rootPkgPath)) probeRootStatus = probeSqliteLoad(PROJECT_ROOT).status;
 
   const betterSqlite3Version = readBetterSqlite3Version(PROJECT_ROOT);
   const runtime = {
@@ -166,7 +166,7 @@ function startServer({ projectRoot, workspace, port, token }) {
   // 포트·격리 계약이 유지된다.
   const guardCopy = path.join(guardDir, 'external-call-guard.cjs');
   fs.copyFileSync(path.join(projectRoot, 'tools', 'diagnostic-runner', 'lib', 'external-call-guard.cjs'), guardCopy);
-  fs.writeFileSync(path.join(guardDir, 'diagnostic-env.json'), JSON.stringify({ ...buildOsooValues({ workspace, token }), OSOO_API_PORT_MIN: String(port) }, null, 2), 'utf8');
+  fs.writeFileSync(path.join(guardDir, 'diagnostic-env.json'), JSON.stringify({ ...buildOsooValues({ workspace, token }), OSOO_API_PORT_MIN: String(port), OSOO_TOOLS_SQLITE_DIR: path.join(projectRoot, 'tools', 'diagnostic-runner', 'node_modules', 'better-sqlite3') }, null, 2), 'utf8');
   env.NODE_OPTIONS = `--require "${guardCopy.split(path.sep).join('/')}"`;
   const stdioStream = fs.createWriteStream(workspace.serverStdioLog, { flags: 'a' });
   const child = spawn(process.execPath, ['server.cjs'], {
@@ -245,6 +245,28 @@ async function waitForGuardBoot(guardDir, guardLogPath, { timeoutMs = 8000 } = {
   return probe;
 }
 
+
+/** 포트가 해제될 때까지 대기한다(재시작 시 EADDRINUSE 경합 방지). */
+function waitPortFree(port, { timeoutMs = 8000 } = {}) {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    const attempt = () => {
+      const probe = net.connect(port, '127.0.0.1');
+      probe.setTimeout(800);
+      const settle = (free) => {
+        probe.removeAllListeners();
+        probe.destroy();
+        if (free || Date.now() > deadline) resolve(free);
+        else setTimeout(attempt, 200);
+      };
+      probe.on('connect', () => settle(false));
+      probe.on('error', () => settle(true));
+      probe.on('timeout', () => settle(true));
+    };
+    attempt();
+  });
+}
+
 function isProcessAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -289,6 +311,7 @@ module.exports = {
   startServer,
   waitForReady,
   waitForGuardBoot,
+  waitPortFree,
   stopServer,
   isProcessAlive,
   READINESS_TIMEOUT_MS,
