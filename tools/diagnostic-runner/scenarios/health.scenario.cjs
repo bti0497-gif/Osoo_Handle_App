@@ -6,6 +6,7 @@
 
 module.exports = {
   id: 'health',
+    covers: [],
   version: '0.1.0',
   status: 'implemented',
   async run({ ctx, dbPath, expected }) {

@@ -30,6 +30,7 @@ function listFilesRecursive(dir) {
 
 module.exports = {
   id: 'qntech-photo',
+    covers: ["water"],
   version: '0.1.0',
   status: 'contract-pending',
   async run({ ctx, fixtures, dbPath }) {

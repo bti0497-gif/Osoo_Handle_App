@@ -13,6 +13,7 @@
 
 module.exports = {
   id: 'board',
+    covers: ["board"],
   version: '0.1.0',
   status: 'contract-pending',
   async run({ ctx }) {

@@ -28,11 +28,25 @@ const { listChangedFiles, mapFilesToScenarios } = require('./lib/changed-scope.c
 const { findBaselineRun, diffAgainstBaseline } = require('./lib/baseline.cjs');
 
 const RUNNER_ROOT = __dirname;
-const SCENARIO_ORDER = ['health', 'auth', 'dailylog', 'medicine', 'water-quality', 'qntech-photo', 'kit', 'operation-status', 'facility', 'board', 'menus-light', 'site-isolation', 'recovery'];
+// 시나리오 자동 발견: scenarios/*.scenario.cjs 를 스캔한다(확장 훅).
+// 새 기능 시나리오는 파일만 추가하면 등록된다. recovery(last:true)는 항상 마지막에 실행된다.
+function discoverScenarios() {
+  const dir = path.join(__dirname, 'scenarios');
+  return fs.readdirSync(dir)
+    .filter((file) => file.endsWith('.scenario.cjs'))
+    .map((file) => require(path.join(dir, file)))
+    .filter((m) => m && typeof m.id === 'string') // ui(실험용) 등 비표준 모듈 제외
+    .sort((a, b) => {
+      const last = (m) => (m.last === true ? 1 : 0);
+      return last(a) - last(b) || a.id.localeCompare(b.id, 'en');
+    })
+    .map((m) => m.id);
+}
+const SCENARIO_ORDER = discoverScenarios();
 const EXIT_CODES = { passed: 0, failed: 1, blocked: 2 };
 
 function parseArgs(argv) {
-  const options = { scenario: 'all', mode: 'local', ui: false, lint: false, changed: null, keepArtifacts: false, list: false };
+  const options = { scenario: 'all', mode: 'local', ui: false, lint: false, coverage: false, changed: null, keepArtifacts: false, list: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--scenario') options.scenario = argv[++index] || 'all';
@@ -40,6 +54,7 @@ function parseArgs(argv) {
     else if (arg === '--ui') options.ui = true;
     else if (arg === '--keep-artifacts') options.keepArtifacts = true;
     else if (arg === '--lint') options.lint = true;
+    else if (arg === '--coverage') options.coverage = true;
     else if (arg === '--changed') {
       options.changed = argv[index + 1] && !argv[index + 1].startsWith('--') ? argv[++index] : true;
     }
@@ -156,6 +171,42 @@ async function waitForServerFilesStable(projectRoot, { timeoutMs = 15000 } = {})
   throw error;
 }
 
+
+/**
+ * 커버리지 갭 리포트: 앱 메뉴(src/core/constants)와 시나리오 covers를 대조한다.
+ * 새 기능이 들어오면 여기에 "미커버"로 표시되어 시나리오 추가를 요구한다(확장 훅).
+ */
+function buildCoverageReport(scenarioModules) {
+  const constantsSrc = fs.readFileSync(path.join(PROJECT_ROOT, 'src', 'core', 'constants', 'index.js'), 'utf8');
+  // 메뉴 엔트리 단위로 분해해 그룹 컨테이너(children 보유)와 실제 기능(리프)을 구분한다.
+  const entries = constantsSrc.split(/(?=\{\s*id:)/);
+  const menuIds = [];
+  const groupIds = [];
+  for (const entry of entries) {
+    const idMatch = entry.match(/\{\s*id:\s*'([^']+)'/);
+    if (!idMatch) continue;
+    if (/children\s*:/.test(entry)) groupIds.push(idMatch[1]);
+    else menuIds.push(idMatch[1]);
+  }
+  const covered = new Set();
+  for (const m of scenarioModules) {
+    for (const id of m.covers || []) covered.add(id);
+  }
+  const uncovered = menuIds.filter((id) => !covered.has(id));
+  return { menuIds, groupIds, covered: [...covered].sort(), uncovered };
+}
+
+async function showCoverage(scenarioModules) {
+  const report = buildCoverageReport(scenarioModules);
+  console.log('=== 메뉴 커버리지 ===');
+  for (const id of report.menuIds) {
+    const owners = scenarioModules.filter((m) => (m.covers || []).includes(id)).map((m) => m.id);
+    console.log((owners.length ? '  ' + id + ' ← ' + owners.join(', ') : '  [미커버] ' + id));
+  }
+  console.log(report.uncovered.length === 0 ? '=== 미커버 메뉴 없음 ===' : '=== 미커버: ' + report.uncovered.join(', ') + ' ===');
+  return report;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (!options) process.exit(EXIT_CODES.blocked);
@@ -190,6 +241,12 @@ async function main() {
     }
     return;
   }
+  if (options.coverage) {
+    const modules = scenarioNames.map((name) => loadScenario(name)).filter(Boolean);
+    await showCoverage(modules);
+    return;
+  }
+
   const scenarios = scenarioNames.map((name) => {
     const scenario = loadScenario(name);
     if (!scenario) {
@@ -380,6 +437,7 @@ async function main() {
       scenarios: executed,
       externalCalls,
       database,
+      uncoveredMenus: buildCoverageReport(scenarioNames.map((name) => loadScenario(name))).uncovered,
       artifacts: { runDir: workspace.runDir, resultJson: workspace.resultJson, reportHtml: workspace.reportHtml },
     });
     result.status = status;

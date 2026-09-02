@@ -7,6 +7,7 @@
 
 module.exports = {
   id: 'auth',
+    covers: ["auth","settings"],
   version: '0.1.0',
   status: 'implemented',
   async run({ ctx, fixtures }) {

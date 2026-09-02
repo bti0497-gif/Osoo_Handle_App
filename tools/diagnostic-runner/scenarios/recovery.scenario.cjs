@@ -13,6 +13,7 @@ function nextDate(dateText, offsetDays) {
 
 module.exports = {
   id: 'recovery',
+    covers: [],
   version: '0.1.0',
   status: 'implemented',
   async run({ ctx, fixtures, dbPath, expected, runtime }) {

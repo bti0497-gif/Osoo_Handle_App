@@ -148,6 +148,12 @@ function renderAgentReportMd(result) {
     lines.push(`## 기준선 비교: 생략(${result.baseline.reason || '비교 불가'})`);
     lines.push('');
   }
+  if (result.uncoveredMenus && result.uncoveredMenus.length > 0) {
+    lines.push('## 미커버 메뉴 (시나리오 추가 필요 - 확장 훅)');
+    lines.push('');
+    for (const id of result.uncoveredMenus) lines.push(`- ${id}`);
+    lines.push('');
+  }
   lines.push('## 단계별 상세');
   for (const step of result.steps || []) {
     lines.push('');

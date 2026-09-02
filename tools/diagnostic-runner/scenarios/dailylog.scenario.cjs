@@ -18,6 +18,7 @@ function approxEqual(a, b, epsilon = 1e-6) {
 
 module.exports = {
   id: 'dailylog',
+    covers: ["flow","log_daily","log_water","log_med_mgmt","log_med_in","log_sludge_photo","log_monthly_operation"],
   version: '0.1.0',
   status: 'implemented',
   async run({ ctx, fixtures, dbPath, expected }) {

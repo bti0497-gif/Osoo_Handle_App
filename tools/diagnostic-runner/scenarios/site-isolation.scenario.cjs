@@ -14,6 +14,7 @@ function approxEqual(a, b, epsilon = 1e-6) {
 
 module.exports = {
   id: 'site-isolation',
+    covers: [],
   version: '0.1.0',
   status: 'implemented',
   async run({ ctx, fixtures, dbPath, expected }) {

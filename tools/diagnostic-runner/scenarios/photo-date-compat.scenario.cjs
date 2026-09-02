@@ -46,6 +46,7 @@ function writeFixture(dir, name) {
 
 module.exports = {
   id: 'photo-date-compat',
+    covers: ["water"],
   version: '0.1.0',
   status: 'implemented',
   async run({ ctx, fixtures, dbPath, expected }) {
@@ -125,6 +126,12 @@ module.exports = {
         const rows = db.prepare("SELECT status, attempts, last_error FROM background_file_tasks WHERE dedupe_key = 'diag:photo-date-compat'").all();
         ctx.assert(rows.length === 1, '같은 dedupe_key 재등록이 행을 늘렸습니다.', 'QUEUE_DEDUPE_BROKEN', rows);
         ctx.assert(rows[0].attempts === 0 && rows[0].last_error === null, '재등록이 attempts/last_error를 리셋하지 않았습니다.', 'QUEUE_RESET_BROKEN', rows[0]);
+
+        // 시나리오 간 격리: 검증용 큐 행을 치운다(뒤 실행되는 qntech-photo의 잔여 검사 보호).
+        db.prepare("DELETE FROM background_file_tasks WHERE dedupe_key = 'diag:photo-date-compat'").run();
+
+      // 시나리오 간 격리: seed한 fixture를 치운다.
+      fs.rmSync(monthDir, { recursive: true, force: true });
       } finally {
         db.close();
       }

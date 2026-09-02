@@ -11,6 +11,7 @@
 
 module.exports = {
   id: 'menus-light',
+    covers: ["dashboard","certificate","log_roadwork_helper","equipment_card"],
   version: '0.1.0',
   status: 'implemented',
   async run({ ctx, fixtures, expected }) {
