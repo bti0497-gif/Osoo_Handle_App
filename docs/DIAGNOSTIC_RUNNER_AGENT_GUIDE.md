@@ -40,6 +40,19 @@ node tools/diagnostic-runner/runner.cjs --scenario <이름> --keep-artifacts
 
 ---
 
+## 1.5 현장 진단 로그 분석 (배포 후 피드백 루프)
+
+현장 PC에서 수집한 진단 로그(JSONL) 폴더를 넣으면 패턴 분석 리포트를 만든다.
+
+```powershell
+node tools/diagnostic-runner/analyzer.cjs .tmp-diagnostics-current
+```
+
+- 에러 패턴 그룹화(수·영향 현장·최초/최종), 슬로우 API 랭킹, 이벤트루프 지연, 현장별 요약
+- **수정 방향 자동 판정**(403 권한 계약, 404 미구현 라우트, 슬로우+이벤트루프 짝패임→동기 블로킹 지목)
+- 직전 분석과 diff: 신규/해결 에러 패턴(릴리즈마다 현장 로그 재분석해 수정 효과 추적)
+- 산출물: tmp/diagnostics/analysis-<시각>/analysis-report.md (코딩 에이전트 인계용)
+
 ## 2. 커버리지 (전 메뉴)
 
 | 메뉴 | 시나리오 | 검증 내용 |

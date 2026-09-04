@@ -29,6 +29,9 @@ node tools/diagnostic-runner/runner.cjs --scenario all --ui    # (실험적) Pla
 node tools/diagnostic-runner/runner.cjs --scenario all --keep-artifacts
 node tools/diagnostic-runner/runner.cjs --list
 
+# 현장 진단 로그 분석(배포 후)
+node tools/diagnostic-runner/analyzer.cjs <진단로그 폴더>
+
 # 배포 누출 검사(수동)
 node tools/diagnostic-runner/leak-check.cjs
 node tools/diagnostic-runner/leak-check.cjs --asar release/win-unpacked/resources/app.asar
