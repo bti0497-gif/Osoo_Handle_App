@@ -330,7 +330,7 @@ function main() {
     ? diffPatterns(analysis.errorPatterns.map((p) => p.key), baseline.errorPatterns)
     : null;
 
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '-' + process.pid;
   const outDir = path.join(OUT_BASE, `analysis-${stamp}`);
   fs.mkdirSync(outDir, { recursive: true });
   const report = renderReport(analysis, hints, diff);

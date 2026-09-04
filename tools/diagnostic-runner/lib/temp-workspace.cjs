@@ -21,9 +21,13 @@ function pad(value) {
 }
 
 function createRunId(now = new Date()) {
+  // 동일 초 병렬 실행 충돌 방지: 밀리초·PID·난수 접미. 날짜 선두라 정렬(기준선 탐색)은 유지된다.
+  const ms = String(now.getMilliseconds()).padStart(3, '0');
+  const rand = Math.random().toString(36).slice(2, 6);
   return [
     now.getFullYear(), pad(now.getMonth() + 1), pad(now.getDate()),
     '-', pad(now.getHours()), pad(now.getMinutes()), pad(now.getSeconds()),
+    '-', ms, '-', process.pid, '-', rand,
   ].join('');
 }
 
