@@ -66,20 +66,11 @@ export default function EquipmentEditorModal({
                 {EQUIPMENT_CATEGORY_OPTIONS.map((option) => <option key={option}>{option}</option>)}
               </select>
             </Field>
-            <Field label="구분 4">
-              <input value={draft.category4} onChange={(event) => onChangeField('category4', event.target.value)} />
-            </Field>
             <Field label="형식">
               <input value={draft.model} onChange={(event) => onChangeField('model', event.target.value)} />
             </Field>
             <Field label="사양">
               <input value={draft.specification} onChange={(event) => onChangeField('specification', event.target.value)} />
-            </Field>
-            <Field label="단위">
-              <input value={draft.unit} onChange={(event) => onChangeField('unit', event.target.value)} />
-            </Field>
-            <Field label="수량">
-              <input type="number" min="0" value={draft.quantity} onChange={(event) => onChangeField('quantity', event.target.value)} />
             </Field>
             <Field label="동력">
               <input value={draft.power} onChange={(event) => onChangeField('power', event.target.value)} placeholder="예: 0.75 kW" />
@@ -121,7 +112,6 @@ export default function EquipmentEditorModal({
           </label>
         </div>
         <footer>
-          <span>UI 확인 단계입니다. 서버 저장은 라우트 연결 후 동작합니다.</span>
           <div>
             {draft.id ? (
               <button type="button" className="danger" onClick={onDelete} disabled={saving}>삭제</button>

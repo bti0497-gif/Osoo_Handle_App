@@ -97,7 +97,6 @@ export default function EquipmentHistoryEditor({
           </div>
         </div>
         <footer>
-          <span>UI 확인 단계입니다. 서버 저장은 라우트 연결 후 동작합니다.</span>
           <div>
             {draft.id ? (
               <button type="button" className="danger" onClick={onDelete} disabled={saving}>삭제</button>

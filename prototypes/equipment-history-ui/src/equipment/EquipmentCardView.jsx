@@ -185,8 +185,10 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
                     className={`equipment-list-item ${vm.selected?.id === item.id ? 'active' : ''}`}
                     onClick={() => vm.selectEquipment(item.id)}
                   >
-                    <span className="equipment-list-thumbnail"><span className="material-icons">precision_manufacturing</span></span>
-                    <span><b>{item.name}</b><small>{item.managementNo} · {item.location}</small></span>
+                    <span>
+                      <b>{item.name}</b>
+                      <small>{item.managementNo}{vm.groupBy === 'type' ? ` · ${item.location}` : ''}</small>
+                    </span>
                     <i className={`equipment-status ${STATUS_CLASS[item.status] || 'normal'}`}>{item.status}</i>
                   </button>
                 ))}
@@ -202,7 +204,7 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
           ) : vm.selected ? (
             <>
               <header className="equipment-card-header">
-                <div><span>시설물 이력카드</span><h1>{vm.selected.name}</h1><p>{vm.selected.managementNo} · {vm.selected.category1} / {vm.selected.category3}</p></div>
+                <div><h1>{vm.selected.name}</h1><p>{vm.selected.managementNo} · {vm.selected.category2 || vm.selected.category3}</p></div>
                 <div className="equipment-card-actions">
                   <button type="button" onClick={() => vm.openEditEquipment(vm.selected)}><span className="material-icons">edit</span> 장비 수정</button>
                   <button type="button" className="danger" onClick={handleDeleteEquipment} disabled={vm.saving}><span className="material-icons">delete</span> 삭제</button>
@@ -211,15 +213,11 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
               </header>
               <section className="equipment-overview">
                 <dl className="equipment-detail-grid">
-                  <DetailRow label="관리번호" value={vm.selected.managementNo} />
-                  <DetailRow label="설비명" value={vm.selected.name} />
                   <DetailRow label="형식" value={vm.selected.model} />
                   <DetailRow label="사양" value={vm.selected.specification} />
-                  <DetailRow label="단위 / 수량" value={`${vm.selected.unit} / ${vm.selected.quantity}`} />
                   <DetailRow label="동력" value={vm.selected.power} />
                   <DetailRow label="설치일자" value={vm.selected.installedAt} />
                   <DetailRow label="납품회사" value={vm.selected.vendor} />
-                  <DetailRow label="설치 위치" value={vm.selected.location} />
                   <DetailRow label="부속설비" value={vm.selected.accessory} />
                   <DetailRow label="비고" value={vm.selected.notes} />
                 </dl>
