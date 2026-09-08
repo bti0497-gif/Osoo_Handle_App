@@ -71,6 +71,7 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('전체');
   const [groupBy, setGroupBy] = useState('process');
+  const [showHidden, setShowHidden] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [tab, setTab] = useState('history');
   const [equipmentEditor, setEquipmentEditor] = useState({
@@ -122,15 +123,20 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
 
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    if (!keyword && category === '전체') return items;
     return items.filter((item) => {
+      // '숨김' 상태 장비는 토글을 켜야 목록에 나타난다(첫 화면에는 주요 장비만).
+      if (item.status === '숨김' && !showHidden) return false;
       const matchesCategory = category === '전체' || item.category3 === category;
       if (!matchesCategory) return false;
       if (!keyword) return true;
       return [item.managementNo, item.name, item.location, item.category1, item.category3]
         .some((field) => String(field || '').toLowerCase().includes(keyword));
     });
-  }, [items, query, category]);
+  }, [items, query, category, showHidden]);
+
+  const hiddenCount = useMemo(() => items.filter((item) => item.status === '숨김').length, [items]);
+
+  const toggleShowHidden = useCallback(() => setShowHidden((previous) => !previous), []);
 
   const grouped = useMemo(() => {
     const field = GROUP_FIELD[groupBy] || 'category1';
@@ -446,6 +452,7 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
     loading, loadError,
     // 목록 상태
     query, setQuery, category, setCategory, groupBy, setGroupBy, selectEquipment,
+    showHidden, hiddenCount, toggleShowHidden,
     // 카드 상태
     tab, setTab,
     // 장비 편집기

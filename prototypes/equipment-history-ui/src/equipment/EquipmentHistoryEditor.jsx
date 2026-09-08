@@ -84,17 +84,17 @@ export default function EquipmentHistoryEditor({
                 placeholder="예: 010-0000-0000"
               />
             </HistoryField>
-            <label className="equipment-editor-photo compact">
-              <span className="material-icons">add_photo_alternate</span>
-              <b>{draft.photoName || '현장 사진 선택'}</b>
-              <small>작업 전후 사진을 등록하세요.</small>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(event) => onChangeField('photoName', event.target.files?.[0]?.name || '')}
-              />
-            </label>
           </div>
+          <label className="equipment-editor-photo-bar">
+            <span className="material-icons">add_photo_alternate</span>
+            <b>{draft.photoName || '현장 사진 선택'}</b>
+            <small>작업 전후 사진을 등록하세요.</small>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => onChangeField('photoName', event.target.files?.[0]?.name || '')}
+            />
+          </label>
         </div>
         <footer>
           <div>

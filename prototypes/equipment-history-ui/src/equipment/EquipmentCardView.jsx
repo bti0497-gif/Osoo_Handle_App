@@ -19,6 +19,7 @@ const STATUS_CLASS = {
   '점검 필요': 'inspect',
   '수리 중': 'repair',
   '예비': 'standby',
+  '숨김': 'hidden',
   '폐기': 'disposed',
 };
 
@@ -168,6 +169,14 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
             {vm.categories.map((name) => (
               <button key={name} type="button" className={vm.category === name ? 'active' : ''} onClick={() => vm.setCategory(name)}>{name}</button>
             ))}
+            {vm.hiddenCount > 0 ? (
+              <button
+                type="button"
+                className={`equipment-hidden-toggle${vm.showHidden ? ' on' : ''}`}
+                onClick={vm.toggleShowHidden}
+                title="숨김 상태 장비 표시 전환"
+              >숨김 {vm.hiddenCount}</button>
+            ) : null}
           </div>
           <div className="equipment-list-scroll">
             {vm.loading ? (

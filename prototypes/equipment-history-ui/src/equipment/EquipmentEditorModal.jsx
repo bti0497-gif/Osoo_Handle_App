@@ -100,7 +100,7 @@ export default function EquipmentEditorModal({
               </select>
             </Field>
           </div>
-          <label className="equipment-editor-photo">
+          <label className="equipment-editor-photo-bar">
             <span className="material-icons">add_photo_alternate</span>
             <b>{draft.photoName || '대표사진 선택'}</b>
             <small>장비 전체 모습이나 명판 사진을 등록하세요.</small>

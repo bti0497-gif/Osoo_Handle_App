@@ -8,7 +8,7 @@
 //
 // Phase 2에서 EquipmentModel이 apiClient 호출로 교체되면 이 파일은 개발 확인용으로만 사용된다.
 
-export const EQUIPMENT_STATUS_OPTIONS = ['사용 중', '점검 필요', '수리 중', '예비', '폐기'];
+export const EQUIPMENT_STATUS_OPTIONS = ['사용 중', '점검 필요', '수리 중', '예비', '숨김', '폐기'];
 export const EQUIPMENT_CATEGORY_OPTIONS = ['기계', '전기', '계측기', '기타'];
 export const EQUIPMENT_HISTORY_TYPES = ['정기점검', '고장', '수리', '부품교체', '위탁', '기타'];
 
