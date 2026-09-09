@@ -15,6 +15,7 @@ const {
   buildBatchDailyWorkLogHwp,
   buildBatchDailyWorkLogPdf,
 } = require('../services/dailyWorkLogHwpService.cjs');
+const { warmUpHwpAutomation } = require('../services/hwpAutomationWorker.cjs');
 const { syncCertificateCacheForSiteMonth } = require('../services/certificateCacheSyncService.cjs');
 const { acquireDailyLogDatabase } = require('../services/bidirectionalDailyLogService.cjs');
 
@@ -92,6 +93,31 @@ module.exports = function (db, baseDir, appDataPath) {
     }
   };
 
+  const scheduleHwpWarmup = (context) => {
+    setImmediate(() => {
+      try {
+        const hwpTemplate = resolveReportTemplatePath(baseDir, appDataPath, TEMPLATE_NAME, {
+          hwpOnly: true,
+          method: context.method,
+        });
+        if (!hwpTemplate?.absolutePath || !fs.existsSync(hwpTemplate.absolutePath)) return;
+        warmUpHwpAutomation({ templatePath: hwpTemplate.absolutePath }).catch((error) => {
+          // 사전 준비 실패가 일지 조회나 기존 HWP 생성 경로를 막아서는 안 된다.
+          console.warn(`[HWP Engine] 메뉴 진입 사전 준비를 건너뜁니다: ${error.message}`);
+        });
+      } catch (error) {
+        console.warn(`[HWP Engine] 사전 준비 양식 확인을 건너뜁니다: ${error.message}`);
+      }
+    });
+  };
+
+  // 앱 초기 안정화·통합입력 완료·일지 화면 진입에서 공통으로 호출한다.
+  // HWP 자동화 엔진만 비차단으로 준비하며, 예열 실패는 기존 출력 경로에 영향을 주지 않는다.
+  router.post('/api/daily-work-log/warmup-hwp', (req, res) => {
+    scheduleHwpWarmup(getRequestContext(req));
+    return res.json({ success: true, scheduled: true });
+  });
+
   router.get('/api/daily-work-log/active-dates', async (req, res) => {
     const { startDate, endDate, templateName } = req.query;
     const resolvedTemplateName = templateName || TEMPLATE_NAME;
@@ -100,6 +126,10 @@ module.exports = function (db, baseDir, appDataPath) {
     if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
       return res.status(404).json(buildMissingTemplateResponse());
     }
+
+    // 일지 화면에 진입한 시점부터 숨김 HWP 엔진을 준비한다. 실제 바인딩은
+    // 출력 요청에서만 수행하므로 날짜 조회·미리보기 결과에는 영향을 주지 않는다.
+    scheduleHwpWarmup(getRequestContext(req));
 
     try {
       if (!startDate || !endDate) {
@@ -129,6 +159,8 @@ module.exports = function (db, baseDir, appDataPath) {
     if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
       return res.status(404).json(buildMissingTemplateResponse());
     }
+
+    scheduleHwpWarmup(getRequestContext(req));
 
     try {
       const range = normalizeDateRange(startDate || date, endDate || date || startDate);

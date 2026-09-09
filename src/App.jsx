@@ -8,6 +8,7 @@ import StatusBar from './components/StatusBar';
 import { WorkspaceErrorBoundary } from './components/common';
 import { DashboardView } from './features/dashboard';
 import { CertificateModel } from './features/certificate/CertificateModel';
+import { DailyLogModel } from './features/dailylog/DailyLogModel';
 const AttendanceView = lazy(() => import('./features/attendance').then((module) => ({ default: module.AttendanceView })));
 const MyInfoView = lazy(() => import('./features/members').then((module) => ({ default: module.MyInfoView })));
 const FlowManagementView = lazy(() => import('./features/flow').then((module) => ({ default: module.FlowManagementView })));
@@ -34,6 +35,9 @@ const CERTIFICATE_CACHE_REFRESH_MS = 60 * 60 * 1000;
 // 먼저 준비하되, 사용 중에는 절대로 시작하지 않는다.
 const CERTIFICATE_CACHE_IDLE_DELAY_MS = 5 * 60 * 1000;
 const BACKGROUND_IDLE_DELAY_MS = 30 * 60 * 1000;
+// 로그인 직후 첫 화면이 자리를 잡은 뒤 HWP 엔진만 비차단으로 준비한다.
+// 현장 사용자는 일일업무일지 진입 직후 바로 출력하는 경우가 많다.
+const HWP_ENGINE_WARMUP_DELAY_MS = 12 * 1000;
 
 const contentLoadingFallback = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '320px' }}>
@@ -122,6 +126,7 @@ function App() {
     const directionToastTimerRef = useRef(null);
     const forcedUpdateActiveRef = useRef(false);
     const loginUpdateCheckKeyRef = useRef(null);
+    const hwpWarmupKeyRef = useRef(null);
     const recordGridSessionsRef = useRef({ flow: {}, medicine: {}, kit: {}, water: {} });
 
     const isMissingBackgroundFieldSession = (error) => (
@@ -298,6 +303,33 @@ function App() {
         // 온라인 이벤트 리스너 등록 (1회만)
         SyncService.initAutoSync();
     }, []);
+
+    // 일지 메뉴를 누르기 전, 로그인 완료 후 첫 화면이 안정되는 시간에 한 번만
+    // HWP 엔진과 양식을 준비한다. 실제 일지·사진·데이터를 만들거나 변경하지 않으며,
+    // 실패해도 로그인 및 기존 출력 경로에는 영향을 주지 않는다.
+    useEffect(() => {
+        if (!isAuthenticated || !user?.id) {
+            hwpWarmupKeyRef.current = null;
+            return undefined;
+        }
+
+        const warmupKey = `${user.id}::${user.site_id || 'default'}`;
+        if (hwpWarmupKeyRef.current === warmupKey) return undefined;
+        hwpWarmupKeyRef.current = warmupKey;
+
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            if (cancelled) return;
+            void DailyLogModel.warmUpHwp().catch(() => {
+                // 예열은 최적화용 보조 작업이다. 실패 시 실제 출력 경로가 처리한다.
+            });
+        }, HWP_ENGINE_WARMUP_DELAY_MS);
+
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [isAuthenticated, user?.id, user?.site_id]);
 
     // Update discovery is the only remote task allowed to run immediately after
     // login. Field data/file synchronization remains on the 30-minute idle queue.

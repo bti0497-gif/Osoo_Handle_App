@@ -1,10 +1,26 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { getRememberedRoadworkSessionUrl, rememberRoadworkSessionUrl } from './roadworkSessionBridge';
+import { rememberRoadworkSessionUrl } from './roadworkSessionBridge';
 import { useRoadworkHelperViewModel } from './useRoadworkHelperViewModel';
 import { RoadworkHelperModel } from './RoadworkHelperModel';
+import { capturePhotoInputDiagnostic } from './photoInputDiagnostic';
 import './components/RoadworkHelperModal.css';
 
-const DEFAULT_ROADWORK_URL = 'https://nwpo.ex.co.kr:5002/security/login.do';
+const DEFAULT_ROADWORK_URL = 'https://nwpo.ex.co.kr:5002/index.jsp';
+
+function resolveRoadworkEntryUrl(value) {
+  try {
+    const url = new URL(String(value || DEFAULT_ROADWORK_URL));
+    // 로그인 URL을 직접 여는 대신 포털 셸의 시작 주소로 진입한다. 이미 인증된
+    // partition은 그대로 복귀하고, 세션이 없을 때만 포털이 로그인으로 전환한다.
+    if (/^\/security\/login\.do$/i.test(url.pathname)) {
+      url.pathname = '/index.jsp';
+      url.search = '';
+    }
+    return url.toString();
+  } catch {
+    return DEFAULT_ROADWORK_URL;
+  }
+}
 
 const ROADWORK_KEEP_ALIVE_SCRIPT = `
 (() => {
@@ -172,6 +188,129 @@ const ROADWORK_STATUS_SCRIPT = `
   };
 })()
 `;
+
+// ===== TEMPORARY ROADWORK CONTEXT MISMATCH DIAGNOSTIC: BEGIN =====
+// 동명(춘천) 외부 포털의 선택 조건과 조회 결과가 서로 달라졌던 현상 전용 진단이다.
+// 정상 화면/일반 필터 변경은 전송하지 않고, 실제 불일치가 재발한 경우만 기록한다.
+// 재발 분석과 해소가 완료되면 아래 스크립트·lastExternal*Ref·capture 콜백 및
+// captureExternalRoadworkContext 호출 지점을 함께 제거한다. 업무 자동채우기에는 의존하지 않는다.
+// 도로공사 WebSquare 화면은 로그인 성공 여부만으로 실제 선택 현장을 보장하지 않는다.
+// 외부 화면이 보유한 본부/지사/휴게소와 목록 첫 행을 제한적으로 채집해, 잘못된
+// 계정·세션·외부 컨텍스트를 현장 ID/partition 진단과 대조할 수 있게 한다.
+// 비밀번호·쿠키·본문 전체·개인정보는 읽지 않는다.
+const ROADWORK_EXTERNAL_CONTEXT_SCRIPT = `
+(() => {
+  const clean = (value, max = 120) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
+  const visible = (element) => {
+    if (!element) return false;
+    const style = getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && element.offsetParent !== null;
+  };
+  const valueOf = (element) => clean(
+    element?.value
+      || element?.getAttribute?.('data-value')
+      || element?.getAttribute?.('aria-label')
+      || element?.getAttribute?.('title')
+      || element?.innerText
+      || element?.textContent,
+  );
+  const findContextValue = (doc, label) => {
+    const labels = Array.from(doc.querySelectorAll('label, span, div, td, th'))
+      .filter((element) => visible(element) && clean(element.textContent, 40) === label)
+      .slice(0, 12);
+    for (const labelElement of labels) {
+      const forId = labelElement.getAttribute('for');
+      const direct = forId ? doc.getElementById(forId) : null;
+      if (direct && visible(direct)) return valueOf(direct);
+      const container = labelElement.parentElement;
+      const candidate = container?.querySelector?.('select, input:not([type="password"]), [role="combobox"]')
+        || labelElement.nextElementSibling?.matches?.('select, input:not([type="password"]), [role="combobox"]') && labelElement.nextElementSibling;
+      if (candidate && visible(candidate)) return valueOf(candidate);
+    }
+    return '';
+  };
+  const inspectDocument = (doc) => {
+    const tableRows = Array.from(doc.querySelectorAll('table'))
+      .map((table) => Array.from(table.querySelectorAll('tr'))
+        .filter((row) => visible(row))
+        .map((row) => Array.from(row.querySelectorAll('th, td')).map((cell) => clean(cell.textContent, 80)).filter(Boolean))
+        .filter((cells) => cells.length >= 3)
+        .slice(0, 12))
+      .filter((rows) => rows.length);
+    const rows = tableRows.flat();
+    const selectionFromRows = (label) => {
+      for (const row of rows) {
+        const index = row.indexOf(label);
+        if (index >= 0 && row[index + 1]) return row[index + 1];
+      }
+      return '';
+    };
+    // WebSquare 라벨은 넓은 부모 컨테이너를 공유해 DOM 인접 탐색만으로는
+    // 본부 값이 지사/휴게소에도 반복될 수 있다. 실제 조회 조건 표를 우선한다.
+    const selections = {
+      headquarters: selectionFromRows('본부') || findContextValue(doc, '본부'),
+      branch: selectionFromRows('지사') || findContextValue(doc, '지사'),
+      serviceArea: selectionFromRows('휴게소') || findContextValue(doc, '휴게소'),
+    };
+    const resultTable = tableRows.find((table) => table.some((row) => (
+      row.includes('본부') && row.includes('지사') && row.includes('휴게소') && row.includes('일시')
+    )));
+    const resultHeaderIndex = resultTable
+      ? resultTable.findIndex((row) => row.includes('본부') && row.includes('지사') && row.includes('휴게소') && row.includes('일시'))
+      : -1;
+    const resultHeader = resultHeaderIndex >= 0 ? resultTable[resultHeaderIndex] : [];
+    const resultData = resultHeaderIndex >= 0 ? resultTable.slice(resultHeaderIndex + 1).find((row) => row.length >= resultHeader.length) : null;
+    const resultValue = (label) => {
+      const index = resultHeader.indexOf(label);
+      return index >= 0 ? clean(resultData?.[index]) : '';
+    };
+    return {
+      selections,
+      rows: rows.slice(0, 2),
+      resultRow: resultData ? {
+        date: resultValue('일시'),
+        headquarters: resultValue('본부'),
+        branch: resultValue('지사'),
+        serviceArea: resultValue('휴게소'),
+      } : {},
+    };
+  };
+  // WebSquare는 바깥 셸에도 메뉴용 표가 있어, 첫 표를 찾았다고 탐색을 끝내면
+  // 실제 일일운영일지 iframe의 본부·지사·휴게소를 놓친다. 접근 가능한 모든
+  // 프레임을 비교하고 현장 식별 라벨이 가장 뚜렷한 문서를 선택한다.
+  const candidates = [];
+  const visit = (target, seen = new Set()) => {
+    if (!target || seen.has(target)) return;
+    seen.add(target);
+    try {
+      const result = inspectDocument(target.document);
+      const selectionCount = Object.values(result.selections).filter(Boolean).length;
+      const identityRows = result.rows.filter((row) => /본부|지사|휴게소/.test(row.join(' '))).length;
+      candidates.push({
+        path: clean(target.location?.pathname, 160),
+        score: (selectionCount * 100) + (identityRows * 30) + (result.resultRow?.serviceArea ? 20 : 0),
+        ...result,
+      });
+      for (const frame of Array.from(target.document.querySelectorAll('iframe, frame, webview'))) {
+        try { visit(frame.contentWindow, seen); } catch {}
+      }
+    } catch {}
+  };
+  visit(window);
+  const result = candidates.sort((left, right) => right.score - left.score)[0]
+    || { path: '', selections: {}, rows: [], resultRow: {} };
+  return {
+    pageTitle: clean(document.title, 120),
+    pagePath: clean(location.pathname, 160),
+    contextPath: result.path || '',
+    selections: result.selections || {},
+    gridRows: result.rows || [],
+    resultRow: result.resultRow || {},
+    capturedAt: new Date().toISOString(),
+  };
+})()
+`;
+// ===== TEMPORARY ROADWORK CONTEXT MISMATCH DIAGNOSTIC: END =====
 
 const ROADWORK_STRUCTURE_SCRIPT = `
 (() => {
@@ -873,6 +1012,8 @@ export default function RoadworkHelperView({ currentUser }) {
   const lastKeepAliveCheckRef = useRef(null);
   const lastKeepAliveRegistrationRef = useRef({ path: '', at: 0 });
   const lastUnexpectedLoginAtRef = useRef(0);
+  const lastExternalContextRef = useRef({ fingerprint: '', context: null });
+  const lastExternalMismatchRef = useRef('');
   const [loadError, setLoadError] = useState(null);
   const [preloadPath, setPreloadPath] = useState('');
   const [webviewUrl, setWebviewUrl] = useState('');
@@ -899,27 +1040,93 @@ export default function RoadworkHelperView({ currentUser }) {
       // The roadwork helper uses only the local, direction-scoped credential
       // saved from Web App Settings.  Opening this page must not query Sheets.
       const urlRes = await window.electronAPI.invokeRoadwork('roadwork:getRoadworkUrl');
-      const targetUrl = String(urlRes?.url || DEFAULT_ROADWORK_URL)
-        .replace(':5002//security', ':5002/security');
+      const targetUrl = resolveRoadworkEntryUrl(String(urlRes?.url || DEFAULT_ROADWORK_URL)
+        .replace(':5002//security', ':5002/security'));
       setConfiguredRoadworkUrl(targetUrl);
-      const rememberedUrl = getRememberedRoadworkSessionUrl(roadworkPartition);
-      setWebviewUrl(rememberedUrl || targetUrl);
+      // 외부 WebSquare는 내부 일일운영일지 URL을 직접 복원하면 메뉴·권한·현장
+      // 컨텍스트 초기화를 건너뛸 수 있다. 항상 도로공사 시작 주소부터 진입한다.
+      setWebviewUrl(targetUrl);
     } catch (err) {
       console.warn('[Roadwork Helper] Failed to resolve config:', err.message);
       setConfiguredRoadworkUrl(DEFAULT_ROADWORK_URL);
       setWebviewUrl(DEFAULT_ROADWORK_URL);
     }
-  }, [roadworkPartition]);
+  }, []);
 
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);
 
   const recordRoadworkDiagnostic = React.useCallback((event, details = {}) => {
-    RoadworkHelperModel.recordDiagnostic(event, details).catch((error) => {
+    // Every helper diagnostic carries the immutable window identity separately
+    // from the shared authenticated user.  This makes directional-site
+    // investigations distinguish a logging attribution issue from a real
+    // request-scope violation.
+    RoadworkHelperModel.recordDiagnostic(event, {
+      ...details,
+      windowSiteId,
+      rendererActiveSiteId: activeSiteId,
+      rendererCurrentUserSiteId: currentUserSiteId,
+      roadworkPartition,
+    }).catch((error) => {
       console.warn('[Roadwork Helper] Failed to record diagnostic:', error?.message || error);
     });
-  }, []);
+  }, [activeSiteId, currentUserSiteId, roadworkPartition, windowSiteId]);
+
+  const captureExternalRoadworkContext = React.useCallback(async (webview, trigger) => {
+    if (!webview || webviewRef.current !== webview) return;
+    try {
+      const context = await webview.executeJavaScript(ROADWORK_EXTERNAL_CONTEXT_SCRIPT);
+      if (webviewRef.current !== webview) return;
+      const fingerprint = JSON.stringify({
+        path: context?.contextPath || context?.pagePath || '',
+        selections: context?.selections || {},
+        rows: context?.gridRows || [],
+        resultRow: context?.resultRow || {},
+      });
+      const previous = lastExternalContextRef.current;
+      lastExternalContextRef.current = { fingerprint, context };
+      const normalized = (value) => String(value || '').replace(/\s+/g, '').trim();
+      const mismatchedFields = [
+        ['headquarters', '본부'],
+        ['branch', '지사'],
+        ['serviceArea', '휴게소'],
+      ].filter(([key]) => {
+        const selected = normalized(context?.selections?.[key]);
+        const actual = normalized(context?.resultRow?.[key]);
+        return selected && actual && selected !== actual;
+      }).map(([, label]) => label);
+      if (!mismatchedFields.length) {
+        // 정상 화면이나 사용자의 일반적인 필터 변경은 진단 파일로 보내지 않는다.
+        lastExternalMismatchRef.current = '';
+        return;
+      }
+      if (lastExternalMismatchRef.current === fingerprint) return;
+      lastExternalMismatchRef.current = fingerprint;
+      recordRoadworkDiagnostic('external-site-context-mismatch', {
+        trigger,
+        mismatchedFields,
+        previousContext: previous.context ? {
+          pagePath: String(previous.context?.pagePath || '').slice(0, 160),
+          contextPath: String(previous.context?.contextPath || '').slice(0, 160),
+          selections: previous.context?.selections || {},
+          gridRows: Array.isArray(previous.context?.gridRows) ? previous.context.gridRows.slice(0, 2) : [],
+        } : null,
+        pageTitle: String(context?.pageTitle || '').slice(0, 120),
+        pagePath: String(context?.pagePath || '').slice(0, 160),
+        contextPath: String(context?.contextPath || '').slice(0, 160),
+        selections: context?.selections || {},
+        gridRows: Array.isArray(context?.gridRows) ? context.gridRows.slice(0, 2) : [],
+        resultRow: context?.resultRow || {},
+        capturedAt: String(context?.capturedAt || '').slice(0, 40),
+      });
+    } catch (error) {
+      recordRoadworkDiagnostic('external-site-context-capture-failed', {
+        trigger,
+        errorName: String(error?.name || 'Error').slice(0, 80),
+      });
+    }
+  }, [recordRoadworkDiagnostic]);
 
   useEffect(() => {
     if (!activeSiteId) return;
@@ -1030,9 +1237,7 @@ export default function RoadworkHelperView({ currentUser }) {
     lastRefreshAtRef.current = now;
 
     const currentUrl = webviewRef.current?.getURL?.() || webviewUrl;
-    const resumeUrl = getRememberedRoadworkSessionUrl(roadworkPartition)
-      || configuredRoadworkUrl
-      || DEFAULT_ROADWORK_URL;
+    const resumeUrl = configuredRoadworkUrl || DEFAULT_ROADWORK_URL;
     clearPendingLoadFailure();
     setLoadError(null);
     setShowRefreshToast(true);
@@ -1106,6 +1311,9 @@ export default function RoadworkHelperView({ currentUser }) {
         const nextStatus = await webview.executeJavaScript(ROADWORK_STATUS_SCRIPT);
         if (nextStatus?.isDailyLog && nextStatus?.dailyUrl) {
           rememberRoadworkSessionUrl(roadworkPartition, nextStatus.dailyUrl);
+          // 메인 WebSquare가 먼저 로드된 뒤 일일운영일지 iframe이 늦게 준비된다.
+          // 실제 본부/지사/휴게소 값은 이 시점에 다시 읽어야 한다.
+          void captureExternalRoadworkContext(webview, 'daily-log-status-ready');
         }
         // 로그인 화면뿐 아니라 외부 사이트의 전체 대시보드 등 일지가 아닌
         // 화면에서도 사용자가 즉시 정상 일지 주소로 복귀할 수 있게 한다.
@@ -1118,7 +1326,18 @@ export default function RoadworkHelperView({ currentUser }) {
     }, 1200);
 
     return () => window.clearInterval(intervalId);
-  }, []);
+  }, [captureExternalRoadworkContext, roadworkPartition]);
+
+  // 외부 WebSquare가 같은 URL 안에서 필터·그리드·권한 레이아웃만 바꾸는 경우에도
+  // 즉시 포착한다. 동일 상태는 기록하지 않으므로 장시간 사용 중 로그가 폭증하지 않는다.
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      const webview = webviewRef.current;
+      if (!webview) return;
+      void captureExternalRoadworkContext(webview, 'continuous-context-monitor');
+    }, 2000);
+    return () => window.clearInterval(intervalId);
+  }, [captureExternalRoadworkContext]);
 
   useEffect(() => {
     const nextDate = roadworkStatus.date;
@@ -1189,6 +1408,12 @@ export default function RoadworkHelperView({ currentUser }) {
         pageOrigin,
         pagePath: (() => { try { return new URL(currentUrl).pathname; } catch { return ''; } })(),
       });
+      if (!isLoginPage) {
+        // WebSquare 내부 iframe과 목록이 채워질 시간을 준 뒤 두 번 관찰한다.
+        // 값이 달라진 경우에만 별도 이벤트를 남겨 불필요한 로그 증가를 막는다.
+        window.setTimeout(() => { void captureExternalRoadworkContext(webview, 'did-finish-load+1200ms'); }, 1200);
+        window.setTimeout(() => { void captureExternalRoadworkContext(webview, 'did-finish-load+3600ms'); }, 3600);
+      }
       if (!wasLoginPageRef.current && isLoginPage) {
         void recordUnexpectedLogin('did-finish-load', currentUrl);
       }
@@ -1246,6 +1471,7 @@ export default function RoadworkHelperView({ currentUser }) {
     };
   }, [
     clearPendingLoadFailure,
+    captureExternalRoadworkContext,
     handleRefresh,
     recordRoadworkDiagnostic,
     recordUnexpectedLogin,
@@ -1284,8 +1510,16 @@ export default function RoadworkHelperView({ currentUser }) {
         itemCount: photos.length,
         localAvailableCount: photos.filter((photo) => photo.available).length,
         discoverySuccess: Boolean(photoResponse?.success),
+        source: 'qntech-import-manifest',
+        preparationStatus: String(photoResponse?.preparationStatus || 'unknown').slice(0, 40),
+        manifestFound: Boolean(photoResponse?.manifestFound),
+        preparedAt: String(photoResponse?.preparedAt || '').slice(0, 40),
+        selectedProjectIndex: photoResponse?.selectedProjectIndex ?? null,
+        unavailableReasons: photoResponse?.unavailableReasons || {},
       });
       const photoResults = [];
+      const photoRunId = `photo-${Date.now()}`;
+      let previousPhotoFinishedAt = null;
       for (let index = 0; index < photos.length; index += 1) {
         currentPhase = `photo-stage-${index + 1}`;
         const photo = photos[index];
@@ -1305,15 +1539,47 @@ export default function RoadworkHelperView({ currentUser }) {
         }
         if (!photo.available || !photo.token) {
           setStatusMessage(`사진 올리는 중.. ${photo.label} ${progress}% (사진 없음)`);
-          photoResults.push({ key: photo.key, result: 'local-photo-missing' });
-          recordRoadworkDiagnostic('photo-stage-item', { date: roadworkStatus.date, item: photo.key, result: 'local-photo-missing' });
+          const unavailableReason = String(photo.availabilityReason || 'unknown').slice(0, 60);
+          const unavailableResult = {
+            'not-imported': 'qntech-photos-not-imported',
+            'not-provided': 'qntech-photo-not-provided',
+            'preparing': 'qntech-photo-preparing',
+            'prepared-file-missing': 'prepared-photo-file-missing',
+            'manifest-invalid': 'photo-manifest-invalid',
+            'manifest-mismatch': 'photo-manifest-mismatch',
+            'manifest-path-invalid': 'photo-manifest-path-invalid',
+          }[unavailableReason] || 'qntech-photo-unavailable';
+          photoResults.push({ key: photo.key, result: unavailableResult, reason: unavailableReason });
+          recordRoadworkDiagnostic('photo-stage-item', {
+            date: roadworkStatus.date,
+            item: photo.key,
+            result: unavailableResult,
+            reason: unavailableReason,
+            preparationStatus: String(photoResponse?.preparationStatus || 'unknown').slice(0, 40),
+          });
           continue;
         }
         setStatusMessage(`사진 올리는 중.. ${photo.label} ${progress}%`);
+        const photoStartedAt = Date.now();
+        const beforeInput = await capturePhotoInputDiagnostic(webview, uploaderIndex, 'before');
+        recordRoadworkDiagnostic('photo-input-trace', {
+          runId: photoRunId, item: photo.key, date: roadworkStatus.date,
+          phase: 'before-injection',
+          sincePreviousPhotoMs: previousPhotoFinishedAt == null ? null : photoStartedAt - previousPhotoFinishedAt,
+          snapshot: beforeInput,
+        });
         const injected = await window.electronAPI.invokeRoadwork('roadwork:setPhotoFile', {
           webContentsId: webview.getWebContentsId(),
           uploaderIndex,
           token: photo.token,
+        });
+        const afterInput = await capturePhotoInputDiagnostic(webview, uploaderIndex, 'after');
+        recordRoadworkDiagnostic('photo-input-trace', {
+          runId: photoRunId, item: photo.key, date: roadworkStatus.date,
+          phase: 'after-injection', elapsedMs: Date.now() - photoStartedAt,
+          success: Boolean(injected?.success),
+          reason: injected?.errorCode || '', method: injected?.method || '',
+          attempts: injected?.attempts || 0, snapshot: afterInput,
         });
         if (!injected?.success) {
           photoResults.push({ key: photo.key, result: 'file-injection-failed' });
@@ -1322,13 +1588,28 @@ export default function RoadworkHelperView({ currentUser }) {
             item: photo.key,
             result: 'file-injection-failed',
             reason: String(injected?.errorCode || injected?.error || '').slice(0, 100),
+            attempts: Number(injected?.attempts || 0),
+            attemptDetails: Array.isArray(injected?.attemptDetails) ? injected.attemptDetails.slice(0, 8) : [],
           });
           continue;
         }
         const added = await waitForRoadworkPhotoRow(webview, uploaderIndex, board.rowCount);
+        previousPhotoFinishedAt = Date.now();
+        recordRoadworkDiagnostic('photo-input-trace', {
+          runId: photoRunId, item: photo.key, date: roadworkStatus.date,
+          phase: 'row-confirmed', elapsedMs: previousPhotoFinishedAt - photoStartedAt,
+          success: Boolean(added), beforeRowCount: board.rowCount,
+          afterRowCount: added?.rowCount ?? null,
+        });
         const itemResult = added ? 'photo-row-added' : 'photo-row-timeout';
         photoResults.push({ key: photo.key, result: itemResult });
-        recordRoadworkDiagnostic('photo-stage-item', { date: roadworkStatus.date, item: photo.key, result: itemResult });
+        recordRoadworkDiagnostic('photo-stage-item', {
+          date: roadworkStatus.date,
+          item: photo.key,
+          result: itemResult,
+          injectionMethod: String(injected?.method || 'unknown').slice(0, 40),
+          injectionAttempts: Number(injected?.attempts || 0),
+        });
       }
       const addedCount = photoResults.filter((item) => item.result === 'photo-row-added').length;
       const skippedCount = photoResults.filter((item) => item.result === 'existing-photo-skipped').length;
@@ -1338,8 +1619,13 @@ export default function RoadworkHelperView({ currentUser }) {
         addedCount,
         skippedCount,
         failedCount,
-        missingCount: photoResults.filter((item) => item.result === 'local-photo-missing').length,
+        unavailableCount: photoResults.filter((item) => item.result.startsWith('qntech-photo') || item.result.startsWith('photo-manifest') || item.result === 'prepared-photo-file-missing').length,
+        unavailableReasons: photoResponse?.unavailableReasons || {},
+        preparationStatus: String(photoResponse?.preparationStatus || 'unknown').slice(0, 40),
       });
+      // 통합입력 결과를 확인하는 동안 HWP 엔진을 미리 올린다. 이 호출은 출력물이나
+      // 현재 웹폼을 바꾸지 않으며, 실패하더라도 자동 채우기 완료 처리는 유지한다.
+      void RoadworkHelperModel.warmUpDailyWorkLogHwp().catch(() => {});
       setStatusMessage(failedCount > 0
         ? `데이터 입력 완료. 사진 ${addedCount}건 추가, ${failedCount}건은 추가하지 못했습니다. 화면을 확인한 뒤 저장하세요.`
         : `데이터와 사진 준비 완료. 사진 ${addedCount}건 추가${skippedCount ? `, 기존 ${skippedCount}건 유지` : ''}. 화면을 확인한 뒤 저장하세요.`);

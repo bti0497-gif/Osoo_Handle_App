@@ -161,13 +161,7 @@ function schedulePostStartupTasks() {
   if (postStartupTasksScheduled || !postStartupCtx) return;
   postStartupTasksScheduled = true;
 
-  const { appDataPath, warmUpExcelPdfConverter, normalizeLegacyPhotoFiles } = postStartupCtx;
-
-  setTimeout(() => {
-    warmUpExcelPdfConverter(appDataPath).catch((error) => {
-      console.warn(`[Excel PDF Warmup Error] ${error.message}`);
-    });
-  }, 30_000);
+  const { appDataPath, normalizeLegacyPhotoFiles } = postStartupCtx;
 
   if (String(process.env.PHOTO_NORMALIZE_ON_STARTUP || 'false') === 'true') {
     setTimeout(() => {
@@ -204,9 +198,6 @@ function registerLazyApplication() {
   db.exec('BEGIN IMMEDIATE; ROLLBACK;');
   initializationTimings.databaseValidationMs = Date.now() - phaseStartedAt;
   const coreServiceLoadStartedAt = Date.now();
-  phaseStartedAt = Date.now();
-  const { warmUpExcelPdfConverter } = require('./services/excelPdfService.cjs');
-  initializationTimings.excelPdfServiceLoadMs = Date.now() - phaseStartedAt;
   phaseStartedAt = Date.now();
   const { normalizeLegacyPhotoFiles } = require('./services/localPhotoNormalizationService.cjs');
   initializationTimings.photoNormalizationServiceLoadMs = Date.now() - phaseStartedAt;
@@ -483,6 +474,11 @@ function registerLazyApplication() {
             const eventDetails = requestBody?.details && typeof requestBody.details === 'object'
               ? requestBody.details
               : {};
+            const requestSiteContext = {
+              serverRequestedSiteId: String(req.get('x-osoo-site-id') || '').trim(),
+              serverResolvedSiteId: String(req.siteContext?.siteId || '').trim(),
+              serverResolvedSiteName: String(req.siteContext?.siteName || '').trim(),
+            };
             const itemResult = String(eventDetails.result || '').trim().toLowerCase();
             const roadworkDiagnosticFailed = roadworkDiagnosticEvent.endsWith('-failed')
               || roadworkDiagnosticEvent === 'session-unexpected-login-page'
@@ -500,6 +496,7 @@ function registerLazyApplication() {
               details: {
                 statusCode: res.statusCode,
                 durationMs: Date.now() - startedAt,
+                ...requestSiteContext,
                 ...eventDetails,
               },
             });
@@ -514,6 +511,11 @@ function registerLazyApplication() {
                 statusCode: res.statusCode,
                 durationMs: Date.now() - startedAt,
                 responseCount,
+                requestSiteContext: {
+                  requestedSiteId: String(req.get('x-osoo-site-id') || '').trim(),
+                  resolvedSiteId: String(req.siteContext?.siteId || '').trim(),
+                  resolvedSiteName: String(req.siteContext?.siteName || '').trim(),
+                },
                 query: sanitize(req.query || {}),
                 body: requestBody,
                 response: DIAGNOSTIC_VERBOSE_INITIAL || res.statusCode >= 400 ? responseText : undefined,
@@ -539,7 +541,7 @@ function registerLazyApplication() {
 
   if (IS_MINIMAL_BUILD) {
     console.log('[Server] minimal build mode: auth routes only');
-    return { appDataPath, warmUpExcelPdfConverter, normalizeLegacyPhotoFiles };
+    return { appDataPath, normalizeLegacyPhotoFiles };
   }
 
   // --- Static file serving ---
@@ -616,7 +618,7 @@ function registerLazyApplication() {
   });
   scheduleDiagnosticUpload();
 
-  return { appDataPath, warmUpExcelPdfConverter, normalizeLegacyPhotoFiles };
+  return { appDataPath, normalizeLegacyPhotoFiles };
 }
 
 const API_PORT_MIN = Number(process.env.OSOO_API_PORT_MIN) || 18731;

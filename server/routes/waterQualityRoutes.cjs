@@ -3,6 +3,7 @@ const { importQntechWaterValues, importQntechWaterPhotos, importQntechWaterAll, 
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const { syncAnalysisKitUsageForRange } = require('../services/kitUsageSyncService.cjs');
 const { isAdminSessionActive } = require('../services/activeUserSessionService.cjs');
+const { recordDiagnostic } = require('../services/diagnosticLogService.cjs');
 
 const router = express.Router();
 
@@ -192,7 +193,35 @@ function maybeSyncAnalysisKitUsageForRange(db, startDate, endDate, metadata, pay
   return syncAnalysisKitUsageForRange(db, startDate, endDate, metadata);
 }
 
-module.exports = function (db, baseDir) {
+module.exports = function (db, baseDir, appDataPath) {
+  const recordPhotoPreparation = ({ source, date, siteContext = {}, site = {}, photoPreparation, error }) => {
+    const status = error ? 'failed' : String(photoPreparation?.status || 'unknown');
+    const level = error || !['ready', 'none'].includes(status) ? 'warn' : 'info';
+    recordDiagnostic(db, appDataPath, {
+      level,
+      area: 'qntech-photo-preparation',
+      action: 'prepare-roadwork-analysis-photos',
+      result: status,
+      message: error
+        ? 'QnTECH 수질사진 준비 명세 생성 실패'
+        : `QnTECH 수질사진 준비 결과: ${status}`,
+      siteId: String(siteContext.siteId || siteContext.site_id || '').trim() || null,
+      siteName: String(site.name || siteContext.siteName || siteContext.site_name || '').trim() || null,
+      details: {
+        source,
+        date: String(date || '').slice(0, 10),
+        selectedProjectIndex: photoPreparation?.selectedProjectIndex ?? null,
+        readyPhotoCount: Number(photoPreparation?.readyPhotoCount || 0),
+        missingPhotoCount: Number(photoPreparation?.missingPhotoCount || 0),
+        identifiedPhotoCount: Number(photoPreparation?.identifiedPhotoCount || 0),
+        downloadFailureCount: Number(photoPreparation?.downloadFailureCount || 0),
+        localSaveFailureCount: Number(photoPreparation?.localSaveFailureCount || 0),
+        resizeDiagnostics: photoPreparation?.resizeDiagnostics || [],
+        error: error || null,
+      },
+    });
+  };
+
   let rangeImportProgress = {
     jobId: null,
     status: 'idle',
@@ -273,8 +302,16 @@ module.exports = function (db, baseDir) {
     const { date } = req.body || {};
     try {
       const result = await importQntechWaterPhotos(db, baseDir, date, req.siteContext);
+      recordPhotoPreparation({
+        source: 'photo-only-import',
+        date: result.date,
+        siteContext: req.siteContext,
+        site: result.site,
+        photoPreparation: result.photoPreparation,
+      });
       res.json({ success: true, ...result });
     } catch (err) {
+      recordPhotoPreparation({ source: 'photo-only-import', date, siteContext: req.siteContext, error: err });
       res.status(500).json({ success: false, message: err.message, error: err.message });
     }
   });
@@ -283,6 +320,13 @@ module.exports = function (db, baseDir) {
     const { date } = req.body || {};
     try {
       const result = await importQntechWaterAll(db, baseDir, date, req.siteContext);
+      recordPhotoPreparation({
+        source: 'combined-import',
+        date: result.date,
+        siteContext: req.siteContext,
+        site: result.site,
+        photoPreparation: result.photoPreparation,
+      });
       const metadata = getCurrentRecordMetadata(db, req.body);
       const kitUsageSync = result?.date && !result?.summary?.matchedExistingData
         ? maybeSyncAnalysisKitUsageForRange(db, result.date, result.date, metadata, req.body)
@@ -293,6 +337,7 @@ module.exports = function (db, baseDir) {
         kitUsageSkipped: Boolean(result?.summary?.matchedExistingData) || Boolean(kitUsageSync?.skipped),
       });
     } catch (err) {
+      recordPhotoPreparation({ source: 'combined-import', date, siteContext: req.siteContext, error: err });
       res.status(500).json({ success: false, message: err.message, error: err.message });
     }
   });
@@ -312,6 +357,7 @@ module.exports = function (db, baseDir) {
     const jobId = `qntech-range-${Date.now()}`;
     const payload = { ...(req.body || {}) };
     const metadata = getCurrentRecordMetadata(db, payload);
+    const rangePhotoPreparations = [];
     rangeImportProgress = {
       jobId,
       status: 'processing',
@@ -332,10 +378,53 @@ module.exports = function (db, baseDir) {
     void (async () => {
       try {
         const result = await importQntechWaterRange(db, baseDir, startDate, endDate, {
-          siteContext: payload,
+          // 범위 불러오기도 요청 본문(site_id) 대신 미들웨어가 검증한 동일한
+          // camelCase 현장 컨텍스트를 사용한다. 양방향 보조 현장이 기본 방향으로
+          // 되돌아가는 일을 막고 사진 명세의 siteId와 수치 저장 siteId를 맞춘다.
+          siteContext: req.siteContext,
           onProgress: (progress) => {
             rangeImportProgress = { ...rangeImportProgress, ...progress, jobId };
-          }
+          },
+          onPhotoPrepared: (entry) => rangePhotoPreparations.push({
+            date: entry.date,
+            status: entry.photoPreparation?.status || 'unknown',
+            readyPhotoCount: Number(entry.photoPreparation?.readyPhotoCount || 0),
+            missingPhotoCount: Number(entry.photoPreparation?.missingPhotoCount || 0),
+            downloadFailureCount: Number(entry.photoPreparation?.downloadFailureCount || 0),
+            localSaveFailureCount: Number(entry.photoPreparation?.localSaveFailureCount || 0),
+            resizeDiagnostics: entry.photoPreparation?.resizeDiagnostics || [],
+          }),
+        });
+        const photoStatusCounts = rangePhotoPreparations.reduce((counts, entry) => {
+          counts[entry.status] = (counts[entry.status] || 0) + 1;
+          return counts;
+        }, {});
+        const rangePhotoResult = photoStatusCounts.failed
+          ? 'failed'
+          : photoStatusCounts.partial
+            ? 'partial'
+            : 'completed';
+        recordDiagnostic(db, appDataPath, {
+          level: rangePhotoResult === 'completed' ? 'info' : 'warn',
+          area: 'qntech-photo-preparation',
+          action: 'prepare-roadwork-analysis-photo-range',
+          result: rangePhotoResult,
+          message: `QnTECH 기간 수질사진 준비 결과: ${rangePhotoResult}`,
+          siteId: req.siteContext?.siteId || null,
+          siteName: req.siteContext?.siteName || null,
+          details: {
+            source: 'range-import',
+            startDate,
+            endDate,
+            processedDateCount: rangePhotoPreparations.length,
+            statusCounts: photoStatusCounts,
+            preparedPhotoCount: rangePhotoPreparations.reduce((sum, entry) => sum + entry.readyPhotoCount, 0),
+            downloadFailureCount: rangePhotoPreparations.reduce((sum, entry) => sum + entry.downloadFailureCount, 0),
+            localSaveFailureCount: rangePhotoPreparations.reduce((sum, entry) => sum + entry.localSaveFailureCount, 0),
+            problemDates: rangePhotoPreparations
+              .filter((entry) => ['failed', 'partial', 'unknown'].includes(entry.status))
+              .slice(0, 31),
+          },
         });
         const kitUsageSync = (result.kitSyncDates || []).map((syncDate) => (
           maybeSyncAnalysisKitUsageForRange(db, syncDate, syncDate, metadata, payload)
@@ -353,6 +442,12 @@ module.exports = function (db, baseDir) {
           result: completedResult
         };
       } catch (err) {
+        recordPhotoPreparation({
+          source: 'range-import',
+          date: rangeImportProgress.currentDate || startDate,
+          siteContext: payload,
+          error: err,
+        });
         rangeImportProgress = {
           ...rangeImportProgress,
           jobId,

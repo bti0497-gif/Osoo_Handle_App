@@ -5,6 +5,7 @@ import { KitModel } from '../kit/KitModel';
 import { WaterQualityModel } from '../water/WaterQualityModel';
 import { SettingsModel } from '../settings/SettingsModel';
 import { OperationStatusModel } from '../operation/OperationStatusModel';
+import { buildMedicinePurchaseProfile } from './medicinePurchaseGuard';
 
 const WATER_FIELDS = ['nh3_n', 'no3_n', 'po4_p', 'alkalinity'];
 const emitFocusDiagnostic = (event, details = {}) => {
@@ -48,6 +49,13 @@ const previousCalendarDate = (date) => {
     if (!match) return '';
     const value = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
     value.setUTCDate(value.getUTCDate() - 1);
+    return value.toISOString().slice(0, 10);
+};
+
+const medicinePurchaseHistoryStart = (date) => {
+    const match = String(date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return date;
+    const value = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 4, 1));
     return value.toISOString().slice(0, 10);
 };
 
@@ -107,7 +115,14 @@ const mergeFlowContext = (baseContext = {}, history = [], date) => {
     };
 };
 
-const mergeInventoryContext = (baseContext = {}, history = [], date, nameField, defaultAmounts = new Map()) => ({
+const mergeInventoryContext = (
+    baseContext = {},
+    history = [],
+    date,
+    nameField,
+    defaultAmounts = new Map(),
+    purchaseHistory = history,
+) => ({
     ...baseContext,
     items: (baseContext.items || []).map((item) => {
         const name = item.key || item.name || item.label;
@@ -121,6 +136,14 @@ const mergeInventoryContext = (baseContext = {}, history = [], date, nameField, 
         return {
             ...item,
             defaultPurchase: defaultAmount,
+            ...(nameField === 'medicine_name' && {
+                purchaseProfile: buildMedicinePurchaseProfile({
+                    history: purchaseHistory,
+                    date,
+                    medicineName: name,
+                    defaultAmount,
+                }),
+            }),
             values: {
                 purchase: hasCurrent ? (isDefaulted(current) ? '' : (current.purchase_amount ?? '')) : '',
                 usage: hasCurrent ? (isDefaulted(current) ? '' : (current.usage_amount ?? '')) : '',
@@ -254,6 +277,7 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                 operationResult,
                 medicineDefaults,
                 kitDefaults,
+                medicinePurchaseHistoryResult,
             ] = await Promise.all([
                 targetTabs.has('flow') ? FlowModel.fetchHistoryRange(previousCalendarDate(date), date) : null,
                 targetTabs.has('medicine') ? MedicineModel.fetchHistoryRange(date) : null,
@@ -266,6 +290,11 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                 targetTabs.has('kit')
                     ? SettingsModel.getKitDefaults().catch(() => ({ success: false, items: [] }))
                     : null,
+                // 선택 날짜의 즉시 재조회 계약은 위에서 유지하고, 입고 경고에만
+                // 같은 달과 최근 정상 입고량을 판정할 과거 범위를 별도로 사용한다.
+                targetTabs.has('medicine')
+                    ? MedicineModel.fetchHistoryRange(medicinePurchaseHistoryStart(date), date)
+                    : null,
             ]);
             const medicineDefaultMap = buildDefaultAmountMap(medicineDefaults);
             const kitDefaultMap = buildDefaultAmountMap(kitDefaults);
@@ -276,7 +305,14 @@ export function useUnifiedRecordViewModel({ isOpen, date, contexts = {} }) {
                     flow: mergeFlowContext(baseContexts.flow, unwrapHistory(flowResult), date),
                 }),
                 ...(targetTabs.has('medicine') && {
-                    medicine: mergeInventoryContext(baseContexts.medicine, unwrapHistory(medicineResult), date, 'medicine_name', medicineDefaultMap),
+                    medicine: mergeInventoryContext(
+                        baseContexts.medicine,
+                        unwrapHistory(medicineResult),
+                        date,
+                        'medicine_name',
+                        medicineDefaultMap,
+                        unwrapHistory(medicinePurchaseHistoryResult),
+                    ),
                 }),
                 ...(targetTabs.has('kit') && {
                     kit: mergeInventoryContext(baseContexts.kit, unwrapHistory(kitResult), date, 'kit_name', kitDefaultMap),

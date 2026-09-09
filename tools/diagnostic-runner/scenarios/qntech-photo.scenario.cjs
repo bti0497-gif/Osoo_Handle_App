@@ -38,8 +38,21 @@ module.exports = {
     const appData = path.dirname(dbPath);
     // 저장 계약: <photoRoot>/<YYYY>/<MM>/데이타불러오기 (사진 루트는 appData/사진관리/수질분석)
     const photoDir = path.join(appData, '사진관리', '수질분석', date.slice(0, 4), date.slice(5, 7), '데이타불러오기');
+    let filesBeforeImport = new Set();
+    let queueCountBeforeImport = 0;
 
     await ctx.step('import-fails-closed-locally', async () => {
+      filesBeforeImport = new Set(listFilesRecursive(photoDir));
+      const Database = require('better-sqlite3');
+      const baselineDb = new Database(dbPath, { readonly: true });
+      try {
+        const exists = baselineDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'background_file_tasks'").get();
+        queueCountBeforeImport = exists
+          ? baselineDb.prepare("SELECT COUNT(*) AS count FROM background_file_tasks WHERE task_type = 'management-photo-drive'").get().count
+          : 0;
+      } finally {
+        baselineDb.close();
+      }
       const response = await ctx.request('POST', '/api/water-quality/import-photos-from-qntech', {
         body: { date },
       });
@@ -55,7 +68,7 @@ module.exports = {
 
     await ctx.step('no-partial-artifacts', async () => {
       // fail-closed: 실패한 import가 로컬 파일을 남기면 안 된다.
-      const strayFiles = listFilesRecursive(photoDir);
+      const strayFiles = listFilesRecursive(photoDir).filter((file) => !filesBeforeImport.has(file));
       ctx.assert(strayFiles.length === 0,
         '실패한 사진 가져오기가 로컬 파일을 남겼습니다(부분 성공 오염).',
         'PARTIAL_IMPORT_ARTIFACTS',
@@ -69,9 +82,9 @@ module.exports = {
         const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'background_file_tasks'").get();
         if (tableExists) {
           const rows = db.prepare("SELECT COUNT(*) AS count FROM background_file_tasks WHERE task_type = 'management-photo-drive'").get();
-          ctx.assert(rows.count === 0,
+          ctx.assert(rows.count === queueCountBeforeImport,
             '실패한 사진 가져오기가 Drive 업로드 큐에 작업을 남겼습니다.',
-            'PARTIAL_DRIVE_QUEUE', rows);
+            'PARTIAL_DRIVE_QUEUE', { before: queueCountBeforeImport, after: rows.count });
         }
       } finally {
         db.close();

@@ -357,17 +357,20 @@ function getImportPhotoDirectory(baseDir, configuredPhotoRoot, date) {
   return path.join(photoRoot, date.slice(0, 4), date.slice(5, 7), '데이타불러오기');
 }
 
-function buildImportDateStamp(date) {
+function buildImportDateStamps(date) {
   const y = String(date || '').slice(0, 4);
   const m = String(date || '').slice(5, 7);
   const d = String(date || '').slice(8, 10);
-  return `${y}${d}${m}`;
+  return [
+    `${y}${m}${d}`,
+    `${y}${d}${m}`, // legacy QnTECH photo filename order
+  ];
 }
 
 function listPhotoFiles(baseDir, configuredPhotoRoot, date) {
   const legacyDir = getDatePhotoDirectory(baseDir, configuredPhotoRoot, date);
   const importDir = getImportPhotoDirectory(baseDir, configuredPhotoRoot, date);
-  const importStamp = buildImportDateStamp(date);
+  const importStamps = buildImportDateStamps(date);
 
   const candidates = [
     { dir: importDir, filterByStamp: true },
@@ -386,7 +389,7 @@ function listPhotoFiles(baseDir, configuredPhotoRoot, date) {
       .filter((entry) => entry.isFile())
       .filter((entry) => {
         if (!candidate.filterByStamp) return true;
-        return String(entry.name).includes(`_${importStamp}_`);
+        return importStamps.some((stamp) => String(entry.name).includes(`_${stamp}_`));
       })
       .map((entry) => {
         const absolutePath = path.join(candidate.dir, entry.name);

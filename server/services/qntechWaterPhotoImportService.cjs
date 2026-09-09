@@ -4,6 +4,7 @@ const path = require('path');
 const { httpRequest } = require('./qntechAuthService.cjs');
 const { enqueueBackgroundFileTask } = require('./backgroundFileTaskService.cjs');
 const { sanitize } = require('./drivePathService.cjs');
+const { writePhotoPreparationManifest } = require('./qntechWaterPhotoManifestService.cjs');
 
 const TARGET_PHOTO_ITEMS = ['암모니아성 질소', '질산성 질소', '오르토인산염', '알칼리도'];
 
@@ -66,11 +67,31 @@ function buildPhotoDirectory(photoRoot, date) {
 }
 
 function toImportDateStamp(date) {
-  // 요청 기준: yyyyddmm
-  const y = String(date || '').slice(0, 4);
-  const m = String(date || '').slice(5, 7);
-  const d = String(date || '').slice(8, 10);
-  return `${y}${d}${m}`;
+  // New files use the ordinary YYYYMMDD order.  Readers retain support for
+  // the older YYYYDDMM names already stored on field computers.
+  return String(date || '').replace(/-/g, '').slice(0, 8);
+}
+
+function toRoadworkPhotoKey(itemName) {
+  const compact = String(itemName || '').replace(/\s+/g, '');
+  if (compact.includes('알칼리도')) return 'alkalinity';
+  if (compact.includes('암모니아성질소')) return 'nh3_n';
+  if (compact.includes('질산성질소')) return 'no3_n';
+  if (compact.includes('오르토인산염') || compact.includes('인산염인')) return 'po4_p';
+  return '';
+}
+
+function selectFirstRoundPreparedPhotos(savedPhotos = []) {
+  const firstRoundItems = [];
+  const firstRoundKeys = new Set();
+  for (const photo of Array.isArray(savedPhotos) ? savedPhotos : []) {
+    if (photo.projectIndex !== 0) continue;
+    const key = toRoadworkPhotoKey(photo.itemName);
+    if (!key || firstRoundKeys.has(key)) continue;
+    firstRoundKeys.add(key);
+    firstRoundItems.push({ key, filePath: photo.savedPath });
+  }
+  return firstRoundItems;
 }
 
 function sanitizeItemForFileName(itemName) {
@@ -104,12 +125,13 @@ async function downloadPhoto(baseUrl, cookieJar, filePathValue) {
   };
 }
 
-async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseDir, configuredPhotoRoot, siteName }) {
+async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseDir, configuredPhotoRoot, siteId, siteName }) {
   const photoRoot = resolvePhotoRoot(baseDir, configuredPhotoRoot);
   const photoDir = buildPhotoDirectory(photoRoot, date);
   ensureDirectory(photoDir);
   const driveUploadErrors = [];
   const sourceProjects = Array.isArray(projects) ? projects : [];
+  const effectiveSiteId = String(siteId || db.prepare('SELECT site_id FROM app_settings WHERE id = 1').get()?.site_id || '').trim();
 
   const selectedFiles = [];
   const totalProjects = sourceProjects.length;
@@ -125,37 +147,67 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
         itemName: matchedItem,
         sourceLabel,
         projectId: String(project?.id || '').trim() || null,
+        projectIndex,
         filePath: file.filePath
       });
     }
   });
 
+  const firstProject = sourceProjects[0] || null;
+  const firstProjectId = String(firstProject?.id || '').trim();
+  writePhotoPreparationManifest({
+    photoRoot,
+    siteId: effectiveSiteId,
+    siteName,
+    date,
+    status: 'preparing',
+    projectCount: totalProjects,
+    selectedProjectId: firstProjectId,
+    selectedProjectIndex: firstProject ? 0 : null,
+    identifiedPhotoCount: selectedFiles.filter((file) => file.projectIndex === 0).length,
+    savedPhotoCount: 0,
+    items: [],
+  });
+
   const findRowIdByProjectStmt = db.prepare(`
     SELECT id
     FROM qntech_water_quality
-    WHERE date = ? AND qntech_project_id = ?
+    WHERE site_id = ? AND date = ? AND qntech_project_id = ?
     ORDER BY measurement_order ASC, id ASC
     LIMIT 1
   `);
   const findAnyQntechRowIdStmt = db.prepare(`
     SELECT id
     FROM qntech_water_quality
-    WHERE date = ? AND source_type = 'qntech'
+    WHERE site_id = ? AND date = ? AND source_type = 'qntech'
     ORDER BY measurement_order ASC, id ASC
     LIMIT 1
   `);
 
   const savedPhotos = [];
   const driveQueuedPhotos = [];
+  const photoDownloadErrors = [];
+  const photoLocalSaveErrors = [];
   const usedFileNames = new Map();
   const stamp = toImportDateStamp(date);
   for (const file of selectedFiles) {
-    const downloaded = await downloadPhoto(baseUrl, cookieJar, file.filePath);
+    let downloaded;
+    try {
+      downloaded = await downloadPhoto(baseUrl, cookieJar, file.filePath);
+    } catch (error) {
+      photoDownloadErrors.push({
+        itemName: file.itemName,
+        projectIndex: file.projectIndex,
+        result: 'download-failed',
+        reason: String(error?.message || error).slice(0, 160),
+      });
+      continue;
+    }
     const ext = pickExtension(file.filePath, downloaded.contentType);
     const rowId = file.projectId
-      ? (findRowIdByProjectStmt.get(date, file.projectId)?.id || null)
+      ? (findRowIdByProjectStmt.get(effectiveSiteId, date, file.projectId)?.id || null)
       : null;
-    const fallbackRowId = findAnyQntechRowIdStmt.get(date)?.id || null;
+    const fallbackRowId = findAnyQntechRowIdStmt.get(effectiveSiteId, date)?.id || null;
     const finalRowId = rowId || fallbackRowId || 0;
     const itemToken = sanitizeItemForFileName(file.itemName);
 
@@ -165,12 +217,23 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
     const duplicateSuffix = duplicateIndex > 0 ? `_${duplicateIndex}` : '';
     const readableName = `${finalRowId}_${stamp}_${itemToken}${duplicateSuffix}${ext.toLowerCase()}`;
     const targetPath = path.join(photoDir, readableName);
-    fs.writeFileSync(targetPath, downloaded.body);
+    try {
+      fs.writeFileSync(targetPath, downloaded.body);
+    } catch (error) {
+      photoLocalSaveErrors.push({
+        itemName: file.itemName,
+        projectIndex: file.projectIndex,
+        result: 'local-save-failed',
+        reason: String(error?.message || error).slice(0, 160),
+      });
+      continue;
+    }
 
     const savedPhoto = {
       itemName: file.itemName,
       sourceLabel: file.sourceLabel,
       projectId: file.projectId,
+      projectIndex: file.projectIndex,
       fileName: readableName,
       savedPath: targetPath,
       size: downloaded.body.length,
@@ -182,21 +245,64 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
     const driveItemLabel = ['수질분석', file.sourceLabel, file.itemName]
       .filter(Boolean)
       .join('_');
-    enqueueBackgroundFileTask(db, {
-      taskType: 'management-photo-drive',
-      dedupeKey: `water:${targetPath}`,
-      payload: {
-        date,
-        siteName: siteName || 'Unknown Site',
-        itemLabel: driveItemLabel,
-        photoIndex: duplicateIndex > 0 ? duplicateIndex + 1 : 0,
-        extension: ext,
-        mimeType: downloaded.contentType || 'image/jpeg',
-        localPath: targetPath,
-      },
-    });
-    driveQueuedPhotos.push({ ...savedPhoto, queued: true });
+    try {
+      enqueueBackgroundFileTask(db, {
+        taskType: 'management-photo-drive',
+        dedupeKey: `water:${targetPath}`,
+        payload: {
+          date,
+          siteName: siteName || 'Unknown Site',
+          itemLabel: driveItemLabel,
+          photoIndex: duplicateIndex > 0 ? duplicateIndex + 1 : 0,
+          extension: ext,
+          mimeType: downloaded.contentType || 'image/jpeg',
+          localPath: targetPath,
+        },
+      });
+      driveQueuedPhotos.push({ ...savedPhoto, queued: true });
+    } catch (error) {
+      driveUploadErrors.push({
+        itemName: file.itemName,
+        projectIndex: file.projectIndex,
+        result: 'drive-queue-failed',
+        reason: String(error?.message || error).slice(0, 160),
+      });
+    }
   }
+
+  // 공사입력도우미는 해당 날짜의 첫 분석 회차만 사용한다. 같은 항목의 사진이
+  // 여러 장이어도 첫 장만 명세에 기록해 외부 일지에 중복 첨부하지 않는다.
+  const { prepareRoadworkPhotos } = require('./roadworkPhotoResizeService.cjs');
+  const prepared = await prepareRoadworkPhotos({
+    photoRoot, siteId: effectiveSiteId, date,
+    items: selectFirstRoundPreparedPhotos(savedPhotos),
+  });
+  const firstRoundItems = prepared.items;
+  const firstRoundIdentifiedCount = selectedFiles.filter((file) => file.projectIndex === 0).length;
+  const firstRoundDownloadFailureCount = photoDownloadErrors.filter((item) => item.projectIndex === 0).length;
+  const firstRoundLocalSaveFailureCount = photoLocalSaveErrors.filter((item) => item.projectIndex === 0).length;
+  const preparationStatus = firstRoundItems.length === 4
+    ? 'ready'
+    : firstRoundItems.length > 0
+      ? 'partial'
+      : firstRoundDownloadFailureCount + firstRoundLocalSaveFailureCount > 0
+        ? 'failed'
+        : 'none';
+  const { manifest } = writePhotoPreparationManifest({
+    photoRoot,
+    siteId: effectiveSiteId,
+    siteName,
+    date,
+    status: preparationStatus,
+    projectCount: totalProjects,
+    selectedProjectId: firstProjectId,
+    selectedProjectIndex: firstProject ? 0 : null,
+    identifiedPhotoCount: firstRoundIdentifiedCount,
+    savedPhotoCount: firstRoundItems.length,
+    downloadFailureCount: firstRoundDownloadFailureCount,
+    localSaveFailureCount: firstRoundLocalSaveFailureCount,
+    items: firstRoundItems,
+  });
 
   return {
     photoRoot,
@@ -211,12 +317,26 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
     photoSourceProjectCount: totalProjects,
     photoProjectsWithRecognizedFiles: projectsWithRecognizedPhotos.size,
     photoProjectsWithoutRecognizedFiles: Math.max(0, totalProjects - projectsWithRecognizedPhotos.size),
-    photoDownloadFailureCount: 0,
+    photoDownloadFailureCount: photoDownloadErrors.length,
+    photoDownloadErrors,
+    photoLocalSaveFailureCount: photoLocalSaveErrors.length,
+    photoLocalSaveErrors,
+    photoPreparation: {
+      resizeDiagnostics: prepared.diagnostics,
+      status: manifest.status,
+      selectedProjectIndex: manifest.selectedProjectIndex,
+      readyPhotoCount: manifest.readyPhotoCount,
+      missingPhotoCount: manifest.missingPhotoCount,
+      identifiedPhotoCount: manifest.identifiedPhotoCount,
+      downloadFailureCount: manifest.downloadFailureCount,
+      localSaveFailureCount: manifest.localSaveFailureCount,
+    },
   };
 }
 
 module.exports = {
   saveProjectPhotos,
+  selectFirstRoundPreparedPhotos,
   getDefaultPhotoRoot,
   resolvePhotoRoot
 };

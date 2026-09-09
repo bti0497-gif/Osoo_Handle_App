@@ -7,6 +7,7 @@ import PhotoManagementTab from './photo-management/PhotoManagementTab';
 import './photo-management/PhotoManagementTab.css';
 import { getTodayKST } from '../../core/constants';
 import { BatchProgressDialog } from '../../components/common';
+import { assessMedicinePurchase } from './medicinePurchaseGuard';
 
 const TAB_META = [
     { id: 'flow', label: '유량관리' },
@@ -780,6 +781,10 @@ export default function UnifiedRecordModal({
                 const updated = {
                     ...current,
                     purchase: nextApplied ? (Number(item.defaultPurchase) || 0) : '',
+                    __dirty: {
+                        ...(current.__dirty || {}),
+                        purchase: true,
+                    },
                 };
                 next[key] = recalculateInventoryDraft(item, updated);
             });
@@ -992,6 +997,7 @@ export default function UnifiedRecordModal({
         const targetTabs = new Set(tabIds);
         const flowMissing = [];
         const unexpectedFlowItems = [];
+        const medicinePurchaseWarnings = [];
         const notices = [];
         const flowItemsToSave = [];
         const medicineItemsToSave = [];
@@ -1109,6 +1115,14 @@ export default function UnifiedRecordModal({
                     ?? clampInventory(previousInventory + (purchase || 0) - usage);
                 if (tab === 'medicine' && isDrafted && usage === 0) {
                     zeroUsageMedicines.push(item.label || item.key);
+                }
+                if (tab === 'medicine') {
+                    medicinePurchaseWarnings.push(...assessMedicinePurchase({
+                        medicineName: item.label || item.key || '약품',
+                        purchaseAmount: purchase,
+                        purchaseEdited: Boolean(values.__dirty?.purchase),
+                        profile: item.purchaseProfile,
+                    }));
                 }
                 target.push({
                     date,
@@ -1250,6 +1264,7 @@ export default function UnifiedRecordModal({
         return {
             flowMissing,
             unexpectedFlowItems,
+            medicinePurchaseWarnings,
             notices,
             flowItems: flowItemsToSave,
             medicineItems: medicineItemsToSave,
@@ -1302,6 +1317,28 @@ export default function UnifiedRecordModal({
             if (!window.confirm(`평상시와 다른 값이 입력됐습니다. 확인해보세요.\n\n대상: ${itemNames}\n\n그래도 저장할까요?`)) {
                 return;
             }
+        }
+
+        if (plan.medicinePurchaseWarnings.length > 0) {
+            const warningText = plan.medicinePurchaseWarnings
+                .map((warning) => `- ${warning.message}`)
+                .join('\n');
+            logOperationalNotice('약품 입고 이상값 저장 확인이 필요합니다.', {
+                warnings: plan.medicinePurchaseWarnings.map((warning) => ({
+                    code: warning.code,
+                    medicineName: warning.medicineName,
+                    purchaseAmount: warning.purchaseAmount,
+                    usualPurchaseAmount: warning.usualPurchaseAmount,
+                })),
+            });
+            const confirmPurchase = typeof onConfirm === 'function'
+                ? onConfirm
+                : (message) => Promise.resolve(window.confirm(message));
+            const confirmed = await confirmPurchase(
+                `약품 입고량을 다시 확인해 주세요.\n\n${warningText}\n\n그래도 저장할까요?`,
+                '약품 입고 확인',
+            );
+            if (!confirmed) return;
         }
 
         const result = await savePlan(plan);

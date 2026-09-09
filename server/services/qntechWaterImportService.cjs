@@ -258,6 +258,7 @@ async function importQntechWaterPhotos(db, baseDir, date, siteContext = {}) {
     date: context.date,
     baseDir,
     configuredPhotoRoot: getConfiguredPhotoRoot(db, siteContext.siteId),
+    siteId: siteContext.siteId,
     siteName: context.site?.name
   });
 
@@ -291,6 +292,7 @@ async function importQntechWaterAll(db, baseDir, date, siteContext = {}) {
     date: context.date,
     baseDir,
     configuredPhotoRoot: getConfiguredPhotoRoot(db, siteContext.siteId),
+    siteId: siteContext.siteId,
     siteName: context.site?.name
   });
 
@@ -312,6 +314,7 @@ async function importQntechWaterAll(db, baseDir, date, siteContext = {}) {
     photoDirectory: photoResult.photoDirectory,
     driveFolderId: photoResult.driveFolderId,
     driveFolderUrl: photoResult.driveFolderUrl,
+    photoPreparation: photoResult.photoPreparation,
     summary: {
       importedRowCount: persistResult.upsertedRowCount,
       insertedRowCount: persistResult.insertedRowCount,
@@ -325,15 +328,19 @@ async function importQntechWaterAll(db, baseDir, date, siteContext = {}) {
       photoProjectsWithRecognizedFiles: photoResult.photoProjectsWithRecognizedFiles,
       photoProjectsWithoutRecognizedFiles: photoResult.photoProjectsWithoutRecognizedFiles,
       photoDownloadFailureCount: photoResult.photoDownloadFailureCount,
+      photoLocalSaveFailureCount: photoResult.photoLocalSaveFailureCount,
       driveUploadedPhotoCount: photoResult.driveUploadedPhotos.length,
       driveQueuedPhotoCount: photoResult.driveQueuedPhotos.length,
-      driveUploadErrorCount: photoResult.driveUploadErrors.length
+      driveUploadErrorCount: photoResult.driveUploadErrors.length,
+      roadworkPhotoPreparationStatus: photoResult.photoPreparation?.status || 'unknown',
+      roadworkReadyPhotoCount: photoResult.photoPreparation?.readyPhotoCount || 0,
+      roadworkMissingPhotoCount: photoResult.photoPreparation?.missingPhotoCount || 0
     }
   };
 }
 
 async function importQntechWaterRange(db, baseDir, startDate, endDate, options = {}) {
-  const { onProgress, siteContext = {} } = options;
+  const { onProgress, onPhotoPrepared, siteContext = {} } = options;
   const dates = enumerateDates(startDate, endDate);
   const client = await createAuthenticatedClient(db, siteContext);
   const activeLocations = getActiveLocations(db, siteContext.siteId);
@@ -344,6 +351,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
   let totalDriveUploadedPhotos = 0;
   let totalDriveQueuedPhotos = 0;
   let totalDriveUploadErrors = 0;
+  let totalPhotoLocalSaveFailures = 0;
   let totalInsertedRows = 0;
   let photoRoot = null;
 
@@ -385,6 +393,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
       date: context.date,
       baseDir,
       configuredPhotoRoot: getConfiguredPhotoRoot(db, siteContext.siteId),
+      siteId: siteContext.siteId,
       siteName: context.site?.name
     });
 
@@ -393,6 +402,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
     totalDriveUploadedPhotos += photoResult.driveUploadedPhotos.length;
     totalDriveQueuedPhotos += photoResult.driveQueuedPhotos.length;
     totalDriveUploadErrors += photoResult.driveUploadErrors.length;
+    totalPhotoLocalSaveFailures += photoResult.photoLocalSaveFailureCount;
     totalInsertedRows += insertedRowCount;
 
     summaryRows.push({
@@ -407,12 +417,20 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
       driveUploadedPhotoCount: photoResult.driveUploadedPhotos.length,
       driveQueuedPhotoCount: photoResult.driveQueuedPhotos.length,
       driveUploadErrorCount: photoResult.driveUploadErrors.length,
+      photoLocalSaveFailureCount: photoResult.photoLocalSaveFailureCount,
       driveUploadErrors: photoResult.driveUploadErrors,
       photoDirectory: photoResult.photoDirectory,
       driveFolderUrl: photoResult.driveFolderUrl,
+      photoPreparation: photoResult.photoPreparation,
       unmatchedSamples: mapped.unmatchedSamples,
       unmatchedItems: mapped.unmatchedItems,
       mappingCollisions: mapped.mappingCollisions,
+    });
+    onPhotoPrepared?.({
+      date,
+      site: context.site,
+      projectCount: context.projects.length,
+      photoPreparation: photoResult.photoPreparation,
     });
 
     onProgress?.({
@@ -441,6 +459,7 @@ async function importQntechWaterRange(db, baseDir, startDate, endDate, options =
       driveUploadedPhotoCount: totalDriveUploadedPhotos,
       driveQueuedPhotoCount: totalDriveQueuedPhotos,
       driveUploadErrorCount: totalDriveUploadErrors,
+      photoLocalSaveFailureCount: totalPhotoLocalSaveFailures,
       existingValueDateCount: summaryRows.filter((item) => item.existingValues).length
     }
   };

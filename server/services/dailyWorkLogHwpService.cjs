@@ -14,6 +14,7 @@ const PDFDocument = new Proxy({}, {
 
 const { buildHwpxBookmarkValues } = require('./dailyWorkLogHwpxService.cjs');
 const { convertHwpToPdf, ensureHwpSecurityModule } = require('./hwpPdfService.cjs');
+const { bindHwpWithPreparedEngine } = require('./hwpAutomationWorker.cjs');
 const { getAvailableReportOutputPath } = require('./reportOutputPathService.cjs');
 
 const SECURITY_MODULE_NAME = 'OsooHandleFilePathChecker';
@@ -73,7 +74,7 @@ function runPowerShell(script, timeout = 180000) {
   });
 }
 
-async function bindHwpTemplate({ templatePath, outputPath, bookmarkValues }) {
+async function bindHwpTemplateOneShot({ templatePath, outputPath, bookmarkValues }) {
   await ensureHwpSecurityModule();
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osoo-hwp-bind-'));
   const valuesPath = path.join(tempDir, 'bookmark-values.json');
@@ -128,6 +129,22 @@ async function bindHwpTemplate({ templatePath, outputPath, bookmarkValues }) {
     const output = await runPowerShell(script);
     if (!fs.existsSync(outputPath)) throw new Error('HWP 출력 파일이 생성되지 않았습니다.');
     return Number(String(output).split(/\r?\n/).pop()) || 0;
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function bindHwpTemplate({ templatePath, outputPath, bookmarkValues }) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osoo-hwp-prepared-bind-'));
+  const valuesPath = path.join(tempDir, 'bookmark-values.json');
+  fs.writeFileSync(valuesPath, JSON.stringify(bookmarkValues), 'utf8');
+
+  try {
+    await ensureHwpSecurityModule();
+    return await bindHwpWithPreparedEngine({ templatePath, outputPath, valuesPath });
+  } catch (error) {
+    console.warn(`[HWP Engine] 준비된 엔진 사용 실패, 기존 생성 방식으로 재시도합니다: ${error.message}`);
+    return bindHwpTemplateOneShot({ templatePath, outputPath, bookmarkValues });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

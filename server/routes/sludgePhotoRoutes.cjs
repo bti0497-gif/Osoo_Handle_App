@@ -17,9 +17,59 @@ const {
 } = require('../services/backgroundFileTaskService.cjs');
 const {
   managementPhotoName,
+  sludgeManagementPhotoName,
   managementPhotoSegments,
   sludgePhotoSegments,
 } = require('../services/drivePathService.cjs');
+
+function driveReceiptPath(localPath) {
+  return `${localPath}.drive.json`;
+}
+
+function readDriveReceipt(localPath) {
+  try { return JSON.parse(fs.readFileSync(driveReceiptPath(localPath), 'utf8')); }
+  catch (_) { return null; }
+}
+
+function writeDriveReceipt(localPath, receipt) {
+  try {
+    fs.writeFileSync(driveReceiptPath(localPath), JSON.stringify(receipt), 'utf8');
+  } catch (error) {
+    console.warn('[sludge-photos] Drive 업로드 영수증 저장 실패:', error.message);
+  }
+}
+
+function removeDriveReceipt(localPath) {
+  try { fs.unlinkSync(driveReceiptPath(localPath)); } catch (_) {}
+}
+
+function sludgeDriveTakenAt(db, date, siteName, suppliedTakenAt, localPath) {
+  if (String(suppliedTakenAt || '').trim()) return String(suppliedTakenAt).trim();
+  try {
+    const row = db.prepare(
+      'SELECT sludge_photo_taken_at FROM sludge_photo_logs WHERE date = ? AND site_name = ? ORDER BY id DESC LIMIT 1'
+    ).get(date, siteName);
+    if (row?.sludge_photo_taken_at) return row.sludge_photo_taken_at;
+  } catch (_) {}
+  try { return toLocalDateTimeString(fs.statSync(localPath).mtime) || nowDateTimeString(); }
+  catch (_) { return nowDateTimeString(); }
+}
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function listManagementSludgePhotos(folderId, date, siteName) {
+  const { listFilesInFolder } = getDriveService();
+  const safeSite = sanitizeName(siteName);
+  const datePart = escapeRegExp(date);
+  const sitePart = escapeRegExp(safeSite);
+  const current = new RegExp(`^${datePart}_\\d{6}_${sitePart}_슬러지반출(?:-\\d+)?\\.jpg$`, 'i');
+  const legacy = new RegExp(`^${datePart}_${sitePart}_슬러지반출\\d*\\.jpg$`, 'i');
+  return (await listFilesInFolder(folderId))
+    .filter((file) => current.test(String(file.name || '')) || legacy.test(String(file.name || '')))
+    .sort((a, b) => String(a.createdTime || '').localeCompare(String(b.createdTime || '')) || String(a.name).localeCompare(String(b.name)));
+}
 
 let driveService = null;
 
@@ -276,12 +326,12 @@ async function savePhotoToLocal(appDataPath, date, label, srcPath, siteId = '') 
   return { destPath, takenAt };
 }
 
-async function uploadSludgePhotoToDrive(db, date, type, localPath, index = 1, siteName = '') {
+async function uploadSludgePhotoToDrive(db, date, type, localPath, index = 1, siteName = '', takenAt = '') {
   const {
     getDriveRootFolderId,
     getOrCreateFolderPath,
     isDriveConfigured,
-    uploadBufferToFolder,
+    uploadBufferToFolder, findFileInFolder,
   } = getDriveService();
   if (!localPath || !fs.existsSync(localPath) || !isDriveConfigured()) return null;
   try {
@@ -290,15 +340,30 @@ async function uploadSludgePhotoToDrive(db, date, type, localPath, index = 1, si
       getDriveRootFolderId(),
       managementPhotoSegments(date)
     );
-    const fileName = type === 'certificate'
-      ? managementPhotoName(date, resolvedSiteName, '청소필증', Math.max(0, Number(index) || 0), '.jpg')
-      : managementPhotoName(date, resolvedSiteName, '슬러지반출', index, '.jpg');
-    return await uploadBufferToFolder({
+    const buffer = fs.readFileSync(localPath);
+    let fileName;
+    const resolvedTakenAt = sludgeDriveTakenAt(db, date, resolvedSiteName, takenAt, localPath);
+    if (type === 'certificate') {
+      fileName = managementPhotoName(date, resolvedSiteName, '청소필증', Math.max(0, Number(index) || 0), '.jpg');
+    } else {
+      const contentHash = require('crypto').createHash('md5').update(buffer).digest('hex');
+      for (let collisionIndex = 0; collisionIndex < 100; collisionIndex += 1) {
+        const candidate = sludgeManagementPhotoName(date, resolvedSiteName, resolvedTakenAt, collisionIndex, '.jpg');
+        const existing = await findFileInFolder(folder.id, candidate);
+        if (!existing || existing.md5Checksum === contentHash) { fileName = candidate; break; }
+      }
+      if (!fileName) throw new Error('동일 시각 슬러지 사진의 파일명을 확정하지 못했습니다.');
+    }
+    const result = await uploadBufferToFolder({
       folderId: folder.id,
       fileName,
-      buffer: fs.readFileSync(localPath),
+      buffer,
       mimeType: 'image/jpeg',
     });
+    if (type !== 'certificate' && result?.id) {
+      writeDriveReceipt(localPath, { version: 1, driveFileId: result.id, fileName, takenAt: resolvedTakenAt });
+    }
+    return result;
   } catch (err) {
     console.warn(`[sludge-photos] Drive 사진 업로드 실패 (${type}):`, err.message);
     return null;
@@ -320,6 +385,10 @@ async function findRemoteSludgePhoto(db, date, type, siteName = '') {
       getDriveRootFolderId(),
       managementPhotoSegments(date)
     );
+    if (type !== 'certificate') {
+      const timedPhotos = await listManagementSludgePhotos(managementFolder.id, date, resolvedSiteName);
+      if (timedPhotos.length > 0) return { ...timedPhotos[0], fileName: timedPhotos[0].name, folderId: managementFolder.id };
+    }
     const managementCandidates = type === 'certificate'
       ? [managementPhotoName(date, resolvedSiteName, '청소필증', 0, '.jpg')]
       : [managementPhotoName(date, resolvedSiteName, '슬러지반출', 1, '.jpg')];
@@ -362,6 +431,9 @@ async function restoreSludgePhotoFromDrive(db, appDataPath, date, type, siteId =
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   const destPath = path.join(destDir, fileName);
   fs.writeFileSync(destPath, buffer);
+  if (type !== 'certificate') {
+    writeDriveReceipt(destPath, { version: 1, driveFileId: remote.id, fileName: remote.fileName, takenAt: null });
+  }
   return {
     localPath: destPath,
     url: buildSludgePhotoUrl(date, fileName, siteId),
@@ -575,7 +647,7 @@ module.exports = function (db, baseDir, appDataPath) {
         enqueueBackgroundFileTask(db, {
           taskType: 'sludge-photo-drive',
           dedupeKey: `sludge:${sludgeLocalPath}`,
-          payload: { date, type: 'sludge', localPath: sludgeLocalPath, index: sludgeIndex, siteName: metadata.siteName },
+          payload: { date, type: 'sludge', localPath: sludgeLocalPath, index: sludgeIndex, siteName: metadata.siteName, takenAt: newTakenAt },
         });
       }
       if (certificateLocalPath) {
@@ -705,6 +777,7 @@ module.exports = function (db, baseDir, appDataPath) {
           localPath: destPath,
           index: sludgeIndex,
           siteName: req.siteContext?.siteName || '',
+          takenAt,
         },
       });
 
@@ -783,7 +856,9 @@ module.exports = function (db, baseDir, appDataPath) {
         return res.status(404).json({ success: false, error: '삭제할 로컬 사진을 찾을 수 없습니다.' });
       }
 
+      const driveReceipt = readDriveReceipt(filePath);
       fs.unlinkSync(filePath);
+      removeDriveReceipt(filePath);
       cancelBackgroundFileTask(db, `${parsed.kind === 'certificate' ? 'certificate' : 'sludge'}:${filePath}`);
       const itemLabel = parsed.kind === 'certificate' ? '청소필증' : '슬러지반출';
       const photoIndex = parsed.index;
@@ -795,6 +870,8 @@ module.exports = function (db, baseDir, appDataPath) {
           siteName: req.siteContext?.siteName || '',
           itemLabel,
           photoIndex,
+          driveFileId: driveReceipt?.driveFileId || null,
+          remoteFileName: driveReceipt?.fileName || null,
         },
       });
 

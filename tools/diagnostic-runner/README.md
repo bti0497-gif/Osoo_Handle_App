@@ -76,8 +76,25 @@ node tools/diagnostic-runner/leak-check.cjs --win-unpacked release/win-unpacked
 - `OSOO_PACKAGED=1` 로 프로젝트 루트 credential fallback(`.env.local`, `client_secret_*.json`)
   을 차단하고, `NODE_OPTIONS` guard 가 loopback 외 네트워크 호출을 기록·차단한다.
 - 포트는 `OSOO_API_PORT_MIN` 방식(일반 Node 계약, `validate-release --api-test`와 동일)으로 임의 포트에 바인딩한다.
-- better-sqlite3 ABI가 Node와 맞지 않으면 시나리오 전에 명확히 실패한다.
-  (`electron:build` 직후라면 `npm rebuild better-sqlite3` 후 재실행)
+- better-sqlite3는 앱과 동일한 버전의 tools 로컬 사본을 실제 메모리 DB로 검사한다.
+  ABI가 맞지 않을 때만 tools 사본을 Node용으로 재빌드한다. 루트 사본은 변경하지 않는다.
+  준비 잠금 충돌·버전 차이·의존성 누락은 명확히 중단한다(실행 중인 다른 러너를 종료하지 않는다).
+- 임시 포트는 실제 HTTP 요청으로 검증한 뒤 사용한다. 서버 조기 종료와 fetch 차단 포트는 즉시 실패한다.
+
+## 환경 준비를 포함한 전체 검증
+
+```powershell
+node tools/diagnostic-runner/validate-prepared.cjs
+```
+
+SQLite 사전 점검 후 검증 프로세스에만 Node용 SQLite를 연결하여 기존 `npm run validate` 전체를 실행한다.
+루트 package.json, 앱의 SQLite 바이너리, 업무 서버 설정은 변경하지 않는다.
+`tmp/diagnostics/validation-*/result.json`과 `validate.log`에 결과를 보존한다.
+환경 준비 실패는 종료 코드 2, 검증 실패는 1, 성공은 0이다. 실패를 통과로 바꾸지 않는다.
+준비된 모듈은 재사용하되 매번 실제 로드와 버전 일치를 확인한다.
+의존성 최초 설치는 이 폴더에서 `npm ci`로 진행한다. 동시에 다른 Node 버전으로 재빌드하지 않는다.
+
+환경 준비 자체의 빠른 회귀검사: `node tools/diagnostic-runner/test-environment.cjs`
 
 ## 에이전트 워크플로 (쿼터 절감)
 
@@ -102,7 +119,7 @@ node tools/diagnostic-runner/runner.cjs --scenario all --lint
 | 상황 | 실행할 검증 |
 |---|---|
 | 일반 기능 수정 직후 | 러너 1회 (`--scenario all --lint --changed`) |
-| Electron·인증·서버 공통·패키징·릴리즈 전 | 러너 + `npm run validate` |
+| Electron·인증·서버 공통·패키징·릴리즈 전 | 러너 + `node tools/diagnostic-runner/validate-prepared.cjs` (`npm run validate` 전체 실행) |
 | 설치파일 생성 후 | 배포 검증 (`validate:asar` 포함) |
 
 러너는 1차 회귀검증기다. `npm run validate`(패키지/asar/설치 계약)를 대체하지 않는다.

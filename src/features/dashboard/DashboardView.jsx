@@ -39,8 +39,8 @@ const DashboardView = ({ currentUser }) => {
         waterSummary,
         medicineRows,
         kitRows,
-        medicineDefaults,
-        kitDefaults,
+        activeMedicineNames,
+        activeKitNames,
         widgetErrors,
         refresh,
     } = useDashboardViewModel(currentUser);
@@ -112,8 +112,8 @@ const DashboardView = ({ currentUser }) => {
                     <InventoryLevelWidget
                         medicineRows={medicineRows}
                         kitRows={kitRows}
-                        medicineDefaults={medicineDefaults}
-                        kitDefaults={kitDefaults}
+                        activeMedicineNames={activeMedicineNames}
+                        activeKitNames={activeKitNames}
                     />
                 </div>
             </div>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DashboardModel } from './DashboardModel';
+import { getActiveConfiguredInventoryNames } from './inventoryLevelUtils';
 import { buildWaterSummary } from './waterSummary';
 
 const FLOW_KEYS = ['유입유량계', '방류유량계', '내부반송유량계', '외부반송유량계', '전력량계'];
@@ -63,8 +64,8 @@ export function useDashboardViewModel(currentUser) {
     const [waterRows, setWaterRows] = useState([]);
     const [medicineRows, setMedicineRows] = useState([]);
     const [kitRows, setKitRows] = useState([]);
-    const [medicineDefaults, setMedicineDefaults] = useState([]);
-    const [kitDefaults, setKitDefaults] = useState([]);
+    const [activeMedicineNames, setActiveMedicineNames] = useState([]);
+    const [activeKitNames, setActiveKitNames] = useState([]);
     const [widgetErrors, setWidgetErrors] = useState(EMPTY_WIDGET_ERRORS);
     const [weekOffset, setWeekOffset] = useState(0);
     const [visibleSeries, setVisibleSeries] = useState({
@@ -79,31 +80,44 @@ export function useDashboardViewModel(currentUser) {
         setLoading(true);
         try {
             let siteId = null;
+            let localSettingsResponse = null;
+            let localSettingsError = null;
             try {
-                siteId = await DashboardModel.fetchAppSettingsSiteId();
-            } catch {
+                localSettingsResponse = await DashboardModel.fetchLocalSettings();
+                const rawSiteId = localSettingsResponse?.settings?.site_id;
+                siteId = rawSiteId == null || String(rawSiteId).trim() === '' ? null : String(rawSiteId);
+            } catch (error) {
                 siteId = null;
+                localSettingsError = error;
             }
             if (!siteId && currentUser?.site_id) {
                 siteId = String(currentUser.site_id);
             }
             const params = siteId ? { site_id: siteId } : {};
+            const configItems = Array.isArray(localSettingsResponse?.configItems)
+                ? localSettingsResponse.configItems
+                : null;
+            const inventoryConfigReady = Array.isArray(configItems);
+            const nextActiveMedicineNames = inventoryConfigReady
+                ? getActiveConfiguredInventoryNames(configItems, 'medicine')
+                : [];
+            const nextActiveKitNames = inventoryConfigReady
+                ? getActiveConfiguredInventoryNames(configItems, 'kit')
+                : [];
+            setActiveMedicineNames(nextActiveMedicineNames);
+            setActiveKitNames(nextActiveKitNames);
 
             const results = await Promise.allSettled([
                 requestWithOneRetry(() => DashboardModel.fetchFlowHistory(params)),
                 requestWithOneRetry(() => DashboardModel.fetchWaterHistory(params)),
                 requestWithOneRetry(() => DashboardModel.fetchMedicineHistory(params)),
                 requestWithOneRetry(() => DashboardModel.fetchKitHistory(params)),
-                requestWithOneRetry(() => DashboardModel.fetchMedicineDefaults()),
-                requestWithOneRetry(() => DashboardModel.fetchKitDefaults()),
             ]);
             const [
                 flowResponse,
                 waterResponse,
                 medicineResponse,
                 kitResponse,
-                medicineDefaultsResponse,
-                kitDefaultsResponse,
             ] = results.map((result) => (result.status === 'fulfilled' ? result.value : null));
             const nextErrors = { ...EMPTY_WIDGET_ERRORS };
             const failureMessages = results.map((result) => (
@@ -154,17 +168,17 @@ export function useDashboardViewModel(currentUser) {
             if (kitResponse?.success && Array.isArray(kitResponse.history)) {
                 setKitRows(kitResponse.history);
             }
-            if (medicineDefaultsResponse?.success && Array.isArray(medicineDefaultsResponse.items)) {
-                setMedicineDefaults(medicineDefaultsResponse.items);
-            }
-            if (kitDefaultsResponse?.success && Array.isArray(kitDefaultsResponse.items)) {
-                setKitDefaults(kitDefaultsResponse.items);
-            }
             if (!medicineResponse?.success || !Array.isArray(medicineResponse.history)
                 || !kitResponse?.success || !Array.isArray(kitResponse.history)
-                || !medicineDefaultsResponse?.success || !Array.isArray(medicineDefaultsResponse.items)
-                || !kitDefaultsResponse?.success || !Array.isArray(kitDefaultsResponse.items)) {
-                nextErrors.inventory = failureMessages.slice(2).filter(Boolean).join(' / ')
+                || !inventoryConfigReady) {
+                const inventoryMessages = failureMessages.slice(2).filter(Boolean);
+                if (!inventoryConfigReady) {
+                    inventoryMessages.unshift(String(
+                        localSettingsError?.message
+                        || '현장별 활성 약품·키트 설정을 불러오지 못했습니다.'
+                    ));
+                }
+                nextErrors.inventory = inventoryMessages.join(' / ')
                     || '약품·키트 재고 데이터를 일부 불러오지 못했습니다.';
             }
             setWidgetErrors(nextErrors);
@@ -276,8 +290,8 @@ export function useDashboardViewModel(currentUser) {
         waterSummary,
         medicineRows,
         kitRows,
-        medicineDefaults,
-        kitDefaults,
+        activeMedicineNames,
+        activeKitNames,
         widgetErrors,
         refresh: loadHistory,
     };

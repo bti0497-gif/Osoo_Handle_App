@@ -1,32 +1,5 @@
 import React from 'react';
-
-function buildDefaultAmountMap(rows) {
-    return new Map((rows || []).map((row) => [
-        String(row?.item_name || row?.itemName || row?.name || '').trim(),
-        Number(row?.default_amount ?? row?.defaultAmount ?? 0),
-    ]));
-}
-
-function normalizeLatestInventory(historyRows, nameKey, defaultAmounts) {
-    const byName = new Map();
-    historyRows.forEach((row) => {
-        const name = String(row?.[nameKey] || '').trim();
-        if (!name) return;
-        const date = String(row?.date || '');
-        const inv = Number(row?.current_inventory);
-        const item = {
-            name,
-            date,
-            inventory: Number.isFinite(inv) ? inv : 0,
-            defaultAmount: Number(defaultAmounts.get(name)) || 0,
-        };
-        const prev = byName.get(name);
-        if (!prev || date >= prev.date) {
-            byName.set(name, item);
-        }
-    });
-    return Array.from(byName.values()).sort((a, b) => b.inventory - a.inventory);
-}
+import { normalizeLatestInventory } from '../inventoryLevelUtils';
 
 function levelColor(percent) {
     if (percent <= 25) return '#ef4444';
@@ -35,12 +8,12 @@ function levelColor(percent) {
 }
 
 function InventoryBottle({ item }) {
-    const hasDefaultAmount = item.defaultAmount > 0;
-    const percent = hasDefaultAmount
-        ? Math.max(0, Math.min(100, (item.inventory / item.defaultAmount) * 100))
+    const hasReferenceAmount = item.referenceAmount > 0;
+    const percent = hasReferenceAmount
+        ? Math.max(0, Math.min(100, (item.inventory / item.referenceAmount) * 100))
         : 0;
     const fillColor = levelColor(percent);
-    const lowStock = hasDefaultAmount && percent <= 25;
+    const lowStock = hasReferenceAmount && percent <= 25;
 
     return (
         <div
@@ -95,7 +68,7 @@ function InventoryBottle({ item }) {
                         {Math.round(item.inventory * 10) / 10}
                     </span>
                     <span style={{ fontSize: '0.72rem', color: lowStock ? '#b91c1c' : '#64748b', fontWeight: 800 }}>
-                        {hasDefaultAmount ? `${Math.round(percent)}%` : '기준 미설정'}
+                        {hasReferenceAmount ? `${Math.round(percent)}%` : '구매 이력 없음'}
                     </span>
                     {lowStock && (
                         <span style={{ fontSize: '0.68rem', color: '#b91c1c', backgroundColor: '#fee2e2', border: '1px solid #fecaca', borderRadius: 999, padding: '0 0.35rem', fontWeight: 900 }}>
@@ -124,23 +97,28 @@ function InventoryColumn({ title, items }) {
     );
 }
 
-export default function InventoryLevelWidget({ medicineRows, kitRows, medicineDefaults, kitDefaults }) {
+export default function InventoryLevelWidget({
+    medicineRows,
+    kitRows,
+    activeMedicineNames,
+    activeKitNames,
+}) {
     const latestMedicines = normalizeLatestInventory(
         medicineRows || [],
         'medicine_name',
-        buildDefaultAmountMap(medicineDefaults)
-    ).slice(0, 8);
+        activeMedicineNames || []
+    );
     const latestKits = normalizeLatestInventory(
         kitRows || [],
         'kit_name',
-        buildDefaultAmountMap(kitDefaults)
-    ).slice(0, 8);
+        activeKitNames || []
+    );
 
     return (
         <section style={{ border: '1px solid #e2e8f0', borderRadius: '12px', backgroundColor: '#ffffff', padding: '0.85rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem' }}>
                 <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 900, color: '#0f172a' }}>약품/키트 재고 위젯</h3>
-                <span style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 800 }}>최신 재고 기준</span>
+                <span style={{ fontSize: '0.78rem', color: '#475569', fontWeight: 800 }}>최근 구매량 기준</span>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>

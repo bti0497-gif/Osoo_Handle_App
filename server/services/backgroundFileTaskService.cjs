@@ -70,6 +70,10 @@ async function executeTask(db, task) {
     } = require('./driveService.cjs');
     const { managementPhotoName, managementPhotoSegments } = require('./drivePathService.cjs');
     if (!isDriveConfigured() || !drive) return { skipped: true, reason: 'drive-not-configured' };
+    if (payload.driveFileId) {
+      await drive.files.delete({ fileId: payload.driveFileId, supportsAllDrives: true });
+      return { deleted: true, fileId: payload.driveFileId, fileName: payload.remoteFileName || null };
+    }
     const folder = await findFolderPath(getDriveRootFolderId(), managementPhotoSegments(payload.date));
     if (!folder?.id) return { skipped: true, reason: 'folder-not-found' };
     const fileName = managementPhotoName(
@@ -91,7 +95,7 @@ async function executeTask(db, task) {
   if (task.task_type === 'sludge-photo-drive') {
     const routes = require('../routes/sludgePhotoRoutes.cjs');
     const result = await routes.__uploadSludgePhotoToDrive(
-      db, payload.date, payload.type, payload.localPath, payload.index, payload.siteName
+      db, payload.date, payload.type, payload.localPath, payload.index, payload.siteName, payload.takenAt
     );
     if (!result?.id) throw new Error('슬러지 사진 Drive 업로드 결과가 없습니다.');
     return result;

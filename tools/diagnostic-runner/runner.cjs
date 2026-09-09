@@ -136,6 +136,7 @@ function writeFailureResult({ workspace, runtime, startedAt, phase, error }) {
     port: null,
     runtime: runtime || null,
     status: 'failed',
+    failureCategory: /^ENV_/.test(error.message) ? 'environment-preparation' : 'server-startup-or-runner',
     startedAt: startedAt.toISOString(),
     durationMs: Date.now() - startedAt.getTime(),
     steps: [{ scenario: 'startup', name: phase, status: 'failed', errorCode: error.code || 'RUNNER_ERROR', message: String(error.message).slice(0, 500) }],
@@ -281,7 +282,7 @@ async function main() {
     await waitPortFree(prevPort);
     serverProcess = startServer({ projectRoot: PROJECT_ROOT, workspace, port: prevPort, token: prevToken });
     await waitForGuardBoot(path.join(workspace.runDir, 'guard'), workspace.guardLog, { timeoutMs: 4000 });
-    const ready = await waitForReady({ port: serverProcess.port, token: serverProcess.token });
+    const ready = await waitForReady({ port: serverProcess.port, token: serverProcess.token, child: serverProcess.child });
     return { ...stopResult, ready: true, pid: serverProcess.pid, port: serverProcess.port, readyPayload: ready };
   };
 
@@ -309,7 +310,7 @@ async function main() {
     } else {
       console.warn('      guard 부팅 증거 미확인 — readiness에서 판정합니다.');
     }
-    await waitForReady({ port, token });
+    await waitForReady({ port, token, child: serverProcess.child });
     console.log('      /api/ping ready 확인');
 
     console.log('[6/9] fixture 직접 seed (임시 osoo.db)');

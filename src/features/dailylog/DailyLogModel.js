@@ -11,6 +11,12 @@ function getApiPrefix(templateName) {
 }
 
 export const DailyLogModel = {
+    // HWP 자동화 엔진과 양식만 숨김으로 준비한다. 일지 데이터 바인딩·파일 생성은
+    // 실제 출력 요청에서만 수행한다.
+    async warmUpHwp() {
+        return apiClient.post('/api/daily-work-log/warmup-hwp', {}, { timeout: 5000 });
+    },
+
     async fetchAllData(date) {
         const [flows, medicines, waterQuality, facilities] = await Promise.all([
             apiClient.get('/api/flows', { date }),

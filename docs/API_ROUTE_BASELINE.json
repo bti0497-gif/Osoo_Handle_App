@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 155,
-  "digest": "21be91ae0563b69608a5ae7fb0f7ef5bd7004e0e0f1c077d31b2997e2b575115",
+  "endpointCount": 156,
+  "digest": "69075aab6dcb897cc985fe434abaa21482fd48c631dfaed36d15d0ec60ee8cfa",
   "endpoints": [
     {
       "method": "GET",
@@ -369,6 +369,14 @@
       "module": "./routes/dailyWorkLogRoutes.cjs",
       "tier": 2,
       "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/daily-work-log/warmup-hwp",
+      "module": "./routes/dailyWorkLogRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
       "syncWatch": false
     },
     {

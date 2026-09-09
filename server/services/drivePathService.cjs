@@ -261,6 +261,18 @@ function managementPhotoName(date, siteName, itemLabel, index = 0, ext = '.jpg')
   return `${parts.join('_')}${normalizedExt.toLowerCase()}`;
 }
 
+/**
+ * 슬러지 반출사진의 촬영/보조 시각을 포함한 관리사진 파일명.
+ * 형식: {date}_{HHmmss}_{현장명}_슬러지반출[-중복번호].jpg
+ */
+function sludgeManagementPhotoName(date, siteName, takenAt, collisionIndex = 0, ext = '.jpg') {
+  const normalizedExt = String(ext || '.jpg').startsWith('.') ? String(ext || '.jpg') : `.${ext}`;
+  const timeMatch = String(takenAt || '').match(/(?:T|\s)(\d{2}):?(\d{2}):?(\d{2})/);
+  const time = timeMatch ? `${timeMatch[1]}${timeMatch[2]}${timeMatch[3]}` : '000000';
+  const collision = Number(collisionIndex) > 0 ? `-${Number(collisionIndex) + 1}` : '';
+  return `${date}_${time}_${sanitize(siteName)}_슬러지반출${collision}${normalizedExt.toLowerCase()}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // 5. exports
 // ─────────────────────────────────────────────────────────────────────
@@ -282,6 +294,7 @@ module.exports = {
 // ─────────────────────────────────────────────────────────────────────
   certificateFileName,
   managementPhotoName,
+  sludgeManagementPhotoName,
   waterAnalysisPhotoName,
   medicinePhotoName,         // 향후 구현
   sludgePhotoName,           // 향후 구현

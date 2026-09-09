@@ -188,7 +188,7 @@ async function findFileInFolder(parentFolderId, fileName) {
       `'${normalizedParentId}' in parents`,
       'trashed=false'
     ].join(' and '),
-    fields: 'files(id, name, webViewLink, webContentLink)',
+    fields: 'files(id, name, webViewLink, webContentLink, md5Checksum, createdTime)',
     spaces: 'drive',
     includeItemsFromAllDrives: true,
     supportsAllDrives: true,
@@ -213,6 +213,27 @@ async function getOrCreateFolderPath(rootFolderId, segments = []) {
   }
 
   return currentFolder;
+}
+
+async function listFilesInFolder(parentFolderId) {
+  const drive = getDriveClient();
+  if (!drive || !parentFolderId) return [];
+  const files = [];
+  let pageToken;
+  do {
+    const response = await drive.files.list({
+      q: [`'${String(parentFolderId).trim()}' in parents`, 'trashed=false'].join(' and '),
+      fields: 'nextPageToken, files(id, name, webViewLink, webContentLink, md5Checksum, createdTime)',
+      spaces: 'drive',
+      includeItemsFromAllDrives: true,
+      supportsAllDrives: true,
+      pageSize: 1000,
+      pageToken,
+    });
+    files.push(...(response.data.files || []));
+    pageToken = response.data.nextPageToken;
+  } while (pageToken);
+  return files;
 }
 
 async function reconcileManagementMonthFolder(parentFolderId, monthName) {
@@ -302,6 +323,7 @@ const exportedDriveService = {
   getOrCreateFolder,
   findFolderInFolder,
   findFileInFolder,
+  listFilesInFolder,
   getOrCreateFolderPath,
   findFolderPath,
   uploadBufferToFolder,

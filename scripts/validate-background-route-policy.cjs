@@ -21,6 +21,7 @@ const certificateModel = read('src/features/certificate/CertificateModel.js');
 const certificateViewModel = read('src/features/certificate/useCertificateViewModel.js');
 const apiClient = read('src/core/api/apiClient.js');
 const diagnosticLogService = read('server/services/diagnosticLogService.cjs');
+const syncService = read('src/features/auth/SyncService.js');
 
 assert.match(app, /BACKGROUND_IDLE_DELAY_MS\s*=\s*30\s*\*\s*60\s*\*\s*1000/);
 assert.match(app, /CERTIFICATE_CACHE_IDLE_DELAY_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/);
@@ -45,6 +46,11 @@ assert.match(fileTasks, /CREATE TABLE IF NOT EXISTS background_file_tasks/);
 assert.match(fileTasks, /WHERE status = 'running'/);
 assert.match(fileTasks, /ON CONFLICT\(dedupe_key\) DO UPDATE/);
 assert.match(bigQueryTrigger, /shouldContinue: \(\) => activityVersion === startedAtActivityVersion/);
+assert.match(
+  syncService,
+  /post\('\/api\/auth\/background-tasks\/run-data-sync', \{\}, \{ timeout: 300000 \}\)/,
+  'BigQuery 순차 동기화가 기본 30초 요청 제한으로 중단되면 안 됩니다.'
+);
 assert.doesNotMatch(bigQueryTrigger, /scheduleIdleSync/);
 assert.doesNotMatch(bigQueryTrigger, /function triggerSync/);
 assert.match(authRoutes, /const BACKGROUND_TASK_TYPES = new Set/);

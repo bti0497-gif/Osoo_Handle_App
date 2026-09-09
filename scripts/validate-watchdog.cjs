@@ -64,7 +64,7 @@ assert.ok(mainProcess.includes('emergency-recovery-request.json') && mainProcess
 assert.ok(watchdogSource.includes('TryReadEmergencyRecoveryRequest') && watchdogSource.includes('HandleEmergencyRecovery') && watchdogSource.includes('emergency-recovery'), 'watchdog does not process an explicit emergency recovery handoff');
 assert.ok(serverIndex.includes('setInterval(() =>') && serverIndex.includes('importWatchdogDiagnostics(db, appDataPath)'), 'watchdog diagnostics are not imported while the app remains running');
 assert.ok(serverIndex.includes('createServerPerformanceDiagnosticService') && serverIndex.includes('runtimePerformanceDiagnostics.middleware'), 'server event-loop and slow API diagnostics are not installed');
-assert.ok(serverIndex.includes('excelPdfServiceLoadMs') && serverIndex.includes('diagnosticServiceLoadMs'), 'server startup diagnostics do not identify slow core service loading');
+assert.ok(serverIndex.includes('coreServiceLoadMs') && serverIndex.includes('diagnosticServiceLoadMs'), 'server startup diagnostics do not identify slow core service loading');
 assert.ok(mainProcess.includes(".slice(-4_000)") && mainProcess.includes("appendElectronRecoveryDiagnostic('embedded-server-process'"), 'server process exit diagnostics do not retain the final stderr trail');
 
 const transientPolicy = createServerRecoveryPolicy({ transientGraceMs: 60_000, startupGraceMs: 120_000 });

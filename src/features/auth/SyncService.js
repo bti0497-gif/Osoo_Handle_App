@@ -60,7 +60,9 @@ export const SyncService = {
     },
 
     async runDataBackgroundSync() {
-        const result = await apiClient.post('/api/auth/background-tasks/run-data-sync', {});
+        // BigQuery는 테이블별로 순차 동기화하므로 전송 건수가 많으면 30초를 넘을 수 있다.
+        // 서버 작업이 정상 진행 중인데 렌더러만 먼저 중단해 재시도하는 일을 막는다.
+        const result = await apiClient.post('/api/auth/background-tasks/run-data-sync', {}, { timeout: 300000 });
         const paused = Boolean(result?.result?.results?.paused || result?.result?.reason === 'waiting-for-idle');
         if (result?.result?.error) throw new Error(result.result.error);
         if (paused) throw new Error('사용자 활동으로 데이터 동기화를 연기했습니다.');

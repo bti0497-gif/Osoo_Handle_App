@@ -1,9 +1,13 @@
 import { apiClient } from '../../core/api';
 
 export const DashboardModel = {
+    async fetchLocalSettings() {
+        return apiClient.get('/api/settings', { source: 'local' });
+    },
+
     /** 로컬 로그 행에 붙는 site_id는 주로 app_settings 기준이므로 대시보드 조회에 우선 사용 */
     async fetchAppSettingsSiteId() {
-        const res = await apiClient.get('/api/settings', { source: 'local' });
+        const res = await this.fetchLocalSettings();
         if (!res?.success || !res.settings) return null;
         const raw = res.settings.site_id;
         if (raw == null || String(raw).trim() === '') return null;

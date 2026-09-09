@@ -52,15 +52,29 @@ const ALLOWED_SYSTEM_ENV = [
 ];
 
 /** 잠깐 닫을 수 있는 포트를 하나 확보해 반환한다(경합 시 readiness/exit 감지로 처리). */
-function resolveFreePort() {
+async function resolveFreePort() {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const port = await probeFreeHttpPort();
+    if (port) return port;
+  }
+  throw new Error('HTTP 요청 가능한 임시 포트를 확보하지 못했습니다.');
+}
+
+function probeFreeHttpPort() {
   return new Promise((resolve, reject) => {
-    const probe = net.createServer();
+    const probe = require('http').createServer((_req, res) => res.end('diagnostic-port-probe'));
     probe.unref();
     probe.on('error', reject);
-    probe.listen(0, '127.0.0.1', () => {
+    probe.listen(0, '127.0.0.1', async () => {
       const address = probe.address();
       const port = typeof address === 'object' && address ? address.port : null;
-      probe.close(() => (port ? resolve(port) : reject(new Error('포트를 확보하지 못했습니다.'))));
+      let usable = false;
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(2000) });
+        usable = await response.text() === 'diagnostic-port-probe';
+      } catch (_) { /* fetch 차단 포트 또는 연결 실패: 다른 포트로 재시도 */ }
+      probe.close(() => resolve(usable ? port : null));
+      probe.closeAllConnections();
     });
   });
 }
@@ -91,6 +105,7 @@ function probeSqliteLoad(cwd) {
  * - 정보: 루트 사본(서버가 guard 리다이렉트로 우회하므로 게이트에서 제외, 상태만 기록).
  */
 function preflightAbi() {
+  require('./validation-environment.cjs').prepareSqlite();
   const runnerRoot = path.join(__dirname, '..');
   const probeRunner = probeSqliteLoad(runnerRoot);
   const rootPkgPath = path.join(PROJECT_ROOT, 'node_modules', 'better-sqlite3', 'package.json');
@@ -175,6 +190,7 @@ function startServer({ projectRoot, workspace, port, token }) {
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  child.on('error', (error) => { child.startError = error; });
   const record = (line) => {
     stdioStream.write(`${line}\n`);
   };
@@ -184,10 +200,13 @@ function startServer({ projectRoot, workspace, port, token }) {
 }
 
 /** /api/ping 이 { app:'osoo-handle-app', ready:true } 를 반환할 때까지 확인한다. */
-async function waitForReady({ port, token, timeoutMs = READINESS_TIMEOUT_MS }) {
+async function waitForReady({ port, token, child, timeoutMs = READINESS_TIMEOUT_MS }) {
   const deadline = Date.now() + timeoutMs;
   let lastError = '';
   while (Date.now() < deadline) {
+    if (child && (child.startError || child.exitCode !== null || child.signalCode !== null)) {
+      throw new Error(`SERVER_EXIT_BEFORE_READY: ${child.startError?.message || child.exitCode || child.signalCode || 'exit 0'}`);
+    }
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/ping`, {
         headers: { 'x-osoo-server-token': token },
@@ -203,7 +222,8 @@ async function waitForReady({ port, token, timeoutMs = READINESS_TIMEOUT_MS }) {
         lastError = `HTTP ${response.status}`;
       }
     } catch (error) {
-      lastError = error.message;
+      lastError = `${error.message}: ${error.cause?.code || error.cause?.message || ''}`;
+      if (error.cause?.message === 'bad port') throw new Error(`UNUSABLE_HTTP_PORT: ${port}`);
     }
     await new Promise((resolve) => setTimeout(resolve, READINESS_INTERVAL_MS));
   }

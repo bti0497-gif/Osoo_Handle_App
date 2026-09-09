@@ -1,6 +1,7 @@
 'use strict';
 
 const os = require('os');
+const { performance } = require('perf_hooks');
 
 const DEFAULT_SAMPLE_INTERVAL_MS = 1_000;
 const DEFAULT_EVENT_LOOP_WARN_MS = 2_000;
@@ -8,6 +9,23 @@ const DEFAULT_EVENT_LOOP_CRITICAL_MS = 10_000;
 const DEFAULT_SLOW_API_MS = 2_000;
 const DEFAULT_LOG_COOLDOWN_MS = 30_000;
 const SYSTEM_SUSPEND_GAP_MS = 5 * 60 * 1_000;
+const ROUTINE_BACKGROUND_SLOW_API_MS = 30_000;
+
+function shouldRecordSlowApiRequest(request, statusCode, durationMs, slowApiMs) {
+  // 성공한 유휴 작업은 사용자의 업무를 기다리게 하지 않는다. 특히 진단 업로드가
+  // 자기 자신의 느린 실행을 다시 기록하면 로그만 불어난다.
+  if (request.path === '/api/auth/background-tasks/run-diagnostic-sync' && statusCode < 400) return false;
+  if (request.path === '/api/auth/background-tasks/run-data-sync'
+    || request.path === '/api/auth/background-tasks/run-file-sync') {
+    return durationMs >= ROUTINE_BACKGROUND_SLOW_API_MS || statusCode >= 400;
+  }
+  // 조건부 요청(304)인 성적서 목록은 원격 Drive 응답 대기일 수 있으나, 짧은 지연을
+  // 현장 장애로 오인하지 않도록 장기 지연만 남긴다.
+  if (request.path === '/api/certificates' && statusCode === 304) {
+    return durationMs >= ROUTINE_BACKGROUND_SLOW_API_MS;
+  }
+  return durationMs >= slowApiMs;
+}
 
 function round(value, digits = 1) {
   const scale = 10 ** digits;
@@ -57,7 +75,23 @@ function createServerPerformanceDiagnosticService({
   let lastResourcePressureLogAt = 0;
   let latestEventLoopLagMs = 0;
   let lastCompletedRequest = null;
+  let previousMonotonicAt = performance.now();
+  let previousWallAt = Date.now();
+  let latestLagObservedAt = null;
+  const recentSamples = [];
+  const recentCompletedRequests = [];
   const activeRequests = new Map();
+  const pushBounded = (list, value, limit) => {
+    list.push(value);
+    if (list.length > limit) list.shift();
+  };
+  const evidenceSnapshot = () => ({
+    diagnosticRevision: 2,
+    recentSamples: recentSamples.slice(),
+    recentCompletedRequests: recentCompletedRequests.slice(),
+    latestLagObservedAt,
+    observationLimit: 'in-process sampling resumes after a stall; correlated requests are not proof of its cause',
+  });
 
   const writeDiagnostic = (event) => {
     try {
@@ -88,14 +122,26 @@ function createServerPerformanceDiagnosticService({
     expectedTickAt = Date.now() + sampleIntervalMs;
     previousCpuMeasuredAt = Date.now();
     previousCpuUsage = process.cpuUsage();
+    previousMonotonicAt = performance.now();
+    previousWallAt = Date.now();
     eventLoopTimer = setInterval(() => {
+      try {
       const now = Date.now();
+      const monotonicNow = performance.now();
+      const monotonicElapsedMs = Math.max(1, monotonicNow - previousMonotonicAt);
+      const clockDeltaMs = round((now - previousWallAt) - monotonicElapsedMs);
+      previousMonotonicAt = monotonicNow;
+      previousWallAt = now;
       const wallElapsedMs = Math.max(1, now - previousCpuMeasuredAt);
       const cpuDelta = process.cpuUsage(previousCpuUsage);
       const cpuUsedMs = (cpuDelta.user + cpuDelta.system) / 1_000;
       const cpuPercent = round((cpuUsedMs / wallElapsedMs) * 100, 1);
       const lagMs = Math.max(0, now - expectedTickAt);
       latestEventLoopLagMs = lagMs;
+      latestLagObservedAt = new Date(now).toISOString();
+      for (const request of activeRequests.values()) {
+        request.maxObservedEventLoopLagMs = Math.max(request.maxObservedEventLoopLagMs, lagMs);
+      }
       expectedTickAt = now + sampleIntervalMs;
       previousCpuMeasuredAt = now;
       previousCpuUsage = process.cpuUsage();
@@ -122,11 +168,27 @@ function createServerPerformanceDiagnosticService({
             activeRequests: activeRequestSnapshot(),
             lastCompletedRequest,
             memory: memorySnapshot(),
+            monotonicElapsedMs: round(monotonicElapsedMs),
+            wallClockDeltaMs: clockDeltaMs,
+            ...evidenceSnapshot(),
           },
         });
       }
 
       const memory = memorySnapshot();
+      const oldestRequest = activeRequestSnapshot()[0];
+      pushBounded(recentSamples, {
+        at: new Date(now).toISOString(), lagMs, cpuPercent,
+        monotonicElapsedMs: round(monotonicElapsedMs), wallClockDeltaMs: clockDeltaMs,
+        rssBytes: memory.process.rssBytes, heapUsedBytes: memory.process.heapUsedBytes,
+        systemFreeBytes: memory.system.freeBytes, systemFreePercent: memory.system.freePercent,
+        activeRequestCount: activeRequests.size,
+        oldestRequest: oldestRequest ? {
+          method: oldestRequest.method,
+          path: oldestRequest.path.slice(0, 160),
+          elapsedMs: oldestRequest.elapsedMs,
+        } : null,
+      }, 15);
       if (memory.system.freePercent !== null
         && memory.system.freePercent < 10
         && now - lastResourcePressureLogAt >= 30 * 60 * 1_000) {
@@ -142,8 +204,13 @@ function createServerPerformanceDiagnosticService({
             serverUptimeSeconds: Math.round(process.uptime()),
             activeRequestCount: activeRequests.size,
             memory,
+            ...evidenceSnapshot(),
           },
         });
+      }
+      } catch (error) {
+        // Diagnostics must never interrupt business processing.
+        console.warn('[server-performance] sampling failed:', error.message);
       }
     }, sampleIntervalMs);
     eventLoopTimer.unref?.();
@@ -158,6 +225,8 @@ function createServerPerformanceDiagnosticService({
     const request = {
       id,
       startedAt,
+      startedMonotonicAt: performance.now(),
+      maxObservedEventLoopLagMs: 0,
       method: String(req.method || '').toUpperCase(),
       path: pathName,
       siteId: String(req.get('x-osoo-site-id') || req.get('x-user-site') || '').slice(0, 80) || null,
@@ -177,8 +246,11 @@ function createServerPerformanceDiagnosticService({
         durationMs,
         completion,
         completedAt: new Date().toISOString(),
+        siteId: request.siteId,
+        monotonicDurationMs: round(performance.now() - request.startedMonotonicAt),
       };
-      if (durationMs < slowApiMs) return;
+      pushBounded(recentCompletedRequests, { ...lastCompletedRequest }, 8);
+      if (!shouldRecordSlowApiRequest(request, res.statusCode, durationMs, slowApiMs)) return;
 
       writeDiagnostic({
         level: durationMs >= eventLoopCriticalMs ? 'error' : 'warn',
@@ -196,6 +268,9 @@ function createServerPerformanceDiagnosticService({
           siteId: request.siteId,
           serverUptimeSeconds: Math.round(process.uptime()),
           eventLoopLagMs: latestEventLoopLagMs,
+          maxObservedEventLoopLagMs: request.maxObservedEventLoopLagMs,
+          monotonicDurationMs: lastCompletedRequest.monotonicDurationMs,
+          ...evidenceSnapshot(),
           activeRequestCount: activeRequests.size,
           memory: memorySnapshot(),
         },
@@ -224,6 +299,7 @@ function createServerPerformanceDiagnosticService({
       lastCompletedRequest,
       eventLoopLagMs: latestEventLoopLagMs,
       memory: memorySnapshot(),
+      ...evidenceSnapshot(),
       ...details,
     },
   });
@@ -232,6 +308,10 @@ function createServerPerformanceDiagnosticService({
     middleware,
     recordFatal,
     start,
+    stop: () => {
+      if (eventLoopTimer) clearInterval(eventLoopTimer);
+      eventLoopTimer = null;
+    },
   };
 }
 

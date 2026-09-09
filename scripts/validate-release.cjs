@@ -561,6 +561,7 @@ function validateRegressionContracts() {
   const dashboardModelPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'DashboardModel.js');
   const dashboardViewPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'DashboardView.jsx');
   const dashboardViewModelPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'useDashboardViewModel.js');
+  const inventoryLevelUtilsPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'inventoryLevelUtils.js');
   const inventoryLevelWidgetPath = path.join(BASE_DIR, 'src', 'features', 'dashboard', 'widgets', 'InventoryLevelWidget.jsx');
   const medicineInRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineInRoutes.cjs');
   const medicineRegisterRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'medicineRegisterRoutes.cjs');
@@ -684,6 +685,7 @@ function validateRegressionContracts() {
   const dashboardModelText = readText(dashboardModelPath);
   const dashboardViewText = readText(dashboardViewPath);
   const dashboardViewModelText = readText(dashboardViewModelPath);
+  const inventoryLevelUtilsText = readText(inventoryLevelUtilsPath);
   const inventoryLevelWidgetText = readText(inventoryLevelWidgetPath);
   const medicineInRoutesText = readText(medicineInRoutesPath);
   const medicineRegisterRoutesText = readText(medicineRegisterRoutesPath);
@@ -1188,14 +1190,25 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    dashboardModelText.includes("apiClient.get('/api/settings/medicine-defaults')") &&
-      dashboardModelText.includes("apiClient.get('/api/settings/kit-defaults')") &&
-      dashboardViewModelText.includes('medicineDefaultsResponse') &&
-      dashboardViewModelText.includes('kitDefaultsResponse') &&
-      inventoryLevelWidgetText.includes('item.inventory / item.defaultAmount') &&
+    dashboardModelText.includes('fetchLocalSettings') &&
+      dashboardViewModelText.includes('getActiveConfiguredInventoryNames') &&
+      dashboardViewModelText.includes('localSettingsResponse?.configItems') &&
+      dashboardViewModelText.includes("getActiveConfiguredInventoryNames(configItems, 'medicine')") &&
+      dashboardViewModelText.includes("getActiveConfiguredInventoryNames(configItems, 'kit')") &&
+      !dashboardViewModelText.includes('fetchMedicineDefaults') &&
+      !dashboardViewModelText.includes('fetchKitDefaults') &&
+      inventoryLevelWidgetText.includes('item.inventory / item.referenceAmount') &&
+      inventoryLevelWidgetText.includes('activeMedicineNames || []') &&
+      inventoryLevelWidgetText.includes('activeKitNames || []') &&
+      inventoryLevelUtilsText.includes('getActiveConfiguredInventoryNames') &&
+      inventoryLevelUtilsText.includes('Number(item?.is_active) !== 1') &&
+      inventoryLevelUtilsText.includes('allowedNames.has(name)') &&
+      inventoryLevelUtilsText.includes('const purchase = Number(row?.purchase_amount)') &&
+      inventoryLevelUtilsText.includes('latestPurchase') &&
+      inventoryLevelUtilsText.includes('referenceAmount: entry.latestPurchase?.amount || 0') &&
       !inventoryLevelWidgetText.includes('Math.max(1, ...items.map((i) => i.inventory))'),
-    '대시보드 품목별 기본구매량 재고율 계약 유지',
-    '대시보드 재고율이 설정 기본구매량이 아닌 품목 간 최대 재고를 기준으로 계산될 수 있습니다'
+    '대시보드 현장별 활성 품목·최근 실제 구매량 재고율 계약 유지',
+    '대시보드가 현장별 활성 품목 또는 품목별 직전 실제 구매량을 기준으로 계산되지 않을 수 있습니다'
   );
 
   checkSource(
@@ -2389,7 +2402,7 @@ function validateEncodingAndKorean() {
           .replace(/[\u0370-\u03FF]/g, '') // 그리스 문자(φ, Δ, λ 등) 허용
           .replace(/[₀₁₂₃₄₅₆₇₈₉⁰¹²³⁴⁵⁶⁷⁸⁹⁻₋－]/g, '') // 화학식/숫자 정규화용 위·아래첨자 허용
           .replace(/[\uD83C\uDFED\u23F8]/g, '') // 🏭, ⏸ 이모지 허용
-          .replace(/[─—→←↔–—⚠️✅❌⚠✓✗ℹ🔍▶║═⭐●│┌┐└┘├┤┬┴┼※≈·³✚▲▼📷➕📸🛠⚙⚙️🔧⚡💡📊📈📉📝📂📁📎🔗🗑📅⏰🕰⏱🧭📍🗺💾📥📤📡🔊🔔🏷📌🔎“”「」…↳💬×✕✖‹›]/g, ''); // 특수 문자 및 이모지 허용
+          .replace(/[─—→←↔–—⚠️✅❌⚠✓✗ℹ🔍▶║═⭐●│┌┐└┘├┤┬┴┼※§≈·³✚▲▼📷➕📸🛠⚙⚙️🔧⚡💡📊📈📉📝📂📁📎🔗🗑📅⏰🕰⏱🧭📍🗺💾📥📤📡🔊🔔🏷📌🔎“”「」…↳💬×✕✖‹›]/g, ''); // 특수 문자 및 이모지 허용
         if (garbledPattern.test(cleanLine)) {
           isGarbled = true;
         }
