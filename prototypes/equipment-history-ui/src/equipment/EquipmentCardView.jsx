@@ -1,6 +1,6 @@
 // 장비이력카드 화면. 렌더링만 담당하고 상태/로직은 useEquipmentViewModel을 경유한다.
 // 본앱 이식 시 이 파일에서 바뀌는 것은 useDialog import 경로뿐이다.
-import React, { useState } from 'react';
+import React from 'react';
 import { useDialog } from '../dialog';
 import { useEquipmentViewModel } from './useEquipmentViewModel';
 import EquipmentEditorModal from './EquipmentEditorModal';
@@ -50,7 +50,6 @@ function StatCard({ label, value, tone }) {
 export default function EquipmentCardView({ processMethod = 'A2O' }) {
   const { showAlert, showConfirm } = useDialog();
   const vm = useEquipmentViewModel({ processMethod });
-  const [bannerOpen, setBannerOpen] = useState(true);
 
   const handleSaveEquipment = async () => {
     try {
@@ -129,25 +128,14 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
 
   return (
     <div className="equipment-feature-root">
-      {bannerOpen ? (
-        <div className="equipment-preview-banner">
-          <span className="material-icons">visibility</span>
-          <p>장비이력카드 UI 확인 단계입니다. 화면에서 변경한 내용은 서버에 저장되지 않으며 새로고침 시 초기화됩니다.</p>
-          <button type="button" onClick={() => setBannerOpen(false)} aria-label="안내 닫기">×</button>
-        </div>
-      ) : null}
-
       <div className="equipment-page">
         <aside className="equipment-list-panel">
           <header>
-            <div>
+            <div className="equipment-panel-title">
               <h2>장비 목록</h2>
-              <p>
-                현장 설비 {vm.items.length}대
-                <span className="equipment-method-badge">{processMethod}</span>
-              </p>
+              <span className="equipment-method-badge">{processMethod}</span>
             </div>
-            <button type="button" className="equipment-add-button" title="장비 추가" onClick={vm.openCatalog}><span className="material-icons">add</span></button>
+            <button type="button" className="equipment-manage-button" onClick={vm.openCatalog}>장비목록 관리</button>
           </header>
           <label className="equipment-list-search">
             <span className="material-icons">search</span>
@@ -194,10 +182,7 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
                     className={`equipment-list-item ${vm.selected?.id === item.id ? 'active' : ''}`}
                     onClick={() => vm.selectEquipment(item.id)}
                   >
-                    <span>
-                      <b>{item.name}</b>
-                      <small>{item.managementNo}{vm.groupBy === 'type' ? ` · ${item.location}` : ''}</small>
-                    </span>
+                    <b>{item.name}</b>
                     <i className={`equipment-status ${STATUS_CLASS[item.status] || 'normal'}`}>{item.status}</i>
                   </button>
                 ))}
