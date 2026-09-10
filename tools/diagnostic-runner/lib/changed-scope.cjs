@@ -34,8 +34,10 @@ const RULES = [
   { test: /src\/features\/operation\//, scenarios: ['operation-status'] },
   { test: /server\/routes\/operationStatusRoutes\.cjs/, scenarios: ['operation-status'] },
 
-  { test: /src\/features\/(facility|equipment)\//, scenarios: ['facility', 'menus-light'] },
+  { test: /src\/features\/equipment\//, scenarios: ['equipment-card'] },
+  { test: /src\/features\/facility\//, scenarios: ['facility', 'equipment-card'] },
   { test: /server\/routes\/facilityRoutes\.cjs/, scenarios: ['facility', 'menus-light'] },
+  { test: /server\/routes\/equipmentRoutes\.cjs|server\/services\/equipment\//, scenarios: ['equipment-card'] },
 
   { test: /src\/features\/board\//, scenarios: ['board'] },
   { test: /server\/routes\/boardRoutes\.cjs|server\/services\/[^]*board/, scenarios: ['board'] },

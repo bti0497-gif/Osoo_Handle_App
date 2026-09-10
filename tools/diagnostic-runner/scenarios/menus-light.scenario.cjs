@@ -9,7 +9,7 @@ const { pathToFileURL } = require('url');
  *   app_settings를 변경하지 않는다)
  * - 성적서: GET /api/certificates 목록 조회
  * - 대시보드: 주요 업무별 데이터 GET 집계(전용 라우트 없음 — 기존 엔드포인트 조합)
- * - 장비이력카드: contract-pending 참고 검사(계획 §3 — 자동 PASS 아님)
+ * 장비이력카드는 equipment-card 전용 시나리오가 검증한다.
  */
 
 module.exports = {
@@ -86,12 +86,5 @@ module.exports = {
         '팩(PAC) 재고가 별도 응집제 이력과 섞였습니다.', 'DASHBOARD_PAC_ALIAS_MIXED', pac);
     });
 
-    await ctx.step('equipment-card-reference', async () => {
-      // 장비이력카드는 현재 프로토타입 화면으로 서버 라우트가 없다(계획 문서 §3 contract-pending).
-      // 404를 기대한다: 백엔드 계약이 추가되면 이 단계가 실패하며 implemented 승격을 요구한다.
-      const response = await ctx.request('GET', '/api/equipment-assets', {});
-      ctx.assert(response.status === 404, '장비이력카드 백엔드 계약 상태가 변했습니다(HTTP ' + response.status + '). contract-pending 판정을 갱신하고 정식 시나리오를 작성하세요.', 'EQUIPMENT_CONTRACT_CHANGED', { status: response.status });
-      return { note: 'contract-pending(라우트 없음, 404 기대)' };
-    });
   },
 };

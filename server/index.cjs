@@ -547,6 +547,8 @@ function registerLazyApplication() {
   // --- Static file serving ---
   app.use('/uploads', express.static(path.join(appDataPath, 'uploads')));
   app.use('/사진관리', express.static(path.join(appDataPath, '사진관리')));
+  // 장비이력 사진은 URL 인코딩/정규화 차이에 영향받지 않는 전용 ASCII 경로도 제공한다.
+  app.use('/equipment-photos', express.static(path.join(appDataPath, '사진관리', '장비이력')));
 
   // --- Tier 1: registry 기반 lazy wrapper 등록 ---
   const tier1Entries = routeRegistry.filter(r => r.tier === 1);

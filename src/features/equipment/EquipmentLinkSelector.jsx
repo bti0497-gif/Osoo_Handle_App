@@ -1,20 +1,21 @@
 import React, { useMemo, useState } from 'react';
-import { EQUIPMENT_PREVIEW_ITEMS } from './equipmentPreviewData';
+import { useEquipmentOptions } from './useEquipmentOptions';
 import './equipment.css';
 
 export default function EquipmentLinkSelector({ value = [], onChange }) {
+  const { items, loading, error } = useEquipmentOptions();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const selected = useMemo(
-    () => EQUIPMENT_PREVIEW_ITEMS.filter((item) => value.includes(item.id)),
-    [value],
+    () => items.filter((item) => value.includes(item.id)),
+    [items, value],
   );
   const candidates = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    if (!keyword) return EQUIPMENT_PREVIEW_ITEMS;
-    return EQUIPMENT_PREVIEW_ITEMS.filter((item) => [item.managementNo, item.name, item.location, item.category3]
+    if (!keyword) return items;
+    return items.filter((item) => [item.managementNo, item.name, item.location, item.category3]
       .some((field) => String(field || '').toLowerCase().includes(keyword)));
-  }, [query]);
+  }, [items, query]);
 
   const toggle = (id) => {
     onChange?.(value.includes(id) ? value.filter((itemId) => itemId !== id) : [...value, id]);
@@ -58,6 +59,8 @@ export default function EquipmentLinkSelector({ value = [], onChange }) {
               <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="관리번호, 설비명, 위치 검색" />
             </div>
             <div className="equipment-picker-list">
+              {loading ? <p className="equipment-picker-none">장비 목록을 불러오는 중입니다.</p> : null}
+              {error ? <p className="equipment-picker-none">장비 목록을 불러오지 못했습니다.</p> : null}
               {candidates.map((item) => {
                 const checked = value.includes(item.id);
                 return (
@@ -68,7 +71,7 @@ export default function EquipmentLinkSelector({ value = [], onChange }) {
                   </button>
                 );
               })}
-              {!candidates.length ? <p className="equipment-picker-none">검색 결과가 없습니다.</p> : null}
+              {!loading && !error && !candidates.length ? <p className="equipment-picker-none">검색 결과가 없습니다.</p> : null}
             </div>
             <footer>
               <span>{value.length}대 선택</span>

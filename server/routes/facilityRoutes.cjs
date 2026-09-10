@@ -60,9 +60,37 @@ function openFolder(folderPath) {
 module.exports = function registerFacilityRoutes(db, appDataPath) {
   const selectWorkRecords = `
     SELECT wr.*,
-           (SELECT COUNT(*) FROM work_record_photos p WHERE p.work_record_id = wr.id) AS photo_count
+           (SELECT COUNT(*) FROM work_record_photos p WHERE p.work_record_id = wr.id) AS photo_count,
+           (SELECT GROUP_CONCAT(l.equipment_id) FROM work_record_equipment_links l
+             WHERE l.work_record_id = wr.id) AS linked_equipment_ids
     FROM work_records wr
   `;
+
+  // 장비 연결(work_record_equipment_links) diff-upsert (계획서 §3-7).
+  // 링크 행은 동기화 북키핑을 위해 숫자 id와 site_id를 직접 소유한다.
+  function replaceWorkRecordLinks(recordId, siteId, equipmentIds) {
+    if (!Array.isArray(equipmentIds)) return;
+    const desired = [...new Set(equipmentIds.map((value) => String(value || '').trim()).filter(Boolean))];
+    const validIds = new Set(
+      db.prepare('SELECT id FROM equipment_assets WHERE site_id = ?').all(siteId).map((row) => row.id),
+    );
+    const existing = db.prepare(
+      'SELECT equipment_id FROM work_record_equipment_links WHERE work_record_id = ?',
+    ).all(recordId).map((row) => row.equipment_id);
+    const toDelete = existing.filter((equipmentId) => !desired.includes(equipmentId));
+    const toInsert = desired.filter((equipmentId) => !existing.includes(equipmentId) && validIds.has(equipmentId));
+    const deleteLink = db.prepare(
+      'DELETE FROM work_record_equipment_links WHERE work_record_id = ? AND equipment_id = ?',
+    );
+    const insertLink = db.prepare(`
+      INSERT INTO work_record_equipment_links (id, work_record_id, equipment_id, site_id, created_at)
+      VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM work_record_equipment_links), ?, ?, ?, ?)
+    `);
+    db.transaction(() => {
+      toDelete.forEach((equipmentId) => deleteLink.run(recordId, equipmentId));
+      toInsert.forEach((equipmentId) => insertLink.run(recordId, equipmentId, siteId, new Date().toISOString()));
+    })();
+  }
 
   router.get('/api/work-records', (req, res) => {
     const query = String(req.query?.q || '').trim();
@@ -80,8 +108,20 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
 
   router.post('/api/work-records', (req, res) => {
     try {
-      const { date, location, title, content, notes } = req.body || {};
+      const { date, location, title, content, notes, equipmentIds } = req.body || {};
       if (!date) return res.status(400).json({ success: false, message: '날짜가 필요합니다.' });
+      const siteId = String(req.siteContext?.siteId || '').trim();
+      // 하루 1건 계약(UNIQUE(site_id, date)): 중복 저장은 409로 안내한다.
+      const duplicate = db.prepare(
+        'SELECT id FROM work_records WHERE site_id = ? AND date = ?',
+      ).get(siteId, date);
+      if (duplicate) {
+        return res.status(409).json({
+          success: false,
+          code: 'WORK_RECORD_DUPLICATE',
+          message: '해당 날짜에 이미 작성한 업무 기록이 있습니다. 기존 기록을 수정해 주세요.',
+        });
+      }
       const metadata = getCurrentRecordMetadata(db, req.body);
       const info = db.prepare(`
         INSERT INTO work_records
@@ -99,8 +139,10 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
         metadata.createdAt,
         metadata.lastModified
       );
+      replaceWorkRecordLinks(info.lastInsertRowid, metadata.siteId, equipmentIds);
       res.json({ success: true, id: info.lastInsertRowid });
     } catch (error) {
+      console.error('[facility] 업무기록 저장 실패:', error.stack || error.message);
       res.status(500).json({ success: false, message: error.message });
     }
   });
@@ -110,7 +152,7 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
       const id = normalizeRecordId(req.params.id);
       if (!id) return res.status(400).json({ success: false, message: '기록 번호가 올바르지 않습니다.' });
       const siteId = String(req.siteContext?.siteId || '').trim();
-      const { date, location, title, content, notes } = req.body || {};
+      const { date, location, title, content, notes, equipmentIds } = req.body || {};
       db.prepare(`
         UPDATE work_records
         SET date = ?, location = ?, title = ?, content = ?, notes = ?, last_modified = ?
@@ -125,6 +167,7 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
         id,
         siteId
       );
+      replaceWorkRecordLinks(id, siteId, equipmentIds);
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });

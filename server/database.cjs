@@ -295,6 +295,18 @@ db.exec(`
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (work_record_id) REFERENCES work_records(id) ON DELETE CASCADE
   );
+  CREATE TABLE IF NOT EXISTS facility_log_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    facility_log_id INTEGER NOT NULL,
+    site_id TEXT,
+    original_name TEXT,
+    stored_name TEXT NOT NULL,
+    relative_path TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    is_synced INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (facility_log_id) REFERENCES facility_logs(id) ON DELETE CASCADE
+  );
   CREATE TABLE IF NOT EXISTS app_diagnostic_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -917,12 +929,48 @@ db.transaction(() => {
 })();
 
 // --- Sync Columns Migration (BigQuery Synchronization) ---
-// 동기화 대상 테이블 목록
+// 동기화 대상 테이블 목록.
+// 장비 테이블(equipment_assets 등 4종)은 날짜 축이 없어 범용 동기화기와 계약이 달라
+// services/equipment/equipmentSyncService.cjs의 전용 동기화를 사용한다(§4-4-4).
 const syncTables = ['flow_readings', 'medicine_logs', 'water_quality', 'qntech_water_quality', 'kit_logs', 'facility_logs', 'operation_status_logs'];
 const inputStatusTables = ['flow_readings', 'medicine_logs', 'qntech_water_quality', 'kit_logs'];
 const syncDefaults = db.prepare('SELECT site_name, manager_name FROM app_settings WHERE id = 1').get() || {};
 const defaultSiteName = syncDefaults.site_name || 'Unknown Site';
 const defaultAuthor = syncDefaults.manager_name || 'Unknown Author';
+
+// --- Equipment History Migration (장비이력카드, docs/EQUIPMENT_CARD_DEVELOPMENT_PLAN.md §4) ---
+// facility_logs: 장비 연결 + 이력 분류 컬럼.
+// 동기화 식별은 site_id + local_id(=facility_logs.id, INTEGER) 계약을 사용한다(§4-4-3).
+ensureColumn('facility_logs', 'equipment_id', 'TEXT');
+ensureColumn('facility_logs', 'type', 'TEXT');
+ensureColumn('facility_logs', 'contact', 'TEXT');
+ensureColumn('facility_logs', 'completed_at', 'TEXT');
+// equipment_assets: 목록 표시 여부는 상태가 아니라 is_visible로 관리한다(§4-4-1).
+ensureColumn('equipment_assets', 'is_visible', 'INTEGER DEFAULT 1');
+// work_record_equipment_links: 동기화 북키핑(is_synced)이 id 기준이라 숫자 id를 보장한다.
+ensureColumn('work_record_equipment_links', 'id', 'INTEGER');
+db.prepare(`
+  UPDATE work_record_equipment_links
+  SET id = rowid
+  WHERE id IS NULL OR id = 0
+`).run();
+db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_work_record_equipment_links_id ON work_record_equipment_links (id)').run();
+// 장비 전용 동기화(equipmentSyncService) 계약 컬럼: 현장 격리와 전송 상태를 테이블이 직접 소유한다.
+ensureColumn('equipment_assets', 'is_synced', 'INTEGER DEFAULT 0');
+ensureColumn('equipment_asset_photos', 'is_synced', 'INTEGER DEFAULT 0');
+ensureColumn('equipment_asset_photos', 'site_id', 'TEXT');
+ensureColumn('work_record_equipment_links', 'is_synced', 'INTEGER DEFAULT 0');
+ensureColumn('work_record_equipment_links', 'site_id', 'TEXT');
+db.prepare(`
+  UPDATE equipment_asset_photos
+  SET site_id = (SELECT e.site_id FROM equipment_assets e WHERE e.id = equipment_asset_photos.equipment_id)
+  WHERE site_id IS NULL OR TRIM(site_id) = ''
+`).run();
+db.prepare(`
+  UPDATE work_record_equipment_links
+  SET site_id = (SELECT wr.site_id FROM work_records wr WHERE wr.id = work_record_equipment_links.work_record_id)
+  WHERE site_id IS NULL OR TRIM(site_id) = ''
+`).run();
 
 syncTables.forEach(tableName => {
   const cols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
@@ -1165,6 +1213,8 @@ db.prepare('CREATE INDEX IF NOT EXISTS idx_water_quality_site_date ON water_qual
 db.prepare('CREATE INDEX IF NOT EXISTS idx_qntech_water_quality_site_date ON qntech_water_quality (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_kit_logs_site_date ON kit_logs (site_id, date)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_facility_logs_site_date ON facility_logs (site_id, date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_facility_logs_equipment ON facility_logs (equipment_id, date)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_facility_log_photos_log ON facility_log_photos (facility_log_id, sort_order, id)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_work_records_date ON work_records (date, id)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_equipment_assets_site_name ON equipment_assets (site_id, equipment_name)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_equipment_photos_equipment ON equipment_asset_photos (equipment_id, sort_order, id)').run();

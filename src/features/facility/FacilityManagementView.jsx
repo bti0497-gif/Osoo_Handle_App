@@ -37,7 +37,7 @@ const FacilityManagementView = ({ currentUser }) => {
             title: row.title || '',
             content: row.content || '',
             photo_count: Number(row.photo_count) || 0,
-            equipmentIds: [],
+            equipmentIds: String(row.linked_equipment_ids || '').split(',').filter(Boolean),
         });
         setDraftPhotos([]);
         setEditorOpen(true);
@@ -69,6 +69,7 @@ const FacilityManagementView = ({ currentUser }) => {
                 location: '',
                 notes: '',
                 author: currentUser?.name || '',
+                equipmentIds: draft.equipmentIds,
             };
             let recordId = draft.id;
             if (recordId) {

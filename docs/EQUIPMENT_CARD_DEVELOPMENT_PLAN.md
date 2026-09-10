@@ -203,10 +203,11 @@ Phase 1 점검에서 확정된 5가지 설계. Phase 2 구현은 이 기준으�
    JSON 경로 저장 방식은 비권장으로 배제한다.
 3. **BigQuery 동기화 자연키 충돌 해소**
    - 기존 자연키(site_id+date+location+facility_name)는 같은 날·같은 장비에 점검과 수리가
-     함께 기록되면 충돌한다. `facility_logs.local_id TEXT`(신규 행 UUID)를 추가하고
-     원격 식별 기준을 `site_id + local_id`로 변경한다.
-   - 기존 행 호환: 과거 행은 최초 동기화 시 local_id를 채우는 마이그레이션을 함께 진행하고,
-     이중 기준 전환 기간의 충돌 규칙을 Phase 2 구현 전 확정한다.
+     함께 기록되면 충돌한다. SQLite에 별도 UUID 컬럼을 추가하지 않고 기존 정수 PK인
+     `facility_logs.id`를 BigQuery의 `local_id INTEGER`로 전송하여 원격 식별 기준을
+     `site_id + local_id`로 변경한다.
+   - 기존 원격 행 호환: `local_id`가 없는 과거 행은 기존 자연키도 함께 비교하는 전환 규칙으로
+     중복 편입을 막는다. 재해복구 시에는 `local_id`를 로컬 `id`로 복원해 사진 FK를 보존한다.
 4. **장비 데이터 재해복구 경로**
    - `equipment_assets`, `equipment_asset_photos`, `work_record_equipment_links`, `facility_log_photos`를
      BigQuery 동기화(syncTables) 또는 주기적 내보내기 대상에 추가한다.
@@ -332,7 +333,7 @@ uploadEquipmentPhotos(id, files)  → POST /api/equipment/:id/photos
 
 ### Phase 2 — 백엔드(스키마 변경은 본 계획 승인 + §4-4 확정 설계 기준)
 
-1. `database.cjs`: facility_logs 컬럼 4종 + `local_id` + `equipment_assets.is_visible` + 인덱스 (§4-2, §4-4)
+1. `database.cjs`: facility_logs 컬럼 4종 + `equipment_assets.is_visible` + 인덱스 (§4-2, §4-4)
 2. `facility_log_photos` 테이블 신설 + 이력 사진 저장/조회/삭제 라우트 (§4-4-2)
 3. `equipmentRoutes.cjs` 신규 + routeRegistry 등록 + api-spec.cjs 갱신
 4. `EquipmentModel.js` 내부를 apiClient로 교체(시그니처 불변). 공법은 기본설정(app_settings.method)에서 주입

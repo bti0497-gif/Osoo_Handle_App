@@ -202,6 +202,31 @@ const apiSpec = {
     ],
   },
 
+  equipment: {
+    tier: 1,
+    path: '/api/equipment',
+    endpoints: [
+      { method: 'GET', path: '', description: '현장 장비 목록 및 최초 프로비저닝' },
+      { method: 'GET', path: '/meta', description: '장비 공법·표시 수 조회' },
+      { method: 'GET', path: '/next-management-no', description: '다음 관리번호 조회' },
+      { method: 'POST', path: '', description: '장비 등록' },
+      { method: 'PUT', path: '/:id', description: '장비 수정' },
+      { method: 'PUT', path: '/:id/status', description: '장비 상태 변경' },
+      { method: 'PUT', path: '/:id/visibility', description: '장비 목록 표시 여부 변경' },
+      { method: 'DELETE', path: '/:id', description: '미사용 장비 삭제' },
+      { method: 'POST', path: '/:id/photos', description: '장비 대표사진 등록' },
+      { method: 'GET', path: '/history', description: '장비 이력 조회' },
+      { method: 'POST', path: '/history', description: '장비 이력 등록' },
+      { method: 'PUT', path: '/history/:id', description: '장비 이력 수정' },
+      { method: 'DELETE', path: '/history/:id', description: '장비 이력 삭제' },
+      { method: 'GET', path: '/history/:id/photos', description: '장비 이력 사진 조회' },
+      { method: 'POST', path: '/history/:id/photos', description: '장비 이력 사진 등록' },
+      { method: 'DELETE', path: '/history/:id/photos/:photoId', description: '장비 이력 사진 삭제' },
+      { method: 'GET', path: '/work-records', description: '장비 연결 업무기록 조회' },
+      { method: 'POST', path: '/catalog', description: '장비 카탈로그 적용' },
+    ],
+  },
+
   system: {
     tier: 0,
     path: '/api',

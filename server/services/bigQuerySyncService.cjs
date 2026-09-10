@@ -190,9 +190,16 @@ const TABLE_MAPPINGS = {
     company: row.company,
     price: row.price,
     notes: row.notes,
+    equipment_id: row.equipment_id || null,
+    type: row.type || null,
+    contact: row.contact || null,
+    completed_at: row.completed_at || null,
+    photo_count: row.photo_count || 0,
     updated_at: row.last_modified,
     uploaded_at: new Date().toISOString()
   })
+  // 장비 테이블(equipment_assets 등 4종)은 services/equipment/equipmentSyncService.cjs의
+  // 전용 동기화를 사용한다(날짜 축 없음 + 사진은 메타데이터만, 원본은 Drive).
 };
 
 const TABLE_NATURAL_KEYS = {
@@ -201,7 +208,10 @@ const TABLE_NATURAL_KEYS = {
   qntech_water_quality: ['site_id', 'date', 'measurement_group', 'location', 'item_code'],
   kit_logs: ['site_id', 'date', 'kit_name'],
   operation_status_logs: ['site_id', 'date'],
-  facility_logs: ['site_id', 'date', 'location', 'facility_name'],
+  // 장비이력 계약(§4-4-3): 같은 날 같은 장비의 여러 이력 건 충돌을 피하기 위해
+  // site_id + local_id(=facility_logs.id, INTEGER)로 식별한다.
+  facility_logs: ['site_id', 'local_id'],
+  // 장비 테이블 4종은 equipmentSyncService 전용 동기화가 별도 식별 계약으로 처리한다.
 };
 
 const BIGQUERY_FIELD_TYPES = {
@@ -246,6 +256,11 @@ const BIGQUERY_FIELD_TYPES = {
   ph: 'FLOAT',
   do_value: 'FLOAT',
   svi: 'FLOAT',
+  // 장비이력카드 facility_logs 확장 컬럼 (§4-4)
+  equipment_id: 'STRING',
+  contact: 'STRING',
+  completed_at: 'STRING',
+  photo_count: 'INTEGER',
 };
 
 function quoteIdentifier(value) {
@@ -349,9 +364,20 @@ async function syncTable(tableName) {
     const columns = Object.keys(bqRows[0]);
     const columnList = columns.map(quoteIdentifier).join(', ');
     const naturalKeys = TABLE_NATURAL_KEYS[tableName] || ['local_id'];
-    const matchSql = naturalKeys
+    let matchSql = naturalKeys
       .map((key) => `T.${quoteIdentifier(key)} = S.${quoteIdentifier(key)}`)
       .join(' AND ');
+    // facility_logs 식별 계약 전환(§4-4-3): local_id가 없는 과거 원격 행은
+    // 기존 자연키(site_id+date+location+facility_name)로도 매치해 중복 편입을 막는다.
+    if (tableName === 'facility_logs') {
+      matchSql += ` OR (
+        T.local_id IS NULL
+        AND T.site_id = S.site_id
+        AND T.date = S.date
+        AND COALESCE(T.location, '') = COALESCE(S.location, '')
+        AND COALESCE(T.facility_name, '') = COALESCE(S.facility_name, '')
+      )`;
+    }
 
     await bq.query({
       query: `

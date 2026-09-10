@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 156,
-  "digest": "69075aab6dcb897cc985fe434abaa21482fd48c631dfaed36d15d0ec60ee8cfa",
+  "endpointCount": 174,
+  "digest": "8c0bebcb326b6f44c147813f311ac9e300ce94d6fc00eefcf1606ef0a886205e",
   "endpoints": [
     {
       "method": "GET",
@@ -386,6 +386,150 @@
       "tier": 2,
       "mutation": false,
       "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/equipment",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/equipment",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/equipment/:id",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/equipment/:id",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/equipment/:id/photos",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/equipment/:id/status",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/equipment/:id/visibility",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/equipment/catalog",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/equipment/history",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/equipment/history",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/equipment/history/:id",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/equipment/history/:id",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/equipment/history/:id/photos",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/equipment/history/:id/photos",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/equipment/history/:id/photos/:photoId",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/equipment/meta",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/equipment/next-management-no",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/equipment/work-records",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
+      "syncWatch": true
     },
     {
       "method": "GET",
