@@ -1,6 +1,6 @@
 // 장비이력카드 ViewModel: 상태 관리와 비즈니스 로직을 담당한다.
 // 데이터 접근은 EquipmentModel을 경유한다(Phase 2에 apiClient로 교체되어도 이 파일은 불변).
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import EquipmentModel from './EquipmentModel';
 import {
   EQUIPMENT_CATALOG,
@@ -41,6 +41,7 @@ export const emptyEquipmentDraft = () => ({
   location: '',
   accessory: '',
   status: '사용 중',
+  is_visible: true,
   photoName: '',
   notes: '',
 });
@@ -77,16 +78,47 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
   const [equipmentEditor, setEquipmentEditor] = useState({
     open: false,
     draft: emptyEquipmentDraft(),
+    initial: emptyEquipmentDraft(),
     managementNoTouched: false,
   });
-  const [historyEditor, setHistoryEditor] = useState({ open: false, draft: null });
+  const [historyEditor, setHistoryEditor] = useState({ open: false, draft: null, initial: null });
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [catalogChecks, setCatalogChecks] = useState({});
   const [catalogCounts, setCatalogCounts] = useState({});
   const [catalogQuery, setCatalogQuery] = useState('');
   const [customCatalogItems, setCustomCatalogItems] = useState([]);
   const [customDraft, setCustomDraft] = useState({ name: '', process: '', group: '' });
+  const [photoUrls, setPhotoUrls] = useState({});
+  const pendingPhotoRef = useRef(null);
+  const [historyPhotoUrls, setHistoryPhotoUrls] = useState({});
+  const [viewer, setViewer] = useState({ open: false, entryId: null, index: 0 });
+  const [historyDraftPhotos, setHistoryDraftPhotos] = useState([]);
   const [saving, setSaving] = useState(false);
+
+  const refreshPhotos = useCallback(async (list) => {
+    const map = {};
+    for (const item of list) {
+      const blob = await EquipmentModel.loadEquipmentPhoto(item.id);
+      if (blob) map[item.id] = URL.createObjectURL(blob);
+    }
+    setPhotoUrls((previous) => {
+      Object.values(previous).forEach((url) => URL.revokeObjectURL(url));
+      return map;
+    });
+  }, []);
+
+  const refreshHistoryPhotos = useCallback(async (entries) => {
+    await EquipmentModel.ensureHistorySeedPhotos();
+    const map = {};
+    for (const entry of entries) {
+      const blobs = await EquipmentModel.loadHistoryPhotos(entry.id);
+      if (blobs.length) map[entry.id] = blobs.map((blob) => URL.createObjectURL(blob));
+    }
+    setHistoryPhotoUrls((previous) => {
+      Object.values(previous).flat().forEach((url) => URL.revokeObjectURL(url));
+      return map;
+    });
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -100,12 +132,14 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
       setItems(nextItems);
       setHistoryEntries(nextHistory);
       setWorkRecords(nextWorkRecords);
+      await refreshPhotos(nextItems);
+      await refreshHistoryPhotos(nextHistory);
     } catch (error) {
       setLoadError(error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshPhotos, refreshHistoryPhotos]);
 
   useEffect(() => {
     EquipmentModel.setProcessMethod(processMethod);
@@ -124,8 +158,8 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase();
     return items.filter((item) => {
-      // '숨김' 상태 장비는 토글을 켜야 목록에 나타난다(첫 화면에는 주요 장비만).
-      if (item.status === '숨김' && !showHidden) return false;
+      // 목록 미표시(is_visible=false) 장비는 토글을 켜야 나타난다(첫 화면에는 주요 장비만).
+      if (item.is_visible === false && !showHidden) return false;
       const matchesCategory = category === '전체' || item.category3 === category;
       if (!matchesCategory) return false;
       if (!keyword) return true;
@@ -134,7 +168,7 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
     });
   }, [items, query, category, showHidden]);
 
-  const hiddenCount = useMemo(() => items.filter((item) => item.status === '숨김').length, [items]);
+  const hiddenCount = useMemo(() => items.filter((item) => item.is_visible === false).length, [items]);
 
   const toggleShowHidden = useCallback(() => setShowHidden((previous) => !previous), []);
 
@@ -157,10 +191,23 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
       .map(([name, groupItems]) => ({ name, items: groupItems }));
   }, [filtered, groupBy]);
 
+  // 선택은 명시적으로 선택한 ID로만 유지한다(검색·필터가 바뀌어도 다른 장비를 암묵 선택하지 않는다).
   const selected = useMemo(
-    () => items.find((item) => item.id === selectedId) || filtered[0] || null,
-    [items, selectedId, filtered],
+    () => items.find((item) => item.id === selectedId) || null,
+    [items, selectedId],
   );
+
+  // 선택한 장비가 현재 검색·필터 결과 밖에 있는 경우 목록에 안내한다.
+  const selectedOutsideFilter = useMemo(() => {
+    if (!selected) return false;
+    return !filtered.some((item) => item.id === selected.id);
+  }, [selected, filtered]);
+
+  const clearFilters = useCallback(() => {
+    setQuery('');
+    setCategory('전체');
+    setShowHidden(false);
+  }, []);
 
   const equipmentHistory = useMemo(
     () => historyEntries
@@ -195,18 +242,30 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
     const draft = emptyEquipmentDraft();
     // 관리번호는 명명규칙에 따라 자동 부여해 시작한다(사용자가 고치면 그때부터 수동).
     draft.managementNo = EquipmentModel.nextManagementNoFor('', undefined, draft.category3);
-    setEquipmentEditor({ open: true, draft, managementNoTouched: false });
+    pendingPhotoRef.current = null;
+    setEquipmentEditor({ open: true, draft, initial: { ...draft }, managementNoTouched: false });
   }, []);
 
   const openEditEquipment = useCallback((item) => {
     if (!item) return;
-    setEquipmentEditor({ open: true, draft: { ...emptyEquipmentDraft(), ...item }, managementNoTouched: true });
+    const draft = { ...emptyEquipmentDraft(), ...item };
+    setEquipmentEditor({ open: true, draft, initial: { ...draft }, managementNoTouched: true });
   }, []);
 
   const closeEquipmentEditor = useCallback(() => {
     if (saving) return;
-    setEquipmentEditor({ open: false, draft: emptyEquipmentDraft(), managementNoTouched: false });
+    pendingPhotoRef.current = null;
+    setEquipmentEditor({ open: false, draft: emptyEquipmentDraft(), initial: emptyEquipmentDraft(), managementNoTouched: false });
   }, [saving]);
+
+  // 편집 중 대표사진 파일 선택: 저장 시 장비 id에 묶여 로컬 저장소에 반영된다.
+  const setEquipmentDraftPhoto = useCallback((file) => {
+    pendingPhotoRef.current = file;
+    setEquipmentEditor((previous) => ({
+      ...previous,
+      draft: { ...previous.draft, photoName: file ? file.name : '' },
+    }));
+  }, []);
 
   const setEquipmentDraftField = useCallback((field, value) => {
     setEquipmentEditor((previous) => {
@@ -227,9 +286,14 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
     setSaving(true);
     try {
       const saved = await EquipmentModel.saveEquipment(draft);
+      // 편집 중 선택한 대표사진을 새(또는 기존) 장비 id에 저장한다.
+      if (pendingPhotoRef.current) {
+        await EquipmentModel.saveEquipmentPhoto(saved.id, pendingPhotoRef.current);
+        pendingPhotoRef.current = null;
+      }
       await load();
       setSelectedId(saved.id);
-      setEquipmentEditor({ open: false, draft: emptyEquipmentDraft() });
+      setEquipmentEditor({ open: false, draft: emptyEquipmentDraft(), managementNoTouched: false });
       return saved;
     } finally {
       setSaving(false);
@@ -237,29 +301,97 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
   }, [equipmentEditor.draft, load]);
 
   const deleteEquipment = useCallback(async (id) => {
+    // 인계 문서 §3 삭제 정책: 이력이 있는 장비는 삭제 차단(이력 보존), 이력 없는
+    // 잘못 등록한 장비만 삭제한다.
+    const hasHistory = historyEntries.some((entry) => entry.equipmentId === id);
+    if (hasHistory) {
+      throw new Error('이 장비에는 유지보수 이력이 있어 삭제할 수 없습니다.\n(이력이 있는 장비는 보존 대상입니다)');
+    }
     setSaving(true);
     try {
       await EquipmentModel.deleteEquipment(id);
+      await EquipmentModel.deleteEquipmentPhoto(id);
+      setPhotoUrls((previous) => {
+        if (previous[id]) URL.revokeObjectURL(previous[id]);
+        const next = { ...previous };
+        delete next[id];
+        return next;
+      });
       await load();
       setSelectedId(null);
     } finally {
       setSaving(false);
     }
+  }, [historyEntries, load]);
+
+  // 카드에서 사진 클릭 → 파일 선택 → 즉시 저장·교체 표시.
+  const uploadEquipmentPhoto = useCallback(async (id, file) => {
+    await EquipmentModel.saveEquipmentPhoto(id, file);
+    setPhotoUrls((previous) => {
+      if (previous[id]) URL.revokeObjectURL(previous[id]);
+      return { ...previous, [id]: URL.createObjectURL(file) };
+    });
+  }, []);
+
+  // 카드 상태 행 빠른 변경.
+  const updateStatus = useCallback(async (id, status) => {
+    await EquipmentModel.updateEquipmentStatus(id, status);
+    await load();
   }, [load]);
+
+  // ---- 사진 보기 (유지보수 내역 사진 칼럼) ----
+  const openPhotoViewer = useCallback((entry) => {
+    setViewer({ open: true, entryId: entry.id, index: 0 });
+  }, []);
+
+  const closePhotoViewer = useCallback(() => {
+    setViewer({ open: false, entryId: null, index: 0 });
+  }, []);
+
+  const viewerSelect = useCallback((index) => {
+    setViewer((previous) => ({ ...previous, index }));
+  }, []);
+
+  const viewerDelete = useCallback(async () => {
+    const { entryId, index } = viewer;
+    const remaining = await EquipmentModel.deleteHistoryPhotoAt(entryId, index);
+    await load();
+    setViewer((previous) => ({
+      ...previous,
+      index: remaining === 0 ? 0 : Math.min(previous.index, remaining - 1),
+    }));
+  }, [viewer, load]);
+
+  const viewerAddFiles = useCallback(async (files) => {
+    const { entryId } = viewer;
+    const total = await EquipmentModel.appendHistoryPhotos(entryId, files);
+    await load();
+    setViewer((previous) => ({ ...previous, index: total - files.length }));
+  }, [viewer, load]);
 
   const openCreateHistory = useCallback(() => {
     if (!selected) return;
-    setHistoryEditor({ open: true, draft: emptyHistoryDraft(selected.id) });
+    setHistoryDraftPhotos([]);
+    const draft = emptyHistoryDraft(selected.id);
+    setHistoryEditor({ open: true, draft, initial: { ...draft } });
   }, [selected]);
 
   const openEditHistory = useCallback((entry) => {
-    setHistoryEditor({ open: true, draft: { ...emptyHistoryDraft(entry.equipmentId), ...entry } });
+    setHistoryDraftPhotos([]);
+    const draft = { ...emptyHistoryDraft(entry.equipmentId), ...entry };
+    setHistoryEditor({ open: true, draft, initial: { ...draft } });
   }, []);
 
   const closeHistoryEditor = useCallback(() => {
     if (saving) return;
+    setHistoryDraftPhotos([]);
     setHistoryEditor({ open: false, draft: null });
   }, [saving]);
+
+  // 이력 편집 중 사진 여러 장 선택: 저장 시 함께 등록된다.
+  const addHistoryDraftPhotos = useCallback((files) => {
+    if (files.length) setHistoryDraftPhotos((previous) => [...previous, ...files]);
+  }, []);
 
   const setHistoryDraftField = useCallback((field, value) => {
     setHistoryEditor((previous) => (
@@ -275,13 +407,18 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
     setSaving(true);
     try {
       const saved = await EquipmentModel.saveHistoryEntry(draft);
+      // 편집 중 선택한 사진들을 이력 id에 묶어 저장한다(기존 사진에 추가).
+      if (historyDraftPhotos.length) {
+        await EquipmentModel.appendHistoryPhotos(saved.id, historyDraftPhotos);
+        setHistoryDraftPhotos([]);
+      }
       await load();
       setHistoryEditor({ open: false, draft: null });
       return saved;
     } finally {
       setSaving(false);
     }
-  }, [historyEditor.draft, load]);
+  }, [historyEditor.draft, historyDraftPhotos, load]);
 
   const deleteHistoryEntry = useCallback(async (id) => {
     setSaving(true);
@@ -383,11 +520,13 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
   }, [customDraft]);
 
   // 체크(사용) ↔ 목록 상태의 차이를 계산한다. 개수형은 스테퍼 값이 '원하는 대수'다.
+  // 제거 대상은 호기가 높은 카드부터이며, 이력 보유 여부를 함께 표시해
+  // 삭제(이력 없음)와 숨김 전환(이력 보존)을 확인창에서 구분한다.
   const catalogDiff = useMemo(() => {
     const additions = [];
-    const removalIds = [];
-    const removalNames = [];
+    const removals = [];
     let changeCount = 0;
+    const historyIds = new Set(historyEntries.map((entry) => entry.equipmentId));
     catalogGroups.forEach((group) => {
       group.items.forEach((item) => {
         const info = registeredInfo(item);
@@ -400,8 +539,11 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
             changeCount += 1;
           }
           if (!checked && current > 0) {
-            removalIds.push(...info.units.map((unit) => unit.id));
-            removalNames.push(item.name);
+            info.units.forEach((unit) => removals.push({
+              id: unit.id,
+              number: `${item.name}(${unit.managementNo})`,
+              hasHistory: historyIds.has(unit.id),
+            }));
             changeCount += 1;
           }
           return;
@@ -414,45 +556,100 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
         if (target < current) {
           // 줄일 때는 호기가 높은 카드부터 제거한다.
           const sorted = [...info.units].sort((a, b) => b.name.localeCompare(a.name, 'en'));
-          removalIds.push(...sorted.slice(0, current - target).map((unit) => unit.id));
-          if (target === 0) removalNames.push(item.name);
+          sorted.slice(0, current - target).forEach((unit) => removals.push({
+            id: unit.id,
+            number: `${unit.name}(${unit.managementNo})`,
+            hasHistory: historyIds.has(unit.id),
+          }));
           changeCount += 1;
         }
       });
     });
-    return { additions, removalIds, removalNames, changeCount };
-  }, [catalogGroups, catalogChecks, catalogCounts, registeredInfo]);
+    return { additions, removals, changeCount };
+  }, [catalogGroups, catalogChecks, catalogCounts, registeredInfo, historyEntries]);
 
   const catalogChangeCount = catalogDiff.changeCount;
-  const catalogRemovalNames = catalogDiff.removalNames;
+  const catalogRemovals = catalogDiff.removals;
 
   const applyCatalogChanges = useCallback(async () => {
-    const { additions, removalIds } = catalogDiff;
-    if (!additions.length && !removalIds.length) return { created: [], removed: 0 };
+    const { additions, removals } = catalogDiff;
+    if (!additions.length && !removals.length) return { created: [], removed: 0, excluded: 0 };
     setSaving(true);
     try {
+      // 인계 문서 §3 삭제 정책: 이력이 있는 장비는 삭제 대신 '숨김' 전환으로 이력을 보존한다.
+      const deleteIds = removals.filter((unit) => !unit.hasHistory).map((unit) => unit.id);
+      const excludeIds = removals.filter((unit) => unit.hasHistory).map((unit) => unit.id);
       let removed = 0;
-      if (removalIds.length) removed = await EquipmentModel.deleteEquipmentByIds(removalIds);
+      let excluded = 0;
+      if (deleteIds.length) removed = await EquipmentModel.deleteEquipmentByIds(deleteIds);
+      if (excludeIds.length) excluded = await EquipmentModel.excludeEquipment(excludeIds);
       const created = additions.length ? await EquipmentModel.addCatalogSelections(additions) : [];
       await load();
       setCatalogOpen(false);
       setCatalogChecks({});
       setCatalogCounts({});
       if (created.length) setSelectedId(created[0].id);
-      return { created, removed };
+      return { created, removed, excluded };
     } finally {
       setSaving(false);
     }
   }, [catalogDiff, load]);
+
+  // ---- 입력 보호: 편집 내용이 있으면 닫기 전에 확인한다(인계 문서 §3). ----
+  const isEquipmentDirty = useCallback(() => {
+    if (!equipmentEditor.open) return false;
+    return JSON.stringify(equipmentEditor.draft) !== JSON.stringify(equipmentEditor.initial);
+  }, [equipmentEditor]);
+
+  const isHistoryDirty = useCallback(() => {
+    if (!historyEditor.open || !historyEditor.draft) return false;
+    return historyDraftPhotos.length > 0
+      || JSON.stringify(historyEditor.draft) !== JSON.stringify(historyEditor.initial);
+  }, [historyEditor, historyDraftPhotos]);
+
+  const requestCloseEquipment = useCallback(async (confirmFn) => {
+    if (!isEquipmentDirty()) {
+      closeEquipmentEditor();
+      return;
+    }
+    const confirmed = await confirmFn('입력한 내용이 저장되지 않았습니다.\n창을 닫을까요?', '닫기 확인');
+    if (confirmed) {
+      pendingPhotoRef.current = null;
+      setEquipmentEditor({ open: false, draft: emptyEquipmentDraft(), initial: emptyEquipmentDraft(), managementNoTouched: false });
+    }
+  }, [isEquipmentDirty, closeEquipmentEditor]);
+
+  const requestCloseHistory = useCallback(async (confirmFn) => {
+    if (!isHistoryDirty()) {
+      setHistoryDraftPhotos([]);
+      setHistoryEditor({ open: false, draft: null, initial: null });
+      return;
+    }
+    const confirmed = await confirmFn('입력한 내용이 저장되지 않았습니다.\n창을 닫을까요?', '닫기 확인');
+    if (confirmed) {
+      setHistoryDraftPhotos([]);
+      setHistoryEditor({ open: false, draft: null, initial: null });
+    }
+  }, [isHistoryDirty]);
 
   return {
     // 데이터
     items, filtered, grouped, categories, historyEntries, workRecords,
     equipmentHistory, linkedWorkRecords, selected, stats,
     loading, loadError,
+    // 이력 사진 + 뷰어
+    historyPhotoUrls, viewer, openPhotoViewer, closePhotoViewer,
+    viewerSelect, viewerDelete, viewerAddFiles, historyDraftPhotos, addHistoryDraftPhotos,
     // 목록 상태
     query, setQuery, category, setCategory, groupBy, setGroupBy, selectEquipment,
     showHidden, hiddenCount, toggleShowHidden,
+    selectedOutsideFilter, clearFilters,
+    // 대표사진
+    photoUrls, uploadEquipmentPhoto, setEquipmentDraftPhoto,
+    // 상태 빠른 변경
+    updateStatus,
+    // 입력 보호
+    isEquipmentDirty, isHistoryDirty, requestCloseEquipment, requestCloseHistory,
     // 카드 상태
     tab, setTab,
     // 장비 편집기
@@ -463,7 +660,7 @@ export function useEquipmentViewModel({ processMethod = 'A2O' } = {}) {
     setHistoryDraftField, saveHistoryEntry, deleteHistoryEntry,
     // 장비 추가 카탈로그
     catalogOpen, catalogGroups, catalogChecks, catalogCounts, catalogQuery, customDraft,
-    registeredInfo, catalogChangeCount, catalogRemovalNames,
+    registeredInfo, catalogChangeCount, catalogRemovals,
     openCatalog, closeCatalog, toggleCatalogItem, setCatalogItemCount, setCatalogQuery,
     setCustomDraftField, addCustomCatalogItem, applyCatalogChanges,
     // 공통

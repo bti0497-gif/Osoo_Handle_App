@@ -1,11 +1,13 @@
 // 장비이력카드 화면. 렌더링만 담당하고 상태/로직은 useEquipmentViewModel을 경유한다.
 // 본앱 이식 시 이 파일에서 바뀌는 것은 useDialog import 경로뿐이다.
-import React from 'react';
+import React, { useRef } from 'react';
 import { useDialog } from '../dialog';
 import { useEquipmentViewModel } from './useEquipmentViewModel';
+import { EQUIPMENT_STATUS_OPTIONS } from './equipmentPreviewData';
 import EquipmentEditorModal from './EquipmentEditorModal';
 import EquipmentCatalogModal from './EquipmentCatalogModal';
 import EquipmentHistoryEditor from './EquipmentHistoryEditor';
+import HistoryPhotoViewer from './HistoryPhotoViewer';
 import './equipment.css';
 import './equipmentEditor.css';
 
@@ -19,21 +21,21 @@ const STATUS_CLASS = {
   '점검 필요': 'inspect',
   '수리 중': 'repair',
   '예비': 'standby',
-  '숨김': 'hidden',
+  '철거': 'removed',
   '폐기': 'disposed',
 };
 
 const TYPE_CLASS = {
+  '고장발생': 'fault',
+  '수리의뢰': 'request',
+  '수리&재설치': 'repair',
+  '교체': 'part',
   '정기점검': 'check',
-  '고장': 'fault',
-  '수리': 'repair',
-  '부품교체': 'part',
-  '위탁': 'consign',
   '기타': 'etc',
 };
 
-function DetailRow({ label, value }) {
-  return <div className="equipment-detail-row"><dt>{label}</dt><dd>{value || '-'}</dd></div>;
+function DetailRow({ label, value, wide }) {
+  return <div className={`equipment-detail-row${wide ? ' wide' : ''}`}><dt>{label}</dt><dd>{value || '-'}</dd></div>;
 }
 
 function StatCard({ label, value, tone }) {
@@ -50,6 +52,15 @@ function StatCard({ label, value, tone }) {
 export default function EquipmentCardView({ processMethod = 'A2O' }) {
   const { showAlert, showConfirm } = useDialog();
   const vm = useEquipmentViewModel({ processMethod });
+  const photoInputRef = useRef(null);
+
+  const handlePhotoPick = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file && vm.selected) {
+      vm.uploadEquipmentPhoto(vm.selected.id, file).catch((error) => showAlert(`사진 저장 실패: ${error.message}`));
+    }
+  };
 
   const handleSaveEquipment = async () => {
     try {
@@ -68,12 +79,14 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
   };
 
   const handleApplyCatalog = async () => {
-    const removals = vm.catalogRemovalNames;
+    const removals = vm.catalogRemovals || [];
+    const toDelete = removals.filter((unit) => !unit.hasHistory).map((unit) => unit.number);
+    const toHide = removals.filter((unit) => unit.hasHistory).map((unit) => unit.number);
     if (removals.length) {
-      const confirmed = await showConfirm(
-        `다음 설비를 목록에서 제거합니다:\n${removals.join(', ')}\n연결된 이력도 함께 제거됩니다. 계속할까요?`,
-        '목록에서 제거',
-      );
+      let message = '';
+      if (toDelete.length) message += `다음 항목을 목록에서 제거합니다:\n${toDelete.join(', ')}\n\n`;
+      if (toHide.length) message += `다음은 유지보수 이력이 있어 삭제하지 않고\n'숨김' 처리 후 이력을 보존합니다:\n${toHide.join(', ')}\n`;
+      const confirmed = await showConfirm(`${message}\n계속할까요?`, '장비 목록 변경');
       if (!confirmed) return;
     }
     try {
@@ -82,6 +95,9 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
       await showAlert(`카탈로그 적용 실패: ${error.message}`);
     }
   };
+
+  const handleCloseEquipment = () => vm.requestCloseEquipment(showConfirm);
+  const handleCloseHistory = () => vm.requestCloseHistory(showConfirm);
 
   const handleDeleteEquipment = async () => {
     const target = vm.selected;
@@ -120,6 +136,11 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
 
   const equipmentDraft = vm.equipmentEditor.draft;
   const historyDraft = vm.historyEditor.draft;
+  const storedHistoryPhotoCount = historyDraft?.id ? (vm.historyPhotoUrls[historyDraft.id]?.length || 0) : 0;
+  const pendingHistoryPhotoCount = vm.historyDraftPhotos.length;
+  const historyPhotoSummary = pendingHistoryPhotoCount > 0
+    ? `${pendingHistoryPhotoCount}장 선택됨${storedHistoryPhotoCount ? ` · 기존 ${storedHistoryPhotoCount}장` : ''}`
+    : (storedHistoryPhotoCount ? `저장된 사진 ${storedHistoryPhotoCount}장` : '현장 사진 선택');
   const linkedNames = (record) => record.equipmentIds
     .map((id) => vm.items.find((item) => item.id === id))
     .filter(Boolean)
@@ -167,6 +188,12 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
             ) : null}
           </div>
           <div className="equipment-list-scroll">
+            {vm.selectedOutsideFilter ? (
+              <div className="equipment-filter-notice">
+                <span>선택한 장비가 현재 검색·필터에 없습니다.</span>
+                <button type="button" onClick={vm.clearFilters}>필터 해제</button>
+              </div>
+            ) : null}
             {vm.loading ? (
               <p className="equipment-list-none">불러오는 중...</p>
             ) : vm.grouped.map((group) => (
@@ -193,9 +220,16 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
         </aside>
 
         <main className="equipment-card-panel">
-          {vm.loading ? (
+          {vm.loadError ? (
+            <div className="equipment-load-error">
+              <p>장비 정보를 불러오지 못했습니다.</p>
+              <button type="button" onClick={vm.reload}>다시 시도</button>
+            </div>
+          ) : null}
+          {!vm.loadError && vm.loading ? (
             <div className="equipment-card-empty">장비 목록을 불러오는 중...</div>
-          ) : vm.selected ? (
+          ) : null}
+          {!vm.loadError && !vm.loading && vm.selected ? (
             <>
               <header className="equipment-card-header">
                 <div><h1>{vm.selected.name}</h1><p>{vm.selected.managementNo} · {vm.selected.category2 || vm.selected.category3}</p></div>
@@ -213,14 +247,33 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
                   <DetailRow label="설치일자" value={vm.selected.installedAt} />
                   <DetailRow label="납품회사" value={vm.selected.vendor} />
                   <DetailRow label="부속설비" value={vm.selected.accessory} />
-                  <DetailRow label="비고" value={vm.selected.notes} />
+                  <DetailRow label="비고" value={vm.selected.notes} wide />
+                  <div className="equipment-detail-row wide status-row">
+                    <dt>상태 지정</dt>
+                    <dd className="equipment-status-picker">
+                      {EQUIPMENT_STATUS_OPTIONS.map((status) => (
+                        <button
+                          key={status}
+                          type="button"
+                          className={`status-option${vm.selected.status === status ? ' on' : ''}`}
+                          onClick={() => vm.updateStatus(vm.selected.id, status)}
+                        >
+                          {status}
+                        </button>
+                      ))}
+                    </dd>
+                  </div>
                 </dl>
-                <button type="button" className="equipment-photo-placeholder">
-                  {vm.selected.photoName ? (
+                <button
+                  type="button"
+                  className="equipment-photo-placeholder"
+                  title="클릭하여 대표사진 선택/교체"
+                  onClick={() => photoInputRef.current?.click()}
+                >
+                  {vm.photoUrls[vm.selected.id] ? (
                     <>
-                      <span className="material-icons">image</span>
-                      <b>{vm.selected.photoName}</b>
-                      <small>대표사진 등록됨</small>
+                      <img src={vm.photoUrls[vm.selected.id]} alt="장비 대표사진" className="equipment-photo-image" />
+                      <small className="equipment-photo-hint">클릭하여 사진 교체</small>
                     </>
                   ) : (
                     <>
@@ -230,6 +283,7 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
                     </>
                   )}
                 </button>
+                <input ref={photoInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handlePhotoPick} />
               </section>
               <section className="equipment-stats">
                 <StatCard label="누적 이력" value={`${vm.stats.historyCount}건`} />
@@ -259,7 +313,7 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
                             <td className="left">{entry.content}</td>
                             <td className="left">{entry.company || '-'}{entry.contact ? <small>{entry.contact}</small> : null}</td>
                             <td className="right">{formatPrice(entry.price)}</td>
-                            <td>{entry.photoCount ? <button type="button" className="equipment-photo-count"><span className="material-icons">photo_library</span>{entry.photoCount}</button> : '-'}</td>
+                            <td>{entry.photoCount ? <button type="button" className="equipment-photo-count" title="사진 보기" onClick={() => vm.openPhotoViewer(entry)}><span className="material-icons">photo_library</span>{entry.photoCount}</button> : '-'}</td>
                             <td>
                               <span className="equipment-row-actions">
                                 <button type="button" title="이력 수정" onClick={() => vm.openEditHistory(entry)}><span className="material-icons">edit</span></button>
@@ -299,8 +353,17 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
             </>
           ) : (
             <div className="equipment-card-empty">
-              <p>등록된 장비가 없습니다.</p>
-              <button type="button" className="equipment-primary-cta" onClick={vm.openCatalog}><span className="material-icons">add</span> 첫 장비 등록</button>
+              {vm.items.length > 0 ? (
+                <>
+                  <p>왼쪽 목록에서 장비를 선택하세요.</p>
+                  {vm.hiddenCount > 0 ? <small style={{ color: '#94a3b8' }}>목록에서 숨긴 장비 {vm.hiddenCount}대는 '숨김' 칩으로 볼 수 있습니다.</small> : null}
+                </>
+              ) : (
+                <>
+                  <p>등록된 장비가 없습니다.</p>
+                  <button type="button" className="equipment-primary-cta" onClick={vm.openCatalog}><span className="material-icons">add</span> 첫 장비 등록</button>
+                </>
+              )}
             </div>
           )}
         </main>
@@ -332,7 +395,8 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
           draft={equipmentDraft}
           saving={vm.saving}
           onChangeField={vm.setEquipmentDraftField}
-          onClose={vm.closeEquipmentEditor}
+          onPhotoFile={vm.setEquipmentDraftPhoto}
+          onClose={handleCloseEquipment}
           onSave={handleSaveEquipment}
           onDelete={handleDeleteEquipment}
         />
@@ -343,10 +407,24 @@ export default function EquipmentCardView({ processMethod = 'A2O' }) {
           draft={historyDraft}
           equipmentName={vm.selected?.name}
           saving={vm.saving}
+          photoSummary={historyPhotoSummary}
+          onPhotosFiles={vm.addHistoryDraftPhotos}
           onChangeField={vm.setHistoryDraftField}
-          onClose={vm.closeHistoryEditor}
+          onClose={handleCloseHistory}
           onSave={handleSaveHistory}
           onDelete={() => handleDeleteHistory(historyDraft)}
+        />
+      ) : null}
+
+      {vm.viewer.open ? (
+        <HistoryPhotoViewer
+          entry={vm.historyEntries.find((entry) => entry.id === vm.viewer.entryId)}
+          urls={vm.historyPhotoUrls[vm.viewer.entryId] || []}
+          index={vm.viewer.index}
+          onSelect={vm.viewerSelect}
+          onDelete={vm.viewerDelete}
+          onAddFiles={vm.viewerAddFiles}
+          onClose={vm.closePhotoViewer}
         />
       ) : null}
     </div>

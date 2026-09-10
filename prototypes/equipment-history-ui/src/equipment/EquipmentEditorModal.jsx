@@ -15,7 +15,7 @@ const Field = ({ label, required, children, wide }) => (
 );
 
 export default function EquipmentEditorModal({
-  draft, saving, onChangeField, onClose, onSave, onDelete,
+  draft, saving, onChangeField, onPhotoFile, onClose, onSave, onDelete,
 }) {
   if (!draft) return null;
   return (
@@ -107,7 +107,7 @@ export default function EquipmentEditorModal({
             <input
               type="file"
               accept="image/*"
-              onChange={(event) => onChangeField('photoName', event.target.files?.[0]?.name || '')}
+              onChange={(event) => onPhotoFile?.(event.target.files?.[0] || null)}
             />
           </label>
         </div>

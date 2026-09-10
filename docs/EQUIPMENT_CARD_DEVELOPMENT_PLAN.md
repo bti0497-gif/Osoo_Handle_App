@@ -80,6 +80,20 @@
 - `work_records`(UNIQUE(site_id, date)): **하루 1건 종합 업무 기록 + 사진 첨부**
 - 두 흐름이 이력카드 타임라인에서 날짜순으로 합쳐 조회된다.
 
+### 3-7. 업무사진관리 ↔ 장비 맞물림 스키마 검토 결과 (2026-09-10)
+
+기존 DDL 확인 완료 — **테이블 추가 없이 맞물림 가능**:
+
+- `work_record_equipment_links(work_record_id INTEGER, equipment_id TEXT, PK 복합, CASCADE/RESTRICT)`가
+  이미 존재하며 양쪽 PK 자료형과 정확히 일치한다.
+- 링크된 업무기록을 `facility_logs`로 **복사하지 않는다**. work_records는 하루 1건(UNIQUE 제약)이라
+  복사본은 원본 수정/삭제 시 고아화된다. 카드는 두 탭으로 표시하거나, 통합 타임라인이 필요하면
+  조회 시 UNION으로만 합친다(저장은 원본 테이블 단일 소스).
+- 삭제 무결성: 업무기록 삭제 → 링크·사진 CASCADE, 링크된 장비 삭제는 RESTRICT(=409 EQUIPMENT_IN_USE 설계와 일치).
+- Phase 3에서 채울 구멍: ① work-records POST/PUT이 `equipmentIds`를 받아 링크 diff-upsert(현재 UI 선택기만 있고 payload 누락),
+  ② `GET /api/equipment/work-records`(링크 조인 + work_record_photos 사진 수 서브쿼리) 신설,
+  ③ 프로토타입 WORK_RECORD_PREVIEW_ITEMS의 `equipmentIds` 배열은 Phase 2에서 링크 테이블 조인으로 대체.
+
 ### 3-4. 공법별 기본 설비 목록 (2026-09-06 사용자 확정)
 
 - 공법은 **앱 기본설정(`app_settings.method`, 값 'A2O' | 'MBR')**에서 지정되며 앱 전체가 그 값을 따른다.
@@ -97,9 +111,11 @@
 '장비 추가'는 빈 양식이 아니라 **체크식 카탈로그**가 기본 경로다(빈 양식 직접 입력은 보조 경로로 유지).
 
 - 카탈로그 구성(공법별 자동 필터): 펌프류 / 교반기류(유량조정·무산소·혐기·포기·방류) / 브로아류(포기·교반) / 스크린류 / 계측기류(DO·PH·MLSS) / 유량계(파샬플롬·유입·내부반송·외부반송·중수·응집이송·막분리) / 감속기 / 탱크류 / 약품펌프류 / 막분리(MBR) / 소독기류 / 여과기
-- 카탈로그 체크는 **양방향 동기화**다(2026-09-06 사용자 확정): 체크 = 목록 등록, **체크 해제 = 목록에서 제거**
-  (제거 시 확인 다이얼로그로 연결된 이력 정리를 안내한다). 개수형의 스테퍼는 **원하는 대수**로,
-  늘리면 다음 호기가 추가되고 줄이면 높은 호기부터 제거된다.
+- 카탈로그 체크는 **양방향 동기화**다(2026-09-06 사용자 확정, 2026-09-10 삭제 정책 개정):
+  체크 = 목록 등록, 체크 해제 = 목록에서 제거. 이때 **이력이 있는 장비는 삭제하지 않고
+  '숨김' 전환으로 이력을 보존**하며, 이력 없는 잘못 등록 장비만 실제 삭제한다.
+  확인 다이얼로그에 제거/숨김 대상 관리번호를 구분 표시한다. 개수형의 스테퍼는 **원하는 대수**로,
+  늘리면 다음 호기가 추가되고 줄이면 높은 호기부터 제거된다(제거 대상 호기도 확인창에 표시).
 
 ### 3-6. 관리번호 명명규칙과 자동채번 (2026-09-06 사용자 확정)
 
@@ -150,7 +166,8 @@ CREATE INDEX IF NOT EXISTS idx_facility_logs_equipment
 ```
 
 상태(`equipment_assets.status`)는 현장 앱 단순성을 위해 한글 라벨을 그대로 저장한다.
-(`사용 중` / `점검 필요` / `수리 중` / `예비` / `폐기`. 기존 기본값 `active`는 신규 등록 시 항상 명시적으로 덮어쓴다.)
+(`사용 중` / `점검 필요` / `수리 중` / `예비` / `철거` / `폐기` 6종. 기존 기본값 `active`는 신규 등록 시 항상 명시적으로 덮어쓴다.)
+목록 표시 여부는 상태가 아니라 `is_visible`(§4-4)로 관리한다.
 
 ### 4-3. 마이그레이션 체크리스트 (Phase 2)
 
@@ -158,6 +175,47 @@ CREATE INDEX IF NOT EXISTS idx_facility_logs_equipment
 - [ ] 기존 `facility_logs` 행의 `equipment_id`는 NULL로 유지(과거 데이터는 미연결 상태가 정상)
 - [ ] BigQuery 측 `facility_logs` 테이블 스키마에 신규 컬럼 반영 여부 확인(`server/services/initBigQuery.cjs` / `bigQuerySyncService.cjs`)
 - [ ] 마이그레이션 전 자동 백업(`sqliteProtectionService.protectDatabaseBeforeMigration`) 동작 확인
+- [ ] §4-4 확정 설계(is_visible, local_id, facility_log_photos) 마이그레이션 포함
+
+### 4-4. Phase 2 착수 전 확정 설계 (2026-09-10 점검 확정)
+
+Phase 1 점검에서 확정된 5가지 설계. Phase 2 구현은 이 기준으로 하며, 담당 에이전트가 임의로 변경하지 않는다.
+
+1. **status와 is_visible 분리**
+   - status는 운영상태만: `사용 중 / 점검 필요 / 수리 중 / 예비 / 철거 / 폐기`(6종, '숨김' 없음)
+   - 목록 표시 여부는 `equipment_assets.is_visible INTEGER DEFAULT 1`(ensureColumn)로 관리
+   - 일지 점검 자동 판정은 status를 근거로 하며, is_visible=0이어도 점검 대상에서 자동 제외하지 않는다
+2. **이력 다중 사진 관계 테이블 신설** — 이력 본문은 facility_logs 단일 테이블 유지(§3-1 불변), 사진 관계만 분리
+   ```sql
+   CREATE TABLE IF NOT EXISTS facility_log_photos (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     facility_log_id INTEGER NOT NULL,
+     original_name TEXT,
+     stored_name TEXT NOT NULL,
+     relative_path TEXT NOT NULL,
+     sort_order INTEGER DEFAULT 0,
+     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+     FOREIGN KEY (facility_log_id) REFERENCES facility_logs(id) ON DELETE CASCADE
+   );
+   CREATE INDEX IF NOT EXISTS idx_facility_log_photos_log
+     ON facility_log_photos (facility_log_id, sort_order, id);
+   ```
+   JSON 경로 저장 방식은 비권장으로 배제한다.
+3. **BigQuery 동기화 자연키 충돌 해소**
+   - 기존 자연키(site_id+date+location+facility_name)는 같은 날·같은 장비에 점검과 수리가
+     함께 기록되면 충돌한다. `facility_logs.local_id TEXT`(신규 행 UUID)를 추가하고
+     원격 식별 기준을 `site_id + local_id`로 변경한다.
+   - 기존 행 호환: 과거 행은 최초 동기화 시 local_id를 채우는 마이그레이션을 함께 진행하고,
+     이중 기준 전환 기간의 충돌 규칙을 Phase 2 구현 전 확정한다.
+4. **장비 데이터 재해복구 경로**
+   - `equipment_assets`, `equipment_asset_photos`, `work_record_equipment_links`, `facility_log_photos`를
+     BigQuery 동기화(syncTables) 또는 주기적 내보내기 대상에 추가한다.
+   - 사진 원본은 슬러지/관리사진과 동일한 Drive 저장 경로를 둔다(로컬 우선 + Drive 미러).
+   - 누락 시 DB 손상 후 facility_logs.equipment_id 고아가 발생하므로 Phase 2에서 반드시 함께 정의한다.
+5. **상태 목록 통일**: 문서·UI·프로토타입 모두 6종으로 통일한다. `철거`는 사용 종료(목록 제거 전 단계),
+   `폐기`는 최종 폐기이며, 숨김은 status가 아니라 is_visible로만 표현한다.
+6. **가독성 하한선**: 현재 밀도를 유지하되 본문·표 본문 최소 13px, 주요 동작 버튼 최소 높이 36px.
+   (현장관리자 연령과 1366×768 환경 기준 하한선으로 확정)
 
 ---
 
@@ -230,7 +288,7 @@ uploadEquipmentPhotos(id, files)  → POST /api/equipment/:id/photos
 
 - 검색: 관리번호/설비명/위치/구분
 - 분류 스트립: `전체` + 데이터의 구분3 유니크(동적 생성)
-- 상태 배지 색: 사용 중(녹) / 점검 필요(주황) / 수리 중(빨강) / 예비(회) / 폐기(진회)
+- 상태 배지 색: 사용 중(녹) / 점검 필요(주황) / 수리 중(빨강) / 예비(회) / 철거(회색) / 폐기(진회)
 - 상단에 프리뷰 안내 배너: "UI 확인 단계 — 서버에 저장되지 않습니다"
 
 ### 6-2. 파일 구성 (모두 `prototypes/equipment-history-ui/src/` 아래)
@@ -272,14 +330,16 @@ uploadEquipmentPhotos(id, files)  → POST /api/equipment/:id/photos
    - 확정 시: Phase 2 착수와 동시에 `src/equipment/` 파일들을 본앱 `src/features/equipment/`로 이식
      (이식 시 바뀌는 것은 README 표에 정리 — useDialog import 경로와 Model 내부뿐)
 
-### Phase 2 — 백엔드(스키마 변경은 본 계획 승인으로 갈음)
+### Phase 2 — 백엔드(스키마 변경은 본 계획 승인 + §4-4 확정 설계 기준)
 
-1. `database.cjs`: facility_logs 컬럼 4종 + 인덱스 (§4-2)
-2. `equipmentRoutes.cjs` 신규 + routeRegistry 등록 + api-spec.cjs 갱신
-3. `EquipmentModel.js` 내부를 apiClient로 교체(시그니처 불변). 공법은 기본설정(app_settings.method)에서 주입
-4. 공법별 기본 설비 시드 1회 프로비저닝(장비 목록이 비어 있고 공법이 지정된 경우에만 — 사용자 CRUD 결과를 덮어쓰지 않음)
-5. 사진 업로드(업로드 보안 미들웨어 재사용) + 로컬 폴더 저장
-6. validate 전체 통과
+1. `database.cjs`: facility_logs 컬럼 4종 + `local_id` + `equipment_assets.is_visible` + 인덱스 (§4-2, §4-4)
+2. `facility_log_photos` 테이블 신설 + 이력 사진 저장/조회/삭제 라우트 (§4-4-2)
+3. `equipmentRoutes.cjs` 신규 + routeRegistry 등록 + api-spec.cjs 갱신
+4. `EquipmentModel.js` 내부를 apiClient로 교체(시그니처 불변). 공법은 기본설정(app_settings.method)에서 주입
+5. 공법별 기본 설비 시드 1회 프로비저닝(장비 목록이 비어 있고 공법이 지정된 경우에만 — 사용자 CRUD 결과를 덮어쓰지 않음)
+6. 사진 업로드(업로드 보안 미들웨어 재사용) + 로컬 폴더 저장 + Drive 미러 경로(§4-4-4)
+7. BigQuery: facility_logs 동기화 키를 site_id+local_id로 전환, 원격 스키마 갱신, 신규 테이블 동기화/백업 포함(§4-4-3,4)
+8. validate 전체 통과 + 진단러너 equipment-card 시나리오(§7 Phase 4)
 
 ### Phase 3 — 업무사진관리 맞물림
 
@@ -319,5 +379,9 @@ uploadEquipmentPhotos(id, files)  → POST /api/equipment/:id/photos
 2. 이력 등록/수정/삭제가 facility_logs에 저장되고 장비 카드 타임라인에 반영된다
 3. 업무사진관리에서 장비를 연결하면 해당 장비 카드의 "연결된 업무·사진"에 나타난다
 4. 장비 삭제 시 연결 데이터가 있으면 삭제가 차단되고 안내된다
-5. `node tools/diagnostic-runner/runner.cjs --scenario equipment-card` PASSED
-6. `npm run validate` 통과, 진단러너 `--coverage`에 미커버 메뉴 없음
+5. status와 is_visible이 분리되어, 숨김 장비의 운영상태가 유지되고 일지 판정 근거에서 사라지지 않는다
+6. 이력 다중 사진이 facility_log_photos로 저장·조회·삭제되고(§4-4-2) 재시작 후 유지된다
+7. facility_logs 동기화가 site_id+local_id 기준으로 동작하고 같은 날 다건 기록이 충돌하지 않는다
+8. 장비 마스터·사진 메타데이터·연결 테이블의 동기화/백업 경로가 존재하고 복원 절차가 문서화된다
+9. `node tools/diagnostic-runner/runner.cjs --scenario equipment-card` PASSED
+10. `npm run validate` 통과, 진단러너 `--coverage`에 미커버 메뉴 없음

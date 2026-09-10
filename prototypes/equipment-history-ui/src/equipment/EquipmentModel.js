@@ -10,6 +10,7 @@ import {
   EQUIPMENT_SEEDS,
   WORK_RECORD_SEEDS,
 } from './equipmentPreviewData';
+import { photoStore } from './photoStore';
 
 const clone = (list) => list.map((item) => ({ ...item }));
 const normalizeMethod = (method) => (
@@ -19,6 +20,25 @@ const normalizeMethod = (method) => (
 );
 
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// 시드 이력 사진 자리표시 이미지 생성 (Phase 2에서는 실제 업로드 파일로 대체)
+let seedPhotosChecked = false;
+
+function makePlaceholderBlob(index) {
+  return new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 360;
+    canvas.height = 240;
+    const context = canvas.getContext('2d');
+    context.fillStyle = `hsl(${(index * 47) % 360}, 45%, 52%)`;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'rgba(255,255,255,.92)';
+    context.font = 'bold 30px sans-serif';
+    context.textAlign = 'center';
+    context.fillText(`현장 사진 ${index + 1}`, canvas.width / 2, canvas.height / 2 + 10);
+    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85);
+  });
+}
 
 // 카탈로그 항목의 현재 등록 상태: 호기 없는 단일 등록이면 1대, '이름 A' 패턴이면 그 대수.
 const countRegisteredUnits = (name, process) => {
@@ -46,12 +66,12 @@ const managementNoPrefix = (name, category2, category3) => {
 
 // 다음 관리번호: 접두어별 기존 최대 일련번호 + 1 (예: M-118 사용 중 → M-119).
 // 새 접두어의 첫 번호는 101로 시작해 기존 번호체계와 맞춘다.
-// 호기 접미사가 붙은 번호(M-103A 등)는 일련번호 계산에서 제외한다.
+// 호기 접미사가 붙은 번호(M-103A/B)도 베이스 103으로 채번에 포함한다.
 const nextManagementNo = (name, category2, category3) => {
   const prefix = managementNoPrefix(name, category2, category3);
   let max = 0;
   equipmentStore.forEach((item) => {
-    const match = /^([A-Z]+)-(\d+)$/.exec(String(item.managementNo || ''));
+    const match = /^([A-Z]+)-(\d+)[A-Z]?$/.exec(String(item.managementNo || ''));
     if (match && match[1] === prefix) max = Math.max(max, Number(match[2]));
   });
   const next = max > 0 ? max + 1 : 101;
@@ -182,16 +202,31 @@ export const EquipmentModel = {
   async deleteEquipment(id) {
     await delay();
     equipmentStore = equipmentStore.filter((existing) => existing.id !== id);
+    const removedHistory = historyStore.filter((entry) => entry.equipmentId === id);
+    for (const entry of removedHistory) {
+      await photoStore.removeSet(`history:${entry.id}`);
+    }
     historyStore = historyStore.filter((entry) => entry.equipmentId !== id);
     return true;
   },
 
-  // 카탈로그 체크 해제(목록 제거)용: 여러 장비를 한 번에 제거하고 연결된 이력도 정리한다.
+  // 카탈로그 체크 해제(목록 제거)용: 여러 장비를 한 번에 제거한다.
+  // 이력이 있는 장비는 이 함수로 제거하지 않는다(VM이 excludeEquipment로 분기).
   async deleteEquipmentByIds(ids) {
     await delay();
     const idSet = new Set(ids);
     equipmentStore = equipmentStore.filter((item) => !idSet.has(item.id));
     historyStore = historyStore.filter((entry) => !idSet.has(entry.equipmentId));
+    return ids.length;
+  },
+
+  // 이력이 있는 장비의 목록 제외 처리: 삭제 대신 is_visible=false로 전환해 이력을 보존한다.
+  // (인수 문서 확정 설계: 숨김은 status가 아니라 표시 여부다. §4-4-1)
+  async excludeEquipment(ids) {
+    const idSet = new Set(ids);
+    equipmentStore = equipmentStore.map((item) => (
+      idSet.has(item.id) ? { ...item, is_visible: false } : item
+    ));
     return ids.length;
   },
 
@@ -218,7 +253,85 @@ export const EquipmentModel = {
 
   async deleteHistoryEntry(id) {
     await delay();
+    await photoStore.removeSet(`history:${id}`);
     historyStore = historyStore.filter((existing) => existing.id !== id);
+    return true;
+  },
+
+  // 대표사진: 로컬 저장소(IndexedDB)에 장비 id별로 저장/조회/삭제한다.
+  // 교체는 같은 id로 다시 save하면 된다(덮어쓰기).
+  async saveEquipmentPhoto(id, file) {
+    await photoStore.save(id, file);
+    return true;
+  },
+
+  async loadEquipmentPhoto(id) {
+    const blob = await photoStore.load(id);
+    return blob || null;
+  },
+
+  async deleteEquipmentPhoto(id) {
+    await photoStore.remove(id);
+    return true;
+  },
+
+  // ---- 이력 사진(여러 장) ----
+  // key = `history:<id>`. 사진 추가/삭제 시 entry.photoCount를 실제 저장 수와 동기화한다.
+
+  async loadHistoryPhotos(id) {
+    return photoStore.loadSet(`history:${id}`);
+  },
+
+  async appendHistoryPhotos(id, files) {
+    const key = `history:${id}`;
+    const existing = await photoStore.loadSet(key);
+    await photoStore.saveSet(key, [...existing, ...files]);
+    historyStore = historyStore.map((entry) => (
+      entry.id === id ? { ...entry, photoCount: existing.length + files.length } : entry
+    ));
+    return existing.length + files.length;
+  },
+
+  async deleteHistoryPhotoAt(id, index) {
+    const key = `history:${id}`;
+    const list = await photoStore.loadSet(key);
+    if (index >= 0 && index < list.length) list.splice(index, 1);
+    await photoStore.saveSet(key, list);
+    historyStore = historyStore.map((entry) => (
+      entry.id === id ? { ...entry, photoCount: list.length } : entry
+    ));
+    return list.length;
+  },
+
+  async removeHistoryPhotos(id) {
+    await photoStore.removeSet(`history:${id}`);
+    return true;
+  },
+
+  // 시드 이력의 photoCount가 실제 저장된 사진과 맞도록 최초 1회 자리표시 사진을 생성한다.
+  // (이미 저장소에 사진이 있으면 건너뛴다 — 사용자 데이터를 덮어쓰지 않는다.)
+  async ensureHistorySeedPhotos() {
+    if (seedPhotosChecked) return;
+    seedPhotosChecked = true;
+    for (const entry of historyStore) {
+      if (!entry.photoCount) continue;
+      const key = `history:${entry.id}`;
+      const existing = await photoStore.loadSet(key);
+      if (existing.length > 0) continue;
+      const blobs = [];
+      for (let index = 0; index < entry.photoCount; index += 1) {
+        blobs.push(await makePlaceholderBlob(index));
+      }
+      await photoStore.saveSet(key, blobs);
+    }
+  },
+
+  // 카드 상태 행 빠른 변경용: 상태만 즉시 갱신한다.
+  async updateEquipmentStatus(id, status) {
+    await delay(80);
+    equipmentStore = equipmentStore.map((item) => (
+      item.id === id ? { ...item, status } : item
+    ));
     return true;
   },
 };

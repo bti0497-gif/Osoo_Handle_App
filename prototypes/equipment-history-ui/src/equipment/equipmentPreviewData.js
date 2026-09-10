@@ -8,9 +8,9 @@
 //
 // Phase 2에서 EquipmentModel이 apiClient 호출로 교체되면 이 파일은 개발 확인용으로만 사용된다.
 
-export const EQUIPMENT_STATUS_OPTIONS = ['사용 중', '점검 필요', '수리 중', '예비', '숨김', '폐기'];
+export const EQUIPMENT_STATUS_OPTIONS = ['사용 중', '점검 필요', '수리 중', '예비', '철거', '폐기'];
 export const EQUIPMENT_CATEGORY_OPTIONS = ['기계', '전기', '계측기', '기타'];
-export const EQUIPMENT_HISTORY_TYPES = ['정기점검', '고장', '수리', '부품교체', '위탁', '기타'];
+export const EQUIPMENT_HISTORY_TYPES = ['고장발생', '수리의뢰', '수리&재설치', '교체', '정기점검', '기타'];
 
 export const EQUIPMENT_PROCESS_METHODS = [
   { value: 'A2O', label: 'A2O' },
@@ -42,6 +42,7 @@ const card = (id, managementNo, category1, category2, name, extras = {}) => {
     location: category1,
     accessory: '',
     status: '사용 중',
+    is_visible: true,
     notes: '',
     ...extras,
   };
@@ -217,7 +218,7 @@ const COMMON_HISTORY = [
     equipmentId: 'seed-m-105-a',
     date: '2026-08-14',
     completedAt: '',
-    type: '고장',
+    type: '고장발생',
     content: 'A호기 운전 중 이상 진동 발생으로 가동 정지',
     company: '',
     contact: '',
@@ -229,7 +230,7 @@ const COMMON_HISTORY = [
     equipmentId: 'seed-m-105-a',
     date: '2026-08-15',
     completedAt: '2026-08-18',
-    type: '수리',
+    type: '수리&재설치',
     content: 'A호기 베어링 교체 및 진동 측정 후 재가동',
     company: '(주)대영기전',
     contact: '033-342-8890',
@@ -241,7 +242,7 @@ const COMMON_HISTORY = [
     equipmentId: 'seed-m-105-a',
     date: '2025-08-20',
     completedAt: '2025-08-20',
-    type: '위탁',
+    type: '정기점검',
     content: '연간 정밀검사(진동·절연 측정)',
     company: '(주)한국설비진단',
     contact: '02-861-4400',
@@ -253,7 +254,7 @@ const COMMON_HISTORY = [
     equipmentId: 'seed-m-106-a',
     date: '2026-06-03',
     completedAt: '2026-06-03',
-    type: '부품교체',
+    type: '교체',
     content: 'A호기 기계밀봉(메커니컬실) 교체',
     company: '(주)동원파워펌프',
     contact: '010-4477-2211',
@@ -289,7 +290,7 @@ const COMMON_HISTORY = [
     equipmentId: 'seed-m-101',
     date: '2026-01-15',
     completedAt: '2026-01-15',
-    type: '고장',
+    type: '고장발생',
     content: '조목 걸림으로 스크린 정지, 수동 제거 후 재가동',
     company: '',
     contact: '',
@@ -301,7 +302,7 @@ const COMMON_HISTORY = [
     equipmentId: 'seed-m-114-a',
     date: '2026-05-21',
     completedAt: '2026-05-21',
-    type: '위탁',
+    type: '정기점검',
     content: 'A호기 연간 정밀검사(진동·절연 측정)',
     company: '(주)한국설비진단',
     contact: '02-861-4400',
@@ -313,7 +314,7 @@ const COMMON_HISTORY = [
     equipmentId: 'seed-m-118',
     date: '2026-07-12',
     completedAt: '2026-07-13',
-    type: '부품교체',
+    type: '교체',
     content: 'UV 램프 4식 및 석영관 세정 교체',
     company: '그린수처리',
     contact: '010-8812-6655',
@@ -340,7 +341,7 @@ const MBR_ONLY_HISTORY = [
     equipmentId: 'seed-m-119-a',
     date: '2026-06-20',
     completedAt: '2026-06-20',
-    type: '위탁',
+    type: '수리의뢰',
     content: '막 화학세척(CIP) 및 차압 점검',
     company: '(주)코아텍워터',
     contact: '02-555-1234',
@@ -352,7 +353,7 @@ const MBR_ONLY_HISTORY = [
     equipmentId: 'seed-m-120-a',
     date: '2026-03-11',
     completedAt: '2026-03-11',
-    type: '부품교체',
+    type: '교체',
     content: 'A호기 흡인펌프 기계밀봉 교체',
     company: '',
     contact: '',

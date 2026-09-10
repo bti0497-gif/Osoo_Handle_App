@@ -1,4 +1,5 @@
 // 장비 이력(점검/고장/수리) 등록·수정 모달. 상태와 검증은 ViewModel이 담당한다.
+// 사진은 여러 장 선택 가능하며 선택 수는 photoSummary로 표시된다.
 import React from 'react';
 import { EQUIPMENT_HISTORY_TYPES } from './equipmentPreviewData';
 
@@ -10,7 +11,8 @@ const HistoryField = ({ label, required, children, wide }) => (
 );
 
 export default function EquipmentHistoryEditor({
-  draft, equipmentName, saving, onChangeField, onClose, onSave, onDelete,
+  draft, equipmentName, saving, photoSummary, onPhotosFiles,
+  onChangeField, onClose, onSave, onDelete,
 }) {
   if (!draft) return null;
   return (
@@ -87,12 +89,17 @@ export default function EquipmentHistoryEditor({
           </div>
           <label className="equipment-editor-photo-bar">
             <span className="material-icons">add_photo_alternate</span>
-            <b>{draft.photoName || '현장 사진 선택'}</b>
-            <small>작업 전후 사진을 등록하세요.</small>
+            <b>{photoSummary}</b>
+            <small>여러 장을 선택할 수 있습니다.</small>
             <input
               type="file"
               accept="image/*"
-              onChange={(event) => onChangeField('photoName', event.target.files?.[0]?.name || '')}
+              multiple
+              onChange={(event) => {
+                const files = Array.from(event.target.files || []);
+                event.target.value = '';
+                if (files.length) onPhotosFiles?.(files);
+              }}
             />
           </label>
         </div>
