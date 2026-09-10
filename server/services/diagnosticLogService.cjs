@@ -2,20 +2,11 @@ const fs = require('fs');
 const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
+const { Worker } = require('worker_threads');
 const { inspectSiteIdentity } = require('./siteIdentityIntegrityService.cjs');
 
-let driveService = null;
-
-function getDriveService() {
-  if (!driveService) {
-    driveService = require('./driveService.cjs');
-  }
-  return driveService;
-}
-
 function isDriveServiceLoaded() {
-  const loadedService = driveService
-    || require.cache[require.resolve('./driveService.cjs')]?.exports;
+  const loadedService = require.cache[require.resolve('./driveService.cjs')]?.exports;
   return Boolean(loadedService?.isDriveClientInitialized?.());
 }
 
@@ -179,46 +170,6 @@ function getKstDayStartIso(dateKey) {
   return new Date(`${dateKey}T00:00:00+09:00`).toISOString();
 }
 
-async function listDriveChildren(folderId) {
-  const { drive } = getDriveService();
-  const items = [];
-  let pageToken;
-  do {
-    const response = await drive.files.list({
-      q: `'${String(folderId).replace(/'/g, "\\'")}' in parents and trashed=false`,
-      fields: 'nextPageToken, files(id, name, mimeType, createdTime)',
-      pageSize: 1000,
-      pageToken,
-      spaces: 'drive',
-      includeItemsFromAllDrives: true,
-      supportsAllDrives: true,
-    });
-    items.push(...(response.data.files || []));
-    pageToken = response.data.nextPageToken;
-  } while (pageToken);
-  return items;
-}
-
-async function deleteOldDriveDiagnosticFiles(folderId, cutoffIso, depth = 0) {
-  const { drive } = getDriveService();
-  if (depth > 4) return 0;
-  const folderMimeType = 'application/vnd.google-apps.folder';
-  const children = await listDriveChildren(folderId);
-  let deletedCount = 0;
-
-  for (const item of children) {
-    if (item.mimeType === folderMimeType) {
-      deletedCount += await deleteOldDriveDiagnosticFiles(item.id, cutoffIso, depth + 1);
-      continue;
-    }
-    if (item.createdTime && item.createdTime < cutoffIso) {
-      await drive.files.delete({ fileId: item.id, supportsAllDrives: true });
-      deletedCount += 1;
-    }
-  }
-  return deletedCount;
-}
-
 async function cleanupOldDiagnosticsOnVersionStart(db, appDataPath) {
   const version = getAppVersion();
   if (!version) return { success: false, skipped: true, reason: 'version-unavailable' };
@@ -243,26 +194,20 @@ async function cleanupOldDiagnosticsOnVersionStart(db, appDataPath) {
     localFileCount += 1;
   }
 
-  let driveFileCount = 0;
-  const {
-    findFolderPath,
-    getDriveRootFolderId,
-    isDriveConfigured,
-  } = getDriveService();
-  if (isDriveConfigured()) {
-    const diagnosticRoot = await findFolderPath(getDriveRootFolderId(), ['앱진단로그']);
-    if (diagnosticRoot?.id) {
-      driveFileCount = await deleteOldDriveDiagnosticFiles(diagnosticRoot.id, cutoffIso);
-    }
-  } else {
+  const driveCleanup = await runDiagnosticUploadWorker({ action: 'cleanup', cutoffIso });
+  if (driveCleanup?.skipped) {
     return {
       success: false,
       skipped: true,
-      reason: 'drive-not-configured',
+      reason: driveCleanup.reason || 'drive-not-configured',
       localRowCount: localDelete.changes,
       localFileCount,
     };
   }
+  if (!driveCleanup?.success) {
+    throw new Error(driveCleanup?.error || 'diagnostic-cleanup-worker-failed');
+  }
+  const driveFileCount = Number(driveCleanup.deletedCount || 0);
 
   fs.writeFileSync(markerPath, JSON.stringify({
     version,
@@ -295,15 +240,6 @@ function toDetailsJson(details) {
   return json.length > MAX_DETAIL_LENGTH
     ? `${json.slice(0, MAX_DETAIL_LENGTH)}...<truncated>`
     : json;
-}
-
-function parseDetailsJson(value) {
-  if (!value) return {};
-  try {
-    return JSON.parse(String(value));
-  } catch (_) {
-    return { raw: safeString(value) };
-  }
 }
 
 let diagnosticRecordedNotifier = null;
@@ -382,14 +318,6 @@ function recordDiagnostic(db, appDataPath, event = {}) {
 }
 
 async function uploadPendingDiagnostics(db, appDataPath, { limit = 200 } = {}) {
-  const {
-    getOrCreateFolderPath,
-    getDriveRootFolderId,
-    isDriveConfigured,
-    uploadBufferToFolder,
-  } = getDriveService();
-  if (!isDriveConfigured()) return { success: false, skipped: true, reason: 'drive-not-configured' };
-
   const rows = db.prepare(`
     SELECT *
     FROM app_diagnostic_logs
@@ -401,35 +329,16 @@ async function uploadPendingDiagnostics(db, appDataPath, { limit = 200 } = {}) {
   if (rows.length === 0) return { success: true, count: 0 };
 
   const site = getSiteInfo(db);
-  const now = new Date();
-  const yyyy = String(now.getFullYear());
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const stamp = now.toISOString().replace(/[:.]/g, '-');
-  const fileName = `${stamp}_${normalizeSiteName(site.siteName)}_diagnostics.jsonl`;
-  const buffer = Buffer.from(rows.map((row) => JSON.stringify({
-    id: row.id,
-    created_at: row.created_at,
-    level: row.level,
-    area: row.area,
-    action: row.action,
-    result: row.result,
-    message: row.message,
-    details: parseDetailsJson(row.details_json),
-    site_id: row.site_id,
-    site_name: row.site_name,
-    app_version: row.app_version,
-    machine: os.hostname(),
-    runtime: process.versions?.electron ? 'electron' : 'node',
-  })).join('\n') + '\n', 'utf8');
 
   try {
-    const folder = await getOrCreateFolderPath(getDriveRootFolderId(), ['앱진단로그', yyyy, mm]);
-    const file = await uploadBufferToFolder({
-      folderId: folder.id,
-      fileName,
-      buffer,
-      mimeType: 'application/jsonl',
+    const workerResult = await runDiagnosticUploadWorker({
+      rows,
+      siteName: site.siteName,
+      machine: os.hostname(),
+      runtime: process.versions?.electron ? 'electron' : 'node',
     });
+    if (workerResult?.skipped) return workerResult;
+    if (!workerResult?.success) throw new Error(workerResult?.error || 'diagnostic-upload-worker-failed');
     const uploadedAt = new Date().toISOString();
     const markStmt = db.prepare(`
       UPDATE app_diagnostic_logs
@@ -437,9 +346,20 @@ async function uploadPendingDiagnostics(db, appDataPath, { limit = 200 } = {}) {
       WHERE id = ?
     `);
     db.transaction(() => {
-      rows.forEach((row) => markStmt.run(uploadedAt, file.id || null, file.webViewLink || null, row.id));
+      rows.forEach((row) => markStmt.run(
+        uploadedAt,
+        workerResult.driveFileId || null,
+        workerResult.driveWebViewLink || null,
+        row.id
+      ));
     })();
-    return { success: true, count: rows.length, driveFileId: file.id || null };
+    return {
+      success: true,
+      count: rows.length,
+      driveFileId: workerResult.driveFileId || null,
+      workerElapsedMs: workerResult.elapsedMs || null,
+      isolatedWorker: true,
+    };
   } catch (error) {
     const failStmt = db.prepare(`
       UPDATE app_diagnostic_logs
@@ -451,6 +371,34 @@ async function uploadPendingDiagnostics(db, appDataPath, { limit = 200 } = {}) {
     })();
     return { success: false, count: rows.length, error: error.message };
   }
+}
+
+function runDiagnosticUploadWorker(payload, { timeoutMs = 180000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(path.join(__dirname, 'diagnosticUploadWorker.cjs'), {
+      workerData: payload,
+    });
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+    };
+    const timer = setTimeout(() => {
+      void worker.terminate();
+      finish(reject, new Error(`diagnostic-upload-worker-timeout:${timeoutMs}ms`));
+    }, timeoutMs);
+    timer.unref?.();
+    worker.once('message', (message) => {
+      if (message?.ok) finish(resolve, message.result || {});
+      else finish(reject, new Error(message?.error || 'diagnostic-upload-worker-failed'));
+    });
+    worker.once('error', (error) => finish(reject, error));
+    worker.once('exit', (code) => {
+      if (!settled && code !== 0) finish(reject, new Error(`diagnostic-upload-worker-exit:${code}`));
+    });
+  });
 }
 
 module.exports = {

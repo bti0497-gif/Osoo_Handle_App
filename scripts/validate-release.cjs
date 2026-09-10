@@ -576,6 +576,7 @@ function validateRegressionContracts() {
   const dailyLogModelPath = path.join(BASE_DIR, 'src', 'features', 'dailylog', 'DailyLogModel.js');
   const operationStatusRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'operationStatusRoutes.cjs');
   const diagnosticLogServicePath = path.join(BASE_DIR, 'server', 'services', 'diagnosticLogService.cjs');
+  const diagnosticUploadWorkerPath = path.join(BASE_DIR, 'server', 'services', 'diagnosticUploadWorker.cjs');
   const serverIndexPath = path.join(BASE_DIR, 'server', 'index.cjs');
   const sludgePhotoRoutesPath = path.join(BASE_DIR, 'server', 'routes', 'sludgePhotoRoutes.cjs');
   const sludgePhotoModelPath = path.join(BASE_DIR, 'src', 'features', 'sludge', 'SludgePhotoModel.js');
@@ -700,6 +701,7 @@ function validateRegressionContracts() {
   const dailyLogModelText = readText(dailyLogModelPath);
   const operationStatusRoutesText = readText(operationStatusRoutesPath);
   const diagnosticLogServiceText = readText(diagnosticLogServicePath);
+  const diagnosticUploadWorkerText = readText(diagnosticUploadWorkerPath);
   const serverIndexText = readText(serverIndexPath);
   const sludgePhotoRoutesText = readText(sludgePhotoRoutesPath);
   const sludgePhotoModelText = readText(sludgePhotoModelPath);
@@ -1346,7 +1348,9 @@ function validateRegressionContracts() {
 
   checkSource(
     diagnosticLogServiceText.includes('async function cleanupOldDiagnosticsOnVersionStart') &&
-      diagnosticLogServiceText.includes("findFolderPath(getDriveRootFolderId(), ['앱진단로그'])") &&
+      diagnosticLogServiceText.includes("runDiagnosticUploadWorker({ action: 'cleanup', cutoffIso })") &&
+      diagnosticUploadWorkerText.includes("findFolderPath(getDriveRootFolderId(), ['앱진단로그'])") &&
+      diagnosticUploadWorkerText.includes('item.createdTime < cutoffIso') &&
       diagnosticLogServiceText.includes("entry.name.slice(0, 10) >= todayKst") &&
       authRoutesSecurityText.includes("router.post('/background-tasks/run-diagnostic-sync'") &&
       authRoutesSecurityText.includes('cleanupOldDiagnosticsOnVersionStart(db, appDataPath)') &&
@@ -1360,6 +1364,15 @@ function validateRegressionContracts() {
       diagnosticLogServiceText.includes("runtime: process.versions?.electron ? 'electron' : 'node'"),
     'Drive 진단로그 PC/실행환경 식별 계약 유지',
     '현장과 개발 PC를 구분할 machine/runtime 진단 필드가 누락되었습니다'
+  );
+
+  checkSource(
+    diagnosticLogServiceText.includes("new Worker(path.join(__dirname, 'diagnosticUploadWorker.cjs')") &&
+      diagnosticLogServiceText.includes('isolatedWorker: true') &&
+      diagnosticUploadWorkerText.includes("require('./driveService.cjs')") &&
+      diagnosticUploadWorkerText.includes('uploadBufferToFolder({'),
+    'Drive 진단로그 초기화·직렬화·전송 워커 격리 계약 유지',
+    '진단로그 업로드가 서버 메인 이벤트 루프를 다시 장시간 점유할 수 있습니다'
   );
 
   checkSource(

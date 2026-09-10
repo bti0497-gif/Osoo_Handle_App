@@ -991,6 +991,12 @@ async function waitForRoadworkPhotoRow(webview, uploaderIndex, beforeCount) {
   return null;
 }
 
+const ROADWORK_PHOTO_BETWEEN_ITEM_DELAY_MS = 600;
+
+async function waitForRoadworkPhotoUploaderToSettle() {
+  await new Promise((resolve) => window.setTimeout(resolve, ROADWORK_PHOTO_BETWEEN_ITEM_DELAY_MS));
+}
+
 export default function RoadworkHelperView({ currentUser }) {
   const windowSiteId = new URLSearchParams(window.location.search).get('siteId') || '';
   // A direction-specific window owns an immutable siteId in its URL.  The
@@ -1525,6 +1531,18 @@ export default function RoadworkHelperView({ currentUser }) {
         const photo = photos[index];
         const uploaderIndex = index + 1;
         const progress = Math.round(((index + 1) / Math.max(photos.length, 1)) * 100);
+        if (previousPhotoFinishedAt != null) {
+          const settleStartedAt = Date.now();
+          await waitForRoadworkPhotoUploaderToSettle();
+          recordRoadworkDiagnostic('photo-input-trace', {
+            runId: photoRunId,
+            item: photo.key,
+            date: roadworkStatus.date,
+            phase: 'between-items-stabilized',
+            elapsedMs: Date.now() - settleStartedAt,
+            configuredDelayMs: ROADWORK_PHOTO_BETWEEN_ITEM_DELAY_MS,
+          });
+        }
         const board = await webview.executeJavaScript(buildRoadworkPhotoBoardStatusScript(uploaderIndex));
         if (!board?.found) {
           photoResults.push({ key: photo.key, result: 'board-not-found' });
@@ -1582,6 +1600,9 @@ export default function RoadworkHelperView({ currentUser }) {
           attempts: injected?.attempts || 0, snapshot: afterInput,
         });
         if (!injected?.success) {
+          // 파일 선택창을 열었다 닫는 시도 자체가 외부 WebSquare 업로더의
+          // 포커스/DOM 상태를 바꿀 수 있으므로 다음 항목 전에 안정화 시간을 둔다.
+          previousPhotoFinishedAt = Date.now();
           photoResults.push({ key: photo.key, result: 'file-injection-failed' });
           recordRoadworkDiagnostic('photo-stage-item', {
             date: roadworkStatus.date,
