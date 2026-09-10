@@ -82,6 +82,11 @@ const EquipmentModel = {
     return apiClient.delete(`${BASE}/history/${id}`);
   },
 
+  async fetchWorkRecordPhotos(id) {
+    const result = await apiClient.get(`/api/work-records/${id}/photos`);
+    return result && result.photos ? result.photos : [];
+  },
+
   async addCatalogSelections(selections) {
     return apiClient.post(`${BASE}/catalog`, { selections });
   },

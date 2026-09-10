@@ -69,7 +69,7 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
   // 장비 연결(work_record_equipment_links) diff-upsert (계획서 §3-7).
   // 링크 행은 동기화 북키핑을 위해 숫자 id와 site_id를 직접 소유한다.
   function replaceWorkRecordLinks(recordId, siteId, equipmentIds) {
-    if (!Array.isArray(equipmentIds)) return;
+    if (!Array.isArray(equipmentIds)) return { changed: 0 };
     const desired = [...new Set(equipmentIds.map((value) => String(value || '').trim()).filter(Boolean))];
     const validIds = new Set(
       db.prepare('SELECT id FROM equipment_assets WHERE site_id = ?').all(siteId).map((row) => row.id),
@@ -86,10 +86,19 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
       INSERT INTO work_record_equipment_links (id, work_record_id, equipment_id, site_id, created_at)
       VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM work_record_equipment_links), ?, ?, ?, ?)
     `);
-    db.transaction(() => {
-      toDelete.forEach((equipmentId) => deleteLink.run(recordId, equipmentId));
-      toInsert.forEach((equipmentId) => insertLink.run(recordId, equipmentId, siteId, new Date().toISOString()));
-    })();
+    toDelete.forEach((equipmentId) => deleteLink.run(recordId, equipmentId));
+    toInsert.forEach((equipmentId) => insertLink.run(recordId, equipmentId, siteId, new Date().toISOString()));
+    return { changed: toDelete.length + toInsert.length };
+  }
+
+  // 연결 변경이 있으면 장비 전용 동기화로 BigQuery 메타데이터를 맞춘다(비차단).
+  function triggerEquipmentSync() {
+    setImmediate(() => {
+      try {
+        const createSync = require('../services/equipment/equipmentSyncService.cjs');
+        createSync(db).syncEquipmentData().catch(() => {});
+      } catch (_) { /* 무시: 다음 변경 시 재전송 */ }
+    });
   }
 
   router.get('/api/work-records', (req, res) => {
@@ -123,24 +132,30 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
         });
       }
       const metadata = getCurrentRecordMetadata(db, req.body);
-      const info = db.prepare(`
+      const insertRecord = db.prepare(`
         INSERT INTO work_records
           (date, location, title, content, notes, site_id, site_name, author, created_at, last_modified)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        date,
-        String(location || '').trim(),
-        String(title || '').trim(),
-        String(content || '').trim(),
-        String(notes || '').trim(),
-        metadata.siteId,
-        metadata.siteName || '',
-        metadata.author || '',
-        metadata.createdAt,
-        metadata.lastModified
-      );
-      replaceWorkRecordLinks(info.lastInsertRowid, metadata.siteId, equipmentIds);
-      res.json({ success: true, id: info.lastInsertRowid });
+      `);
+      let recordId;
+      db.transaction(() => {
+        const info = insertRecord.run(
+          date,
+          String(location || '').trim(),
+          String(title || '').trim(),
+          String(content || '').trim(),
+          String(notes || '').trim(),
+          metadata.siteId,
+          metadata.siteName || '',
+          metadata.author || '',
+          metadata.createdAt,
+          metadata.lastModified
+        );
+        recordId = info.lastInsertRowid;
+        replaceWorkRecordLinks(recordId, metadata.siteId, equipmentIds);
+      })();
+      if (Array.isArray(equipmentIds) && equipmentIds.length) triggerEquipmentSync();
+      res.json({ success: true, id: recordId });
     } catch (error) {
       console.error('[facility] 업무기록 저장 실패:', error.stack || error.message);
       res.status(500).json({ success: false, message: error.message });
@@ -153,22 +168,55 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
       if (!id) return res.status(400).json({ success: false, message: '기록 번호가 올바르지 않습니다.' });
       const siteId = String(req.siteContext?.siteId || '').trim();
       const { date, location, title, content, notes, equipmentIds } = req.body || {};
-      db.prepare(`
+      // 소유권 확인 후 본문·연결 변경을 하나의 트랜잭션으로 처리한다(결함 6).
+      // 다른 현장의 기록 ID면 아무 데이터도 변경하지 않는다.
+      const record = db.prepare('SELECT id FROM work_records WHERE id = ? AND site_id = ?').get(id, siteId);
+      if (!record) return res.status(404).json({ success: false, message: '현재 현장의 업무 기록을 찾을 수 없습니다.' });
+      const update = db.prepare(`
         UPDATE work_records
         SET date = ?, location = ?, title = ?, content = ?, notes = ?, last_modified = ?
         WHERE id = ? AND site_id = ?
-      `).run(
-        date,
-        String(location || '').trim(),
-        String(title || '').trim(),
-        String(content || '').trim(),
-        String(notes || '').trim(),
-        new Date().toISOString(),
-        id,
-        siteId
-      );
-      replaceWorkRecordLinks(id, siteId, equipmentIds);
+      `);
+      db.transaction(() => {
+        update.run(
+          date,
+          String(location || '').trim(),
+          String(title || '').trim(),
+          String(content || '').trim(),
+          String(notes || '').trim(),
+          new Date().toISOString(),
+          id,
+          siteId
+        );
+        replaceWorkRecordLinks(id, siteId, equipmentIds);
+      })();
+      if (equipmentIds !== undefined) triggerEquipmentSync();
       res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // 업무기록 사진 목록(장비이력카드 '연결된 업무·사진' 열람용, 읽기 전용)
+  router.get('/api/work-records/:id/photos', (req, res) => {
+    try {
+      const id = normalizeRecordId(req.params.id);
+      const siteId = String(req.siteContext?.siteId || '').trim();
+      const record = db.prepare('SELECT id, date, title FROM work_records WHERE id = ? AND site_id = ?').get(id, siteId);
+      if (!record) return res.status(404).json({ success: false, message: '업무 기록을 찾을 수 없습니다.' });
+      const rows = db.prepare(
+        'SELECT id, original_name, relative_path FROM work_record_photos WHERE work_record_id = ? ORDER BY id',
+      ).all(id);
+      res.json({
+        success: true,
+        date: record.date,
+        title: record.title,
+        photos: rows.map((row) => ({
+          id: row.id,
+          originalName: row.original_name,
+          url: `/${String(row.relative_path || '').replace(/\\/g, '/').replace(/^\/+/, '')}`,
+        })),
+      });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
     }

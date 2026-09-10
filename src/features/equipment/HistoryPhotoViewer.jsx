@@ -1,12 +1,14 @@
-// 유지보수 내역 사진 보기: 큰 이미지 + 하단 썸네일 행, 삭제/추가 지원.
-// items: [{ id, url }]. 사진 데이터와 갱신 로직은 ViewModel/Model이 담당한다.
+// 유지보수 내역 사진 보기: 큰 이미지 + 하단 썸네일 행.
+// items: [{ id, url }]. readOnly면 삭제·추가를 숨긴다(업무사진 열람은 읽기 전용).
+// 사진 데이터와 갱신 로직은 ViewModel/Model이 담당한다.
 import React from 'react';
 
 export default function HistoryPhotoViewer({
-  entry, items = [], index, onSelect, onDelete, onAddFiles, onClose,
+  title = '', items = [], readOnly = false, index, onSelect, onDelete, onAddFiles, onClose,
 }) {
   const total = items.length;
-  const safeIndex = Math.min(index, Math.max(0, total - 1));
+  const requestedIndex = Number.isFinite(Number(index)) ? Number(index) : 0;
+  const safeIndex = Math.max(0, Math.min(requestedIndex, Math.max(0, total - 1)));
   const current = total > 0 ? items[safeIndex] : null;
   return (
     <div className="equipment-editor-backdrop" role="presentation" onMouseDown={onClose}>
@@ -20,7 +22,7 @@ export default function HistoryPhotoViewer({
         <header>
           <div>
             <h2>현장 사진 보기</h2>
-            <p>{entry ? `${entry.date} · ${entry.content}` : ''}</p>
+            <p>{title}</p>
           </div>
           <button type="button" className="catalog-close" onClick={onClose} aria-label="닫기">
             <span className="material-icons">close</span>
@@ -47,10 +49,12 @@ export default function HistoryPhotoViewer({
                     >›</button>
                   </>
                 ) : null}
-                <button type="button" className="viewer-delete" onClick={onDelete} title="이 사진 삭제">
-                  <span className="material-icons">delete</span>
-                  삭제
-                </button>
+                {!readOnly ? (
+                  <button type="button" className="viewer-delete" onClick={onDelete} title="이 사진 삭제">
+                    <span className="material-icons">delete</span>
+                    삭제
+                  </button>
+                ) : null}
                 <span className="viewer-counter">{safeIndex + 1} / {total}</span>
               </div>
               <div className="photo-viewer-thumbs">
@@ -70,6 +74,7 @@ export default function HistoryPhotoViewer({
           ) : (
             <p className="viewer-empty">저장된 사진이 없습니다. 아래 버튼으로 사진을 추가하세요.</p>
           )}
+          {!readOnly ? (
           <label className="viewer-add">
             <span className="material-icons">add_photo_alternate</span>
             사진 추가
@@ -84,6 +89,7 @@ export default function HistoryPhotoViewer({
               }}
             />
           </label>
+          ) : null}
         </div>
         <footer>
           <div>

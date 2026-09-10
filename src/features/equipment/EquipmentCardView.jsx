@@ -81,6 +81,14 @@ export default function EquipmentCardView() {
     }
   };
 
+  const handleOpenWorkPhotos = async (record) => {
+    try {
+      await vm.openWorkPhotoViewer(record);
+    } catch (error) {
+      await showAlert(`사진을 불러오지 못했습니다: ${error.message}`);
+    }
+  };
+
   const handleApplyCatalog = async () => {
     const removals = vm.catalogRemovals || [];
     const toDelete = removals.filter((unit) => !unit.hasHistory).map((unit) => unit.number);
@@ -328,7 +336,7 @@ export default function EquipmentCardView() {
                             <td>{record.date}</td>
                             <td className="left">{record.title}{record.content ? <small>{record.content}</small> : null}</td>
                             <td>{Number(record.photo_count) > 0 ? (
-                              <button type="button" className="equipment-photo-count"><span className="material-icons">photo_library</span>{record.photo_count}</button>
+                              <button type="button" className="equipment-photo-count" title="사진 보기" onClick={() => handleOpenWorkPhotos(record)}><span className="material-icons">photo_library</span>{record.photo_count}</button>
                             ) : '-'}</td>
                             <td className="left">{(record.linked_equipment_ids || '').split(',').length}대 연결</td>
                           </tr>
@@ -408,8 +416,9 @@ export default function EquipmentCardView() {
 
       {vm.viewer.open ? (
         <HistoryPhotoViewer
-          entry={vm.historyEntries.find((entry) => entry.id === vm.viewer.entryId)}
-          items={vm.historyPhotoUrls[vm.viewer.entryId] || []}
+          title={vm.viewer.workTitle || ((vm.historyEntries.find((entry) => entry.id === vm.viewer.entryId) || {}).date || '')}
+          items={vm.viewer.items.length ? vm.viewer.items : (vm.historyPhotoUrls[vm.viewer.entryId] || [])}
+          readOnly={vm.viewer.entryId === null}
           index={vm.viewer.index}
           onSelect={vm.viewerSelect}
           onDelete={vm.viewerDelete}

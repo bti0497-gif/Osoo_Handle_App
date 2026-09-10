@@ -36,13 +36,26 @@ module.exports = {
 
     await ctx.step('equipment-history-create', async () => {
       const response = await ctx.request('POST', '/api/equipment/history', {
-        body: { equipmentId, date: historyDate, type: '정기점검', content: '진단 점검 완료', company: '진단업체' },
+        body: {
+          equipmentId, date: historyDate, completedAt: historyDate,
+          type: '정기점검', content: '진단 점검 완료', company: '진단업체',
+        },
       });
       ctx.assert(response.ok && response.json?.id, '장비 이력 생성에 실패했습니다.', 'EQUIPMENT_HISTORY_CREATE_FAILED', response.json);
       historyId = response.json.id;
       const list = await ctx.request('GET', '/api/equipment/history', { query: { equipmentId } });
       ctx.assert(list.ok && Array.isArray(list.json) && list.json.some((row) => row.id === historyId),
         '생성한 장비 이력을 재조회하지 못했습니다.', 'EQUIPMENT_HISTORY_RELOAD_FAILED', list.json);
+
+      const updated = await ctx.request('PUT', `/api/equipment/history/${historyId}`, {
+        body: { content: '진단 점검 내용 수정' },
+      });
+      const afterUpdate = await ctx.request('GET', '/api/equipment/history', { query: { equipmentId } });
+      const preserved = Array.isArray(afterUpdate.json)
+        ? afterUpdate.json.find((row) => row.id === historyId)
+        : null;
+      ctx.assert(updated.ok && preserved?.completed_at === historyDate,
+        '이력 내용 수정 중 완료일이 소실됐습니다.', 'EQUIPMENT_COMPLETED_AT_LOST', preserved);
     });
 
     await ctx.step('equipment-work-record-link', async () => {
@@ -67,6 +80,44 @@ module.exports = {
           '장비 이력 FK/현장 범위가 손상됐습니다.', 'EQUIPMENT_HISTORY_DB_SCOPE_BROKEN', history);
       } finally {
         db.close();
+      }
+    });
+
+    await ctx.step('equipment-delete-and-work-record-site-guard', async () => {
+      const disposable = await ctx.request('POST', '/api/equipment', {
+        body: { managementNo: `DEL-${Date.now()}`, name: '삭제진단장비', category1: '진단', category2: '진단' },
+      });
+      ctx.assert(disposable.ok && disposable.json?.id,
+        '삭제 검증용 장비 생성에 실패했습니다.', 'EQUIPMENT_DELETE_SETUP_FAILED', disposable.json);
+      const removed = await ctx.request('DELETE', `/api/equipment/${disposable.json.id}`, {});
+      ctx.assert(removed.ok,
+        '이력 없는 장비의 정상 삭제 또는 사진 폴더 정리에 실패했습니다.', 'EQUIPMENT_DELETE_FAILED', removed.json);
+
+      const Database = require('better-sqlite3');
+      const db = new Database(dbPath);
+      let foreignId;
+      try {
+        const inserted = db.prepare(`
+          INSERT INTO work_records (date, title, site_id, site_name, created_at, last_modified)
+          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `).run(`${fixtures.dataset.fixedDate.slice(0, 8)}20`, '타 현장 보호 진단', 'foreign-site', '타 현장');
+        foreignId = inserted.lastInsertRowid;
+      } finally {
+        db.close();
+      }
+      const foreignPut = await ctx.request('PUT', `/api/work-records/${foreignId}`, {
+        body: { date: workDate, title: '변경 시도', equipmentIds: [equipmentId] },
+      });
+      ctx.assert(foreignPut.status === 404,
+        '다른 현장 업무기록 수정이 차단되지 않았습니다.', 'WORK_RECORD_SITE_GUARD_FAILED', foreignPut.json);
+      const verifyDb = new Database(dbPath, { readonly: true });
+      try {
+        const row = verifyDb.prepare('SELECT title FROM work_records WHERE id = ?').get(foreignId);
+        const link = verifyDb.prepare('SELECT 1 FROM work_record_equipment_links WHERE work_record_id = ?').get(foreignId);
+        ctx.assert(row?.title === '타 현장 보호 진단' && !link,
+          '차단된 요청이 타 현장 업무기록 또는 장비 연결을 변경했습니다.', 'WORK_RECORD_SITE_MUTATED', { row, link });
+      } finally {
+        verifyDb.close();
       }
     });
   },

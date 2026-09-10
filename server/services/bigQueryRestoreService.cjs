@@ -340,6 +340,8 @@ async function restoreEquipmentMaster(db, { siteId = '', siteName = '' } = {}) {
       author = excluded.author,
       last_modified = excluded.last_modified,
       is_synced = 1
+    -- 미동기화 로컬 수정은 보존한다(§4-4-4 복원 원칙)
+    WHERE equipment_assets.is_synced = 1
   `);
   const insertAssetPhoto = db.prepare(`
     INSERT INTO equipment_asset_photos (
@@ -361,11 +363,15 @@ async function restoreEquipmentMaster(db, { siteId = '', siteName = '' } = {}) {
       equipment_id = excluded.equipment_id, type = excluded.type, contact = excluded.contact,
       completed_at = excluded.completed_at, last_modified = excluded.last_modified, is_synced = 1
     WHERE facility_logs.site_id = excluded.site_id
+      -- 미동기화 로컬 수정은 보존한다(원격 값으로 덮어쓰지 않음)
+      AND facility_logs.is_synced = 1
   `);
+  // 업무기록 연결 복원: 부모 업무기록이 존재할 때만 넣는다(고아 링크 방지).
   const upsertLink = db.prepare(`
     INSERT INTO work_record_equipment_links (
       work_record_id, equipment_id, site_id, created_at, is_synced
-    ) VALUES (@work_record_id, @equipment_id, @site_id, @created_at, 1)
+    ) SELECT @work_record_id, @equipment_id, @site_id, @created_at, 1
+    WHERE EXISTS (SELECT 1 FROM work_records WHERE id = @work_record_id)
     ON CONFLICT(work_record_id, equipment_id) DO NOTHING
   `);
   const insertLogPhoto = db.prepare(`

@@ -42,11 +42,12 @@ const TABLE_CONTRACTS = {
       { name: 'location', source: (row) => row.location },
       { name: 'accessory', source: (row) => row.accessory },
       { name: 'status', source: (row) => row.status },
-      { name: 'is_visible', source: (row) => (row.is_visible === undefined ? 1 : row.is_visible), type: 'BOOLEAN' },
+      { name: 'is_visible', source: (row) => Boolean(Number(row.is_visible === undefined ? 1 : row.is_visible)), type: 'BOOLEAN' },
       { name: 'notes', source: (row) => row.notes },
-      { name: 'author', source: (row) => row.author || ctx.authorName },
+      { name: 'author', source: (row, ctx) => row.author || ctx.authorName },
       { name: 'created_at', source: (row) => toTimestamp(row.created_at), type: 'TIMESTAMP' },
       { name: 'updated_at', source: (row) => toTimestamp(row.last_modified), type: 'TIMESTAMP' },
+      { name: 'uploaded_at', source: () => new Date().toISOString(), type: 'TIMESTAMP' },
     ],
   },
   equipment_asset_photos: {
@@ -135,11 +136,15 @@ async function ensureRemoteTable(dataset, tableName, contract) {
 
 async function mergeRow(bq, tableName, contract, row, ctx) {
   const values = {};
+  const types = {};
   contract.columns.forEach((column) => {
     values[column.name] = column.source(row, ctx);
+    // NULL 파라미터는 타입 추론이 불가능하므로 모든 파라미터에 타입을 선언한다.
+    types[column.name] = column.type || 'STRING';
   });
   contract.naturalKeys.forEach((key) => {
     values[`nk_${key}`] = values[key];
+    types[`nk_${key}`] = types[key];
   });
 
   const keyMatch = contract.naturalKeys
@@ -161,6 +166,7 @@ async function mergeRow(bq, tableName, contract, row, ctx) {
       WHEN NOT MATCHED THEN INSERT (${insertColumns}) VALUES (${insertValues})
     `,
     params: values,
+    types,
   });
 }
 
@@ -168,6 +174,10 @@ function createEquipmentSyncService(db) {
   let syncInFlight = null;
 
   async function runSyncEquipmentData() {
+    // 동기화 활성화 플래그: 범용 동기화기(bigQueryTriggerService)와 동일한 게이트를 따른다.
+    if (String(process.env.BIGQUERY_SYNC_ENABLED || 'true') !== 'true') {
+      return { success: false, skipped: 'BIGQUERY_SYNC_ENABLED=false', tables: {} };
+    }
     const bq = getBigQueryClient();
     if (!bq) return { success: false, skipped: 'client-not-ready', tables: {} };
     const siteInfo = getSiteInfo(db);
@@ -176,6 +186,8 @@ function createEquipmentSyncService(db) {
     for (const tableName of TABLE_NAMES) {
       const contract = TABLE_CONTRACTS[tableName];
       try {
+        // 서버 재시작/크래시로 is_synced=2에 잔류한 행을 전송 대기 상태로 복구한다.
+        db.prepare(`UPDATE ${tableName} SET is_synced = 0 WHERE is_synced = 2`).run();
         const rows = db.prepare(`SELECT * FROM ${tableName} WHERE is_synced = 0`).all();
         if (!rows.length) {
           tables[tableName] = { success: true, count: 0 };

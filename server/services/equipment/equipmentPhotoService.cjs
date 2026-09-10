@@ -48,6 +48,14 @@ function createEquipmentPhotoService(db, appDataPath) {
     }
   }
 
+  function removeDirQuiet(dir) {
+    try {
+      if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    } catch (error) {
+      console.warn('[equipment-photos] 폴더 삭제 실패:', error.message);
+    }
+  }
+
   function writeDriveReceipt(localPath, receipt) {
     try {
       fs.writeFileSync(`${localPath}.drive.json`, JSON.stringify(receipt), 'utf8');

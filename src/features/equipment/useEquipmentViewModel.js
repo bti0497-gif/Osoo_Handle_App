@@ -1,6 +1,7 @@
 // 장비이력카드 ViewModel: 상태 관리와 비즈니스 로직을 담당한다.
 // 데이터는 EquipmentModel(apiClient)을 경유하며, 사진 URL은 정적 마운트 상대경로다.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getApiBase } from '../../core/api/serverConfig.js';
 import EquipmentModel from './EquipmentModel';
 import {
   EQUIPMENT_CATALOG,
@@ -122,10 +123,15 @@ export function useEquipmentViewModel() {
   const [customDraft, setCustomDraft] = useState({ name: '', process: '', group: '' });
   const [photoUrls, setPhotoUrls] = useState({});
   const [historyPhotoUrls, setHistoryPhotoUrls] = useState({});
-  const [viewer, setViewer] = useState({ open: false, entryId: null, index: 0 });
+  const [viewer, setViewer] = useState({ open: false, entryId: null, index: 0, workTitle: '', items: [] });
   const [historyDraftPhotos, setHistoryDraftPhotos] = useState([]);
   const pendingPhotoRef = useRef(null);
   const [saving, setSaving] = useState(false);
+
+  const toServerPhotoUrl = useCallback((url) => {
+    if (!url || /^(?:https?:|data:|blob:)/i.test(url)) return url || '';
+    return `${getApiBase()}${url.startsWith('/') ? '' : '/'}${url}`;
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -143,14 +149,20 @@ export function useEquipmentViewModel() {
       const urlMap = {};
       normalizedItems.forEach((item) => {
         if (Number(item.photo_count) > 0 && item.main_photo_url) {
-          urlMap[item.id] = item.main_photo_url;
+          // 개발(vite 포트)·설치앱(file://) 모두 API 서버 원본을 가리키도록 절대 URL로 조합
+          urlMap[item.id] = toServerPhotoUrl(item.main_photo_url);
         }
       });
       setPhotoUrls(urlMap);
       const historyUrlMap = {};
       await Promise.all(nextHistory.map(async (entry) => {
         const rows = await EquipmentModel.loadHistoryPhotos(entry.id);
-        if (rows.length) historyUrlMap[entry.id] = rows;
+        if (rows.length) {
+          historyUrlMap[entry.id] = rows.map((photo) => ({
+            ...photo,
+            url: toServerPhotoUrl(photo.url),
+          }));
+        }
       }));
       setHistoryPhotoUrls(historyUrlMap);
       setSelectedId((current) => (current && normalizedItems.some((item) => item.id === current) ? current : null));
@@ -159,7 +171,7 @@ export function useEquipmentViewModel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [toServerPhotoUrl]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -496,7 +508,10 @@ export function useEquipmentViewModel() {
       let removed = 0;
       if (deleteIds.length) removed = await EquipmentModel.deleteEquipmentByIds(deleteIds);
       if (excludeIds.length) await EquipmentModel.excludeEquipment(excludeIds);
-      const created = additions.length ? await EquipmentModel.addCatalogSelections(additions) : [];
+      const createResult = additions.length
+        ? await EquipmentModel.addCatalogSelections(additions)
+        : { created: [] };
+      const created = Array.isArray(createResult?.created) ? createResult.created : [];
       await load();
       setCatalogOpen(false);
       setCatalogChecks({});
@@ -522,6 +537,9 @@ export function useEquipmentViewModel() {
       ...emptyHistoryDraft(entry.equipment_id),
       ...entry,
       equipmentId: entry.equipment_id,
+      // 서버 컬럼(completed_at)과 폼 필드(completedAt) 매핑 — 누락 시 기존 완료일 소실
+      completedAt: entry.completed_at || '',
+      type: entry.type || '정기점검',
     };
     setHistoryEditor({ open: true, draft, initial: { ...draft } });
   }, []);
@@ -577,9 +595,9 @@ export function useEquipmentViewModel() {
     const result = await EquipmentModel.uploadEquipmentPhoto(id, file);
     setPhotoUrls((previous) => ({
       ...previous,
-      [id]: result.photoUrl || previous[id],
+      [id]: toServerPhotoUrl(result.photoUrl) || previous[id],
     }));
-  }, []);
+  }, [toServerPhotoUrl]);
 
   // ---- 상태 빠른 변경 ----
   const updateStatus = useCallback(async (id, status) => {
@@ -589,11 +607,11 @@ export function useEquipmentViewModel() {
 
   // ---- 사진 보기 ----
   const openPhotoViewer = useCallback((entry) => {
-    setViewer({ open: true, entryId: entry.id, index: 0 });
+    setViewer({ open: true, entryId: entry.id, index: 0, workTitle: '', items: [] });
   }, []);
 
   const closePhotoViewer = useCallback(() => {
-    setViewer({ open: false, entryId: null, index: 0 });
+    setViewer({ open: false, entryId: null, index: 0, workTitle: '', items: [] });
   }, []);
 
   const viewerSelect = useCallback((index) => {
@@ -614,10 +632,41 @@ export function useEquipmentViewModel() {
   }, [viewer, historyPhotoUrls, load]);
 
   const viewerAddFiles = useCallback(async (files) => {
-    const total = await EquipmentModel.appendHistoryPhotos(viewer.entryId, files);
+    // 서버 응답 계약: { success, added, total }
+    const result = await EquipmentModel.appendHistoryPhotos(viewer.entryId, files);
+    const total = Number(result && result.total) || 0;
     await load();
-    setViewer((previous) => ({ ...previous, index: total - files.length }));
+    setViewer((previous) => ({
+      ...previous,
+      index: total === 0 ? 0 : Math.max(0, Math.min(total - files.length, total - 1)),
+    }));
   }, [viewer, load]);
+
+  // ---- 업무사진 열람 (읽기 전용 뷰어) ----
+  const openWorkPhotoViewer = useCallback(async (record) => {
+    const title = `${record.date} · ${record.title || '업무 기록'}`;
+    try {
+      const photos = (await EquipmentModel.fetchWorkRecordPhotos(record.id)).map((photo) => ({
+        ...photo,
+        url: toServerPhotoUrl(photo.url),
+      }));
+      setViewer({
+        open: true,
+        entryId: null,
+        workTitle: title,
+        items: photos,
+        index: 0,
+      });
+    } catch {
+      setViewer({
+        open: true,
+        entryId: null,
+        workTitle: title,
+        items: [],
+        index: 0,
+      });
+    }
+  }, [toServerPhotoUrl]);
 
   // ---- 입력 보호 ----
   const isEquipmentDirty = useCallback(() => {
@@ -693,6 +742,8 @@ export function useEquipmentViewModel() {
     saveHistoryEntry, deleteHistoryEntry,
     // 대표사진
     photoUrls, uploadEquipmentPhoto,
+    // 업무사진 열람
+    openWorkPhotoViewer,
     // 상태 빠른 변경
     updateStatus,
     // 사진 보기

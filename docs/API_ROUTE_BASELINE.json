@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 174,
-  "digest": "8c0bebcb326b6f44c147813f311ac9e300ce94d6fc00eefcf1606ef0a886205e",
+  "endpointCount": 175,
+  "digest": "df6f9a7ff211058f1cf39f168b78f4787e79d0183a70e7a563530d82ffe7342c",
   "endpoints": [
     {
       "method": "GET",
@@ -1385,6 +1385,14 @@
       "module": "./routes/facilityRoutes.cjs",
       "tier": 1,
       "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/work-records/:id/photos",
+      "module": "./routes/facilityRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
       "syncWatch": true
     },
     {

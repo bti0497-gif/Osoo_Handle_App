@@ -27,7 +27,7 @@ function createEquipmentCatalogService(db) {
     `);
     const created = [];
 
-    selections.forEach(({ entry, count }) => {
+    db.transaction(() => selections.forEach(({ entry, count }) => {
       if (!entry || !entry.name || !entry.process) return;
       const wanted = Math.max(1, Math.min(26, Number(count) || 1));
       const category3 = entry.category3
@@ -36,8 +36,11 @@ function createEquipmentCatalogService(db) {
       const matched = listAll.filter((item) => (
         item.category_1 === entry.process && namePattern.test(item.equipment_name)
       ));
-      const registered = matched.length;
       const unitRows = matched.filter((item) => / ([A-Z])$/.test(item.equipment_name));
+      const registered = matched.length;
+      const nextLetterIndex = unitRows.length
+        ? Math.max(...unitRows.map((item) => item.equipment_name.charCodeAt(item.equipment_name.length - 1) - 65)) + 1
+        : 0;
 
       // 베이스 관리번호: 호기 카드가 있으면 그 번호에서, 단일 등록이면 그 번호에서 승계,
       // 없으면 규칙 기반 신규 채번한다.
@@ -52,7 +55,7 @@ function createEquipmentCatalogService(db) {
 
       for (let offset = 0; offset < wanted; offset += 1) {
         const isFirstSingle = registered === 0 && wanted === 1 && offset === 0;
-        const letter = isFirstSingle ? null : String.fromCharCode(65 + (registered === 0 ? offset : registered + offset));
+        const letter = isFirstSingle ? null : String.fromCharCode(65 + nextLetterIndex + offset);
         const id = uuid();
         const managementNo = isFirstSingle ? baseNo : `${baseNo}${letter}`;
         const name = isFirstSingle ? entry.name : `${entry.name} ${letter}`;
@@ -65,7 +68,7 @@ function createEquipmentCatalogService(db) {
         listAll.push({ management_no: managementNo, equipment_name: name, category_1: entry.process, category_3: category3 });
         created.push({ id, managementNo, name });
       }
-    });
+    }))();
     return { created };
   }
 
