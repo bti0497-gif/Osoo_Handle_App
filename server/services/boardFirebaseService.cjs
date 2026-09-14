@@ -29,6 +29,7 @@ let db = null;
 let initialized = false;
 let initializationAttempted = false;
 let admin = null;
+const { measurePhase } = require('./requestPhaseService.cjs');
 
 // ── SDK 초기화 (안전 예외 처리 포함) ──────────────────────────────────
 function initializeFirebase() {
@@ -36,7 +37,12 @@ function initializeFirebase() {
   initializationAttempted = true;
   try {
     if (fs.existsSync(serviceAccountPath)) {
-      admin = require('firebase-admin');
+      const app = require('firebase-admin/app');
+      const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+      admin = {
+        apps: app.getApps(), initializeApp: app.initializeApp,
+        credential: { cert: app.cert }, firestore: Object.assign(() => getFirestore(), { FieldValue }),
+      };
       const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
       if (admin.apps.length === 0) {
         admin.initializeApp({
@@ -59,7 +65,7 @@ function initializeFirebase() {
 }
 
 function ensureInitialized() {
-  initializeFirebase();
+  measurePhase('firebase-initialize', initializeFirebase);
   if (!initialized || !db) {
     throw new Error(`Firebase 서비스가 설정되지 않았습니다. 런타임 키 파일을 확인해 주세요: ${serviceAccountPath}`);
   }
@@ -102,7 +108,16 @@ function isPopupActive(data) {
 /**
  * 게시글 목록 조회
  */
-async function getPosts(role, siteName, userName = '') {
+const pendingPostLists = new Map();
+function getPosts(role, siteName, userName = '') {
+  // Share only concurrent identical reads; never cache results across requests or sites.
+  const key = JSON.stringify([role, siteName, userName]);
+  if (pendingPostLists.has(key)) return pendingPostLists.get(key);
+  const pending = readPosts(role, siteName, userName).finally(() => pendingPostLists.delete(key));
+  pendingPostLists.set(key, pending);
+  return pending;
+}
+async function readPosts(role, siteName, userName = '') {
   ensureInitialized();
 
   let query = db.collection('posts').where('is_deleted', '==', false);
@@ -112,10 +127,10 @@ async function getPosts(role, siteName, userName = '') {
     query = query.where('visible_sites', 'array-contains-any', ['ALL', siteName || '']);
   }
 
-  const [snapshot, commentSnapshot] = await Promise.all([
+  const [snapshot, commentSnapshot] = await measurePhase('firebase-posts-and-comments', () => Promise.all([
     query.limit(500).get(),
     db.collection('comments').where('is_deleted', '==', false).get()
-  ]);
+  ]));
 
   const commentCounts = new Map();
   commentSnapshot.forEach(doc => {

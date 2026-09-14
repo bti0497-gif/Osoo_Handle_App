@@ -19,7 +19,7 @@ function approxEqual(a, b, epsilon = 1e-6) {
 module.exports = {
   id: 'dailylog',
     covers: ["flow","log_daily","log_water","log_med_mgmt","log_med_in","log_sludge_photo","log_monthly_operation"],
-  version: '0.1.0',
+  version: '0.3.0',
   status: 'implemented',
   async run({ ctx, fixtures, dbPath, expected }) {
     const { deterministicUuid } = require('../lib/fixture-seeder.cjs');
@@ -102,6 +102,53 @@ module.exports = {
       } finally {
         db.close();
       }
+    });
+
+    await ctx.step('site-parshall-hwp-process-inflow', async () => {
+      const path = require('path');
+      const Database = require('better-sqlite3');
+      const db = new Database(dbPath);
+      try {
+        const upsertConfig = db.prepare(`INSERT INTO site_config_items
+          (site_id, category, item_name, is_active, display_order)
+          VALUES (?, 'flow', ?, 1, ?)
+          ON CONFLICT(site_id, category, item_name) DO UPDATE SET is_active = 1`);
+        upsertConfig.run(expected.siteId, '파샬플롬유량계', 90);
+        upsertConfig.run(expected.siteId, '유입유량계', 91);
+        const upsertFlow = db.prepare(`INSERT INTO flow_readings
+          (date, type, raw_value, calculated_flow, site_id, site_name, is_synced)
+          VALUES (?, ?, ?, ?, ?, ?, 0)
+          ON CONFLICT(site_id, date, type) DO UPDATE SET raw_value=excluded.raw_value, calculated_flow=excluded.calculated_flow`);
+        upsertFlow.run(day1, '파샬플롬유량계', 1200, 100, expected.siteId, expected.siteName);
+        upsertFlow.run(day1, '유입유량계', 800, 70, expected.siteId, expected.siteName);
+        const { buildHwpxBookmarkValues } = require('../../../server/services/dailyWorkLogHwpxService.cjs');
+        const values = await buildHwpxBookmarkValues(db, path.dirname(dbPath), day1, {
+          siteId: expected.siteId, siteName: expected.siteName,
+        });
+        const numeric = (value) => Number(String(value).replace(/,/g, ''));
+        ctx.assert(numeric(values.오늘유입) === 1200 && numeric(values.유입량) === 100,
+          '현장 파샬플롬이 일지 유입수로 바인딩되지 않았습니다.', 'PARSHALL_BINDING_FAILED', values);
+        ctx.assert(numeric(values.오늘공정) === 800 && numeric(values.공정량) === 70,
+          '기존 유입유량계가 일지 공정유입수로 바인딩되지 않았습니다.', 'PROCESS_INFLOW_BINDING_FAILED', values);
+      } finally { db.close(); }
+    });
+
+    await ctx.step('flow-grid-primary-meter-order-contract', async () => {
+      const fs = require('fs');
+      const path = require('path');
+      const source = fs.readFileSync(
+        path.join(__dirname, '..', '..', '..', 'src', 'features', 'flow', 'FlowManagementView.jsx'),
+        'utf8'
+      );
+      const parshallPriority = source.indexOf("normalizedName.includes('파샬')");
+      const inflowPriority = source.indexOf("normalizedName === '유입유량계'");
+      const outflowPriority = source.indexOf("normalizedName === '방류유량계'");
+      ctx.assert(
+        parshallPriority >= 0 && inflowPriority > parshallPriority && outflowPriority > inflowPriority
+          && source.includes('sortFlowItemsForGrid(active.length > 0 ? active : DEFAULT_FLOW_VIEW_ITEMS)'),
+        '유량 그리드의 파샬플롬→유입→방류 우선 표시 계약이 누락됐습니다.',
+        'FLOW_GRID_PRIMARY_ORDER_MISSING'
+      );
     });
   },
 };

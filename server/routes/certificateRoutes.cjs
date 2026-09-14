@@ -1058,11 +1058,14 @@ module.exports = function (appDataPath) {
     } : null;
   }
 
-  function listLocalCertificates(year, month, siteNames = []) {
+  async function listLocalCertificates(year, month, siteNames = []) {
     const dir = localMonthDir(year, month);
-    if (!fs.existsSync(dir)) return [];
+    let names;
+    try { names = await fs.promises.readdir(dir); }
+    catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+    const previews = new Set(names.filter((name) => name.endsWith('.preview.jpg')).map((name) => name.split('__')[0]));
     const allowedSiteKeys = new Set(siteNames.map(normalizeSiteNameKey).filter(Boolean));
-    return fs.readdirSync(dir)
+    return names
       .filter((name) => name.includes('__') && !name.endsWith('.preview.jpg') && !name.endsWith('.downloading'))
       .map((storedName) => {
         const separator = storedName.indexOf('__');
@@ -1074,13 +1077,12 @@ module.exports = function (appDataPath) {
         const siteKey = normalizeSiteNameKey(siteName);
         if (allowedSiteKeys.size > 0 && (!siteKey || !allowedSiteKeys.has(siteKey))) return null;
         const reportDate = parsed ? normalizeDateLike(parsed.yyyymmdd) : (legacy?.issuedAt || '');
-        const cached = findLocalCertificate(id, year, month);
         return {
           id, fileName, siteName: siteName || '공통',
           sampledAt: reportDate, issuedAt: reportDate,
           category: parsed?.prefix || legacy?.category || '',
           year, month, localCached: true,
-          previewUrl: cached?.previewPath
+          previewUrl: previews.has(id)
             ? `/api/certificates/local/${encodeURIComponent(id)}/preview?year=${year}&month=${month}`
             : '',
           localFileUrl: `/api/certificates/local/${encodeURIComponent(id)}/file?year=${year}&month=${month}`,
@@ -1181,21 +1183,22 @@ module.exports = function (appDataPath) {
         siteNameFilters.map((name) => normalizeSiteNameKey(name)).filter(Boolean)
       );
       const items = [];
-      const localItems = listLocalCertificates(year, month, siteNameFilters);
+      const { measurePhase } = require('../services/requestPhaseService.cjs');
+      const localItems = await measurePhase('certificates-local-list', () => listLocalCertificates(year, month, siteNameFilters));
       if (String(req.query.source || 'local').trim().toLowerCase() !== 'drive') {
         return res.json({ success: true, items: localItems, source: 'local' });
       }
-      if (!getDriveClient() || !CERTIFICATE_ROOT_FOLDER_ID) {
+      if (!measurePhase('drive-initialize', getDriveClient) || !CERTIFICATE_ROOT_FOLDER_ID) {
         return res.json({ success: true, items: localItems, offline: true });
       }
 
       // 성적서 메뉴의 파일 목록은 Drive를 단일 원천으로 사용한다.
       // BigQuery water_quality는 성적서 분석값 동기화/업무일지 바인딩용이며 파일 목록에는 사용하지 않는다.
       try {
-        const folders = await resolveMonthFolders({ year, month });
+        const folders = await measurePhase('drive-month-folders', () => resolveMonthFolders({ year, month }));
 
         for (const folder of folders) {
-          const files = await listFiles(folder.folderId);
+          const files = await measurePhase('drive-file-list', () => listFiles(folder.folderId));
           for (const file of files) {
             const baseName = toBaseName(file.name);
             // 성적서 목록은 결과 파일만 노출 (ZIP/기타 산출물 제외)

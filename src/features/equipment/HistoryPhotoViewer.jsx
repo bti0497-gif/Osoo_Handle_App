@@ -1,7 +1,7 @@
 // 유지보수 내역 사진 보기: 큰 이미지 + 하단 썸네일 행.
 // items: [{ id, url }]. readOnly면 삭제·추가를 숨긴다(업무사진 열람은 읽기 전용).
 // 사진 데이터와 갱신 로직은 ViewModel/Model이 담당한다.
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 export default function HistoryPhotoViewer({
   title = '', items = [], readOnly = false, index, onSelect, onDelete, onAddFiles, onClose,
@@ -10,6 +10,13 @@ export default function HistoryPhotoViewer({
   const requestedIndex = Number.isFinite(Number(index)) ? Number(index) : 0;
   const safeIndex = Math.max(0, Math.min(requestedIndex, Math.max(0, total - 1)));
   const current = total > 0 ? items[safeIndex] : null;
+  const dialogRef = useRef(null);
+  const [failedUrl, setFailedUrl] = useState(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    dialogRef.current?.focus();
+    return () => previous?.focus?.();
+  }, []);
   return (
     <div className="equipment-editor-backdrop" role="presentation" onMouseDown={onClose}>
       <div
@@ -17,6 +24,17 @@ export default function HistoryPhotoViewer({
         role="dialog"
         aria-modal="true"
         aria-label="현장 사진 보기"
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') { event.stopPropagation(); onClose(); }
+          if (event.key === 'Tab') {
+            const controls = [...event.currentTarget.querySelectorAll('button:not(:disabled), input:not([type="file"])')];
+            const first = controls[0]; const last = controls[controls.length - 1];
+            if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) { event.preventDefault(); last?.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+          }
+        }}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header>
@@ -32,7 +50,7 @@ export default function HistoryPhotoViewer({
           {total > 0 ? (
             <>
               <div className="photo-viewer-main">
-                <img src={current.url} alt={`사진 ${safeIndex + 1}`} />
+                {failedUrl === current.url ? <p role="alert">사진을 불러오지 못했습니다. 창을 닫고 다시 시도해 주세요.</p> : <img src={current.url} alt={`사진 ${safeIndex + 1}`} onError={() => setFailedUrl(current.url)} />}
                 {total > 1 ? (
                   <>
                     <button
@@ -72,7 +90,7 @@ export default function HistoryPhotoViewer({
               </div>
             </>
           ) : (
-            <p className="viewer-empty">저장된 사진이 없습니다. 아래 버튼으로 사진을 추가하세요.</p>
+            <p className="viewer-empty">{readOnly ? '저장된 사진이 없습니다.' : '저장된 사진이 없습니다. 아래 버튼으로 사진을 추가하세요.'}</p>
           )}
           {!readOnly ? (
           <label className="viewer-add">

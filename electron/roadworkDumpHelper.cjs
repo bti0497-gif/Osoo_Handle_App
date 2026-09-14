@@ -251,8 +251,8 @@ async function attachRoadworkPhotoFile({
   target,
   filePath,
   uploaderIndex,
-  chooserTimeouts = [1600, 2400, 3500],
-  retryDelayMs = 180,
+  chooserTimeouts = [2500, 4000, 6000],
+  retryDelayMs = 500,
 }) {
   const debuggerApi = target.debugger;
   let wasAttached = false;

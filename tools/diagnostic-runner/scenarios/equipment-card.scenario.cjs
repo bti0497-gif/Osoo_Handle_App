@@ -4,7 +4,7 @@
 module.exports = {
   id: 'equipment-card',
   covers: ['equipment_card', 'equipment_history'],
-  version: '1.0.0',
+  version: '1.1.0',
   status: 'implemented',
   async run({ ctx, dbPath, expected, fixtures }) {
     let equipmentId;
@@ -81,6 +81,22 @@ module.exports = {
       } finally {
         db.close();
       }
+    });
+
+    await ctx.step('equipment-visibility-diagnostics', async () => {
+      const hidden = await ctx.request('PUT', `/api/equipment/${equipmentId}/visibility`, { body: { is_visible: false } });
+      ctx.assert(hidden.ok && hidden.json.is_visible === 0, '숨김 저장 실패', 'VISIBILITY_FAILED');
+      const restored = await ctx.request('PUT', `/api/equipment/${equipmentId}/visibility`, { body: { is_visible: true } });
+      ctx.assert(restored.ok, '표시 복원 실패', 'VISIBILITY_RESTORE_FAILED');
+      const Database = require('better-sqlite3');
+      const db = new Database(dbPath, { readonly: true });
+      try {
+        const rows = db.prepare("SELECT site_id, details_json FROM app_diagnostic_logs WHERE area = 'equipment-card' AND action = 'PUT /api/equipment/:id/visibility' AND result = 'ok'").all();
+        ctx.assert(rows.some((row) => row.site_id === expected.siteId && JSON.parse(row.details_json).isVisible === false),
+          '숨김 현장/결과 진단 누락', 'VISIBILITY_DIAGNOSTIC_MISSING');
+        const work = db.prepare("SELECT COUNT(*) AS n FROM app_diagnostic_logs WHERE area = 'work-photos' AND result = 'ok'").get();
+        ctx.assert(work.n > 0, '업무사진 연결 진단 누락', 'WORK_DIAGNOSTIC_MISSING');
+      } finally { db.close(); }
     });
 
     await ctx.step('equipment-delete-and-work-record-site-guard', async () => {

@@ -2,6 +2,8 @@
 
 const os = require('os');
 const { performance } = require('perf_hooks');
+const { runRequest } = require('./requestPhaseService.cjs');
+const { collectProcessPressureSnapshot } = require('./processPressureSnapshotService.cjs');
 
 const DEFAULT_SAMPLE_INTERVAL_MS = 1_000;
 const DEFAULT_EVENT_LOOP_WARN_MS = 2_000;
@@ -114,6 +116,8 @@ function createServerPerformanceDiagnosticService({
         path: request.path,
         elapsedMs: now - request.startedAt,
         siteId: request.siteId,
+        currentPhase: request.currentPhase || null,
+        phases: request.phases || [],
       }));
   };
 
@@ -193,6 +197,10 @@ function createServerPerformanceDiagnosticService({
         && memory.system.freePercent < 10
         && now - lastResourcePressureLogAt >= 30 * 60 * 1_000) {
         lastResourcePressureLogAt = now;
+        collectProcessPressureSnapshot((snapshot) => writeDiagnostic({
+          area: 'server-performance', action: 'memory-pressure-processes', result: 'observed',
+          details: { pressureObservedAt: new Date(now).toISOString(), ...snapshot },
+        }));
         writeDiagnostic({
           level: 'warn',
           area: 'server-performance',
@@ -248,6 +256,7 @@ function createServerPerformanceDiagnosticService({
         completedAt: new Date().toISOString(),
         siteId: request.siteId,
         monotonicDurationMs: round(performance.now() - request.startedMonotonicAt),
+        phases: (request.phases || []).slice(),
       };
       pushBounded(recentCompletedRequests, { ...lastCompletedRequest }, 8);
       if (!shouldRecordSlowApiRequest(request, res.statusCode, durationMs, slowApiMs)) return;
@@ -269,6 +278,7 @@ function createServerPerformanceDiagnosticService({
           serverUptimeSeconds: Math.round(process.uptime()),
           eventLoopLagMs: latestEventLoopLagMs,
           maxObservedEventLoopLagMs: request.maxObservedEventLoopLagMs,
+          phases: request.phases || [],
           monotonicDurationMs: lastCompletedRequest.monotonicDurationMs,
           ...evidenceSnapshot(),
           activeRequestCount: activeRequests.size,
@@ -279,7 +289,7 @@ function createServerPerformanceDiagnosticService({
 
     res.once('finish', () => complete('finish'));
     res.once('close', () => complete('close'));
-    return next();
+    return runRequest(request, next);
   };
 
   const recordFatal = (action, error, details = {}) => writeDiagnostic({

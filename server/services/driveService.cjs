@@ -80,7 +80,8 @@ let driveInitialized = false;
 
 function getDriveClient() {
   if (driveInitialized) return drive;
-  const { google } = require('googleapis');
+  // Load only Drive: the aggregate entry eagerly loads hundreds of unrelated APIs.
+  const google = require('googleapis/build/src/apis/drive');
   const { auth, mode } = createDriveAuth(google);
   driveAuthMode = mode;
   drive = auth ? google.drive({ version: 'v3', auth }) : null;

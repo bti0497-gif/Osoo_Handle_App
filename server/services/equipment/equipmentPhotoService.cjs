@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { ServiceError, uuid } = require('./equipmentShared.cjs');
+const { report } = require('./operationDiagnosticService.cjs');
 
 const EQUIPMENT_PHOTO_DIRNAME = '장비이력';
 
@@ -65,6 +66,8 @@ function createEquipmentPhotoService(db, appDataPath) {
   }
 
   async function mirrorPhotoToDrive({ localPath, fileName, mimeType, subfolders = [] }) {
+    const started = Date.now();
+    const details = () => ({ siteId: subfolders[0] || null, entityId: subfolders[1] || null, durationMs: Date.now() - started });
     try {
       const driveService = getDriveService();
       const {
@@ -73,7 +76,10 @@ function createEquipmentPhotoService(db, appDataPath) {
         isDriveConfigured,
         uploadBufferToFolder,
       } = driveService;
-      if (!localPath || !fs.existsSync(localPath) || !isDriveConfigured()) return null;
+      if (!localPath || !fs.existsSync(localPath) || !isDriveConfigured()) {
+        report(db, appDataPath, { area: 'equipment-card', action: 'photo-drive-mirror', result: 'skipped', details: details() });
+        return null;
+      }
       const folder = await getOrCreateFolderPath(
         getDriveRootFolderId(),
         ['사진관리', EQUIPMENT_PHOTO_DIRNAME, ...subfolders.map((value) => String(value || '').trim()).filter(Boolean)],
@@ -81,8 +87,10 @@ function createEquipmentPhotoService(db, appDataPath) {
       const buffer = fs.readFileSync(localPath);
       const result = await uploadBufferToFolder({ folderId: folder.id, fileName, buffer, mimeType });
       if (result?.id) writeDriveReceipt(localPath, { version: 1, driveFileId: result.id, fileName });
+      report(db, appDataPath, { area: 'equipment-card', action: 'photo-drive-mirror', level: result?.id ? 'info' : 'warn', result: result?.id ? 'ok' : 'failed', details: details() });
       return result || null;
     } catch (error) {
+      report(db, appDataPath, { area: 'equipment-card', action: 'photo-drive-mirror', level: 'warn', result: 'failed', details: { ...details(), errorName: error.name } });
       console.warn('[equipment-photos] Drive 미러 실패:', error.message);
       return null;
     }

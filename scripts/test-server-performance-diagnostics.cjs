@@ -3,8 +3,20 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { createServerPerformanceDiagnosticService } = require('../server/services/serverPerformanceDiagnosticService.cjs');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const { runRequest, measurePhase } = require('../server/services/requestPhaseService.cjs');
 
 (async () => {
+  const first = {}, second = {};
+  await Promise.all([
+    runRequest(first, () => measurePhase('local-list', () => sleep(5))),
+    runRequest(second, () => measurePhase('remote-list', () => sleep(8))),
+  ]);
+  assert.equal(first.phases[0].name, 'local-list');
+  assert.equal(second.phases[0].name, 'remote-list');
+  assert.equal(first.currentPhase, null);
+  assert.throws(() => runRequest(first, () => measurePhase('failed', () => { throw new Error('expected'); })));
+  assert.equal(first.currentPhase, null);
+  console.log('PASS: request phase isolation and failure cleanup');
   const events = [];
   const service = createServerPerformanceDiagnosticService({
     recordDiagnostic: (_db, _path, event) => events.push(event),

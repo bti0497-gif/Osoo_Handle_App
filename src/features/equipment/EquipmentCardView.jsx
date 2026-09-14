@@ -246,13 +246,13 @@ export default function EquipmentCardView() {
                 <button
                   type="button"
                   className="equipment-photo-placeholder"
-                  title="클릭하여 대표사진 선택/교체"
-                  onClick={() => photoInputRef.current?.click()}
+                  title={selectedPhotoUrl ? '사진 크게 보기' : '대표사진 선택'}
+                  onClick={() => selectedPhotoUrl ? vm.openEquipmentPhotoViewer() : photoInputRef.current?.click()}
                 >
                   {selectedPhotoUrl ? (
                     <>
                       <img src={selectedPhotoUrl} alt="장비 대표사진" className="equipment-photo-image" />
-                      <small className="equipment-photo-hint">클릭하여 사진 교체</small>
+                      <small className="equipment-photo-hint">클릭하여 크게 보기</small>
                     </>
                   ) : (
                     <>
@@ -262,6 +262,7 @@ export default function EquipmentCardView() {
                     </>
                   )}
                 </button>
+                {selectedPhotoUrl && <button type="button" onClick={() => photoInputRef.current?.click()}>대표사진 교체</button>}
                 <input
                   ref={photoInputRef}
                   type="file"

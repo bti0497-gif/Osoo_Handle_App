@@ -614,6 +614,11 @@ export function useEquipmentViewModel() {
     setViewer({ open: false, entryId: null, index: 0, workTitle: '', items: [] });
   }, []);
 
+  const openEquipmentPhotoViewer = useCallback(() => {
+    const url = photoUrls[selected?.id];
+    if (url) setViewer({ open: true, entryId: null, index: 0, workTitle: '장비 대표사진', items: [{ id: selected.id, url }] });
+  }, [photoUrls, selected]);
+
   const viewerSelect = useCallback((index) => {
     setViewer((previous) => ({ ...previous, index }));
   }, []);
@@ -645,7 +650,6 @@ export function useEquipmentViewModel() {
   // ---- 업무사진 열람 (읽기 전용 뷰어) ----
   const openWorkPhotoViewer = useCallback(async (record) => {
     const title = `${record.date} · ${record.title || '업무 기록'}`;
-    try {
       const photos = (await EquipmentModel.fetchWorkRecordPhotos(record.id)).map((photo) => ({
         ...photo,
         url: toServerPhotoUrl(photo.url),
@@ -657,15 +661,6 @@ export function useEquipmentViewModel() {
         items: photos,
         index: 0,
       });
-    } catch {
-      setViewer({
-        open: true,
-        entryId: null,
-        workTitle: title,
-        items: [],
-        index: 0,
-      });
-    }
   }, [toServerPhotoUrl]);
 
   // ---- 입력 보호 ----
@@ -743,7 +738,7 @@ export function useEquipmentViewModel() {
     // 대표사진
     photoUrls, uploadEquipmentPhoto,
     // 업무사진 열람
-    openWorkPhotoViewer,
+    openWorkPhotoViewer, openEquipmentPhotoViewer,
     // 상태 빠른 변경
     updateStatus,
     // 사진 보기

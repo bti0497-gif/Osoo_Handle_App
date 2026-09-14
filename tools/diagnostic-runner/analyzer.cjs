@@ -53,7 +53,7 @@ function parseRecords(files) {
         records.push({
           ...rec,
           _file: base,
-          _site: rec.site_name || fileSite || '알수없음',
+          _site: String(rec.site_name || fileSite || '알수없음').replace(/휴게소/g, '').replace(/방향(?=\))/g, '').trim(),
           _machine: rec.machine || '',
           _version: rec.app_version || '',
           _at: rec.created_at || '',
@@ -185,13 +185,11 @@ function buildFixHints(analysis) {
     });
   }
   const slowest = analysis.slowApis[0];
-  const lagged = analysis.eventLoopLags[0];
   if (slowest && slowest.maxMs > 3000) {
-    const blockingNote = lagged && lagged.lagMs > 3000 ? ` 같은 시간대 event-loop 지연(${lagged.lagMs}ms)이 함께 기록됨 — 해당 핸들러의 동기 블로킹이 서버 전체를 멈추고 있을 가능성 높음.` : '';
     hints.push({
-      priority: lagged && lagged.lagMs > 3000 ? '높음' : '중간',
+      priority: '중간',
       target: slowest.path,
-      hint: `최대 ${slowest.maxMs}ms(평균 ${slowest.avgMs}ms, ${slowest.sites.length}개 현장).${blockingNote} 핸들러의 동기 I/O·외부 호출·대량 쿼리 비동기화 검토.`,
+      hint: `최대 ${slowest.maxMs}ms(평균 ${slowest.avgMs}ms, ${slowest.sites.length}개 현장). 현장·PID·요청 시간 구간이 일치하는지 별도 확인해야 하며, 전체 최대 event-loop 지연을 이 요청의 원인으로 연결하지 않습니다. 핸들러의 동기 I/O·외부 호출·대량 쿼리 비동기화 검토.`,
     });
   }
   const login401 = hasPattern((p) => p.key.includes('local-login') && p.message.includes('401'));

@@ -19,6 +19,22 @@ const DEFAULT_FLOW_VIEW_ITEMS = [
 
 const FLOW_COLORS = ['#1e3a8a', '#047857', '#b45309', '#4338ca', '#57534e', '#0e7490'];
 
+const getFlowDisplayPriority = (name) => {
+    const normalizedName = String(name || '').replace(/\s+/g, '');
+    if (normalizedName.includes('파샬')) return 0;
+    if (normalizedName === '유입유량계') return 1;
+    if (normalizedName === '방류유량계') return 2;
+    return 3;
+};
+
+const sortFlowItemsForGrid = (items) => items
+    .map((item, originalIndex) => ({ item, originalIndex }))
+    .sort((left, right) => {
+        const priorityDiff = getFlowDisplayPriority(left.item?.name) - getFlowDisplayPriority(right.item?.name);
+        return priorityDiff || left.originalIndex - right.originalIndex;
+    })
+    .map(({ item }) => item);
+
 const formatNumber = (value) => {
     if (value === null || value === undefined || value === '' || Number.isNaN(Number(value))) return '';
     return Number(value).toLocaleString();
@@ -86,7 +102,7 @@ const FlowManagementView = ({ currentUser, workspaceSession = {}, onWorkspaceSes
     const visibleFlowItems = useMemo(() => {
         if (!settingsReady) return [];
         const active = flowItems.filter((item) => item.checked);
-        return active.length > 0 ? active : DEFAULT_FLOW_VIEW_ITEMS;
+        return sortFlowItemsForGrid(active.length > 0 ? active : DEFAULT_FLOW_VIEW_ITEMS);
     }, [flowItems, settingsReady]);
 
     const flowMeterTypes = useMemo(() => visibleFlowItems.map((item) => item.name), [visibleFlowItems]);

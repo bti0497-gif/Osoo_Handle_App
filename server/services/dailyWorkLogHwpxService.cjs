@@ -350,7 +350,18 @@ function getPreviousDate(date) {
 
 function getProcessFlowBindings(db, date, context = {}) {
   const filter = getSiteFilter(db, context);
-  const activeFlowNames = db.prepare(`
+  // 설정 화면에서 추가한 유량계는 현장별 site_config_items에 저장된다.
+  // HWP 출력에서도 일반 바인딩과 같은 현장 설정을 읽어야 한다.
+  const activeFlowNames = (filter.siteId ? db.prepare(`
+    SELECT item_name
+    FROM site_config_items
+    WHERE site_id = ?
+      AND category = 'flow'
+      AND is_active = 1
+      AND item_name NOT LIKE '%\\_raw' ESCAPE '\\'
+      AND item_name NOT LIKE '%\\_flow' ESCAPE '\\'
+    ORDER BY display_order, id
+  `).all(filter.siteId) : db.prepare(`
     SELECT item_name
     FROM config_items
     WHERE category = 'flow'
@@ -358,7 +369,7 @@ function getProcessFlowBindings(db, date, context = {}) {
       AND item_name NOT LIKE '%\\_raw' ESCAPE '\\'
       AND item_name NOT LIKE '%\\_flow' ESCAPE '\\'
     ORDER BY display_order, id
-  `).all().map((row) => String(row.item_name || '').trim());
+  `).all()).map((row) => String(row.item_name || '').trim());
   const hasParshall = activeFlowNames.some((name) => name.includes('파샬'));
   if (!hasParshall) {
     return { 전날공정: '', 오늘공정: '', 공정량: '' };

@@ -24,7 +24,7 @@ export const FacilityModel = {
         return apiClient.upload(`/api/work-records/${id}/photos`, formData);
     },
 
-    async openPhotoFolder(id) {
-        return apiClient.post(`/api/work-records/${id}/open-photo-folder`, {});
+    async fetchPhotos(id) {
+        return apiClient.get(`/api/work-records/${id}/photos`);
     },
 };

@@ -357,7 +357,12 @@ function backfillDefaultSite(db, siteId) {
   };
 
   for (const key of Object.keys(expected)) {
-    if (actual[key] !== expected[key]) {
+    // 현장 설정에는 공용 기준을 복사한 뒤 사용자가 추가한 항목이 존재할 수 있다.
+    // configItems의 초과분은 정상이며, 공용 기준보다 부족한 경우만 백필 실패다.
+    const invalid = key === 'configItems'
+      ? actual[key] < expected[key]
+      : actual[key] !== expected[key];
+    if (invalid) {
       throw new Error(`양방향 기반 백필 검증 실패(${key}): ${actual[key]}/${expected[key]}`);
     }
   }

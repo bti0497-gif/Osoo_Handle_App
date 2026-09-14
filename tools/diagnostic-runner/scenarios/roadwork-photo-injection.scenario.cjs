@@ -2,6 +2,7 @@
 
 const { EventEmitter } = require('events');
 const path = require('path');
+const fs = require('fs');
 
 const PROJECT_ROOT = path.join(__dirname, '..', '..', '..');
 
@@ -62,7 +63,7 @@ class DiagnosticDebugger extends EventEmitter {
 module.exports = {
   id: 'roadwork-photo-injection',
   covers: ['roadwork-helper'],
-  version: '0.1.0',
+  version: '0.2.0',
   status: 'implemented',
   async run({ ctx }) {
     const helper = loadPhotoHelper();
@@ -100,6 +101,16 @@ module.exports = {
         results.push({ uploaderIndex, method: result.method });
       }
       return results;
+    });
+
+    await ctx.step('photo-progress-and-no-photo-guidance-contract', async () => {
+      const source = fs.readFileSync(path.join(PROJECT_ROOT, 'src/features/roadwork-helper/RoadworkHelperView.jsx'), 'utf8');
+      ctx.assert(source.includes('실험분석 사진은 준비되지 않아 올리지 않습니다'),
+        '준비 사진 없음 안내가 누락됐습니다.', 'NO_PHOTO_GUIDANCE_MISSING');
+      ctx.assert(source.includes('role="progressbar"') && source.includes('사진 반영을 확인하고 있습니다'),
+        '사진별 진행률 또는 지연 반영 확인 UI가 누락됐습니다.', 'PHOTO_PROGRESS_CONTRACT_MISSING');
+      ctx.assert(source.includes("'photo-row-added-delayed'"),
+        '늦게 반영된 사진의 성공 판정이 누락됐습니다.', 'DELAYED_PHOTO_CONFIRMATION_MISSING');
     });
   },
 };

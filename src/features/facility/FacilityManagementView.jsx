@@ -2,6 +2,8 @@ import React, { useRef, useState } from 'react';
 import { useFacilityViewModel } from './useFacilityViewModel';
 import { useDialog } from '../../components/common/DialogContext';
 import { EquipmentLinkSelector } from '../equipment';
+import HistoryPhotoViewer from '../equipment/HistoryPhotoViewer';
+import '../equipment/equipmentEditor.css';
 
 const TODAY = () => new Intl.DateTimeFormat('sv-SE', {
     timeZone: 'Asia/Seoul',
@@ -112,7 +114,7 @@ const FacilityManagementView = ({ currentUser }) => {
         if (photoBusyId) return;
         setPhotoBusyId(row.id);
         try {
-            await vm.openPhotoFolder(row.id);
+            await vm.openPhotoViewer(row.id);
         } catch (error) {
             await showAlert(`사진 폴더를 열 수 없습니다: ${error.message}`);
         } finally {
@@ -205,7 +207,7 @@ const FacilityManagementView = ({ currentUser }) => {
                                         type="button"
                                         disabled={photoBusy}
                                         onClick={() => handleListPhotoClick(row)}
-                                        title={hasPhotos ? '저장된 사진 폴더 열기' : '사진 추가'}
+                                        title={hasPhotos ? '사진 크게 보기' : '사진 추가'}
                                         style={{
                                             minWidth: 58,
                                             height: 27,
@@ -273,7 +275,7 @@ const FacilityManagementView = ({ currentUser }) => {
                                         {draftPhotos.length > 0 ? `${draftPhotos.length}개 선택됨` : (draft.photo_count > 0 ? `저장된 사진 ${draft.photo_count}개` : '선택된 사진 없음')}
                                     </span>
                                     {draft.id && draft.photo_count > 0 && (
-                                        <button type="button" onClick={() => openPhotoFolder(draft)} style={{ marginLeft: 'auto', height: 31, padding: '0 11px', border: '1px solid #15803d', borderRadius: 6, background: '#16a34a', color: '#fff', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>사진 폴더 열기</button>
+                                        <button type="button" onClick={() => openPhotoFolder(draft)} style={{ marginLeft: 'auto', height: 31, padding: '0 11px', border: '1px solid #15803d', borderRadius: 6, background: '#16a34a', color: '#fff', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>사진 크게 보기</button>
                                     )}
                                 </div>
                             </div>
@@ -286,6 +288,7 @@ const FacilityManagementView = ({ currentUser }) => {
                     </div>
                 </div>
             )}
+            {vm.viewer && <HistoryPhotoViewer {...vm.viewer} readOnly onSelect={vm.selectPhoto} onClose={vm.closePhotoViewer} />}
         </div>
     );
 };

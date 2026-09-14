@@ -6,6 +6,7 @@
  * 계약 문서: docs/EQUIPMENT_CARD_DEVELOPMENT_PLAN.md §4-4, §5
  */
 const express = require('express');
+const { operationDiagnostics, report } = require('../services/equipment/operationDiagnosticService.cjs');
 const multer = require('multer');
 const {
   COMMON_MULTIPART_LIMITS,
@@ -21,6 +22,7 @@ const createEquipmentProvisioningService = require('../services/equipment/equipm
 
 function createEquipmentRoutes(db, appDataPath) {
   const router = express.Router();
+  router.use('/api/equipment', operationDiagnostics(db, appDataPath, 'equipment-card'));
   const upload = multer({
     storage: multer.memoryStorage(),
     limits: { ...COMMON_MULTIPART_LIMITS, fileSize: MAX_IMAGE_BYTES, files: 10 },
@@ -56,7 +58,12 @@ function createEquipmentRoutes(db, appDataPath) {
   // 데이터 변경 후 전송 대기 행을 BigQuery로 비차단 푸시한다.
   function triggerSync() {
     setImmediate(() => {
-      sync.syncEquipmentData().catch((error) => {
+      sync.syncEquipmentData().then((result) => {
+        report(db, appDataPath, { area: 'equipment-card', action: 'remote-sync',
+          level: result.success ? 'info' : 'warn', result: result.success ? 'ok' : (result.skipped ? 'skipped' : 'failed'),
+          details: result });
+      }).catch((error) => {
+        report(db, appDataPath, { area: 'equipment-card', action: 'remote-sync', level: 'warn', result: 'failed', details: { errorName: error.name } });
         console.warn('[equipment] BigQuery 동기화 트리거 실패:', error.message);
       });
     });

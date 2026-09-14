@@ -1,4 +1,5 @@
 const express = require('express');
+const { operationDiagnostics } = require('../services/equipment/operationDiagnosticService.cjs');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -58,6 +59,7 @@ function openFolder(folderPath) {
 }
 
 module.exports = function registerFacilityRoutes(db, appDataPath) {
+  router.use('/api/work-records', operationDiagnostics(db, appDataPath, 'work-photos'));
   const selectWorkRecords = `
     SELECT wr.*,
            (SELECT COUNT(*) FROM work_record_photos p WHERE p.work_record_id = wr.id) AS photo_count,
@@ -214,7 +216,7 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
         photos: rows.map((row) => ({
           id: row.id,
           originalName: row.original_name,
-          url: `/${String(row.relative_path || '').replace(/\\/g, '/').replace(/^\/+/, '')}`,
+          url: `/work-record-photos/${path.relative(getPhotoRoot(appDataPath), path.resolve(appDataPath, row.relative_path)).split(path.sep).map(encodeURIComponent).join('/')}`,
         })),
       });
     } catch (error) {

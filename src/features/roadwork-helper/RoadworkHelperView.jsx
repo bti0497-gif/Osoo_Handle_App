@@ -983,15 +983,15 @@ function buildRoadworkPhotoBoardStatusScript(uploaderIndex) {
 }
 
 async function waitForRoadworkPhotoRow(webview, uploaderIndex, beforeCount) {
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 200));
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
     const status = await webview.executeJavaScript(buildRoadworkPhotoBoardStatusScript(uploaderIndex));
     if (status?.hasPhoto && Number(status.rowCount || 0) > Number(beforeCount || 0)) return status;
   }
   return null;
 }
 
-const ROADWORK_PHOTO_BETWEEN_ITEM_DELAY_MS = 600;
+const ROADWORK_PHOTO_BETWEEN_ITEM_DELAY_MS = 1500;
 
 async function waitForRoadworkPhotoUploaderToSettle() {
   await new Promise((resolve) => window.setTimeout(resolve, ROADWORK_PHOTO_BETWEEN_ITEM_DELAY_MS));
@@ -1028,6 +1028,7 @@ export default function RoadworkHelperView({ currentUser }) {
   const [showRefreshToast, setShowRefreshToast] = useState(true);
   const [roadworkStatus, setRoadworkStatus] = useState({ isDailyLog: false, canAutoFill: false, date: '', isEditableData: false, newButtonRect: null });
   const [statusMessage, setStatusMessage] = useState('');
+  const [photoProgress, setPhotoProgress] = useState(null);
   const [isFilling, setIsFilling] = useState(false);
 
   const fetchConfig = React.useCallback(async () => {
@@ -1493,6 +1494,7 @@ export default function RoadworkHelperView({ currentUser }) {
     try {
       setIsFilling(true);
       setStatusMessage('');
+      setPhotoProgress(null);
       const latestPayload = await RoadworkHelperModel.fetchAll(roadworkStatus.date, activeSiteId);
       const result = await webview.executeJavaScript(buildRoadworkAutoFillScript({
         flow: latestPayload.flow || [],
@@ -1511,6 +1513,7 @@ export default function RoadworkHelperView({ currentUser }) {
         date: roadworkStatus.date,
       });
       const photos = Array.isArray(photoResponse?.photos) ? photoResponse.photos : [];
+      const readyPhotoCount = photos.filter((photo) => photo.available && photo.token).length;
       recordRoadworkDiagnostic('photo-stage-started', {
         date: roadworkStatus.date,
         itemCount: photos.length,
@@ -1530,7 +1533,8 @@ export default function RoadworkHelperView({ currentUser }) {
         currentPhase = `photo-stage-${index + 1}`;
         const photo = photos[index];
         const uploaderIndex = index + 1;
-        const progress = Math.round(((index + 1) / Math.max(photos.length, 1)) * 100);
+        const readyIndex = photos.slice(0, index + 1).filter((item) => item.available && item.token).length;
+        const progress = readyPhotoCount > 0 ? Math.round((readyIndex / readyPhotoCount) * 100) : 0;
         if (previousPhotoFinishedAt != null) {
           const settleStartedAt = Date.now();
           await waitForRoadworkPhotoUploaderToSettle();
@@ -1550,13 +1554,11 @@ export default function RoadworkHelperView({ currentUser }) {
           continue;
         }
         if (board.hasPhoto) {
-          setStatusMessage(`사진 올리는 중.. ${photo.label} ${progress}% (기존 사진 유지)`);
           photoResults.push({ key: photo.key, result: 'existing-photo-skipped' });
           recordRoadworkDiagnostic('photo-stage-item', { date: roadworkStatus.date, item: photo.key, result: 'existing-photo-skipped' });
           continue;
         }
         if (!photo.available || !photo.token) {
-          setStatusMessage(`사진 올리는 중.. ${photo.label} ${progress}% (사진 없음)`);
           const unavailableReason = String(photo.availabilityReason || 'unknown').slice(0, 60);
           const unavailableResult = {
             'not-imported': 'qntech-photos-not-imported',
@@ -1577,7 +1579,8 @@ export default function RoadworkHelperView({ currentUser }) {
           });
           continue;
         }
-        setStatusMessage(`사진 올리는 중.. ${photo.label} ${progress}%`);
+        setStatusMessage(`${photo.label} 사진을 올리고 있습니다… (${readyIndex}/${readyPhotoCount})`);
+        setPhotoProgress({ label: photo.label, current: readyIndex, total: readyPhotoCount, percent: progress });
         const photoStartedAt = Date.now();
         const beforeInput = await capturePhotoInputDiagnostic(webview, uploaderIndex, 'before');
         recordRoadworkDiagnostic('photo-input-trace', {
@@ -1600,6 +1603,18 @@ export default function RoadworkHelperView({ currentUser }) {
           attempts: injected?.attempts || 0, snapshot: afterInput,
         });
         if (!injected?.success) {
+          setStatusMessage(`${photo.label} 사진 반영을 확인하고 있습니다… (${readyIndex}/${readyPhotoCount})`);
+          const delayedAdded = await waitForRoadworkPhotoRow(webview, uploaderIndex, board.rowCount);
+          if (delayedAdded) {
+            previousPhotoFinishedAt = Date.now();
+            photoResults.push({ key: photo.key, result: 'photo-row-added-delayed' });
+            recordRoadworkDiagnostic('photo-stage-item', {
+              date: roadworkStatus.date, item: photo.key, result: 'photo-row-added-delayed',
+              reason: String(injected?.errorCode || '').slice(0, 100),
+              attempts: Number(injected?.attempts || 0), afterRowCount: delayedAdded.rowCount,
+            });
+            continue;
+          }
           // 파일 선택창을 열었다 닫는 시도 자체가 외부 WebSquare 업로더의
           // 포커스/DOM 상태를 바꿀 수 있으므로 다음 항목 전에 안정화 시간을 둔다.
           previousPhotoFinishedAt = Date.now();
@@ -1632,7 +1647,7 @@ export default function RoadworkHelperView({ currentUser }) {
           injectionAttempts: Number(injected?.attempts || 0),
         });
       }
-      const addedCount = photoResults.filter((item) => item.result === 'photo-row-added').length;
+      const addedCount = photoResults.filter((item) => ['photo-row-added', 'photo-row-added-delayed'].includes(item.result)).length;
       const skippedCount = photoResults.filter((item) => item.result === 'existing-photo-skipped').length;
       const failedCount = photoResults.filter((item) => ['file-injection-failed', 'photo-row-timeout', 'board-not-found'].includes(item.result)).length;
       recordRoadworkDiagnostic('photo-stage-completed', {
@@ -1647,9 +1662,13 @@ export default function RoadworkHelperView({ currentUser }) {
       // 통합입력 결과를 확인하는 동안 HWP 엔진을 미리 올린다. 이 호출은 출력물이나
       // 현재 웹폼을 바꾸지 않으며, 실패하더라도 자동 채우기 완료 처리는 유지한다.
       void RoadworkHelperModel.warmUpDailyWorkLogHwp().catch(() => {});
-      setStatusMessage(failedCount > 0
+      setPhotoProgress(null);
+      const unavailableCount = photoResults.filter((item) => item.result.startsWith('qntech-photo') || item.result.startsWith('photo-manifest') || item.result === 'prepared-photo-file-missing').length;
+      setStatusMessage(readyPhotoCount === 0
+        ? '데이터 입력 완료. 실험분석 사진은 준비되지 않아 올리지 않습니다. 화면을 확인한 뒤 저장하세요.'
+        : failedCount > 0
         ? `데이터 입력 완료. 사진 ${addedCount}건 추가, ${failedCount}건은 추가하지 못했습니다. 화면을 확인한 뒤 저장하세요.`
-        : `데이터와 사진 준비 완료. 사진 ${addedCount}건 추가${skippedCount ? `, 기존 ${skippedCount}건 유지` : ''}. 화면을 확인한 뒤 저장하세요.`);
+        : `데이터와 사진 준비 완료. 사진 ${addedCount}건 추가${skippedCount ? `, 기존 ${skippedCount}건 유지` : ''}${unavailableCount ? `, 준비되지 않은 사진 ${unavailableCount}건 제외` : ''}. 화면을 확인한 뒤 저장하세요.`);
     } catch (error) {
       recordRoadworkDiagnostic('auto-fill-failed', {
         date: roadworkStatus.date,
@@ -1657,6 +1676,7 @@ export default function RoadworkHelperView({ currentUser }) {
         reason: String(error?.message || error || '').slice(0, 120),
       });
       setStatusMessage(error?.message || '자동 채우기 중 오류가 발생했습니다.');
+      setPhotoProgress(null);
     } finally {
       setIsFilling(false);
       window.setTimeout(() => setStatusMessage(''), 3500);
@@ -1729,6 +1749,11 @@ export default function RoadworkHelperView({ currentUser }) {
       {statusMessage ? (
         <div className="roadwork-autofill-status">
           {statusMessage}
+          {photoProgress ? (
+            <div className="roadwork-photo-progress" role="progressbar" aria-label={`${photoProgress.label} 사진 업로드 진행률`} aria-valuemin="0" aria-valuemax="100" aria-valuenow={photoProgress.percent}>
+              <span style={{ width: `${photoProgress.percent}%` }} />
+            </div>
+          ) : null}
         </div>
       ) : null}
 
