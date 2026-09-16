@@ -5,7 +5,23 @@
 - [개발 히스토리](DEVELOPMENT_HISTORY.md)
 - [향후 작업 로드맵](ROADMAP.md)
 - [릴리스 및 자동 업데이트 가이드](RELEASE_GUIDE.md)
-- [업무 시나리오 진단 러너 개발계획](DIAGNOSTIC_RUNNER_DEVELOPMENT_PLAN.md)
+- [일일업무일지 점검표·스냅샷 개발계획](DAILY_WORK_LOG_INSPECTION_SNAPSHOT_DEVELOPMENT_PLAN.md)
+- [장비이력카드 개발·유지보수 기준](EQUIPMENT_CARD_DEVELOPMENT_PLAN.md)
+- [진단 러너 사용법](../tools/diagnostic-runner/README.md)
+
+## 현행 기술 계약
+
+- [진단 러너 내부 계약](DIAGNOSTIC_RUNNER_DEVELOPMENT_PLAN.md)
+- [로컬 우선 백그라운드 정책](LOCAL_FIRST_BACKGROUND_ROUTE_POLICY.md)
+- [감시런처 운영계획](FIELD_APP_WATCHDOG_LAUNCHER_PLAN.md)
+- [릴리스 패키지 무결성](RELEASE_PACKAGE_INTEGRITY_POLICY.md)
+- [보안 감사 예외](SECURITY_AUDIT_EXCEPTIONS.md)
+
+## 사용자·장기 계획
+
+- [현장 사용자 매뉴얼 원본](FIELD_USER_MANUAL_NOTEBOOKLM_SOURCE.md)
+- [플랫폼 전환 방향](PLATFORM_DIRECTION_AND_GATES.md)
+- [WinForms 전환 계획](winforms-transition-plan.md)
 
 ## 루트의 필수 운영 문서
 
