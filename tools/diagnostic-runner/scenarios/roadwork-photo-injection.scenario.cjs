@@ -27,6 +27,8 @@ class DiagnosticDebugger extends EventEmitter {
     this.uploaderIndex = uploaderIndex;
     this.attached = false;
     this.setFileCalls = [];
+    this.runtimePayloads = [];
+    this.inputEvents = [];
   }
 
   isAttached() { return this.attached; }
@@ -35,12 +37,21 @@ class DiagnosticDebugger extends EventEmitter {
 
   async sendCommand(method, payload = {}) {
     if (method === 'Runtime.evaluate') {
+      this.runtimePayloads.push(payload);
       if (this.mode === 'chooser') {
         setImmediate(() => this.emit('message', {}, 'Page.fileChooserOpened', { backendNodeId: 700 + this.uploaderIndex }));
       }
       return { result: { value: true } };
     }
+    if (method === 'Input.dispatchKeyEvent') {
+      this.inputEvents.push(payload);
+      if (this.mode === 'trusted-key' && payload.type === 'rawKeyDown') {
+        setImmediate(() => this.emit('message', {}, 'Page.fileChooserOpened', { backendNodeId: 800 + this.uploaderIndex }));
+      }
+      return {};
+    }
     if (method === 'DOM.getDocument') {
+      if (this.mode === 'trusted-key') return { root: { nodeName: '#document', nodeId: 1, children: [] } };
       return {
         root: {
           nodeName: '#document',
@@ -98,9 +109,28 @@ module.exports = {
           ctx.assert(result.method === 'file-chooser',
             '정상 공통 파일선택창 경로가 사용되지 않았습니다.', 'FILE_CHOOSER_PATH_MISSED', result);
         }
+        ctx.assert(debuggerApi.runtimePayloads.every((payload) => payload.userGesture === true),
+          '파일 추가 버튼 클릭에 CDP 사용자 제스처가 누락됐습니다.', 'PHOTO_USER_GESTURE_MISSING', debuggerApi.runtimePayloads);
         results.push({ uploaderIndex, method: result.method });
       }
       return results;
+    });
+
+    await ctx.step('recover-with-trusted-key-when-script-click-is-blocked', async () => {
+      const debuggerApi = new DiagnosticDebugger('trusted-key', 2);
+      const result = await helper.attachRoadworkPhotoFile({
+        target: { debugger: debuggerApi },
+        filePath: 'C:\\diagnostic\\trusted-key.jpg',
+        uploaderIndex: 2,
+        chooserTimeouts: [5, 20],
+        retryDelayMs: 0,
+      });
+      ctx.assert(result.success && result.method === 'file-chooser',
+        '스크립트 클릭 차단 후 신뢰 키 입력으로 복구하지 못했습니다.', 'TRUSTED_KEY_RECOVERY_FAILED', result);
+      ctx.assert(debuggerApi.inputEvents.some((event) => event.type === 'rawKeyDown' && event.key === 'Enter'),
+        '파일 버튼에 신뢰 Enter 입력이 전달되지 않았습니다.', 'TRUSTED_KEY_NOT_DISPATCHED', debuggerApi.inputEvents);
+      ctx.assert(debuggerApi.runtimePayloads.every((payload) => payload.userGesture === true),
+        '복구 시도에서 사용자 제스처 계약이 깨졌습니다.', 'TRUSTED_KEY_USER_GESTURE_MISSING', debuggerApi.runtimePayloads);
     });
 
     await ctx.step('photo-progress-and-no-photo-guidance-contract', async () => {

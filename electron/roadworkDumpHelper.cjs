@@ -271,6 +271,9 @@ async function attachRoadworkPhotoFile({
     for (let index = 0; index < chooserTimeouts.length; index += 1) {
       const attempt = index + 1;
       const waiter = createFileChooserWaiter(debuggerApi, chooserTimeouts[index]);
+      // Chromium은 파일선택창을 사용자 활성화가 없는 비신뢰 click에서 차단한다.
+      // userGesture를 켜고, 두 번째 시도에서는 포커스된 버튼에 CDP 키 입력을 보낸다.
+      const useTrustedKey = index === 1;
       const clickResult = await debuggerApi.sendCommand('Runtime.evaluate', {
         expression: `(() => {
           const visited = [];
@@ -282,7 +285,7 @@ async function attachRoadworkPhotoFile({
               if (button) {
                 button.scrollIntoView?.({ block: 'center', inline: 'center' });
                 button.focus?.();
-                button.click();
+                ${useTrustedKey ? '' : 'button.click();'}
                 return true;
               }
               for (const frame of targetWindow.document?.querySelectorAll('iframe') || []) {
@@ -298,6 +301,7 @@ async function attachRoadworkPhotoFile({
         })()`,
         returnByValue: true,
         awaitPromise: true,
+        userGesture: true,
       });
       if (!clickResult?.result?.value) {
         waiter.cancel();
@@ -308,6 +312,22 @@ async function attachRoadworkPhotoFile({
           attempts: attempt,
           attemptDetails,
         };
+      }
+
+      if (useTrustedKey) {
+        try {
+          await debuggerApi.sendCommand('Input.dispatchKeyEvent', {
+            type: 'rawKeyDown', key: 'Enter', code: 'Enter',
+            windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13,
+          });
+          await debuggerApi.sendCommand('Input.dispatchKeyEvent', {
+            type: 'keyUp', key: 'Enter', code: 'Enter',
+            windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13,
+          });
+          attemptDetails.push({ attempt, method: 'trusted-key', result: 'dispatched' });
+        } catch (error) {
+          attemptDetails.push({ attempt, method: 'trusted-key', result: 'dispatch-failed', errorCode: error?.code || '' });
+        }
       }
 
       const chooser = await waiter.promise;
