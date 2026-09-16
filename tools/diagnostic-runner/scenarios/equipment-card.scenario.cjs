@@ -83,6 +83,28 @@ module.exports = {
       }
     });
 
+    await ctx.step('equipment-bigquery-parameter-types', async () => {
+      const { BigQuery } = require('@google-cloud/bigquery');
+      const { TABLE_CONTRACTS } = require('../../../server/services/equipment/equipmentSyncService.cjs');
+      const declaredTypes = Object.values(TABLE_CONTRACTS)
+        .flatMap((contract) => contract.columns.map((column) => column.type || 'STRING'));
+      const invalidTypes = declaredTypes.filter((type) => {
+        try {
+          BigQuery.getTypeDescriptorFromProvidedType_(type);
+          return false;
+        } catch (_) {
+          return true;
+        }
+      });
+      ctx.assert(invalidTypes.length === 0,
+        '장비 BigQuery 쿼리 파라미터에 클라이언트가 허용하지 않는 타입이 있습니다.',
+        'EQUIPMENT_BIGQUERY_PARAMETER_TYPE_INVALID', { invalidTypes });
+      const visibility = TABLE_CONTRACTS.equipment_assets.columns.find((column) => column.name === 'is_visible');
+      ctx.assert(visibility?.type === 'BOOL',
+        '장비 표시 상태의 BigQuery 파라미터 타입은 BOOL이어야 합니다.',
+        'EQUIPMENT_VISIBILITY_BOOL_CONTRACT_BROKEN', visibility);
+    });
+
     await ctx.step('equipment-visibility-diagnostics', async () => {
       const hidden = await ctx.request('PUT', `/api/equipment/${equipmentId}/visibility`, { body: { is_visible: false } });
       ctx.assert(hidden.ok && hidden.json.is_visible === 0, '숨김 저장 실패', 'VISIBILITY_FAILED');

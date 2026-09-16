@@ -42,7 +42,8 @@ const TABLE_CONTRACTS = {
       { name: 'location', source: (row) => row.location },
       { name: 'accessory', source: (row) => row.accessory },
       { name: 'status', source: (row) => row.status },
-      { name: 'is_visible', source: (row) => Boolean(Number(row.is_visible === undefined ? 1 : row.is_visible)), type: 'BOOLEAN' },
+      // @google-cloud/bigquery의 쿼리 파라미터 타입은 스키마 별칭 BOOLEAN이 아니라 BOOL을 요구한다.
+      { name: 'is_visible', source: (row) => Boolean(Number(row.is_visible === undefined ? 1 : row.is_visible)), type: 'BOOL' },
       { name: 'notes', source: (row) => row.notes },
       { name: 'author', source: (row, ctx) => row.author || ctx.authorName },
       { name: 'created_at', source: (row) => toTimestamp(row.created_at), type: 'TIMESTAMP' },
@@ -261,3 +262,5 @@ function createEquipmentSyncService(db) {
 }
 
 module.exports = createEquipmentSyncService;
+// 진단 러너가 외부 BigQuery 호출 없이 파라미터 타입 계약을 검증할 수 있게 공개한다.
+module.exports.TABLE_CONTRACTS = TABLE_CONTRACTS;
