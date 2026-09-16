@@ -1,6 +1,6 @@
 import { apiClient } from '../../core/api';
 
-/** 로컬 전용 업무 기록 API. BigQuery 동기화 경로를 사용하지 않는다. */
+/** 업무 기록은 로컬 우선이며, 사진은 Drive와 메타데이터 동기화 경로로 백업한다. */
 export const FacilityModel = {
     async fetchAll(q) {
         return apiClient.get('/api/work-records', q ? { q } : {});
@@ -26,5 +26,9 @@ export const FacilityModel = {
 
     async fetchPhotos(id) {
         return apiClient.get(`/api/work-records/${id}/photos`);
+    },
+
+    async deletePhoto(id, photoId) {
+        return apiClient.delete(`/api/work-records/${id}/photos/${photoId}`);
     },
 };

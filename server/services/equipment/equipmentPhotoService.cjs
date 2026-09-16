@@ -96,6 +96,62 @@ function createEquipmentPhotoService(db, appDataPath) {
     }
   }
 
+  async function mirrorPhotosToDrive({ photos = [], subfolders = [] }) {
+    if (!photos.length) return [];
+    const started = Date.now();
+    const details = (extra = {}) => ({
+      siteId: subfolders[0] || null,
+      entityId: subfolders[1] || null,
+      photoCount: photos.length,
+      durationMs: Date.now() - started,
+      ...extra,
+    });
+    try {
+      const driveService = getDriveService();
+      if (!driveService.isDriveConfigured()) {
+        report(db, appDataPath, { area: 'equipment-card', action: 'photo-drive-mirror-batch', result: 'skipped', details: details() });
+        return [];
+      }
+      const folder = await driveService.getOrCreateFolderPath(
+        driveService.getDriveRootFolderId(),
+        ['사진관리', EQUIPMENT_PHOTO_DIRNAME, ...subfolders.map((value) => String(value || '').trim()).filter(Boolean)],
+      );
+      const results = [];
+      // 목적 폴더는 한 번만 준비하고 사진은 순차 전송한다. 사진 수만큼
+      // 동일한 사진관리/장비이력 폴더가 생성되는 경합을 막는다.
+      for (const photo of photos) {
+        if (!photo.localPath || !fs.existsSync(photo.localPath)) continue;
+        const result = await driveService.uploadBufferToFolder({
+          folderId: folder.id,
+          fileName: photo.fileName,
+          buffer: fs.readFileSync(photo.localPath),
+          mimeType: photo.mimeType,
+        });
+        if (result?.id) writeDriveReceipt(photo.localPath, { version: 1, driveFileId: result.id, fileName: photo.fileName });
+        results.push(result);
+      }
+      report(db, appDataPath, {
+        area: 'equipment-card',
+        action: 'photo-drive-mirror-batch',
+        level: results.length === photos.length ? 'info' : 'warn',
+        result: results.length === photos.length ? 'ok' : 'partial',
+        details: details({
+          uploadedCount: results.length,
+          driveFolderId: folder.id,
+          duplicateFoldersDetected: folder._pathDuplicates || [],
+        }),
+      });
+      return results;
+    } catch (error) {
+      report(db, appDataPath, {
+        area: 'equipment-card', action: 'photo-drive-mirror-batch', level: 'warn', result: 'failed',
+        details: details({ errorName: error.name }),
+      });
+      console.warn('[equipment-photos] Drive 묶음 미러 실패:', error.message);
+      return [];
+    }
+  }
+
   // ---- 장비 대표사진 (equipment_asset_photos, photo_type = 'main') ----
   function saveEquipmentMainPhoto(equipmentId, file = null) {
     if (!file || !file.buffer) throw new ServiceError('사진 파일이 없습니다.');
@@ -162,12 +218,14 @@ function createEquipmentPhotoService(db, appDataPath) {
         saved.push({ storedName, absolutePath, mimeType: file.mimetype });
       });
     })();
-    saved.forEach((item) => mirrorPhotoToDrive({
-      localPath: item.absolutePath,
-      fileName: item.storedName,
-      mimeType: item.mimeType,
+    mirrorPhotosToDrive({
+      photos: saved.map((item) => ({
+        localPath: item.absolutePath,
+        fileName: item.storedName,
+        mimeType: item.mimeType,
+      })),
       subfolders: [historyRow.site_id, `log-${historyRow.id}`],
-    }));
+    });
     return { added: files.length, total: countHistoryPhotos(historyRow.id) };
   }
 

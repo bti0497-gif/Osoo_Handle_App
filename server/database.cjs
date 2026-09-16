@@ -289,9 +289,11 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS work_record_photos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     work_record_id INTEGER NOT NULL,
+    site_id TEXT,
     original_name TEXT,
     stored_name TEXT NOT NULL,
     relative_path TEXT NOT NULL,
+    is_synced INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (work_record_id) REFERENCES work_records(id) ON DELETE CASCADE
   );
@@ -961,6 +963,8 @@ ensureColumn('equipment_asset_photos', 'is_synced', 'INTEGER DEFAULT 0');
 ensureColumn('equipment_asset_photos', 'site_id', 'TEXT');
 ensureColumn('work_record_equipment_links', 'is_synced', 'INTEGER DEFAULT 0');
 ensureColumn('work_record_equipment_links', 'site_id', 'TEXT');
+ensureColumn('work_record_photos', 'site_id', 'TEXT');
+ensureColumn('work_record_photos', 'is_synced', 'INTEGER DEFAULT 0');
 db.prepare(`
   UPDATE equipment_asset_photos
   SET site_id = (SELECT e.site_id FROM equipment_assets e WHERE e.id = equipment_asset_photos.equipment_id)
@@ -1220,6 +1224,7 @@ db.prepare('CREATE INDEX IF NOT EXISTS idx_equipment_assets_site_name ON equipme
 db.prepare('CREATE INDEX IF NOT EXISTS idx_equipment_photos_equipment ON equipment_asset_photos (equipment_id, sort_order, id)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_work_equipment_equipment ON work_record_equipment_links (equipment_id, work_record_id)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_work_record_photos_record ON work_record_photos (work_record_id)').run();
+db.prepare('CREATE INDEX IF NOT EXISTS idx_work_record_photos_site_record ON work_record_photos (site_id, work_record_id)').run();
 db.prepare('CREATE INDEX IF NOT EXISTS idx_operation_status_logs_site_date ON operation_status_logs (site_id, date)').run();
 
 // site_id 백필: 기존 데이터가 있으면 app_settings.site_id로 채움
@@ -1229,6 +1234,14 @@ if (currentSiteId) {
   db.prepare('UPDATE qntech_water_quality SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE kit_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE facility_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
+  db.prepare(`
+    UPDATE work_record_photos
+    SET site_id = COALESCE(
+      (SELECT wr.site_id FROM work_records wr WHERE wr.id = work_record_photos.work_record_id),
+      ?
+    )
+    WHERE site_id IS NULL OR TRIM(site_id) = ''
+  `).run(currentSiteId);
   db.prepare('UPDATE operation_status_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE sludge_photo_logs SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);
   db.prepare('UPDATE attendance SET site_id = ? WHERE site_id IS NULL OR TRIM(site_id) = \'\'').run(currentSiteId);

@@ -216,6 +216,12 @@ module.exports = function (db, baseDir, appDataPath) {
         identifiedPhotoCount: Number(photoPreparation?.identifiedPhotoCount || 0),
         downloadFailureCount: Number(photoPreparation?.downloadFailureCount || 0),
         localSaveFailureCount: Number(photoPreparation?.localSaveFailureCount || 0),
+        downloadErrors: Array.isArray(photoPreparation?.downloadErrors)
+          ? photoPreparation.downloadErrors.slice(0, 4)
+          : [],
+        localSaveErrors: Array.isArray(photoPreparation?.localSaveErrors)
+          ? photoPreparation.localSaveErrors.slice(0, 4)
+          : [],
         resizeDiagnostics: photoPreparation?.resizeDiagnostics || [],
         error: error || null,
       },

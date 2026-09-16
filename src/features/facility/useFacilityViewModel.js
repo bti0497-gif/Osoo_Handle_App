@@ -53,10 +53,34 @@ export const useFacilityViewModel = () => {
     const openPhotoViewer = async (id) => {
         const result = await FacilityModel.fetchPhotos(id);
         setViewer({
+            recordId: id,
             title: `${result.date || ''} · ${result.title || '업무사진'}`,
             items: (result.photos || []).map((photo) => ({ ...photo, url: `${getApiBase()}${photo.url}` })),
             index: 0,
         });
+    };
+
+    const deletePhoto = async () => {
+        const current = viewer?.items?.[viewer.index];
+        if (!viewer?.recordId || !current?.id) return;
+        await FacilityModel.deletePhoto(viewer.recordId, current.id);
+        const result = await FacilityModel.fetchPhotos(viewer.recordId);
+        const items = (result.photos || []).map((photo) => ({ ...photo, url: `${getApiBase()}${photo.url}` }));
+        setViewer((previous) => previous ? {
+            ...previous,
+            items,
+            index: Math.min(previous.index, Math.max(0, items.length - 1)),
+        } : null);
+        await loadLogs(searchQuery);
+    };
+
+    const addViewerPhotos = async (files) => {
+        if (!viewer?.recordId || !files?.length) return;
+        await FacilityModel.uploadPhotos(viewer.recordId, files);
+        const result = await FacilityModel.fetchPhotos(viewer.recordId);
+        const items = (result.photos || []).map((photo) => ({ ...photo, url: `${getApiBase()}${photo.url}` }));
+        setViewer((previous) => previous ? { ...previous, items, index: Math.max(0, items.length - 1) } : null);
+        await loadLogs(searchQuery);
     };
 
     return {
@@ -72,5 +96,7 @@ export const useFacilityViewModel = () => {
         viewer,
         closePhotoViewer: () => setViewer(null),
         selectPhoto: (index) => setViewer((previous) => previous ? { ...previous, index } : null),
+        deletePhoto,
+        addViewerPhotos,
     };
 };

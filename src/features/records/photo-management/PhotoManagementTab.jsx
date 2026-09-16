@@ -254,12 +254,28 @@ export default function PhotoManagementTab({ date, onError }) {
 
         Promise.all(galleryPhotos.map(async (photo) => {
             try {
-                const response = await apiClient.getRaw(normalizeLocalPhotoUrl(photo.url));
-                if (!response.ok) return null;
+                const normalizedUrl = normalizeLocalPhotoUrl(photo.url);
+                const response = await apiClient.getRaw(normalizedUrl);
+                if (!response.ok) {
+                    emitPhotoDiagnostic('preview-load-failed', {
+                        category,
+                        date: photo.date,
+                        label: photo.label,
+                        statusCode: response.status,
+                        urlPath: normalizedUrl.split('?')[0],
+                    });
+                    return null;
+                }
                 const objectUrl = URL.createObjectURL(await response.blob());
                 objectUrls.push(objectUrl);
                 return [photo.url, objectUrl];
-            } catch {
+            } catch (error) {
+                emitPhotoDiagnostic('preview-load-failed', {
+                    category,
+                    date: photo.date,
+                    label: photo.label,
+                    errorName: error?.name || 'Error',
+                });
                 return null;
             }
         })).then((entries) => {
@@ -273,7 +289,7 @@ export default function PhotoManagementTab({ date, onError }) {
             cancelled = true;
             objectUrls.forEach((url) => URL.revokeObjectURL(url));
         };
-    }, [galleryPhotos]);
+    }, [category, galleryPhotos]);
 
     const getLoadedPhotoUrl = (photo) => localPhotoUrls[photo.url] || '';
 

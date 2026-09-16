@@ -22,13 +22,27 @@ function managementNoPrefix(name, category2, category3) {
   return 'M';
 }
 
-function nextManagementNo(rows, prefix) {
+function mechanicalProcessGroup(category1) {
+  const process = String(category1 || '').trim();
+  if (['침사조', '유량조정조'].includes(process)) return 1;
+  if (['혐기조', '무산소조'].includes(process)) return 2;
+  if (['포기조', '막분리조'].includes(process)) return 3;
+  if (['침전조', '응집침전조'].includes(process)) return 4;
+  if (['여과조', '소독조', '방류조'].includes(process)) return 5;
+  return null;
+}
+
+function nextManagementNo(rows, prefix, category1 = '') {
+  const group = prefix === 'M' ? mechanicalProcessGroup(category1) : null;
   let max = 0;
   rows.forEach(({ management_no: managementNo }) => {
     const match = UNIT_PATTERN.exec(String(managementNo || ''));
-    if (match && match[1] === prefix) max = Math.max(max, Number(match[2]));
+    const number = match ? Number(match[2]) : 0;
+    if (match && match[1] === prefix && (!group || Math.floor(number / 100) === group)) {
+      max = Math.max(max, number);
+    }
   });
-  const next = max > 0 ? max + 1 : 101;
+  const next = max > 0 ? max + 1 : (group ? group * 100 + 1 : 101);
   return `${prefix}-${next}`;
 }
 
@@ -49,6 +63,7 @@ module.exports = {
   ServiceError,
   uuid,
   managementNoPrefix,
+  mechanicalProcessGroup,
   nextManagementNo,
   baseNumberOf,
 };

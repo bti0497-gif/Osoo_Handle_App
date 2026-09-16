@@ -1,7 +1,7 @@
 /**
  * server/services/equipment/equipmentSyncService.cjs
  * 장비 테이블 4종(equipment_assets / equipment_asset_photos /
- * work_record_equipment_links / facility_log_photos)의 전용 동기화(§4-4-4).
+ * work_record_equipment_links / facility_log_photos / work_record_photos)의 전용 동기화(§4-4-4).
  *
  * 범용 동기화기(bigQuerySyncService)와 다른 점:
  *  - 날짜 축이 없다: is_synced = 0인 미전송 행 전체를 대상으로 한다.
@@ -86,6 +86,19 @@ const TABLE_CONTRACTS = {
       { name: 'stored_name', source: (row) => row.stored_name },
       { name: 'relative_path', source: (row) => row.relative_path },
       { name: 'sort_order', source: (row) => row.sort_order || 0, type: 'INTEGER' },
+      { name: 'created_at', source: (row) => toTimestamp(row.created_at), type: 'TIMESTAMP' },
+      { name: 'uploaded_at', source: () => new Date().toISOString(), type: 'TIMESTAMP' },
+    ],
+  },
+  work_record_photos: {
+    naturalKeys: ['site_id', 'id'],
+    columns: [
+      { name: 'site_id', source: (row, ctx) => row.site_id || ctx.siteId },
+      { name: 'id', source: (row) => row.id, type: 'INTEGER' },
+      { name: 'work_record_id', source: (row) => row.work_record_id, type: 'INTEGER' },
+      { name: 'original_name', source: (row) => row.original_name },
+      { name: 'stored_name', source: (row) => row.stored_name },
+      { name: 'relative_path', source: (row) => row.relative_path },
       { name: 'created_at', source: (row) => toTimestamp(row.created_at), type: 'TIMESTAMP' },
       { name: 'uploaded_at', source: () => new Date().toISOString(), type: 'TIMESTAMP' },
     ],
@@ -200,12 +213,20 @@ function createEquipmentSyncService(db) {
 
         const succeededIds = [];
         let failures = 0;
+        let firstFailure = null;
         for (const row of rows) {
           try {
             await mergeRow(bq, tableName, contract, row, siteInfo);
             succeededIds.push(row.id);
           } catch (rowError) {
             failures += 1;
+            if (!firstFailure) {
+              firstFailure = {
+                errorName: rowError?.name || 'Error',
+                errorCode: rowError?.code || null,
+                message: String(rowError?.message || 'unknown error').slice(0, 500),
+              };
+            }
             console.warn(`[equipment-sync] ${tableName} 행 전송 실패:`, rowError.message);
           }
         }
@@ -216,7 +237,7 @@ function createEquipmentSyncService(db) {
         succeededIds.forEach((id) => markDone.run(id));
         if (failures > 0) markPending.run();
 
-        tables[tableName] = { success: failures === 0, count: succeededIds.length, failures };
+        tables[tableName] = { success: failures === 0, count: succeededIds.length, failures, firstFailure };
       } catch (error) {
         tables[tableName] = { success: false, error: error.message };
         console.warn(`[equipment-sync] ${tableName} 동기화 실패:`, error.message);

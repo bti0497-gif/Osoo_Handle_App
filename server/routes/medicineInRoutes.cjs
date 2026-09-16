@@ -530,11 +530,14 @@ module.exports = function (db, baseDir, appDataPath) {
       const withPhoto = (row) => {
         const rowPhotos = photoEntries.filter((photo) => photo.date === row.date && photo.name === sanitizeName(row.name));
         const found = rowPhotos[rowPhotos.length - 1] || photoMap[sanitizeName(row.name)];
+        const localPhotoUrl = found?.date === row.date ? found.url : null;
         return {
           ...row,
-          photoUrl: row.photo_url || (found?.date === row.date ? found.url : null),
+          // DB의 photo_url은 현장 분리 이전 경로일 수 있다. 실제 로컬 파일을
+          // 스캔해 만든 현재 URL을 우선해야 화면만 액박이 되는 현상을 막는다.
+          photoUrl: localPhotoUrl || row.photo_url || null,
           photoUrls: rowPhotos.map((photo) => photo.url),
-          photoDate: found?.date === row.date ? found.date : null,
+          photoDate: localPhotoUrl ? found.date : null,
         };
       };
       const tradeEntries = photoEntries.filter((photo) => photo.name === sanitizeName('거래명세서'));

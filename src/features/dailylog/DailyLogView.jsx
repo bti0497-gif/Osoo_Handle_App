@@ -14,6 +14,7 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
         isManifestLoading,
         isPreviewAssetLoading,
         isOutputProcessing,
+        outputJob,
         outputFormat,
         setOutputFormat,
         manifestError,
@@ -238,7 +239,19 @@ const DailyLogView = ({ currentUser, templateName = '수질분석일지', title 
                             borderRadius: '50%',
                             animation: 'spin 0.8s linear infinite'
                         }} />
-                        {outputFormatLabel} 일지를 출력 중입니다. 잠시만 기다려 주세요...
+                        <div style={{ minWidth: '280px' }}>
+                            <div>{outputJob?.message || `${outputFormatLabel} 일지를 출력 중입니다. 잠시만 기다려 주세요...`}</div>
+                            {outputFormat === 'hwp' && outputJob && (
+                                <div style={{ marginTop: '10px' }}>
+                                    <div style={{ height: '6px', overflow: 'hidden', borderRadius: '999px', background: 'rgba(255,255,255,0.25)' }}>
+                                        <div style={{ width: `${Math.max(0, Math.min(100, outputJob.progress || 0))}%`, height: '100%', background: '#60a5fa', transition: 'width 0.25s ease' }} />
+                                    </div>
+                                    <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#cbd5e1', textAlign: 'right' }}>
+                                        {outputJob.progress || 0}%
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}

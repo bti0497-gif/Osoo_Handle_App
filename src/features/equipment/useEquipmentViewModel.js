@@ -30,14 +30,25 @@ function managementNoPrefix(name, category2, category3) {
   return 'M';
 }
 
-function estimateNextManagementNo(items, name, category2, category3) {
+function mechanicalProcessGroup(category1) {
+  if (['침사조', '유량조정조'].includes(category1)) return 1;
+  if (['혐기조', '무산소조'].includes(category1)) return 2;
+  if (['포기조', '막분리조'].includes(category1)) return 3;
+  if (['침전조', '응집침전조'].includes(category1)) return 4;
+  if (['여과조', '소독조', '방류조'].includes(category1)) return 5;
+  return null;
+}
+
+function estimateNextManagementNo(items, name, category1, category2, category3) {
   const prefix = managementNoPrefix(name, category2, category3);
+  const group = prefix === 'M' ? mechanicalProcessGroup(category1) : null;
   let max = 0;
   items.forEach((item) => {
     const match = UNIT_PATTERN.exec(String(item.managementNo || item.management_no || ''));
-    if (match && match[1] === prefix) max = Math.max(max, Number(match[2]));
+    const number = match ? Number(match[2]) : 0;
+    if (match && match[1] === prefix && (!group || Math.floor(number / 100) === group)) max = Math.max(max, number);
   });
-  const next = max > 0 ? max + 1 : 101;
+  const next = max > 0 ? max + 1 : (group ? group * 100 + 1 : 101);
   return `${prefix}-${next}`;
 }
 
@@ -284,7 +295,7 @@ export function useEquipmentViewModel() {
   // ---- 장비 편집 ----
   const openCreateEquipment = useCallback(() => {
     const draft = emptyEquipmentDraft();
-    draft.managementNo = estimateNextManagementNo(items, '', draft.category2, draft.category3);
+    draft.managementNo = estimateNextManagementNo(items, '', draft.category1, draft.category2, draft.category3);
     pendingPhotoRef.current = null;
     setEquipmentEditor({ open: true, draft, initial: { ...draft }, managementNoTouched: false });
   }, [items]);
@@ -306,8 +317,8 @@ export function useEquipmentViewModel() {
       const draft = { ...previous.draft, [field]: value };
       const touched = field === 'managementNo' ? true : previous.managementNoTouched;
       // 사용자가 직접 고치기 전까지는 이름/구분에 맞춰 관리번호를 자동으로 따라가게 한다.
-      if (!touched && (field === 'name' || field === 'category2' || field === 'category3')) {
-        draft.managementNo = estimateNextManagementNo(items, draft.name, draft.category2, draft.category3);
+      if (!touched && (field === 'name' || field === 'category1' || field === 'category2' || field === 'category3')) {
+        draft.managementNo = estimateNextManagementNo(items, draft.name, draft.category1, draft.category2, draft.category3);
       }
       return { ...previous, draft, managementNoTouched: touched };
     });

@@ -98,10 +98,10 @@ function createEquipmentRoutes(db, appDataPath) {
     try {
       const siteId = requireSiteId(req, res);
       if (!siteId) return;
-      const { name = '', category2 = '', category3 = '' } = req.query;
+      const { name = '', category1 = '', category2 = '', category3 = '' } = req.query;
       return res.json({
         success: true,
-        managementNo: assets.nextManagementNoFor(siteId, name, category2, category3),
+        managementNo: assets.nextManagementNoFor(siteId, name, category1, category2, category3),
       });
     } catch (error) {
       return sendError(res, error);

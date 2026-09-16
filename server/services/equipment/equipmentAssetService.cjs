@@ -44,10 +44,10 @@ function createEquipmentAssetService(db) {
     return String(settings.method || 'A2O').toUpperCase();
   }
 
-  function nextManagementNoFor(siteId, name, category2, category3) {
+  function nextManagementNoFor(siteId, name, category1, category2, category3) {
     const prefix = managementNoPrefix(name, category2, category3);
     const rows = db.prepare('SELECT management_no FROM equipment_assets WHERE site_id = ?').all(siteId);
-    return nextManagementNo(rows, prefix);
+    return nextManagementNo(rows, prefix, category1);
   }
 
   function assertManagementNoFree(siteId, managementNo, exceptId = null) {

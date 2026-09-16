@@ -177,6 +177,8 @@ const apiSpec = {
       { method: 'GET', path: '/export', description: '로그 내보내기' },
       { method: 'GET', path: '/export-pdf', description: 'HWP 기반 일일업무일지 다중 날짜 PDF 병합 내보내기' },
       { method: 'GET', path: '/export-hwp', description: '책갈피 기반 일일업무일지 HWP 내보내기' },
+      { method: 'POST', path: '/hwp-jobs', description: '비동기 일일업무일지 HWP 생성 작업 시작' },
+      { method: 'GET', path: '/hwp-jobs/:jobId', description: '일일업무일지 HWP 생성 작업 상태 조회' },
     ],
   },
 

@@ -55,6 +55,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
     const [pageRenderData, setPageRenderData] = useState(null);
     const [isPreviewAssetLoading, setIsPreviewAssetLoading] = useState(false);
     const [isOutputProcessing, setIsOutputProcessing] = useState(false);
+    const [outputJob, setOutputJob] = useState(null);
     const [outputFormat, setOutputFormat] = useState(isDailyWorkLog ? 'hwp' : 'excel');
     const [activeDates, setActiveDates] = useState([]);
     const [siteName, setSiteName] = useState('');
@@ -425,14 +426,34 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
 
         try {
             setIsOutputProcessing(true);
+            setOutputJob(null);
             const effectiveOutputFormat = isDailyWorkLog
                 ? (outputFormat === 'hwp' ? 'hwp' : 'pdf')
                 : 'excel';
-            const result = effectiveOutputFormat === 'pdf'
-                ? await DailyLogModel.fetchExportPdf(dateRangeStr, templateName, siteName, requestContext)
-                : effectiveOutputFormat === 'hwp'
-                    ? await DailyLogModel.fetchExportHwp(dateRangeStr, templateName, siteName, requestContext)
+            let result;
+            if (effectiveOutputFormat === 'hwp') {
+                const started = await DailyLogModel.startExportHwpJob(dateRangeStr, templateName, siteName, requestContext);
+                let job = started?.job;
+                if (!job?.id) throw new Error('HWP 출력 작업 번호를 받지 못했습니다.');
+                setOutputJob(job);
+
+                const deadline = Date.now() + (10 * 60 * 1000);
+                while (!['completed', 'failed'].includes(job.status)) {
+                    if (Date.now() >= deadline) {
+                        throw new Error('HWP 출력은 백그라운드에서 계속 진행 중입니다. 잠시 후 생성된 파일을 확인해 주세요.');
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 1000));
+                    const polled = await DailyLogModel.fetchExportHwpJob(job.id);
+                    job = polled?.job || job;
+                    setOutputJob(job);
+                }
+                if (job.status === 'failed') throw new Error(job.message || job.error || 'HWP 생성에 실패했습니다.');
+                result = job.result;
+            } else {
+                result = effectiveOutputFormat === 'pdf'
+                    ? await DailyLogModel.fetchExportPdf(dateRangeStr, templateName, siteName, requestContext)
                     : await DailyLogModel.fetchExportExcel(dateRangeStr, templateName, siteName, requestContext);
+            }
             if (result && result.success) {
                 const fileList = Array.isArray(result.files) && result.files.length
                     ? `\n${result.files.join('\n')}`
@@ -527,6 +548,7 @@ export const useDailyLogViewModel = (currentUser, initialDate, templateName, sho
         isManifestLoading,
         isPreviewAssetLoading,
         isOutputProcessing,
+        outputJob,
         outputFormat,
         setOutputFormat,
         manifestError,

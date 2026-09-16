@@ -16,6 +16,7 @@ const {
   buildBatchDailyWorkLogPdf,
 } = require('../services/dailyWorkLogHwpService.cjs');
 const { warmUpHwpAutomation } = require('../services/hwpAutomationWorker.cjs');
+const { createDailyWorkLogHwpJobService } = require('../services/dailyWorkLogHwpJobService.cjs');
 const { syncCertificateCacheForSiteMonth } = require('../services/certificateCacheSyncService.cjs');
 const { acquireDailyLogDatabase } = require('../services/bidirectionalDailyLogService.cjs');
 
@@ -62,6 +63,7 @@ function getMonthKeys(startDate, endDate) {
 }
 
 module.exports = function (db, baseDir, appDataPath) {
+  const hwpJobService = createDailyWorkLogHwpJobService({ db, appDataPath });
   const getCurrentMethod = (siteId = '') => (
     (siteId ? db.prepare('SELECT method FROM sites WHERE id = ?').get(siteId)?.method : '')
     || db.prepare('SELECT method FROM app_settings WHERE id = 1').get()?.method
@@ -319,6 +321,78 @@ module.exports = function (db, baseDir, appDataPath) {
       }
       return res.status(500).json({ success: false, error: `PDF 생성에 실패했습니다: ${err.message}` });
     }
+  });
+
+  router.post('/api/daily-work-log/hwp-jobs', (req, res) => {
+    const { startDate, endDate, date, templateName } = req.body || {};
+    const resolvedTemplateName = templateName || TEMPLATE_NAME;
+    const context = {
+      siteId: req.body?.siteId || req.body?.site_id || req.siteContext?.siteId || '',
+      siteName: req.body?.siteName || req.body?.site_name || req.siteContext?.siteName || '',
+      author: req.body?.author || '',
+      method: req.body?.method || getCurrentMethod(req.body?.siteId || req.body?.site_id || req.siteContext?.siteId || ''),
+      dataSource: req.body?.dataSource || req.body?.data_source || 'local',
+      localSiteName: req.body?.localSiteName || req.body?.local_site_name || '',
+    };
+    const templateInfo = resolveReportTemplatePath(baseDir, appDataPath, resolvedTemplateName, {
+      hwpOnly: true,
+      method: context.method,
+    });
+    if (!templateInfo?.absolutePath || !fs.existsSync(templateInfo.absolutePath)) {
+      return res.status(404).json(buildMissingHwpTemplateResponse());
+    }
+
+    let range;
+    try {
+      range = normalizeDateRange(startDate || date, endDate || date || startDate);
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+
+    const job = hwpJobService.createJob({
+      metadata: {
+        siteId: context.siteId,
+        startDate: range.startDate,
+        endDate: range.endDate,
+      },
+      run: async (reportProgress) => {
+        reportProgress('loading-data', '업무일지 원본 데이터를 불러오고 있습니다.', 15);
+        const acquired = await acquireDailyLogDatabase(db, appDataPath, context, range.startDate, range.endDate);
+        let results;
+        try {
+          if (!acquired.isRemote) await syncCertificateCacheForRange(range, acquired.context);
+          const manifest = buildPreviewManifest(range.startDate, range.endDate);
+          results = await buildBatchDailyWorkLogHwp({
+            db: acquired.db,
+            appDataPath,
+            templateInfo,
+            manifest,
+            context: acquired.context,
+            onProgress: reportProgress,
+          });
+        } finally {
+          acquired.release();
+        }
+
+        reportProgress('opening-files', '생성된 HWP 업무일지를 열고 있습니다.', 95);
+        const { openExcelFile } = require('../services/excelOpenService.cjs');
+        for (const result of results) await openExcelFile(result.outputPath);
+        return {
+          success: true,
+          message: `${results.length}개의 HWP 일지를 열었습니다.`,
+          files: results.map((result) => path.basename(result.outputPath)),
+          bookmarkCount: results.reduce((sum, result) => sum + result.replacedCount, 0),
+        };
+      },
+    });
+
+    return res.status(202).json({ success: true, job });
+  });
+
+  router.get('/api/daily-work-log/hwp-jobs/:jobId', (req, res) => {
+    const job = hwpJobService.getJob(req.params.jobId);
+    if (!job) return res.status(404).json({ success: false, error: 'HWP 출력 작업을 찾을 수 없습니다.' });
+    return res.json({ success: true, job });
   });
 
   router.get(['/api/daily-work-log/export-hwp', '/api/daily-work-log/export-hwpx'], async (req, res) => {

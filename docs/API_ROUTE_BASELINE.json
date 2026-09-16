@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 175,
-  "digest": "df6f9a7ff211058f1cf39f168b78f4787e79d0183a70e7a563530d82ffe7342c",
+  "endpointCount": 177,
+  "digest": "108614fd1aeaac8cab0938da45b566f16e00ea857bc7bfb50a6e023b6db55339",
   "endpoints": [
     {
       "method": "GET",
@@ -350,6 +350,22 @@
     {
       "method": "GET",
       "path": "/api/daily-work-log/export-pdf",
+      "module": "./routes/dailyWorkLogRoutes.cjs",
+      "tier": 2,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/daily-work-log/hwp-jobs",
+      "module": "./routes/dailyWorkLogRoutes.cjs",
+      "tier": 2,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/daily-work-log/hwp-jobs/:jobId",
       "module": "./routes/dailyWorkLogRoutes.cjs",
       "tier": 2,
       "mutation": false,
@@ -1380,14 +1396,6 @@
       "syncWatch": true
     },
     {
-      "method": "POST",
-      "path": "/api/work-records/:id/open-photo-folder",
-      "module": "./routes/facilityRoutes.cjs",
-      "tier": 1,
-      "mutation": true,
-      "syncWatch": true
-    },
-    {
       "method": "GET",
       "path": "/api/work-records/:id/photos",
       "module": "./routes/facilityRoutes.cjs",
@@ -1398,6 +1406,14 @@
     {
       "method": "POST",
       "path": "/api/work-records/:id/photos",
+      "module": "./routes/facilityRoutes.cjs",
+      "tier": 1,
+      "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/work-records/:id/photos/:photoId",
       "module": "./routes/facilityRoutes.cjs",
       "tier": 1,
       "mutation": true,

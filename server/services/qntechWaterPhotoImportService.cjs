@@ -330,6 +330,8 @@ async function saveProjectPhotos({ db, baseUrl, cookieJar, projects, date, baseD
       identifiedPhotoCount: manifest.identifiedPhotoCount,
       downloadFailureCount: manifest.downloadFailureCount,
       localSaveFailureCount: manifest.localSaveFailureCount,
+      downloadErrors: photoDownloadErrors.slice(0, 4),
+      localSaveErrors: photoLocalSaveErrors.slice(0, 4),
     },
   };
 }

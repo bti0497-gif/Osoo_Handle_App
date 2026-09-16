@@ -70,35 +70,37 @@ const COMMON_ITEMS = [
   ...unitCards('seed-m-103', '유량조정조', '교반기류', '교반기', { managementNoBase: 'M-103', model: '수중 교반기', power: '1.5 kW', notes: '기본 2대 · 추가 시 C, D, E...' }),
   ...unitCards('seed-m-104', '유량조정조', '펌프류', '원수펌프', { managementNoBase: 'M-104', model: '수중펌프', power: '2.2 kW', notes: '기본 2대 · 추가 시 C, D, E...' }),
   card('seed-flt-102', 'FLT-102', '유량조정조', '유량계', '유입유량계', { model: '전자유량계' }),
-  ...unitCards('seed-m-105', '포기조', '브로아류', '포기조브로아', { managementNoBase: 'M-105', model: '루츠 블로어', power: '7.5 kW', location: '송풍기실', accessory: '공기 여과기 포함', notes: '기본 2대 · 추가 시 C, D, E...', statusByUnit: { A: '수리 중' } }),
-  ...unitCards('seed-m-106', '포기조', '펌프류', '내부반송펌프', { managementNoBase: 'M-106', model: '수중펌프', power: '2.2 kW', notes: '기본 2대 · 추가 시 C, D, E...', statusByUnit: { A: '점검 필요' } }),
+  ...unitCards('seed-m-105', '포기조', '브로아류', '포기조브로아', { managementNoBase: 'M-301', model: '루츠 블로어', power: '7.5 kW', location: '송풍기실', accessory: '공기 여과기 포함', notes: '기본 2대 · 추가 시 C, D, E...', statusByUnit: { A: '수리 중' } }),
+  card('seed-m-122', 'M-302', '포기조', '브로아류', '급기팬', { model: '환기팬', location: '기계실', notes: '밀폐공간 급기용' }),
+  card('seed-m-123', 'M-303', '포기조', '브로아류', '배기팬', { model: '환기팬', location: '기계실', notes: '밀폐공간 배기용' }),
+  ...unitCards('seed-m-106', '포기조', '펌프류', '내부반송펌프', { managementNoBase: 'M-304', model: '수중펌프', power: '2.2 kW', notes: '기본 2대 · 추가 시 C, D, E...', statusByUnit: { A: '점검 필요' } }),
   card('seed-flt-103', 'FLT-103', '포기조', '유량계', '내부반송유량계', { model: '전자유량계' }),
   card('seed-do-101', 'DO-101', '포기조', '계측기류', 'DO계', { model: '막전극 용존산소계', specification: '0~20 mg/L' }),
   card('seed-ph-101', 'PH-101', '포기조', '계측기류', 'PH계', { model: '유리전극 pH계', specification: '0~14 pH' }),
-  ...unitCards('seed-m-114', '방류조', '펌프류', '방류펌프', { managementNoBase: 'M-114', model: '수중펌프', power: '2.2 kW', notes: '기본 2대 · 추가 시 C, D, E...' }),
-  ...unitCards('seed-m-115', '방류조', '펌프류', '중수펌프', { managementNoBase: 'M-115', model: '수중펌프', power: '1.5 kW', notes: '기본 2대 · 추가 시 C, D, E...' }),
-  ...unitCards('seed-m-116', '방류조', '펌프류', '역세펌프', { managementNoBase: 'M-116', model: '수중펌프', power: '1.5 kW', notes: '여과기 역세용 · 기본 2대' }),
-  card('seed-m-117', 'M-117', '방류조', '여과기', '여과기', { model: '모래여과기', accessory: '부속 펌프·밸브 포함' }),
-  card('seed-m-118', 'M-118', '방류조', '소독기류', 'UV 소독기', { model: '관류식 자외선 소독기', specification: '램프 4식', power: '0.8 kW', accessory: '램프·안정기 포함' }),
+  ...unitCards('seed-m-114', '방류조', '펌프류', '방류펌프', { managementNoBase: 'M-501', model: '수중펌프', power: '2.2 kW', notes: '기본 2대 · 추가 시 C, D, E...' }),
+  ...unitCards('seed-m-115', '방류조', '펌프류', '중수펌프', { managementNoBase: 'M-502', model: '수중펌프', power: '1.5 kW', notes: '기본 2대 · 추가 시 C, D, E...' }),
+  ...unitCards('seed-m-116', '방류조', '펌프류', '역세펌프', { managementNoBase: 'M-503', model: '수중펌프', power: '1.5 kW', notes: '여과기 역세용 · 기본 2대' }),
+  card('seed-m-117', 'M-504', '방류조', '여과기', '여과기', { model: '모래여과기', accessory: '부속 펌프·밸브 포함' }),
+  card('seed-m-118', 'M-505', '방류조', '소독기류', 'UV 소독기', { model: '관류식 자외선 소독기', specification: '램프 4식', power: '0.8 kW', accessory: '램프·안정기 포함' }),
 ];
 
 // A2O 전용: 침전조(감속기·외부반송)와 응집침전조(응집제·폴리머 계열)
 const A2O_ONLY_ITEMS = [
-  card('seed-m-107', 'M-107', '침전조', '감속기', '감속기', { model: '중심구동 스크래퍼용', power: '0.75 kW', accessory: '스크래퍼 포함' }),
-  ...unitCards('seed-m-108', '침전조', '펌프류', '외부반송펌프', { managementNoBase: 'M-108', model: '수중펌프', power: '2.2 kW', notes: '기본 2대 · 추가 시 C, D, E...' }),
+  card('seed-m-107', 'M-401', '침전조', '감속기', '감속기', { model: '중심구동 스크래퍼용', power: '0.75 kW', accessory: '스크래퍼 포함' }),
+  ...unitCards('seed-m-108', '침전조', '펌프류', '외부반송펌프', { managementNoBase: 'M-402', model: '수중펌프', power: '2.2 kW', notes: '기본 2대 · 추가 시 C, D, E...' }),
   card('seed-flt-104', 'FLT-104', '침전조', '유량계', '외부반송유량계', { model: '전자유량계' }),
-  card('seed-m-109', 'M-109', '응집침전조', '감속기', '감속기', { model: '중심구동 스크래퍼용', power: '0.75 kW', accessory: '스크래퍼 포함' }),
-  card('seed-m-110', 'M-110', '응집침전조', '탱크류', '응집제탱크', { model: 'PE 저장탱크', unit: '개', location: '약품실' }),
-  card('seed-m-111', 'M-111', '응집침전조', '약품펌프류', '응집제 주입펌프', { model: '정량 다이어프램 펌프', power: '0.1 kW', location: '약품실', notes: '예비 포함 시 추가 등록' }),
-  card('seed-m-112', 'M-112', '응집침전조', '탱크류', '폴리머탱크', { model: 'PE 저장탱크', unit: '개', location: '약품실', accessory: '교반기 포함' }),
-  card('seed-m-113', 'M-113', '응집침전조', '약품펌프류', '폴리머 주입펌프', { model: '정량 다이어프램 펌프', power: '0.1 kW', location: '약품실', notes: '예비 포함 시 추가 등록' }),
+  card('seed-m-109', 'M-403', '응집침전조', '감속기', '감속기', { model: '중심구동 스크래퍼용', power: '0.75 kW', accessory: '스크래퍼 포함' }),
+  card('seed-m-110', 'M-404', '응집침전조', '탱크류', '응집제탱크', { model: 'PE 저장탱크', unit: '개', location: '약품실' }),
+  card('seed-m-111', 'M-405', '응집침전조', '약품펌프류', '응집제 주입펌프', { model: '정량 다이어프램 펌프', power: '0.1 kW', location: '약품실', notes: '예비 포함 시 추가 등록' }),
+  card('seed-m-112', 'M-406', '응집침전조', '탱크류', '폴리머탱크', { model: 'PE 저장탱크', unit: '개', location: '약품실', accessory: '교반기 포함' }),
+  card('seed-m-113', 'M-407', '응집침전조', '약품펌프류', '폴리머 주입펌프', { model: '정량 다이어프램 펌프', power: '0.1 kW', location: '약품실', notes: '예비 포함 시 추가 등록' }),
 ];
 
 // MBR 전용: 침전조·외부반송·응집침전 대신 막분리설비
 const MBR_ONLY_ITEMS = [
-  ...unitCards('seed-m-119', '막분리조', '막분리', '막모듈', { managementNoBase: 'M-119', model: '침지형 평막 모듈', specification: '0.1 um 평막', unit: '식', accessory: '막 지지 프레임 포함', notes: '기본 4식 · 증설 시 추가 등록' }, UNITS4),
-  ...unitCards('seed-m-120', '막분리조', '펌프류', '흡인펌프', { managementNoBase: 'M-120', model: '자흡식 원심펌프', power: '1.5 kW', notes: '교대 운전 2대 · 추가 시 C, D, E...' }),
-  card('seed-m-121', 'M-121', '막분리조', '펌프류', '막세척펌프', { model: '정량 다이어프램 펌프', power: '0.4 kW', accessory: 'CIP 약액 라인 포함', notes: '화학세척(CIP)용' }),
+  ...unitCards('seed-m-119', '막분리조', '막분리', '막모듈', { managementNoBase: 'M-305', model: '침지형 평막 모듈', specification: '0.1 um 평막', unit: '식', accessory: '막 지지 프레임 포함', notes: '기본 4식 · 증설 시 추가 등록' }, UNITS4),
+  ...unitCards('seed-m-120', '막분리조', '펌프류', '흡인펌프', { managementNoBase: 'M-306', model: '자흡식 원심펌프', power: '1.5 kW', notes: '교대 운전 2대 · 추가 시 C, D, E...' }),
+  card('seed-m-121', 'M-307', '막분리조', '펌프류', '막세척펌프', { model: '정량 다이어프램 펌프', power: '0.4 kW', accessory: 'CIP 약액 라인 포함', notes: '화학세척(CIP)용' }),
   card('seed-flt-105', 'FLT-105', '막분리조', '유량계', '막분리유량계', { model: '전자유량계', notes: '처리수 유량 측정' }),
 ];
 
@@ -141,6 +143,8 @@ export const EQUIPMENT_CATALOG = [
     items: [
       { name: '포기조브로아', process: '포기조' },
       { name: '교반브로아', process: '포기조' },
+      { name: '급기팬', process: '포기조' },
+      { name: '배기팬', process: '포기조' },
     ],
   },
   {

@@ -991,7 +991,10 @@ async function waitForRoadworkPhotoRow(webview, uploaderIndex, beforeCount) {
   return null;
 }
 
-const ROADWORK_PHOTO_BETWEEN_ITEM_DELAY_MS = 1500;
+// 외부 WebSquare 업로더는 이전 파일 반영 후에도 네이티브 chooser 연결을
+// 늦게 해제하는 PC가 있다. 천안 실측에서 1.5초 뒤 다음 항목이 3회 모두
+// chooser를 열지 못했으므로 충분한 안정화 시간을 보장한다.
+const ROADWORK_PHOTO_BETWEEN_ITEM_DELAY_MS = 3000;
 
 async function waitForRoadworkPhotoUploaderToSettle() {
   await new Promise((resolve) => window.setTimeout(resolve, ROADWORK_PHOTO_BETWEEN_ITEM_DELAY_MS));
@@ -1547,6 +1550,10 @@ export default function RoadworkHelperView({ currentUser }) {
             configuredDelayMs: ROADWORK_PHOTO_BETWEEN_ITEM_DELAY_MS,
           });
         }
+        // 느린 PC에서 이전 업로더 처리 후 webview의 활성 상태가 풀리는 경우가
+        // 있으므로 다음 파일 선택 요청 전에 다시 포커스를 확보한다.
+        webview.focus();
+        await new Promise((resolve) => window.setTimeout(resolve, 150));
         const board = await webview.executeJavaScript(buildRoadworkPhotoBoardStatusScript(uploaderIndex));
         if (!board?.found) {
           photoResults.push({ key: photo.key, result: 'board-not-found' });

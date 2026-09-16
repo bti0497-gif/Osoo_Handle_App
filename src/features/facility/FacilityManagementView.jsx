@@ -172,7 +172,7 @@ const FacilityManagementView = ({ currentUser }) => {
                 <header style={{ padding: '18px 22px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div>
                         <h2 style={{ margin: 0, fontSize: 20, color: '#1e293b' }}>업무사진관리</h2>
-                        <p style={{ margin: '5px 0 0', fontSize: 12, color: '#64748b' }}>이 현장 컴퓨터에만 저장되는 사진 기록 게시판입니다.</p>
+                        <p style={{ margin: '5px 0 0', fontSize: 12, color: '#64748b' }}>현장 컴퓨터에 먼저 저장하고 관리사진 폴더로 안전하게 백업합니다.</p>
                     </div>
                     <button type="button" onClick={openNew} style={{ height: 36, padding: '0 16px', border: 0, borderRadius: 7, background: '#1e293b', color: '#fff', fontWeight: 800, cursor: 'pointer' }}>글쓰기</button>
                 </header>
@@ -237,7 +237,7 @@ const FacilityManagementView = ({ currentUser }) => {
                         style={{ width: 250, height: 31, padding: '0 10px', border: '1px solid #cbd5e1', borderRadius: 6, outline: 'none', fontSize: 12 }}
                     />
                     <button type="button" onClick={() => vm.handleSearch(searchInput)} style={{ height: 31, padding: '0 12px', border: '1px solid #cbd5e1', borderRadius: 6, background: '#fff', fontWeight: 700, cursor: 'pointer' }}>검색</button>
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>총 {vm.logs.length}건 · 로컬 전용</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>총 {vm.logs.length}건 · 로컬 우선 저장</span>
                 </footer>
             </section>
 
@@ -288,7 +288,7 @@ const FacilityManagementView = ({ currentUser }) => {
                     </div>
                 </div>
             )}
-            {vm.viewer && <HistoryPhotoViewer {...vm.viewer} readOnly onSelect={vm.selectPhoto} onClose={vm.closePhotoViewer} />}
+            {vm.viewer && <HistoryPhotoViewer {...vm.viewer} onSelect={vm.selectPhoto} onDelete={vm.deletePhoto} onAddFiles={vm.addViewerPhotos} onClose={vm.closePhotoViewer} />}
         </div>
     );
 };

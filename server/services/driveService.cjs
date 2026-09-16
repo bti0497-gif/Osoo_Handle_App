@@ -77,6 +77,9 @@ function createDriveAuth(google) {
 let drive = null;
 let driveAuthMode = 'uninitialized';
 let driveInitialized = false;
+// Drive는 같은 이름의 폴더를 허용한다. 한 프로세스 안에서 동일 경로를
+// 동시에 준비하는 사진 작업은 하나의 조회/생성 Promise를 공유한다.
+const pendingFolderRequests = new Map();
 
 function getDriveClient() {
   if (driveInitialized) return drive;
@@ -113,7 +116,7 @@ function isDriveConfigured() {
   );
 }
 
-async function getOrCreateFolder(parentFolderId, folderName) {
+async function getOrCreateFolderUnlocked(parentFolderId, folderName) {
   const drive = getDriveClient();
   if (!drive) throw new Error('Google Drive 인증 정보가 설정되지 않았습니다.');
   const normalizedParentId = String(parentFolderId || '').trim();
@@ -136,7 +139,10 @@ async function getOrCreateFolder(parentFolderId, folderName) {
   });
 
   if ((res.data.files || []).length > 0) {
-    return res.data.files[0];
+    const matches = res.data.files.slice().sort(
+      (a, b) => String(a.createdTime || '').localeCompare(String(b.createdTime || '')),
+    );
+    return { ...matches[0], _duplicateCount: matches.length };
   }
 
   const folder = await drive.files.create({
@@ -150,6 +156,19 @@ async function getOrCreateFolder(parentFolderId, folderName) {
   });
 
   return folder.data;
+}
+
+async function getOrCreateFolder(parentFolderId, folderName) {
+  const normalizedParentId = String(parentFolderId || '').trim();
+  const normalizedName = String(folderName || '').trim();
+  const key = `${normalizedParentId}\u0000${normalizedName}`;
+  const pending = pendingFolderRequests.get(key);
+  if (pending) return pending;
+
+  const request = getOrCreateFolderUnlocked(normalizedParentId, normalizedName)
+    .finally(() => pendingFolderRequests.delete(key));
+  pendingFolderRequests.set(key, request);
+  return request;
 }
 
 async function findFolderInFolder(parentFolderId, folderName) {
@@ -166,7 +185,7 @@ async function findFolderInFolder(parentFolderId, folderName) {
       `'${normalizedParentId}' in parents`,
       'trashed=false'
     ].join(' and '),
-    fields: 'files(id, name, webViewLink)',
+    fields: 'files(id, name, webViewLink, createdTime)',
     spaces: 'drive',
     includeItemsFromAllDrives: true,
     supportsAllDrives: true,
@@ -208,12 +227,16 @@ async function getOrCreateFolderPath(rootFolderId, segments = []) {
     return reconcileManagementMonthFolder(year.id, segments[2]);
   }
   let currentFolder = { id: rootFolderId, name: '', webViewLink: '' };
+  const duplicatesDetected = [];
 
   for (const segment of segments) {
     currentFolder = await getOrCreateFolder(currentFolder.id, segment);
+    if (Number(currentFolder._duplicateCount || 0) > 1) {
+      duplicatesDetected.push({ segment, count: currentFolder._duplicateCount });
+    }
   }
 
-  return currentFolder;
+  return { ...currentFolder, _pathDuplicates: duplicatesDetected };
 }
 
 async function listFilesInFolder(parentFolderId) {

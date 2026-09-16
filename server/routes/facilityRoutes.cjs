@@ -1,8 +1,7 @@
 const express = require('express');
-const { operationDiagnostics } = require('../services/equipment/operationDiagnosticService.cjs');
+const { operationDiagnostics, report } = require('../services/equipment/operationDiagnosticService.cjs');
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
 const multer = require('multer');
 const { getCurrentRecordMetadata } = require('../services/syncMetadataService.cjs');
 const {
@@ -42,20 +41,6 @@ function getRecordPhotoDir(appDataPath, recordId) {
     throw new Error('사진 폴더 경로가 올바르지 않습니다.');
   }
   return target;
-}
-
-function openFolder(folderPath) {
-  if (process.platform === 'win32') {
-    const child = spawn('explorer.exe', [folderPath], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false,
-    });
-    child.unref();
-    return;
-  }
-  const command = process.platform === 'darwin' ? 'open' : 'xdg-open';
-  spawn(command, [folderPath], { detached: true, stdio: 'ignore' }).unref();
 }
 
 module.exports = function registerFacilityRoutes(db, appDataPath) {
@@ -101,6 +86,62 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
         createSync(db).syncEquipmentData().catch(() => {});
       } catch (_) { /* 무시: 다음 변경 시 재전송 */ }
     });
+  }
+
+  function writeDriveReceipt(localPath, receipt) {
+    try {
+      fs.writeFileSync(`${localPath}.drive.json`, JSON.stringify(receipt), 'utf8');
+    } catch (error) {
+      console.warn('[work-photos] Drive 영수증 저장 실패:', error.message);
+    }
+  }
+
+  async function mirrorWorkPhotosToDrive(record, photos) {
+    const startedAt = Date.now();
+    try {
+      const driveService = require('../services/driveService.cjs');
+      if (!photos.length || !driveService.isDriveConfigured()) {
+        report(db, appDataPath, {
+          area: 'work-photos', action: 'photo-drive-mirror-batch', result: 'skipped',
+          details: { recordId: record.id, siteId: record.site_id, photoCount: photos.length },
+        });
+        return;
+      }
+      const folder = await driveService.getOrCreateFolderPath(
+        driveService.getDriveRootFolderId(),
+        ['사진관리', '업무기록', record.site_id, record.date, `record-${record.id}`],
+      );
+      let uploadedCount = 0;
+      for (const photo of photos) {
+        if (!fs.existsSync(photo.absolutePath)) continue;
+        const uploaded = await driveService.uploadBufferToFolder({
+          folderId: folder.id,
+          fileName: photo.storedName,
+          buffer: fs.readFileSync(photo.absolutePath),
+          mimeType: photo.mimeType,
+        });
+        if (uploaded?.id) {
+          uploadedCount += 1;
+          writeDriveReceipt(photo.absolutePath, { version: 1, driveFileId: uploaded.id, fileName: photo.storedName });
+        }
+      }
+      report(db, appDataPath, {
+        area: 'work-photos', action: 'photo-drive-mirror-batch',
+        level: uploadedCount === photos.length ? 'info' : 'warn',
+        result: uploadedCount === photos.length ? 'ok' : 'partial',
+        details: {
+          recordId: record.id, siteId: record.site_id, photoCount: photos.length, uploadedCount,
+          driveFolderId: folder.id, duplicateFoldersDetected: folder._pathDuplicates || [],
+          durationMs: Date.now() - startedAt,
+        },
+      });
+    } catch (error) {
+      report(db, appDataPath, {
+        area: 'work-photos', action: 'photo-drive-mirror-batch', level: 'warn', result: 'failed',
+        details: { recordId: record.id, siteId: record.site_id, photoCount: photos.length, errorName: error.name },
+      });
+      console.warn('[work-photos] Drive 묶음 미러 실패:', error.message);
+    }
   }
 
   router.get('/api/work-records', (req, res) => {
@@ -199,7 +240,7 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
     }
   });
 
-  // 업무기록 사진 목록(장비이력카드 '연결된 업무·사진' 열람용, 읽기 전용)
+  // 업무기록 사진 목록(업무사진관리와 장비이력카드의 연결 사진이 같은 API를 사용)
   router.get('/api/work-records/:id/photos', (req, res) => {
     try {
       const id = normalizeRecordId(req.params.id);
@@ -219,6 +260,31 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
           url: `/work-record-photos/${path.relative(getPhotoRoot(appDataPath), path.resolve(appDataPath, row.relative_path)).split(path.sep).map(encodeURIComponent).join('/')}`,
         })),
       });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  router.delete('/api/work-records/:id/photos/:photoId', (req, res) => {
+    try {
+      const id = normalizeRecordId(req.params.id);
+      const photoId = normalizeRecordId(req.params.photoId);
+      const siteId = String(req.siteContext?.siteId || '').trim();
+      const photo = id && photoId ? db.prepare(`
+        SELECT p.id, p.relative_path FROM work_record_photos p
+        JOIN work_records wr ON wr.id = p.work_record_id
+        WHERE p.id = ? AND p.work_record_id = ? AND wr.site_id = ?
+      `).get(photoId, id, siteId) : null;
+      if (!photo) return res.status(404).json({ success: false, message: '현재 현장의 사진을 찾을 수 없습니다.' });
+      db.prepare('DELETE FROM work_record_photos WHERE id = ?').run(photo.id);
+      const absolutePath = path.resolve(appDataPath, photo.relative_path);
+      if (absolutePath.startsWith(`${path.resolve(appDataPath)}${path.sep}`)) {
+        if (fs.existsSync(absolutePath)) fs.unlinkSync(absolutePath);
+        if (fs.existsSync(`${absolutePath}.drive.json`)) fs.unlinkSync(`${absolutePath}.drive.json`);
+      }
+      triggerEquipmentSync();
+      const remaining = db.prepare('SELECT COUNT(*) AS count FROM work_record_photos WHERE work_record_id = ?').get(id).count;
+      res.json({ success: true, remaining });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -246,15 +312,15 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
   router.post('/api/work-records/:id/photos', photoUpload.array('photos', 10), (req, res) => {
     try {
       const id = normalizeRecordId(req.params.id);
-      const record = id ? db.prepare('SELECT id, date FROM work_records WHERE id = ? AND site_id = ?').get(id, req.siteContext?.siteId) : null;
+      const record = id ? db.prepare('SELECT id, date, site_id FROM work_records WHERE id = ? AND site_id = ?').get(id, req.siteContext?.siteId) : null;
       if (!record) return res.status(404).json({ success: false, message: '업무 기록을 찾을 수 없습니다.' });
       if (!req.files?.length) return res.status(400).json({ success: false, message: '선택한 사진이 없습니다.' });
 
       const photoDir = getRecordPhotoDir(appDataPath, id);
       fs.mkdirSync(photoDir, { recursive: true });
       const insert = db.prepare(`
-        INSERT INTO work_record_photos (work_record_id, original_name, stored_name, relative_path, created_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO work_record_photos (work_record_id, site_id, original_name, stored_name, relative_path, is_synced, created_at)
+        VALUES (?, ?, ?, ?, ?, 0, ?)
       `);
       const saved = [];
       db.transaction(() => {
@@ -266,25 +332,13 @@ module.exports = function registerFacilityRoutes(db, appDataPath) {
           const absolutePath = path.join(photoDir, storedName);
           fs.writeFileSync(absolutePath, file.buffer);
           const relativePath = path.relative(appDataPath, absolutePath);
-          insert.run(id, file.originalname || storedName, storedName, relativePath, new Date().toISOString());
-          saved.push(storedName);
+          insert.run(id, record.site_id, file.originalname || storedName, storedName, relativePath, new Date().toISOString());
+          saved.push({ storedName, absolutePath, mimeType: file.mimetype });
         });
       })();
-      res.json({ success: true, count: saved.length, files: saved });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  });
-
-  router.post('/api/work-records/:id/open-photo-folder', (req, res) => {
-    try {
-      const id = normalizeRecordId(req.params.id);
-      const record = id ? db.prepare('SELECT id FROM work_records WHERE id = ? AND site_id = ?').get(id, req.siteContext?.siteId) : null;
-      if (!record) return res.status(404).json({ success: false, message: '업무 기록을 찾을 수 없습니다.' });
-      const photoDir = getRecordPhotoDir(appDataPath, id);
-      fs.mkdirSync(photoDir, { recursive: true });
-      openFolder(photoDir);
-      res.json({ success: true, path: photoDir });
+      mirrorWorkPhotosToDrive(record, saved);
+      triggerEquipmentSync();
+      res.json({ success: true, count: saved.length, files: saved.map((item) => item.storedName) });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
     }

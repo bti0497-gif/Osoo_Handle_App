@@ -50,7 +50,7 @@ function createEquipmentCatalogService(db) {
       } else if (registered > 0) {
         baseNo = matched[0].management_no;
       } else {
-        baseNo = nextManagementNo(listAll, managementNoPrefix(entry.name, entry.group, category3));
+        baseNo = nextManagementNo(listAll, managementNoPrefix(entry.name, entry.group, category3), entry.process);
       }
 
       for (let offset = 0; offset < wanted; offset += 1) {

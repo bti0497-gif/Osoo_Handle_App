@@ -121,4 +121,18 @@ export const DailyLogModel = {
         }
         return apiClient.get('/api/daily-work-log/export-hwp', params, { timeout: 300000 });
     },
+    startExportHwpJob: async (dateString, templateName, siteName, context = {}) => {
+        const ranges = dateString.split(',');
+        const body = { templateName, siteName, ...context };
+        if (ranges.length === 1) {
+            body.date = ranges[0].trim();
+        } else {
+            body.startDate = ranges[0].trim();
+            body.endDate = ranges[1].trim();
+        }
+        return apiClient.post('/api/daily-work-log/hwp-jobs', body, { timeout: 30000 });
+    },
+    fetchExportHwpJob: async (jobId) => (
+        apiClient.get(`/api/daily-work-log/hwp-jobs/${encodeURIComponent(jobId)}`, {}, { timeout: 10000 })
+    ),
 };

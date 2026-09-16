@@ -12,6 +12,19 @@ const DEFAULT_SLOW_API_MS = 2_000;
 const DEFAULT_LOG_COOLDOWN_MS = 30_000;
 const SYSTEM_SUSPEND_GAP_MS = 5 * 60 * 1_000;
 const ROUTINE_BACKGROUND_SLOW_API_MS = 30_000;
+const DAILY_SUMMARY_HOUR_KST = 20;
+
+function kstDateKey(now = new Date()) {
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(now);
+}
+
+function kstHour(now = new Date()) {
+  return Number(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false,
+  }).format(now));
+}
 
 function shouldRecordSlowApiRequest(request, statusCode, durationMs, slowApiMs) {
   // 성공한 유휴 작업은 사용자의 업무를 기다리게 하지 않는다. 특히 진단 업로드가
@@ -70,6 +83,7 @@ function createServerPerformanceDiagnosticService({
 
   let requestSequence = 0;
   let eventLoopTimer = null;
+  let dailySummaryTimer = null;
   let expectedTickAt = 0;
   let previousCpuUsage = process.cpuUsage();
   let previousCpuMeasuredAt = Date.now();
@@ -80,6 +94,11 @@ function createServerPerformanceDiagnosticService({
   let previousMonotonicAt = performance.now();
   let previousWallAt = Date.now();
   let latestLagObservedAt = null;
+  let dailyMetrics = {
+    date: kstDateKey(), startedAt: new Date().toISOString(),
+    apiTotal: 0, apiSuccess: 0, apiFailure: 0, apiTimeout: 0, slowApiCount: 0,
+    maxEventLoopLagMs: 0, maxProcessRssBytes: 0, minSystemFreePercent: null,
+  };
   const recentSamples = [];
   const recentCompletedRequests = [];
   const activeRequests = new Map();
@@ -104,6 +123,75 @@ function createServerPerformanceDiagnosticService({
       console.warn('[server-performance] diagnostic write failed:', error.message);
       return false;
     }
+  };
+
+  const resetDailyMetricsIfNeeded = () => {
+    const today = kstDateKey();
+    if (dailyMetrics.date === today) return;
+    dailyMetrics = {
+      date: today, startedAt: new Date().toISOString(),
+      apiTotal: 0, apiSuccess: 0, apiFailure: 0, apiTimeout: 0, slowApiCount: 0,
+      maxEventLoopLagMs: 0, maxProcessRssBytes: 0, minSystemFreePercent: null,
+    };
+  };
+
+  const writeDailyStabilitySummary = () => {
+    resetDailyMetricsIfNeeded();
+    if (kstHour() < DAILY_SUMMARY_HOUR_KST) return;
+    const dayStart = new Date(`${dailyMetrics.date}T00:00:00+09:00`).toISOString();
+    const alreadyWritten = db.prepare(`
+      SELECT 1 FROM app_diagnostic_logs
+      WHERE area = 'stability-summary' AND action = 'daily-summary' AND created_at >= ?
+      LIMIT 1
+    `).get(dayStart);
+    if (alreadyWritten) return;
+    const events = db.prepare(`
+      SELECT level, area, action, result FROM app_diagnostic_logs
+      WHERE created_at >= ?
+    `).all(dayStart);
+    const includes = (value, words) => words.some((word) => String(value || '').toLowerCase().includes(word));
+    const failureEvents = events.filter((row) => (
+      ['error', 'warn'].includes(String(row.level || '').toLowerCase())
+      || ['failed', 'error', 'rejected', 'degraded'].includes(String(row.result || '').toLowerCase())
+    ));
+    const countAreaAction = (areaWords, actionWords = []) => events.filter((row) => (
+      includes(row.area, areaWords) || includes(row.action, actionWords.length ? actionWords : areaWords)
+    ));
+    const photoEvents = countAreaAction(['photo', '사진']);
+    const syncEvents = countAreaAction(['sync', '동기화']);
+    const recoveryEvents = countAreaAction(['recovery', 'watchdog'], ['recovery', 'restart', 'emergency']);
+    const failed = (rows) => rows.filter((row) => (
+      ['error', 'warn'].includes(String(row.level || '').toLowerCase())
+      || ['failed', 'error', 'rejected', 'degraded'].includes(String(row.result || '').toLowerCase())
+    )).length;
+    writeDiagnostic({
+      level: failureEvents.length ? 'warn' : 'info',
+      area: 'stability-summary',
+      action: 'daily-summary',
+      result: failureEvents.length ? 'attention' : 'stable',
+      message: 'daily field stability summary',
+      details: {
+        date: dailyMetrics.date,
+        observationStartedAt: dailyMetrics.startedAt,
+        summarizedAt: new Date().toISOString(),
+        api: {
+          total: dailyMetrics.apiTotal, success: dailyMetrics.apiSuccess,
+          failed: dailyMetrics.apiFailure, timeout: dailyMetrics.apiTimeout,
+          slow: dailyMetrics.slowApiCount,
+        },
+        diagnostics: { total: events.length, warningOrError: failureEvents.length },
+        server: {
+          startupCount: events.filter((row) => row.area === 'server' && row.action === 'startup').length,
+          recoveryCount: recoveryEvents.length,
+          maxEventLoopLagMs: Math.round(dailyMetrics.maxEventLoopLagMs),
+          maxProcessRssBytes: dailyMetrics.maxProcessRssBytes,
+          minSystemFreePercent: dailyMetrics.minSystemFreePercent,
+        },
+        photos: { events: photoEvents.length, failed: failed(photoEvents) },
+        sync: { events: syncEvents.length, failed: failed(syncEvents) },
+        note: 'API counts cover the current server process observation window; diagnostic counts cover retained rows for the KST date.',
+      },
+    });
   };
 
   const activeRequestSnapshot = () => {
@@ -141,6 +229,8 @@ function createServerPerformanceDiagnosticService({
       const cpuUsedMs = (cpuDelta.user + cpuDelta.system) / 1_000;
       const cpuPercent = round((cpuUsedMs / wallElapsedMs) * 100, 1);
       const lagMs = Math.max(0, now - expectedTickAt);
+      resetDailyMetricsIfNeeded();
+      dailyMetrics.maxEventLoopLagMs = Math.max(dailyMetrics.maxEventLoopLagMs, lagMs);
       latestEventLoopLagMs = lagMs;
       latestLagObservedAt = new Date(now).toISOString();
       for (const request of activeRequests.values()) {
@@ -180,6 +270,12 @@ function createServerPerformanceDiagnosticService({
       }
 
       const memory = memorySnapshot();
+      dailyMetrics.maxProcessRssBytes = Math.max(dailyMetrics.maxProcessRssBytes, memory.process.rssBytes);
+      if (memory.system.freePercent !== null) {
+        dailyMetrics.minSystemFreePercent = dailyMetrics.minSystemFreePercent === null
+          ? memory.system.freePercent
+          : Math.min(dailyMetrics.minSystemFreePercent, memory.system.freePercent);
+      }
       const oldestRequest = activeRequestSnapshot()[0];
       pushBounded(recentSamples, {
         at: new Date(now).toISOString(), lagMs, cpuPercent,
@@ -222,6 +318,13 @@ function createServerPerformanceDiagnosticService({
       }
     }, sampleIntervalMs);
     eventLoopTimer.unref?.();
+    dailySummaryTimer = setInterval(() => {
+      try { writeDailyStabilitySummary(); } catch (error) {
+        console.warn('[server-performance] daily summary failed:', error.message);
+      }
+    }, 60 * 1000);
+    dailySummaryTimer.unref?.();
+    try { writeDailyStabilitySummary(); } catch (_) { /* 다음 주기에 재시도 */ }
   };
 
   const middleware = (req, res, next) => {
@@ -247,6 +350,11 @@ function createServerPerformanceDiagnosticService({
       completed = true;
       activeRequests.delete(id);
       const durationMs = Date.now() - startedAt;
+      resetDailyMetricsIfNeeded();
+      dailyMetrics.apiTotal += 1;
+      if (res.statusCode >= 200 && res.statusCode < 400) dailyMetrics.apiSuccess += 1;
+      else dailyMetrics.apiFailure += 1;
+      if ([408, 504].includes(res.statusCode)) dailyMetrics.apiTimeout += 1;
       lastCompletedRequest = {
         method: request.method,
         path: request.path,
@@ -260,6 +368,7 @@ function createServerPerformanceDiagnosticService({
       };
       pushBounded(recentCompletedRequests, { ...lastCompletedRequest }, 8);
       if (!shouldRecordSlowApiRequest(request, res.statusCode, durationMs, slowApiMs)) return;
+      dailyMetrics.slowApiCount += 1;
 
       writeDiagnostic({
         level: durationMs >= eventLoopCriticalMs ? 'error' : 'warn',
@@ -320,7 +429,9 @@ function createServerPerformanceDiagnosticService({
     start,
     stop: () => {
       if (eventLoopTimer) clearInterval(eventLoopTimer);
+      if (dailySummaryTimer) clearInterval(dailySummaryTimer);
       eventLoopTimer = null;
+      dailySummaryTimer = null;
     },
   };
 }

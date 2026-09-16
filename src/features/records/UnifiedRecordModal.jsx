@@ -1537,6 +1537,48 @@ export default function UnifiedRecordModal({
         );
     };
 
+    const handleInputArrowNavigation = (event) => {
+        // 좌·우는 현재 입력값 안에서 자릿수(커서)를 움직이는 기본 동작을 유지한다.
+        // 상·하만 같은 입력 표 안의 인접 입력칸 이동에 사용한다.
+        if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        const current = event.target.closest?.('[data-unified-nav="true"]');
+        if (!current) return;
+
+        // type=number의 기본 상·하 증감도 막는다. 맨 위/아래에서는 값이 바뀌지 않고
+        // 현재 칸에 그대로 머문다.
+        event.preventDefault();
+
+        const inputs = Array.from(event.currentTarget.querySelectorAll('[data-unified-nav="true"]'))
+            .filter((element) => !element.disabled && element.offsetParent !== null);
+        const currentRect = current.getBoundingClientRect();
+        const cx = currentRect.left + currentRect.width / 2;
+        const cy = currentRect.top + currentRect.height / 2;
+        const positive = event.key === 'ArrowDown';
+        const candidates = inputs.filter((element) => {
+            if (element === current) return false;
+            const rect = element.getBoundingClientRect();
+            const y = rect.top + rect.height / 2;
+            return positive ? y > cy + 2 : y < cy - 2;
+        });
+        candidates.sort((a, b) => {
+            const score = (element) => {
+                const rect = element.getBoundingClientRect();
+                const x = rect.left + rect.width / 2;
+                const y = rect.top + rect.height / 2;
+                const primary = Math.abs(y - cy);
+                const cross = Math.abs(x - cx);
+                return primary * 1000 + cross;
+            };
+            return score(a) - score(b);
+        });
+        const next = candidates[0];
+        if (!next) return;
+        next.focus();
+        // 빈 칸은 입력 커서만 두고, 값이 있으면 바로 덮어쓸 수 있도록 전체 선택한다.
+        if (String(next.value ?? '').length > 0) next.select?.();
+    };
+
     const renderFields = () => {
         if (activeTab === 'photos') {
             return <PhotoManagementTab date={date} onError={notifyValidation} />;
@@ -1569,6 +1611,7 @@ export default function UnifiedRecordModal({
                                 <div style={{ marginTop: 3, fontSize: 12, fontWeight: 700, color: '#64748b' }}>{description}</div>
                             </div>
                             <input
+                                data-unified-nav="true"
                                 type="number"
                                 step="0.01"
                                 aria-label={`포기조 ${label}`}
@@ -1674,6 +1717,7 @@ export default function UnifiedRecordModal({
                                 {fieldLabels.map(([field, label]) => (
                                     <div key={`${item.key}-${field}`} style={{ padding: '7px 8px', borderBottom: '1px solid #f1f5f9' }}>
                                         <input
+                                            data-unified-nav="true"
                                             aria-label={`${item.label} ${label}`}
                                             style={{
                                                 ...inputStyle,
@@ -1844,6 +1888,7 @@ export default function UnifiedRecordModal({
                                     ].map(([field, label]) => (
                                         <div key={`${item.key}-${field}`} style={{ padding: '7px 8px', borderBottom: '1px solid #f1f5f9' }}>
                                             <input
+                                                data-unified-nav="true"
                                                 aria-label={`${item.label} ${label}`}
                                                 style={{
                                                     ...inputStyle,
@@ -1939,6 +1984,7 @@ export default function UnifiedRecordModal({
                             return (
                                 <div key={`${field.id}-${location}`} style={{ display: 'flex', justifyContent: 'center' }}>
                                     <input
+                                        data-unified-nav="true"
                                         disabled={!enabled}
                                         style={{
                                             ...inputStyle,
@@ -2162,7 +2208,7 @@ export default function UnifiedRecordModal({
                             scrollbarGutter: 'stable',
                             opacity: isDateContextPending ? 0.55 : 1,
                             pointerEvents: isDateContextPending ? 'none' : 'auto',
-                        }}>
+                        }} onKeyDown={handleInputArrowNavigation}>
                             {renderFields()}
                         </div>
                     </main>

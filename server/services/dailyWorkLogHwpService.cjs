@@ -150,7 +150,8 @@ async function bindHwpTemplate({ templatePath, outputPath, bookmarkValues }) {
   }
 }
 
-async function buildDailyWorkLogHwp({ db, appDataPath, templateInfo, date, context = {}, persistOutput = true }) {
+async function buildDailyWorkLogHwp({ db, appDataPath, templateInfo, date, context = {}, persistOutput = true, onProgress }) {
+  onProgress?.('binding-data', `${date} 업무일지 데이터를 바인딩하고 있습니다.`);
   const bookmarkValues = await buildHwpxBookmarkValues(db, appDataPath, date, context);
   const settings = db.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get() || {};
   bookmarkValues.현장명 = String(context.siteName || settings.site_name || '').trim();
@@ -159,6 +160,7 @@ async function buildDailyWorkLogHwp({ db, appDataPath, templateInfo, date, conte
   }
 
   const outputPath = getAvailableOutputPath(appDataPath, date, persistOutput, bookmarkValues.현장명);
+  onProgress?.('hwp-automation', `${date} 한글 문서를 생성하고 있습니다.`);
   const replacedCount = await bindHwpTemplate({
     templatePath: templateInfo.absolutePath,
     outputPath,
@@ -173,13 +175,25 @@ function enqueue(task) {
   return queued;
 }
 
-function buildBatchDailyWorkLogHwp({ db, appDataPath, templateInfo, manifest, context = {}, persistOutput = true }) {
+function buildBatchDailyWorkLogHwp({ db, appDataPath, templateInfo, manifest, context = {}, persistOutput = true, onProgress }) {
   return enqueue(async () => {
     const results = [];
     const dates = [...new Set(manifest.pages.map((page) => page.date))];
-    for (const date of dates) {
-      results.push(await buildDailyWorkLogHwp({ db, appDataPath, templateInfo, date, context, persistOutput }));
+    for (let index = 0; index < dates.length; index += 1) {
+      const date = dates[index];
+      const baseProgress = 20 + Math.floor((index / Math.max(1, dates.length)) * 65);
+      onProgress?.('binding-data', `${date} 업무일지를 준비하고 있습니다.`, baseProgress);
+      results.push(await buildDailyWorkLogHwp({
+        db,
+        appDataPath,
+        templateInfo,
+        date,
+        context,
+        persistOutput,
+        onProgress: (phase, message) => onProgress?.(phase, message, baseProgress + 10),
+      }));
     }
+    onProgress?.('verifying', '생성된 HWP 파일을 확인하고 있습니다.', 90);
     return results;
   });
 }
