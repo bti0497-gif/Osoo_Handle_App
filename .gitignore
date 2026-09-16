@@ -16,7 +16,7 @@ release-*/
 artifacts/
 test-build/
 .tmp-validation/
-tmp/diagnostics/
+tmp/**
 tools/diagnostic-runner/node_modules/
 
 # Local databases and generated reports

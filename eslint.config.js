@@ -10,8 +10,6 @@ export default defineConfig([
     '**/dist/**',
     'tmp/**',
     '.tmp-*/**',
-    // 장비이력 UI는 별도 폴더에서 개발 중이며 본앱 합류 전까지 독립 검증한다.
-    'prototypes/equipment-history-ui/**',
   ]),
   {
     files: ['**/*.{js,jsx}'],

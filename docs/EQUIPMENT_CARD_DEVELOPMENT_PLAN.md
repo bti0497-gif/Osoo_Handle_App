@@ -25,7 +25,7 @@
 | `equipment_assets` 테이블 | `server/database.cjs` | 스키마 확정(사용 안 됨) |
 | `equipment_asset_photos`, `work_record_equipment_links` | `server/database.cjs` + 인덱스 | 스키마 확정(사용 안 됨) |
 | 프리뷰 UI | `src/features/equipment/` | 화면 동작만 확인 가능 |
-| 독립 프로토타입 | `prototypes/equipment-history-ui/` | UI 참고용, 확정 후 삭제 예정 |
+| 독립 프로토타입 | 프로젝트 외부 보관소로 이동 | 본앱 이식·검증 완료 후 제거됨 |
 
 즉 본 기능은 "새로 만들기"가 아니라 **영속화(Persistence)와 연결(Link)을 활성화**하는 작업이다.
 

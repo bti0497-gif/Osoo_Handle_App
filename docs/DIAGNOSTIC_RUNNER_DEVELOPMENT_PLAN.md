@@ -150,9 +150,9 @@ OSOO_MINIMAL_BUILD=0은 전체 라우트 로드를 명시한다.
 
 독립 `package.json`은 진단 도구의 의존성과 실행 방법을 명시하기 위한 것이다. 루트 앱의 production dependency에 Playwright나 진단 전용 패키지를 추가하지 않는다.
 
-현재 `prototypes/equipment-history-ui/`와 `src/features/equipment/`의 화면은 장비이력카드
-검토·연결 UI가 먼저 존재하고 저장·이력 연계는 아직 완성 전인 상태다. 진단 러너는 이 화면을
-완성된 업무 기능으로 판정하지 않으며, 아래 기능 상태와 계약 버전을 결과에 표시한다.
+장비이력 독립 프로토타입은 본앱 이식과 회귀검증 완료 후 제거되었다. 현재
+`src/features/equipment/`와 `equipment-card` 시나리오가 정식 구현 및 검증 기준이다.
+진단 러너는 아래 기능 상태와 계약 버전을 결과에 표시한다.
 
 ```text
 prototype        화면·UX 확인만 가능, 회귀 참고 대상
