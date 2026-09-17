@@ -82,7 +82,7 @@ function gitStatus() {
 
 function conflictingProcesses() {
   const result = process.platform === 'win32'
-    ? runCommand('powershell.exe', ['-NoProfile', '-Command', "Get-Process | Where-Object { $_.ProcessName -match 'electron|electron-builder|makensis|7z' } | Select-Object Id,ProcessName,Path | ConvertTo-Json -Compress"])
+    ? runCommand('powershell.exe', ['-NoProfile', '-Command', "Get-Process | Where-Object { $_.ProcessName -match '^(Osoo Handle App|OsooWatchdog)$|electron|electron-builder|makensis|7z' } | Select-Object Id,ProcessName,Path | ConvertTo-Json -Compress"])
     : runCommand('ps', ['-eo', 'pid=,comm=,args=']);
   if (result.status !== 0 || !result.stdout.trim()) return [];
   if (process.platform === 'win32') {
@@ -250,7 +250,7 @@ async function main() {
     for (const [name, command, args] of plannedCommands) {
       if (name === 'NATIVE/ELECTRON ABI PREPARATION') packageStarted = true;
       const commandResult = runCommand(command, args, { timeout: 0 });
-      result.steps[name] = { status: commandResult.status === 0 ? 'PASS' : 'FAIL', ...commandResult };
+      result.steps[name] = { ...commandResult, status: commandResult.status === 0 ? 'PASS' : 'FAIL' };
       logStep(name, result.steps[name].status);
       if (commandResult.status !== 0) {
         result.failedStep = name;
@@ -272,7 +272,7 @@ async function main() {
   } finally {
     if (packageStarted) {
       const restore = runCommand('npm', ['rebuild', 'better-sqlite3'], { timeout: 0 });
-      result.steps['NODE ABI RESTORE'] = { status: restore.status === 0 ? 'PASS' : 'FAIL', ...restore };
+      result.steps['NODE ABI RESTORE'] = { ...restore, status: restore.status === 0 ? 'PASS' : 'FAIL' };
       logStep('Node ABI Restore', result.steps['NODE ABI RESTORE'].status);
       if (restore.status !== 0 && !result.failedStep) {
         result.failedStep = 'NODE ABI RESTORE';
