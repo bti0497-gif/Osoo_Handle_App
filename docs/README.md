@@ -5,6 +5,7 @@
 - [개발 히스토리](DEVELOPMENT_HISTORY.md)
 - [향후 작업 로드맵](ROADMAP.md)
 - [릴리스 및 자동 업데이트 가이드](RELEASE_GUIDE.md)
+- [현장 앱 자동업데이트·통합 설치 패키징 실행서](AUTO_UPDATE_PACKAGING_PLAYBOOK.md)
 - [일일업무일지 점검표·스냅샷 개발계획](DAILY_WORK_LOG_INSPECTION_SNAPSHOT_DEVELOPMENT_PLAN.md)
 - [장비이력카드 개발·유지보수 기준](EQUIPMENT_CARD_DEVELOPMENT_PLAN.md)
 - [진단 러너 사용법](../tools/diagnostic-runner/README.md)

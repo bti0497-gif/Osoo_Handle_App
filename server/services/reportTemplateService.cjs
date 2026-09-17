@@ -14,6 +14,7 @@ const ALLOWED_REPORT_TEMPLATE_NAMES = [
   '약품입고일지',
   '슬러지반출관리대장',
   '슬러지사진대지',
+  '설비이력카드',
 ];
 const ALLOWED_REPORT_TEMPLATE_IDENTITIES = new Set(
   ALLOWED_REPORT_TEMPLATE_NAMES.map((name) => normalizeTemplateKey(name))

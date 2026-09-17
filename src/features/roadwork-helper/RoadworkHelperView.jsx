@@ -1608,6 +1608,10 @@ export default function RoadworkHelperView({ currentUser }) {
           success: Boolean(injected?.success),
           reason: injected?.errorCode || '', method: injected?.method || '',
           attempts: injected?.attempts || 0, snapshot: afterInput,
+          targetUrl: injected?.targetUrl || '',
+          targetTitle: injected?.targetTitle || '',
+          chooserWaitMs: injected?.chooserWaitMs || null,
+          attemptDetails: Array.isArray(injected?.attemptDetails) ? injected.attemptDetails.slice(0, 12) : [],
         });
         if (!injected?.success) {
           setStatusMessage(`${photo.label} 사진 반영을 확인하고 있습니다… (${readyIndex}/${readyPhotoCount})`);

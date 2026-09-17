@@ -216,17 +216,24 @@ function collectFileInputNodes(node, ancestors = [], result = []) {
   return result;
 }
 
+function sanitizeDiagnosticContext(value) {
+  return String(value || '')
+    .replace(/\b(password|passwd|token|secret|authorization|credential|value)\s+[^\s]+/gi, '$1 [redacted]')
+    .slice(0, 320);
+}
+
 function createFileChooserWaiter(debuggerApi, timeoutMs) {
   let settled = false;
   let timer = null;
   let handler = null;
   let resolvePromise;
+  const startedAt = Date.now();
   const finish = (value) => {
     if (settled) return;
     settled = true;
     if (timer) clearTimeout(timer);
     if (handler) debuggerApi.removeListener('message', handler);
-    resolvePromise(value);
+    resolvePromise({ value, waitedMs: Date.now() - startedAt });
   };
   const promise = new Promise((resolve) => {
     resolvePromise = resolve;
@@ -244,7 +251,28 @@ async function findUploaderFileInput(debuggerApi, uploaderIndex) {
   const inputs = collectFileInputNodes(documentResult?.root);
   const token = `dragdrop${uploaderIndex}`.toLowerCase();
   const matched = inputs.find((input) => String(input.context || '').toLowerCase().includes(token));
-  return { nodeId: matched?.nodeId || null, discoveredInputCount: inputs.length };
+  return {
+    nodeId: matched?.nodeId || null,
+    discoveredInputCount: inputs.length,
+    matchedContext: matched?.context ? sanitizeDiagnosticContext(matched.context) : '',
+    candidates: inputs.slice(0, 12).map((input) => ({
+      nodeId: input.nodeId,
+      context: sanitizeDiagnosticContext(input.context),
+    })),
+  };
+}
+
+function getTargetDiagnostics(target) {
+  let url = '';
+  let title = '';
+  try {
+    const parsed = new URL(target?.getURL?.() || '');
+    url = `${parsed.origin}${parsed.pathname}`.slice(0, 320);
+  } catch {}
+  try {
+    title = String(target?.getTitle?.() || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+  } catch {}
+  return { targetUrl: url, targetTitle: title };
 }
 
 async function attachRoadworkPhotoFile({
@@ -258,6 +286,7 @@ async function attachRoadworkPhotoFile({
   let wasAttached = false;
   let attachedByThisCall = false;
   const attemptDetails = [];
+  const targetDiagnostics = getTargetDiagnostics(target);
   try {
     wasAttached = Boolean(debuggerApi.isAttached());
     if (!wasAttached) {
@@ -303,6 +332,11 @@ async function attachRoadworkPhotoFile({
         awaitPromise: true,
         userGesture: true,
       });
+      attemptDetails.push({
+        attempt,
+        method: useTrustedKey ? 'trusted-key-focus' : 'script-click',
+        result: clickResult?.result?.value ? 'target-found' : 'target-not-found',
+      });
       if (!clickResult?.result?.value) {
         waiter.cancel();
         return {
@@ -311,6 +345,7 @@ async function attachRoadworkPhotoFile({
           errorCode: 'PHOTO_ADD_BUTTON_NOT_FOUND',
           attempts: attempt,
           attemptDetails,
+          ...targetDiagnostics,
         };
       }
 
@@ -330,19 +365,40 @@ async function attachRoadworkPhotoFile({
         }
       }
 
-      const chooser = await waiter.promise;
+      const chooserEvent = await waiter.promise;
+      const chooser = chooserEvent?.value || null;
       if (chooser?.backendNodeId) {
         try {
           await debuggerApi.sendCommand('DOM.setFileInputFiles', {
             files: [filePath],
             backendNodeId: chooser.backendNodeId,
           });
-          return { success: true, method: 'file-chooser', attempts: attempt, attemptDetails };
+          return {
+            success: true,
+            method: 'file-chooser',
+            attempts: attempt,
+            chooserWaitMs: chooserEvent.waitedMs,
+            ...targetDiagnostics,
+            attemptDetails,
+          };
         } catch (error) {
-          attemptDetails.push({ attempt, method: 'file-chooser', result: 'set-files-failed', errorCode: error?.code || '' });
+          attemptDetails.push({
+            attempt,
+            method: 'file-chooser',
+            result: 'set-files-failed',
+            errorCode: error?.code || '',
+            errorName: error?.name || '',
+            chooserWaitMs: chooserEvent.waitedMs,
+            backendNodeId: chooser.backendNodeId || null,
+          });
         }
       } else {
-        attemptDetails.push({ attempt, method: 'file-chooser', result: 'not-opened' });
+        attemptDetails.push({
+          attempt,
+          method: 'file-chooser',
+          result: 'not-opened',
+          chooserWaitMs: chooserEvent?.waitedMs || chooserTimeouts[index],
+        });
       }
 
       try {
@@ -357,6 +413,9 @@ async function attachRoadworkPhotoFile({
             method: 'direct-file-input',
             attempts: attempt,
             discoveredInputCount: directInput.discoveredInputCount,
+            matchedContext: directInput.matchedContext,
+            candidates: directInput.candidates,
+            ...targetDiagnostics,
             attemptDetails,
           };
         }
@@ -365,9 +424,16 @@ async function attachRoadworkPhotoFile({
           method: 'direct-file-input',
           result: 'matching-input-not-found',
           discoveredInputCount: directInput.discoveredInputCount,
+          candidates: directInput.candidates,
         });
       } catch (error) {
-        attemptDetails.push({ attempt, method: 'direct-file-input', result: 'inspection-failed', errorCode: error?.code || '' });
+        attemptDetails.push({
+          attempt,
+          method: 'direct-file-input',
+          result: 'inspection-failed',
+          errorCode: error?.code || '',
+          errorName: error?.name || '',
+        });
       }
 
       if (index + 1 < chooserTimeouts.length) {
@@ -380,6 +446,7 @@ async function attachRoadworkPhotoFile({
       error: 'roadwork file chooser not opened',
       errorCode: 'PHOTO_CHOOSER_NOT_OPENED',
       attempts: chooserTimeouts.length,
+      ...targetDiagnostics,
       attemptDetails,
     };
   } catch (error) {
@@ -389,6 +456,7 @@ async function attachRoadworkPhotoFile({
       error: 'roadwork photo injection failed',
       errorCode: 'CDP_FILE_INPUT_FAILED',
       attempts: attemptDetails.length,
+      ...targetDiagnostics,
       attemptDetails,
     };
   } finally {

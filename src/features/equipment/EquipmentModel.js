@@ -26,6 +26,10 @@ const EquipmentModel = {
     return apiClient.get(`${BASE}/work-records`, { equipmentId });
   },
 
+  async exportEquipmentCard(id) {
+    return apiClient.get(`${BASE}/${encodeURIComponent(id)}/export-excel`, {}, { timeout: 120000 });
+  },
+
   async saveEquipment(item) {
     return item.id ? apiClient.put(`${BASE}/${item.id}`, item) : apiClient.post(BASE, item);
   },

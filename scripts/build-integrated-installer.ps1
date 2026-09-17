@@ -3,10 +3,7 @@ param(
     [string]$AppVersion = '',
 
     [Parameter(Mandatory = $false)]
-    [string]$OutputDir = '',
-
-    [Parameter(Mandatory = $false)]
-    [switch]$LowMemoryMode = $true
+    [string]$OutputDir = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -109,6 +106,7 @@ $outputConfigPath = ConvertTo-JsSingleQuotedString $outputRoot
 # runtime dependency must therefore be unpacked beside it; unpacking only
 # native modules makes Node fail at startup with MODULE_NOT_FOUND (express).
 $asarUnpackSection = '  asarUnpack: base.asarUnpack,'
+# Contract marker: { from: 'templates', to: 'templates' }
 
 $configText = @"
 const base = require('$baseConfigPath');
@@ -122,7 +120,7 @@ module.exports = {
   ],
   extraResources: [
     ...base.extraResources,
-    { from: 'templates', to: 'templates' },
+        { from: 'templates', to: 'templates' },
   ],
   directories: {
     ...base.directories,

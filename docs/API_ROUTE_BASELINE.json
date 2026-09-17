@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 177,
-  "digest": "108614fd1aeaac8cab0938da45b566f16e00ea857bc7bfb50a6e023b6db55339",
+  "endpointCount": 178,
+  "digest": "20f88e893fc284120fff747c2fcd827a17678964e969c51a1b5dd605f22efd48",
   "endpoints": [
     {
       "method": "GET",
@@ -433,6 +433,14 @@
       "module": "./routes/equipmentRoutes.cjs",
       "tier": 1,
       "mutation": true,
+      "syncWatch": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/equipment/:id/export-excel",
+      "module": "./routes/equipmentRoutes.cjs",
+      "tier": 1,
+      "mutation": false,
       "syncWatch": true
     },
     {

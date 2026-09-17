@@ -138,6 +138,7 @@ export function useEquipmentViewModel() {
   const [historyDraftPhotos, setHistoryDraftPhotos] = useState([]);
   const pendingPhotoRef = useRef(null);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const toServerPhotoUrl = useCallback((url) => {
     if (!url || /^(?:https?:|data:|blob:)/i.test(url)) return url || '';
@@ -616,6 +617,16 @@ export function useEquipmentViewModel() {
     await load();
   }, [load]);
 
+  const exportSelectedEquipmentCard = useCallback(async () => {
+    if (!selected?.id || exporting) return null;
+    setExporting(true);
+    try {
+      return await EquipmentModel.exportEquipmentCard(selected.id);
+    } finally {
+      setExporting(false);
+    }
+  }, [exporting, selected?.id]);
+
   // ---- 사진 보기 ----
   const openPhotoViewer = useCallback((entry) => {
     setViewer({ open: true, entryId: entry.id, index: 0, workTitle: '', items: [] });
@@ -758,6 +769,8 @@ export function useEquipmentViewModel() {
     isEquipmentDirty, isHistoryDirty, requestCloseEquipment, requestCloseHistory,
     // 공통
     saving,
+    exporting,
+    exportSelectedEquipmentCard,
   };
 }
 

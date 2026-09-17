@@ -89,6 +89,15 @@ export default function EquipmentCardView() {
     }
   };
 
+  const handleExportEquipmentCard = async () => {
+    try {
+      const result = await vm.exportSelectedEquipmentCard();
+      if (result?.success) await showAlert(`설비이력카드를 열었습니다.\n${result.file}`);
+    } catch (error) {
+      await showAlert(`설비이력카드 출력 실패: ${error.message}`);
+    }
+  };
+
   const handleApplyCatalog = async () => {
     const removals = vm.catalogRemovals || [];
     const toDelete = removals.filter((unit) => !unit.hasHistory).map((unit) => unit.number);
@@ -230,7 +239,7 @@ export default function EquipmentCardView() {
                 <div className="equipment-card-actions">
                   <button type="button" onClick={() => vm.openEditEquipment(vm.selected)}><span className="material-icons">edit</span> 장비 수정</button>
                   <button type="button" className="danger" onClick={handleDeleteEquipment} disabled={vm.saving}><span className="material-icons">delete</span> 삭제</button>
-                  <button type="button" disabled title="인쇄는 후속 단계에서 제공됩니다."><span className="material-icons">print</span> 출력</button>
+                  <button type="button" onClick={handleExportEquipmentCard} disabled={vm.exporting} title="설비이력카드 Excel 출력"><span className="material-icons">table_view</span> {vm.exporting ? '출력 중...' : 'Excel 출력'}</button>
                 </div>
               </header>
               <section className="equipment-overview">

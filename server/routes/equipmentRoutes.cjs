@@ -6,6 +6,7 @@
  * 계약 문서: docs/EQUIPMENT_CARD_DEVELOPMENT_PLAN.md §4-4, §5
  */
 const express = require('express');
+const path = require('path');
 const { operationDiagnostics, report } = require('../services/equipment/operationDiagnosticService.cjs');
 const multer = require('multer');
 const {
@@ -19,6 +20,7 @@ const createEquipmentPhotoService = require('../services/equipment/equipmentPhot
 const createEquipmentCatalogService = require('../services/equipment/equipmentCatalogService.cjs');
 const createEquipmentSyncService = require('../services/equipment/equipmentSyncService.cjs');
 const createEquipmentProvisioningService = require('../services/equipment/equipmentProvisioningService.cjs');
+const { exportEquipmentCard } = require('../services/equipment/equipmentCardExcelService.cjs');
 
 function createEquipmentRoutes(db, appDataPath) {
   const router = express.Router();
@@ -196,6 +198,58 @@ function createEquipmentRoutes(db, appDataPath) {
       if (!siteId) return;
       return res.json(history.list(siteId, req.query.equipmentId));
     } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
+  router.get('/api/equipment/:id/export-excel', async (req, res) => {
+    const startedAt = Date.now();
+    const siteId = String(req.siteContext?.siteId || '').trim();
+    const equipmentId = String(req.params.id || '').trim();
+    const openFile = String(req.query.open || 'true').toLowerCase() !== 'false';
+    try {
+      if (!requireSiteId(req, res)) return;
+      const result = await exportEquipmentCard({
+        db,
+        appDataPath,
+        baseDir: path.join(__dirname, '..', '..'),
+        siteId,
+        equipmentId,
+        openFile,
+      });
+      report(db, appDataPath, {
+        level: 'info',
+        area: 'equipment-card',
+        action: 'excel-export',
+        result: 'ok',
+        siteId,
+        siteName: req.siteContext?.siteName,
+        details: {
+          equipmentId,
+          historyCount: result.historyCount,
+          historySourceCounts: result.historySourceCounts || {},
+          pageCount: result.pageCount,
+          fileName: result.file,
+          opened: openFile,
+          durationMs: Date.now() - startedAt,
+        },
+      });
+      return res.json(result);
+    } catch (error) {
+      report(db, appDataPath, {
+        level: 'warn',
+        area: 'equipment-card',
+        action: 'excel-export',
+        result: 'failed',
+        siteId,
+        siteName: req.siteContext?.siteName,
+        details: {
+          equipmentId,
+          errorCode: error.code || '',
+          errorName: error.name || 'Error',
+          durationMs: Date.now() - startedAt,
+        },
+      });
       return sendError(res, error);
     }
   });
