@@ -10,7 +10,7 @@ const projectRoot = path.resolve(__dirname, '..', '..');
 const packageJsonPath = path.join(projectRoot, 'package.json');
 const packageLockPath = path.join(projectRoot, 'package-lock.json');
 const playbookPath = path.join(projectRoot, 'docs', 'AUTO_UPDATE_PACKAGING_PLAYBOOK.md');
-const resultPath = path.join(projectRoot, 'release', 'release-runner-result.json');
+const resultPath = path.join(projectRoot, 'tmp', 'release-runner-result.json');
 const requiredTemplateSource = path.join(projectRoot, 'templates', 'reports', '설비이력카드.xlsx');
 const electronBuilderConfigPath = path.join(projectRoot, 'electron-builder.config.cjs');
 const nativeScriptPath = path.join(projectRoot, 'scripts', 'validate-packaged-native.cjs');
@@ -167,20 +167,20 @@ function preflight(packageJson, packageLock) {
   return { checks, failures };
 }
 
-function expectedArtifacts(version) {
+function expectedArtifacts(version, outputDirectory) {
   return [
-    path.join(projectRoot, 'release', 'win-unpacked', 'Osoo Handle App.exe'),
-    path.join(projectRoot, 'release', 'win-unpacked', 'resources', 'app.asar'),
-    path.join(projectRoot, 'release', 'win-unpacked', 'resources', 'app-update.yml'),
-    path.join(projectRoot, 'release', 'win-unpacked', 'resources', 'defaults', 'report-templates', '설비이력카드.xlsx'),
-    path.join(projectRoot, 'release', `Osoo.Handle.App.Setup.${version}.exe`),
-    path.join(projectRoot, 'release', `Osoo.Handle.App.Setup.${version}.exe.blockmap`),
-    path.join(projectRoot, 'release', 'latest.yml'),
+    path.join(projectRoot, outputDirectory, 'win-unpacked', 'Osoo Handle App.exe'),
+    path.join(projectRoot, outputDirectory, 'win-unpacked', 'resources', 'app.asar'),
+    path.join(projectRoot, outputDirectory, 'win-unpacked', 'resources', 'app-update.yml'),
+    path.join(projectRoot, outputDirectory, 'win-unpacked', 'resources', 'defaults', 'report-templates', '설비이력카드.xlsx'),
+    path.join(projectRoot, outputDirectory, `Osoo.Handle.App.Setup.${version}.exe`),
+    path.join(projectRoot, outputDirectory, `Osoo.Handle.App.Setup.${version}.exe.blockmap`),
+    path.join(projectRoot, outputDirectory, 'latest.yml'),
   ];
 }
 
-function artifactValidation(version) {
-  const artifacts = expectedArtifacts(version).map(fileInfo);
+function artifactValidation(version, outputDirectory) {
+  const artifacts = expectedArtifacts(version, outputDirectory).map(fileInfo);
   const failures = artifacts.filter((item) => !item.exists || item.size <= 0);
   return {
     artifacts: artifacts.map((item) => ({ ...item, sha256: item.exists ? sha256(path.join(projectRoot, item.path)) : '' })),
@@ -203,6 +203,7 @@ async function main() {
 
   const packageJson = readJson(packageJsonPath);
   const packageLock = readJson(packageLockPath);
+  const outputDirectory = `release-${packageJson.version}`;
   const result = {
     runnerVersion,
     version: packageJson.version,
@@ -210,6 +211,7 @@ async function main() {
     gitCommit: '',
     dryRun: options.dryRun,
     playbook: path.relative(projectRoot, playbookPath),
+    outputDirectory,
     steps: {},
     artifacts: [],
     result: 'FAIL',
@@ -238,9 +240,9 @@ async function main() {
     ['PREPARED VALIDATION', 'node', ['tools/diagnostic-runner/validate-prepared.cjs']],
     ['NATIVE/ELECTRON ABI PREPARATION', 'npx', ['@electron/rebuild', '--force', '--arch=x64', `--version=${electronVersion}`]],
     ['PACKAGE', 'npm', ['run', 'release:safe']],
-    ['ASAR VALIDATION', 'npm', ['run', 'validate:asar']],
-    ['NATIVE VALIDATION', 'npm', ['run', 'validate:native']],
-    ['SECURITY/RESOURCE VALIDATION', 'node', ['scripts/validate-release.cjs', '--asar-path', './release/win-unpacked/resources/app.asar']],
+    ['ASAR VALIDATION', 'node', ['scripts/validate-release.cjs', '--asar-path', `./${outputDirectory}/win-unpacked/resources/app.asar`]],
+    ['NATIVE VALIDATION', 'node', ['scripts/validate-packaged-native.cjs', `./${outputDirectory}/win-unpacked`]],
+    ['SECURITY/RESOURCE VALIDATION', 'node', ['scripts/validate-release.cjs', '--asar-path', `./${outputDirectory}/win-unpacked/resources/app.asar`]],
   ];
   if (options.dryRun) {
     result.plannedCommands = plannedCommands.map(([name, command, args]) => ({ name, command: [command, ...args].join(' ') }));
@@ -258,7 +260,10 @@ async function main() {
   try {
     for (const [name, command, args] of plannedCommands) {
       if (name === 'NATIVE/ELECTRON ABI PREPARATION') packageStarted = true;
-      const commandResult = runCommand(command, args, { timeout: 0 });
+      const commandResult = runCommand(command, args, {
+        timeout: 0,
+        env: { OSOO_RELEASE_OUTPUT_DIR: outputDirectory },
+      });
       result.steps[name] = { ...commandResult, status: commandResult.status === 0 ? 'PASS' : 'FAIL' };
       logStep(name, result.steps[name].status);
       if (commandResult.status !== 0) {
@@ -267,7 +272,7 @@ async function main() {
         break;
       }
       if (name === 'PACKAGE') {
-        const artifacts = artifactValidation(packageJson.version);
+        const artifacts = artifactValidation(packageJson.version, outputDirectory);
         result.artifacts = artifacts.artifacts;
         result.steps['ARTIFACT VALIDATION'] = { status: artifacts.failures.length ? 'FAIL' : 'PASS', failures: artifacts.failures, artifacts: artifacts.artifacts };
         logStep('Artifact Validation', result.steps['ARTIFACT VALIDATION'].status);

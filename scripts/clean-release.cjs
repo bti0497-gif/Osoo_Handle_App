@@ -7,10 +7,14 @@ const path = require('path');
 const rootDir = path.resolve(__dirname, '..');
 const retryDelayMs = 200;
 const retryCount = 30;
+const configuredReleaseDirectory = String(process.env.OSOO_RELEASE_OUTPUT_DIR || 'release').trim();
+if (!/^[A-Za-z0-9._-]+$/.test(configuredReleaseDirectory) || configuredReleaseDirectory === '.' || configuredReleaseDirectory === '..') {
+  throw new Error(`Invalid OSOO_RELEASE_OUTPUT_DIR: ${configuredReleaseDirectory}`);
+}
 const removableDirectories = [
   'dist',
   'build',
-  'release',
+  configuredReleaseDirectory,
   'release-diagnostic',
   'release-photo-diagnostic',
   'release-dongmyeong-hotfix',
@@ -81,7 +85,7 @@ for (const relativePath of removableDirectories) {
       });
       console.log(`[clean] ${relativePath}`);
     } catch (error) {
-      if (relativePath !== 'release') throw error;
+      if (relativePath !== configuredReleaseDirectory) throw error;
       try {
         emptyReleaseContents(target);
         console.warn('[clean] locked release root retained after its contents were cleared');

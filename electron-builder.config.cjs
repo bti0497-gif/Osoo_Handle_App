@@ -3,6 +3,7 @@
  * Keep this in sync with electron-builder.config.js until the main config is migrated.
  */
 const rendererPackageGuard = require('./scripts/renderer-package-guard.cjs');
+const releaseOutputDirectory = process.env.OSOO_RELEASE_OUTPUT_DIR || 'release';
 
 module.exports = {
   appId: 'com.osoo.handle-app',
@@ -11,7 +12,9 @@ module.exports = {
   npmRebuild: false,
   nodeGypRebuild: false,
   directories: {
-    output: 'release',
+    // 일반 빌드는 release/를 유지한다. Release Runner만 잠긴 과거 산출물과
+    // 분리하기 위해 OSOO_RELEASE_OUTPUT_DIR을 명시적으로 지정할 수 있다.
+    output: releaseOutputDirectory,
     buildResources: 'build',
   },
   beforePack: rendererPackageGuard.beforePack,
