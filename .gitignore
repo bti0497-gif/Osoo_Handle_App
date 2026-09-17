@@ -15,6 +15,7 @@ release/
 /release-*/
 artifacts/
 test-build/
+.stale-release*/
 .tmp-validation/
 tmp/**
 tools/diagnostic-runner/node_modules/

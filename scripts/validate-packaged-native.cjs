@@ -5,7 +5,12 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const projectRoot = path.join(__dirname, '..');
-const unpackedRoot = path.resolve(process.argv[2] || path.join(projectRoot, 'release', 'win-unpacked'));
+const defaultReleaseDir = process.env.OSOO_RELEASE_OUTPUT_DIR || 'release';
+let targetDir = process.argv[2];
+if (!targetDir || (targetDir === './release/win-unpacked' && process.env.OSOO_RELEASE_OUTPUT_DIR)) {
+  targetDir = path.join(projectRoot, defaultReleaseDir, 'win-unpacked');
+}
+const unpackedRoot = path.resolve(targetDir);
 const electronExe = path.join(unpackedRoot, 'Osoo Handle App.exe');
 const updaterConfig = path.join(unpackedRoot, 'resources', 'app-update.yml');
 const sqlitePackage = path.join(

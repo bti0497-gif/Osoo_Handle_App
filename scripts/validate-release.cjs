@@ -2552,7 +2552,16 @@ function validateHeavyModuleLazyLoadingContract() {
   validateEncodingAndKorean();
   
   if (hasAsarTest) {
-    const asarPath = args[args.indexOf('--asar-path') + 1];
+    let asarPath = args[args.indexOf('--asar-path') + 1];
+    if (process.env.OSOO_RELEASE_OUTPUT_DIR && asarPath) {
+      const normalized = asarPath.replace(/\\/g, '/');
+      if (normalized.includes('release/win-unpacked')) {
+        const redirectedPath = asarPath.replace(/([/\\])release([/\\]win-unpacked)/i, `$1${process.env.OSOO_RELEASE_OUTPUT_DIR}$2`);
+        if (fs.existsSync(redirectedPath) || !fs.existsSync(asarPath)) {
+          asarPath = redirectedPath;
+        }
+      }
+    }
     validateAsarPackage(asarPath);
   }
   

@@ -260,15 +260,28 @@ async function main() {
   try {
     for (const [name, command, args] of plannedCommands) {
       if (name === 'NATIVE/ELECTRON ABI PREPARATION') packageStarted = true;
+      console.log(`\n▶ [${name}] 시작: ${command} ${args.join(' ')}`);
       const commandResult = runCommand(command, args, {
         timeout: 0,
         env: { OSOO_RELEASE_OUTPUT_DIR: outputDirectory },
       });
       result.steps[name] = { ...commandResult, status: commandResult.status === 0 ? 'PASS' : 'FAIL' };
       logStep(name, result.steps[name].status);
+      writeResult(result);
       if (commandResult.status !== 0) {
         result.failedStep = name;
         exitCode = 1;
+        console.error(`\n[ERROR] '${name}' 단계 실패 (종료 코드: ${commandResult.status})`);
+        if (commandResult.error) console.error(`시스템 오류: ${commandResult.error}`);
+        if (commandResult.stderr) {
+          console.error(`--- STDERR ---`);
+          console.error(commandResult.stderr.split(/\r?\n/).slice(-30).join('\n'));
+        }
+        if (commandResult.stdout) {
+          console.error(`--- STDOUT ---`);
+          console.error(commandResult.stdout.split(/\r?\n/).slice(-30).join('\n'));
+        }
+        console.error(`--------------\n`);
         break;
       }
       if (name === 'PACKAGE') {
@@ -276,8 +289,10 @@ async function main() {
         result.artifacts = artifacts.artifacts;
         result.steps['ARTIFACT VALIDATION'] = { status: artifacts.failures.length ? 'FAIL' : 'PASS', failures: artifacts.failures, artifacts: artifacts.artifacts };
         logStep('Artifact Validation', result.steps['ARTIFACT VALIDATION'].status);
+        writeResult(result);
         if (artifacts.failures.length) {
           result.failedStep = 'ARTIFACT VALIDATION';
+          console.error(`\n[ERROR] 필수 산출물 누락: ${artifacts.failures.join(', ')}`);
           exitCode = 1;
           break;
         }
