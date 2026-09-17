@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { createHash } = require('crypto');
 
 const projectRoot = path.resolve(__dirname, '..', '..');
@@ -11,6 +11,7 @@ const packageJsonPath = path.join(projectRoot, 'package.json');
 const packageLockPath = path.join(projectRoot, 'package-lock.json');
 const playbookPath = path.join(projectRoot, 'docs', 'AUTO_UPDATE_PACKAGING_PLAYBOOK.md');
 const resultPath = path.join(projectRoot, 'tmp', 'release-runner-result.json');
+const progressPath = path.join(projectRoot, 'tmp', 'release-runner-progress.json');
 const requiredTemplateSource = path.join(projectRoot, 'templates', 'reports', '설비이력카드.xlsx');
 const electronBuilderConfigPath = path.join(projectRoot, 'electron-builder.config.cjs');
 const nativeScriptPath = path.join(projectRoot, 'scripts', 'validate-packaged-native.cjs');
@@ -56,6 +57,21 @@ function sha256(filePath) {
   return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}초`;
+  return `${minutes}분 ${seconds}초`;
+}
+
+function writeProgress(progress) {
+  try {
+    ensureResultDirectory();
+    fs.writeFileSync(progressPath, `${JSON.stringify(progress, null, 2)}\n`, 'utf8');
+  } catch {}
+}
+
 function runCommand(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: projectRoot,
@@ -73,6 +89,99 @@ function runCommand(command, args, options = {}) {
     stdout: String(result.stdout || '').slice(-12000),
     stderr: String(result.stderr || '').slice(-12000),
   };
+}
+
+function runCommandAsync(command, args, options = {}) {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    const stepName = options.stepName || command;
+    let stdoutBuffer = '';
+    let stderrBuffer = '';
+    let lastLogLine = '';
+    let lastMilestone = '';
+
+    const child = spawn(command, args, {
+      cwd: projectRoot,
+      shell: process.platform === 'win32',
+      windowsHide: true,
+      env: { ...process.env, ...(options.env || {}) },
+    });
+
+    let tickCount = 0;
+    const heartbeatTimer = setInterval(() => {
+      tickCount += 1;
+      const elapsed = Date.now() - startTime;
+      if (options.onProgress) {
+        options.onProgress({
+          elapsedMs: elapsed,
+          elapsed: formatDuration(elapsed),
+          lastLogLine: lastLogLine.slice(0, 200),
+        });
+      }
+      // 30초(5초 * 6)마다 콘솔 하트비트 출력
+      if (tickCount % 6 === 0) {
+        const preview = lastMilestone || lastLogLine ? ` | 최근: ${(lastMilestone || lastLogLine).slice(0, 60)}` : '';
+        console.log(`   ⏳ [${stepName}] 진행 중... (${formatDuration(elapsed)}${preview})`);
+      }
+    }, 5000);
+
+    const milestoneRegex = /(✓|PASS|FAIL|building|packaging|Rebuild Complete|vite|built in|created installer|compiling|cleaning|Lint)/i;
+
+    child.stdout.on('data', (data) => {
+      const text = data.toString();
+      stdoutBuffer += text;
+      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length > 0) {
+        lastLogLine = lines[lines.length - 1].trim();
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (milestoneRegex.test(trimmed)) {
+            lastMilestone = trimmed;
+            console.log(`   → ${trimmed.slice(0, 100)}`);
+          }
+        }
+      }
+    });
+
+    child.stderr.on('data', (data) => {
+      const text = data.toString();
+      stderrBuffer += text;
+      const lines = text.split(/\r?\n/).filter((l) => l.trim());
+      if (lines.length > 0) {
+        lastLogLine = lines[lines.length - 1].trim();
+      }
+    });
+
+    child.on('close', (code, signal) => {
+      clearInterval(heartbeatTimer);
+      const durationMs = Date.now() - startTime;
+      resolve({
+        command: [command, ...args].join(' '),
+        status: code === null ? (signal ? 1 : 0) : code,
+        signal,
+        error: '',
+        durationMs,
+        duration: formatDuration(durationMs),
+        stdout: stdoutBuffer.slice(-15000),
+        stderr: stderrBuffer.slice(-15000),
+      });
+    });
+
+    child.on('error', (err) => {
+      clearInterval(heartbeatTimer);
+      const durationMs = Date.now() - startTime;
+      resolve({
+        command: [command, ...args].join(' '),
+        status: 1,
+        signal: null,
+        error: err.message,
+        durationMs,
+        duration: formatDuration(durationMs),
+        stdout: stdoutBuffer.slice(-15000),
+        stderr: stderrBuffer.slice(-15000),
+      });
+    });
+  });
 }
 
 function gitStatus() {
@@ -257,17 +366,49 @@ async function main() {
 
   let packageStarted = false;
   let exitCode = 0;
+  const runnerStartTime = Date.now();
+  const totalSteps = plannedCommands.length;
   try {
+    let stepIndex = 0;
     for (const [name, command, args] of plannedCommands) {
+      stepIndex += 1;
       if (name === 'NATIVE/ELECTRON ABI PREPARATION') packageStarted = true;
-      console.log(`\n▶ [${name}] 시작: ${command} ${args.join(' ')}`);
-      const commandResult = runCommand(command, args, {
-        timeout: 0,
-        env: { OSOO_RELEASE_OUTPUT_DIR: outputDirectory },
+      console.log(`\n▶ [${stepIndex}/${totalSteps}] ${name} 시작 (${command} ${args.join(' ')})`);
+
+      writeProgress({
+        version: packageJson.version,
+        stepIndex,
+        totalSteps,
+        currentStep: name,
+        command: [command, ...args].join(' '),
+        status: 'RUNNING',
+        stepStartedAt: new Date().toISOString(),
+        totalElapsed: formatDuration(Date.now() - runnerStartTime),
       });
+
+      const commandResult = await runCommandAsync(command, args, {
+        stepName: name,
+        env: { OSOO_RELEASE_OUTPUT_DIR: outputDirectory },
+        onProgress: (info) => {
+          writeProgress({
+            version: packageJson.version,
+            stepIndex,
+            totalSteps,
+            currentStep: name,
+            command: [command, ...args].join(' '),
+            status: 'RUNNING',
+            stepElapsed: info.elapsed,
+            totalElapsed: formatDuration(Date.now() - runnerStartTime),
+            lastLog: info.lastLogLine,
+            updatedAt: new Date().toISOString(),
+          });
+        },
+      });
+
       result.steps[name] = { ...commandResult, status: commandResult.status === 0 ? 'PASS' : 'FAIL' };
-      logStep(name, result.steps[name].status);
+      logStep(name, result.steps[name].status, `소요: ${commandResult.duration || '0초'}`);
       writeResult(result);
+
       if (commandResult.status !== 0) {
         result.failedStep = name;
         exitCode = 1;
@@ -300,14 +441,25 @@ async function main() {
     }
   } finally {
     if (packageStarted) {
-      const restore = runCommand('npm', ['rebuild', 'better-sqlite3'], { timeout: 0 });
+      console.log('\n▶ Node ABI 복구 중 (npm rebuild better-sqlite3)...');
+      const restore = await runCommandAsync('npm', ['rebuild', 'better-sqlite3'], { stepName: 'NODE ABI RESTORE' });
       result.steps['NODE ABI RESTORE'] = { ...restore, status: restore.status === 0 ? 'PASS' : 'FAIL' };
-      logStep('Node ABI Restore', result.steps['NODE ABI RESTORE'].status);
+      logStep('Node ABI Restore', result.steps['NODE ABI RESTORE'].status, `소요: ${restore.duration || '0초'}`);
       if (restore.status !== 0 && !result.failedStep) {
         result.failedStep = 'NODE ABI RESTORE';
         exitCode = 1;
       }
     }
+    const totalDuration = formatDuration(Date.now() - runnerStartTime);
+    result.totalDuration = totalDuration;
+    writeProgress({
+      version: packageJson.version,
+      status: exitCode === 0 ? 'COMPLETED' : 'FAILED',
+      result: exitCode === 0 ? 'PASS' : 'FAIL',
+      failedStep: result.failedStep || '',
+      totalDuration,
+      completedAt: new Date().toISOString(),
+    });
     return finish(result, exitCode);
   }
 }
@@ -323,15 +475,25 @@ function finish(result, exitCode, dryRun = false) {
   if (!result.failedStep && exitCode !== 0) result.failedStep = 'UNKNOWN';
   result.steps['FINAL REPORT'] = { status: dryRun ? 'DRY-RUN' : (exitCode === 0 ? 'PASS' : 'FAIL') };
   writeResult(result);
+  writeProgress({
+    version: result.version,
+    status: dryRun ? 'DRY-RUN' : (exitCode === 0 ? 'COMPLETED' : 'FAILED'),
+    result: result.result,
+    failedStep: result.failedStep || '',
+    totalDuration: result.totalDuration || '0초',
+    completedAt: new Date().toISOString(),
+  });
   console.log('');
   console.log(`RESULT: ${result.result}`);
   console.log(`READY FOR RELEASE: ${result.readyForRelease ? 'YES' : 'NO'}`);
+  if (result.totalDuration) console.log(`TOTAL DURATION: ${result.totalDuration}`);
   if (result.failedStep) console.log(`FAILED STEP: ${result.failedStep}`);
   const installer = result.artifacts?.find((artifact) => /Setup\..+\.exe$/.test(artifact.path));
   if (installer) {
     console.log(`Installer: ${installer.path}`);
     console.log(`SHA256: ${installer.sha256 || 'unavailable'}`);
   }
+  console.log(`PROGRESS: ${path.relative(projectRoot, progressPath)}`);
   console.log(`REPORT: ${path.relative(projectRoot, resultPath)}`);
   console.log('========================================');
   return exitCode;
