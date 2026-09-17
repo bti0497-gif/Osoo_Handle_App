@@ -16,7 +16,7 @@ const requiredTemplateSource = path.join(projectRoot, 'templates', 'reports', '�
 const electronBuilderConfigPath = path.join(projectRoot, 'electron-builder.config.cjs');
 const nativeScriptPath = path.join(projectRoot, 'scripts', 'validate-packaged-native.cjs');
 const asarScriptPath = path.join(projectRoot, 'scripts', 'validate-release.cjs');
-const runnerVersion = '1.0.0';
+const runnerVersion = '1.1.0';
 const electronVersion = '40.6.0';
 
 const steps = [
@@ -30,15 +30,19 @@ const steps = [
   'NATIVE VALIDATION',
   'SECURITY/RESOURCE VALIDATION',
   'NODE ABI RESTORE',
+  'PUBLISH',
   'FINAL REPORT',
 ];
 
 function parseArgs(argv) {
   const args = new Set(argv.slice(2));
-  if (args.has('--publish')) {
-    throw new Error('Release Runner는 게시를 수행하지 않습니다. PUBLISH는 별도 기능으로 남겨둡니다.');
-  }
-  return { dryRun: args.has('--dry-run'), help: args.has('--help') || args.has('-h') };
+  return {
+    dryRun: args.has('--dry-run'),
+    help: args.has('--help') || args.has('-h'),
+    publish: args.has('--publish'),
+    debug: args.has('--debug') || args.has('--verbose'),
+    allowExistingTag: args.has('--allow-existing-tag') || args.has('--force-tag'),
+  };
 }
 
 function readJson(filePath) {
@@ -70,6 +74,25 @@ function writeProgress(progress) {
     ensureResultDirectory();
     fs.writeFileSync(progressPath, `${JSON.stringify(progress, null, 2)}\n`, 'utf8');
   } catch {}
+}
+
+function cleanStaleReleaseDirectories() {
+  const cleaned = [];
+  try {
+    const entries = fs.readdirSync(projectRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory() && entry.name.startsWith('.stale-release-')) {
+        const fullPath = path.join(projectRoot, entry.name);
+        try {
+          fs.rmSync(fullPath, { recursive: true, force: true });
+          cleaned.push(entry.name);
+        } catch (err) {
+          console.warn(`   [Release Runner] 오래된 임시 디렉터리 삭제 건너뜀 (${entry.name}): ${err.message}`);
+        }
+      }
+    }
+  } catch {}
+  return cleaned;
 }
 
 function runCommand(command, args, options = {}) {
@@ -118,8 +141,8 @@ function runCommandAsync(command, args, options = {}) {
           lastLogLine: lastLogLine.slice(0, 200),
         });
       }
-      // 30초(5초 * 6)마다 콘솔 하트비트 출력
-      if (tickCount % 6 === 0) {
+      // 디버그 모드가 아닐 때 30초(5초 * 6)마다 콘솔 하트비트 출력
+      if (!options.debug && tickCount % 6 === 0) {
         const preview = lastMilestone || lastLogLine ? ` | 최근: ${(lastMilestone || lastLogLine).slice(0, 60)}` : '';
         console.log(`   ⏳ [${stepName}] 진행 중... (${formatDuration(elapsed)}${preview})`);
       }
@@ -129,15 +152,20 @@ function runCommandAsync(command, args, options = {}) {
 
     child.stdout.on('data', (data) => {
       const text = data.toString();
+      if (options.debug) {
+        process.stdout.write(text);
+      }
       stdoutBuffer += text;
       const lines = text.split(/\r?\n/).filter((l) => l.trim());
       if (lines.length > 0) {
         lastLogLine = lines[lines.length - 1].trim();
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (milestoneRegex.test(trimmed)) {
-            lastMilestone = trimmed;
-            console.log(`   → ${trimmed.slice(0, 100)}`);
+        if (!options.debug) {
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (milestoneRegex.test(trimmed)) {
+              lastMilestone = trimmed;
+              console.log(`   → ${trimmed.slice(0, 100)}`);
+            }
           }
         }
       }
@@ -145,6 +173,9 @@ function runCommandAsync(command, args, options = {}) {
 
     child.stderr.on('data', (data) => {
       const text = data.toString();
+      if (options.debug) {
+        process.stderr.write(text);
+      }
       stderrBuffer += text;
       const lines = text.split(/\r?\n/).filter((l) => l.trim());
       if (lines.length > 0) {
@@ -232,9 +263,72 @@ function writeResult(result) {
   }
 }
 
-function preflight(packageJson, packageLock) {
+function checkExistingRelease(version) {
+  const tag = `v${version}`;
+  let localTag = false;
+  let remoteTag = false;
+  let ghRelease = false;
+  const details = [];
+
+  const localRes = runCommand('git', ['tag', '-l', tag]);
+  if (localRes.status === 0 && localRes.stdout.trim() === tag) {
+    localTag = true;
+    details.push('로컬 Git 태그');
+  }
+
+  const remoteRes = runCommand('git', ['ls-remote', '--tags', 'origin', `refs/tags/${tag}`], { timeout: 8000 });
+  if (remoteRes.status === 0 && remoteRes.stdout.includes(tag)) {
+    remoteTag = true;
+    details.push('원격 Git 태그');
+  }
+
+  const ghRes = runCommand('gh', ['release', 'view', tag, '--json', 'tagName'], { timeout: 8000 });
+  if (ghRes.status === 0) {
+    ghRelease = true;
+    details.push('GitHub Release');
+  }
+
+  const exists = localTag || remoteTag || ghRelease;
+  return {
+    tag,
+    exists,
+    localTag,
+    remoteTag,
+    ghRelease,
+    details: details.join(', '),
+  };
+}
+
+function writeChecksumsFile(version, outputDirectory) {
+  const targetDir = path.join(projectRoot, outputDirectory);
+  if (!fs.existsSync(targetDir)) return null;
+
+  const filesToHash = [
+    `Osoo.Handle.App.Setup.${version}.exe`,
+    `Osoo.Handle.App.Setup.${version}.exe.blockmap`,
+    'latest.yml',
+  ];
+
+  const lines = [];
+  for (const fileName of filesToHash) {
+    const fullPath = path.join(targetDir, fileName);
+    if (fs.existsSync(fullPath)) {
+      const hash = sha256(fullPath);
+      lines.push(`${hash} *${fileName}`);
+    }
+  }
+
+  if (lines.length === 0) return null;
+
+  const sumsPath = path.join(targetDir, 'SHA256SUMS.txt');
+  fs.writeFileSync(sumsPath, `${lines.join('\n')}\n`, 'utf8');
+  return fileInfo(sumsPath);
+}
+
+function preflight(packageJson, packageLock, options = {}) {
   const status = gitStatus();
   const processes = conflictingProcesses();
+  const tagCheck = checkExistingRelease(packageJson.version);
   const builderConfigText = fs.existsSync(electronBuilderConfigPath)
     ? fs.readFileSync(electronBuilderConfigPath, 'utf8')
     : '';
@@ -243,6 +337,7 @@ function preflight(packageJson, packageLock) {
     lockVersion: packageLock.version,
     versionsMatch: packageJson.version === packageLock.version,
     gitStatus: status,
+    tagCheck,
     template: fileInfo(requiredTemplateSource),
     builderConfig: fileInfo(electronBuilderConfigPath),
     approvedTemplateResource: builderConfigText.includes(
@@ -263,6 +358,13 @@ function preflight(packageJson, packageLock) {
   };
   const failures = [];
   if (!checks.versionsMatch) failures.push('package.json/package-lock.json version mismatch');
+  if (tagCheck.exists) {
+    if (options.allowExistingTag) {
+      console.warn(`   [WARN] '${tagCheck.tag}'가 이미 존재합니다 (${tagCheck.details}). --allow-existing-tag 플래그로 인해 진행합니다.`);
+    } else {
+      failures.push(`태그/릴리즈 '${tagCheck.tag}'가 이미 존재합니다 (${tagCheck.details}). 20~30분 소요되는 패키징의 중복 실행을 방지하기 위해 중단합니다. (우회: --allow-existing-tag)`);
+    }
+  }
   if (!checks.template.exists || checks.template.size <= 0) failures.push('설비이력카드.xlsx missing or empty');
   if (!checks.builderConfig.exists) failures.push('electron-builder.config.cjs missing');
   if (!checks.approvedTemplateResource) failures.push('approved 설비이력카드 extraResources entry missing');
@@ -285,6 +387,7 @@ function expectedArtifacts(version, outputDirectory) {
     path.join(projectRoot, outputDirectory, `Osoo.Handle.App.Setup.${version}.exe`),
     path.join(projectRoot, outputDirectory, `Osoo.Handle.App.Setup.${version}.exe.blockmap`),
     path.join(projectRoot, outputDirectory, 'latest.yml'),
+    path.join(projectRoot, outputDirectory, 'SHA256SUMS.txt'),
   ];
 }
 
@@ -298,9 +401,14 @@ function artifactValidation(version, outputDirectory) {
 }
 
 function printHelp() {
-  console.log('Usage: npm run release:runner [-- --dry-run]');
-  console.log('The default runner performs validation and packaging but never publishes.');
-  console.log('--dry-run  Run preflight and print planned steps without package/build/rebuild commands.');
+  console.log('Usage: npm run release:runner [-- [options]]');
+  console.log('');
+  console.log('Options:');
+  console.log('  --publish             모든 검증이 PASS되면 GitHub Release를 자동 생성/업로드합니다.');
+  console.log('  --debug, --verbose    자식 프로세스의 모든 출력을 실시간으로 터미널에 스트리밍합니다.');
+  console.log('  --allow-existing-tag  이미 Git 태그나 GitHub Release가 존재해도 사전 검사를 우회합니다.');
+  console.log('  --dry-run             실제 빌드 없이 사전 검사 및 실행 계획만 확인합니다.');
+  console.log('  --help, -h            도움말을 출력합니다.');
 }
 
 async function main() {
@@ -308,6 +416,12 @@ async function main() {
   if (options.help) {
     printHelp();
     return 0;
+  }
+
+  // [보강 6] 시작 전 잠금 풀린 오래된 임시 디렉터리 자동 청소
+  const cleanedStale = cleanStaleReleaseDirectories();
+  if (cleanedStale.length > 0) {
+    console.log(`[Release Runner] 오래된 임시 디렉터리 정리 완료: ${cleanedStale.join(', ')}`);
   }
 
   const packageJson = readJson(packageJsonPath);
@@ -319,6 +433,7 @@ async function main() {
     timestamp: new Date().toISOString(),
     gitCommit: '',
     dryRun: options.dryRun,
+    publish: options.publish,
     playbook: path.relative(projectRoot, playbookPath),
     outputDirectory,
     steps: {},
@@ -334,13 +449,18 @@ async function main() {
   console.log('========================================');
   console.log('OSOO RELEASE RUNNER');
   console.log(`Version: ${packageJson.version}`);
+  console.log(`Mode: ${options.dryRun ? 'DRY-RUN' : (options.publish ? 'PACKAGE & PUBLISH' : 'PACKAGE ONLY')}`);
+  if (options.debug) console.log('Debug: ENABLED (상세 로그 실시간 스트리밍)');
   console.log('========================================');
 
-  const preflightResult = preflight(packageJson, packageLock);
+  const preflightResult = preflight(packageJson, packageLock, options);
   result.steps.PREFLIGHT = { status: preflightResult.failures.length ? 'FAIL' : 'PASS', ...preflightResult };
   logStep('Preflight', result.steps.PREFLIGHT.status, `dirty=${preflightResult.checks.gitStatus.length}, conflicts=${preflightResult.checks.conflictingProcesses.length}`);
   if (preflightResult.failures.length) {
     result.failedStep = 'PREFLIGHT';
+    for (const fail of preflightResult.failures) {
+      console.error(`   ✕ ${fail}`);
+    }
     return finish(result, 1);
   }
 
@@ -355,12 +475,14 @@ async function main() {
   ];
   if (options.dryRun) {
     result.plannedCommands = plannedCommands.map(([name, command, args]) => ({ name, command: [command, ...args].join(' ') }));
-    for (const name of steps.slice(1, -2)) {
+    for (const name of steps.slice(1, -3)) {
       result.steps[name] = { status: 'DRY-RUN', command: result.plannedCommands.find((item) => item.name === name)?.command || 'cleanup/final report' };
       logStep(name, 'DRY-RUN');
     }
-    result.steps['NODE ABI RESTORE'] = { status: 'DRY-RUN', command: 'npm rebuild better-sqlite3 (finally)' };
+    result.steps['NODE ABI RESTORE'] = { status: 'DRY-RUN', command: 'npm rebuild better-sqlite3' };
     logStep('Node ABI Restore', 'DRY-RUN');
+    result.steps.PUBLISH = { status: 'DRY-RUN', command: options.publish ? `gh release create v${packageJson.version} ...` : 'SKIPPED (--publish 옵션 없음)' };
+    logStep('Publish', 'DRY-RUN', options.publish ? 'gh release create 예정' : '생략');
     return finish(result, 0, true);
   }
 
@@ -368,10 +490,13 @@ async function main() {
   let exitCode = 0;
   const runnerStartTime = Date.now();
   const totalSteps = plannedCommands.length;
+  let lastStepIndex = 0;
+
   try {
     let stepIndex = 0;
     for (const [name, command, args] of plannedCommands) {
       stepIndex += 1;
+      lastStepIndex = stepIndex;
       if (name === 'NATIVE/ELECTRON ABI PREPARATION') packageStarted = true;
       console.log(`\n▶ [${stepIndex}/${totalSteps}] ${name} 시작 (${command} ${args.join(' ')})`);
 
@@ -379,6 +504,8 @@ async function main() {
         version: packageJson.version,
         stepIndex,
         totalSteps,
+        totalSteps: totalSteps + (options.publish ? 1 : 0),
+        percentage: Math.round(((stepIndex - 1) / (totalSteps + (options.publish ? 1 : 0))) * 100),
         currentStep: name,
         command: [command, ...args].join(' '),
         status: 'RUNNING',
@@ -388,12 +515,15 @@ async function main() {
 
       const commandResult = await runCommandAsync(command, args, {
         stepName: name,
+        debug: options.debug,
         env: { OSOO_RELEASE_OUTPUT_DIR: outputDirectory },
         onProgress: (info) => {
           writeProgress({
             version: packageJson.version,
             stepIndex,
             totalSteps,
+            totalSteps: totalSteps + (options.publish ? 1 : 0),
+            percentage: Math.round(((stepIndex - 1) / (totalSteps + (options.publish ? 1 : 0))) * 100),
             currentStep: name,
             command: [command, ...args].join(' '),
             status: 'RUNNING',
@@ -414,18 +544,25 @@ async function main() {
         exitCode = 1;
         console.error(`\n[ERROR] '${name}' 단계 실패 (종료 코드: ${commandResult.status})`);
         if (commandResult.error) console.error(`시스템 오류: ${commandResult.error}`);
-        if (commandResult.stderr) {
+        if (commandResult.stderr && !options.debug) {
           console.error(`--- STDERR ---`);
           console.error(commandResult.stderr.split(/\r?\n/).slice(-30).join('\n'));
         }
-        if (commandResult.stdout) {
+        if (commandResult.stdout && !options.debug) {
           console.error(`--- STDOUT ---`);
           console.error(commandResult.stdout.split(/\r?\n/).slice(-30).join('\n'));
         }
         console.error(`--------------\n`);
         break;
       }
+
       if (name === 'PACKAGE') {
+        // [보강 4] SHA256SUMS.txt 생성
+        const checksumFile = writeChecksumsFile(packageJson.version, outputDirectory);
+        if (checksumFile) {
+          console.log(`   → SHA256SUMS.txt 생성 완료`);
+        }
+
         const artifacts = artifactValidation(packageJson.version, outputDirectory);
         result.artifacts = artifacts.artifacts;
         result.steps['ARTIFACT VALIDATION'] = { status: artifacts.failures.length ? 'FAIL' : 'PASS', failures: artifacts.failures, artifacts: artifacts.artifacts };
@@ -442,7 +579,10 @@ async function main() {
   } finally {
     if (packageStarted) {
       console.log('\n▶ Node ABI 복구 중 (npm rebuild better-sqlite3)...');
-      const restore = await runCommandAsync('npm', ['rebuild', 'better-sqlite3'], { stepName: 'NODE ABI RESTORE' });
+      const restore = await runCommandAsync('npm', ['rebuild', 'better-sqlite3'], {
+        stepName: 'NODE ABI RESTORE',
+        debug: options.debug,
+      });
       result.steps['NODE ABI RESTORE'] = { ...restore, status: restore.status === 0 ? 'PASS' : 'FAIL' };
       logStep('Node ABI Restore', result.steps['NODE ABI RESTORE'].status, `소요: ${restore.duration || '0초'}`);
       if (restore.status !== 0 && !result.failedStep) {
@@ -450,18 +590,72 @@ async function main() {
         exitCode = 1;
       }
     }
-    const totalDuration = formatDuration(Date.now() - runnerStartTime);
-    result.totalDuration = totalDuration;
-    writeProgress({
-      version: packageJson.version,
-      status: exitCode === 0 ? 'COMPLETED' : 'FAILED',
-      result: exitCode === 0 ? 'PASS' : 'FAIL',
-      failedStep: result.failedStep || '',
-      totalDuration,
-      completedAt: new Date().toISOString(),
-    });
-    return finish(result, exitCode);
   }
+
+  // [보강 3] PUBLISH 단계 (모든 검증이 PASS이고 options.publish 활성화 시)
+  if (exitCode === 0) {
+    if (options.publish) {
+      console.log(`\n▶ [PUBLISH] GitHub Release v${packageJson.version} 배포 시작...`);
+      const releaseTag = `v${packageJson.version}`;
+      const uploadFiles = [
+        path.join(outputDirectory, `Osoo.Handle.App.Setup.${packageJson.version}.exe`),
+        path.join(outputDirectory, `Osoo.Handle.App.Setup.${packageJson.version}.exe.blockmap`),
+        path.join(outputDirectory, 'latest.yml'),
+        path.join(outputDirectory, 'SHA256SUMS.txt'),
+      ].filter((rel) => fs.existsSync(path.join(projectRoot, rel)));
+
+      writeProgress({
+        version: packageJson.version,
+        stepIndex: totalSteps + 1,
+        totalSteps: totalSteps + 1,
+        percentage: 95,
+        currentStep: 'PUBLISH',
+        command: `gh release ... ${releaseTag}`,
+        status: 'RUNNING',
+        stepStartedAt: new Date().toISOString(),
+        totalElapsed: formatDuration(Date.now() - runnerStartTime),
+      });
+
+      const viewCheck = runCommand('gh', ['release', 'view', releaseTag]);
+      const isExisting = viewCheck.status === 0;
+
+      const ghArgs = isExisting
+        ? ['release', 'upload', releaseTag, ...uploadFiles, '--clobber']
+        : ['release', 'create', releaseTag, ...uploadFiles, '--title', releaseTag, '--notes', `Release ${releaseTag}`];
+
+      const publishResult = await runCommandAsync('gh', ghArgs, {
+        stepName: 'PUBLISH',
+        debug: options.debug,
+      });
+
+      result.steps.PUBLISH = { ...publishResult, status: publishResult.status === 0 ? 'PASS' : 'FAIL' };
+      logStep('Publish', result.steps.PUBLISH.status, `소요: ${publishResult.duration || '0초'}`);
+      if (publishResult.status !== 0) {
+        result.failedStep = 'PUBLISH';
+        exitCode = 1;
+        console.error(`\n[ERROR] GitHub Release 배포 실패`);
+        if (publishResult.stderr) console.error(publishResult.stderr);
+      }
+    } else {
+      result.steps.PUBLISH = { status: 'SKIPPED', message: '--publish 옵션 미지정 (수동 배포 모드)' };
+      logStep('Publish', 'SKIPPED', '수동 배포 모드');
+    }
+  } else {
+    result.steps.PUBLISH = { status: 'SKIPPED', message: '선행 검증 실패로 배포 생략' };
+  }
+
+  const totalDuration = formatDuration(Date.now() - runnerStartTime);
+  result.totalDuration = totalDuration;
+  writeProgress({
+    version: packageJson.version,
+    percentage: exitCode === 0 ? 100 : Math.min(99, Math.round((lastStepIndex / totalSteps) * 100)),
+    status: exitCode === 0 ? 'COMPLETED' : 'FAILED',
+    result: exitCode === 0 ? 'PASS' : 'FAIL',
+    failedStep: result.failedStep || '',
+    totalDuration,
+    completedAt: new Date().toISOString(),
+  });
+  return finish(result, exitCode);
 }
 
 function finish(result, exitCode, dryRun = false) {
