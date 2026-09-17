@@ -88,7 +88,16 @@ function conflictingProcesses() {
   if (process.platform === 'win32') {
     try {
       const parsed = JSON.parse(result.stdout.trim());
-      return Array.isArray(parsed) ? parsed : [parsed];
+      const projectPrefix = `${path.resolve(projectRoot)}${path.sep}`.toLowerCase();
+      return (Array.isArray(parsed) ? parsed : [parsed]).filter((processInfo) => {
+        if (!processInfo) return false;
+        const name = String(processInfo.ProcessName || '');
+        if (/^(electron|electron-builder|makensis|7z)$/i.test(name)) return true;
+        // 설치된 현장 앱은 프로젝트 release 폴더를 잡지 않으므로 빌드를 막지 않는다.
+        // 반면 이 작업 폴더에서 직접 실행한 앱/워치독은 산출물을 잠글 수 있다.
+        return /^(Osoo Handle App|OsooWatchdog)$/i.test(name)
+          && String(processInfo.Path || '').toLowerCase().startsWith(projectPrefix);
+      });
     } catch {
       return [{ raw: result.stdout.trim() }];
     }

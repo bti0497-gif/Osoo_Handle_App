@@ -47,6 +47,25 @@ function moveReleaseAside(target, staleTarget) {
   throw lastError;
 }
 
+// Explorer/백신 등이 release 루트 디렉터리만 잠시 열어 둔 경우에는 루트의
+// rename/remove은 EPERM이지만 하위 산출물 삭제는 가능합니다. 이 경우 루트를
+// 재사용하면 빌더 출력 계약(release/)을 바꾸지 않고도 안전하게 다음 빌드를
+// 시작할 수 있습니다.
+function emptyReleaseContents(target) {
+  const entries = fs.readdirSync(target, { withFileTypes: true });
+  for (const entry of entries) {
+    fs.rmSync(path.join(target, entry.name), {
+      recursive: entry.isDirectory(),
+      force: true,
+      maxRetries: retryCount,
+      retryDelay: retryDelayMs,
+    });
+  }
+  if (fs.readdirSync(target).length !== 0) {
+    throw new Error(`Release directory was not emptied: ${target}`);
+  }
+}
+
 for (const relativePath of removableDirectories) {
   const target = path.resolve(rootDir, relativePath);
   if (!target.startsWith(`${rootDir}${path.sep}`)) {
@@ -63,6 +82,13 @@ for (const relativePath of removableDirectories) {
       console.log(`[clean] ${relativePath}`);
     } catch (error) {
       if (relativePath !== 'release') throw error;
+      try {
+        emptyReleaseContents(target);
+        console.warn('[clean] locked release root retained after its contents were cleared');
+        continue;
+      } catch (contentsError) {
+        console.warn(`[clean] could not clear locked release contents: ${contentsError.message}`);
+      }
       const staleTarget = path.resolve(rootDir, `.stale-release-${Date.now()}`);
       if (!staleTarget.startsWith(`${rootDir}${path.sep}`)) {
         throw new Error(`Refusing to move release path outside project: ${staleTarget}`);
