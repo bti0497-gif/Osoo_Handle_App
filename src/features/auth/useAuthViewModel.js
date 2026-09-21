@@ -378,6 +378,16 @@ export const useAuthViewModel = () => {
         return typeof unsubscribe === 'function' ? unsubscribe : undefined;
     }, [clearLocalAuthenticatedState, refreshLoginHint]);
 
+    useEffect(() => {
+        const unsubscribe = window.electronAPI?.onMorningWakeup?.((info) => {
+            console.log('[출근 안내] 오전 6시 자동 기상 이벤트 수신:', info);
+            if (!userRef.current) {
+                void refreshLoginHint();
+            }
+        });
+        return typeof unsubscribe === 'function' ? unsubscribe : undefined;
+    }, [refreshLoginHint]);
+
     const login = async (name, password, diagnosticContext = {}) => {
         try {
             const normalizedName = String(name || '').trim();

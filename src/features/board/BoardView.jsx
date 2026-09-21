@@ -598,10 +598,29 @@ const BoardView = ({ currentUser }) => {
                                 )}
                             </div>
 
-                            {/* 첨부파일 */}
+                            {/* 댓글 헤더 */}
                             <div style={{ marginTop: '1.5rem', borderTop: '2px solid #e2e8f0', paddingTop: '1rem' }}>
-                                <div style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#1e293b', marginBottom: '0.75rem' }}>
-                                    💬 댓글 {comments.length}개
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '8px' }}>
+                                    <div style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#1e293b' }}>
+                                        💬 댓글 {comments.length}개
+                                    </div>
+                                    <div style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        padding: '2px 8px',
+                                        borderRadius: '4px',
+                                        fontSize: '0.6875rem',
+                                        fontWeight: 700,
+                                        backgroundColor: isAdmin ? '#eff6ff' : '#f0fdf4',
+                                        color: isAdmin ? '#1d4ed8' : '#15803d',
+                                        border: `1px solid ${isAdmin ? '#bfdbfe' : '#bbf7d0'}`
+                                    }}>
+                                        <span className="material-icons" style={{ fontSize: '12px' }}>
+                                            {isAdmin ? 'admin_panel_settings' : 'lock'}
+                                        </span>
+                                        {isAdmin ? '관리자 모드 (전체 근로자 댓글 열람 중)' : '1:1 비밀 소통 (본인과 중앙관리자만 열람 가능)'}
+                                    </div>
                                 </div>
 
                                 {/* 댓글 목록 */}

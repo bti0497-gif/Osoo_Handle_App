@@ -100,6 +100,60 @@ function popupExpiry(isPopup, requestedDays) {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
+/**
+ * 댓글 1:1 비밀 소통(프라이빗 스레드) 필터링
+ * - 중앙관리자: 모든 댓글 열람 가능
+ * - 현장근무자:
+ *   1) 자신이 작성한 최상위 댓글 + 그 하위 답글(관리자 답변 포함)
+ *   2) 관리자가 작성한 최상위 댓글(공지성 댓글) 및 그 하위에 본인/관리자가 단 답글
+ *   3) 타인 근로자가 작성한 댓글 스레드는 완전히 제외
+ */
+function filterCommentsForUser(comments, user) {
+  if (!Array.isArray(comments) || comments.length === 0) return [];
+  if (isAdmin(user)) return comments;
+
+  const currentUserName = String(user?.name || '').trim();
+  if (!currentUserName) return [];
+
+  const commentMap = new Map();
+  for (const c of comments) {
+    commentMap.set(c.id, c);
+  }
+
+  function getRootComment(c) {
+    let curr = c;
+    const visited = new Set();
+    while (curr.parent_id && commentMap.has(curr.parent_id) && !visited.has(curr.parent_id)) {
+      visited.add(curr.id);
+      curr = commentMap.get(curr.parent_id);
+    }
+    return curr;
+  }
+
+  return comments.filter((c) => {
+    const root = getRootComment(c);
+    const rootAuthor = String(root.author || '').trim();
+    const commentAuthor = String(c.author || '').trim();
+
+    // 1. 최상위 댓글이 본인인 경우 -> 전체 스레드 열람 가능 (본인 댓글 + 관리자 답변 등)
+    if (rootAuthor === currentUserName) {
+      return true;
+    }
+
+    // 2. 최상위 댓글이 관리자인 경우 (전체 공지성 댓글)
+    const isRootAdmin = isAdminRole(root.author_role) || rootAuthor === '최고관리자' || rootAuthor.toLowerCase() === 'admin';
+    if (isRootAdmin) {
+      if (c.id === root.id) return true; // 관리자 최상위 댓글 자체
+      const isCommentAdmin = isAdminRole(c.author_role) || commentAuthor === '최고관리자' || commentAuthor.toLowerCase() === 'admin';
+      if (commentAuthor === currentUserName || isCommentAdmin) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+}
+
 module.exports = function () {
 
   // 이 세션은 로그인 성공 시 생성되며 출결 기록·BigQuery 동기화와 무관하다.
@@ -207,7 +261,8 @@ module.exports = function () {
         return res.status(403).json({ success: false, message: '댓글 조회 권한 없음' });
       }
       const comments = await getComments(req.params.id);
-      res.json({ success: true, data: comments });
+      const filteredComments = filterCommentsForUser(comments, user);
+      res.json({ success: true, data: filteredComments });
     } catch (err) { handleError(res, err, 'getComments'); }
   });
 
@@ -222,9 +277,11 @@ module.exports = function () {
         return res.status(403).json({ success: false, message: '댓글 작성 권한 없음' });
       }
       const comment = await createComment(req.params.id, {
-        author:  user.name,
-        content: body.content || '',
-        parent_id: body.parent_id || null
+        author:      user.name,
+        author_role: user.role,
+        author_site: user.site,
+        content:     body.content || '',
+        parent_id:   body.parent_id || null
       });
       res.json({ success: true, data: comment });
     } catch (err) { handleError(res, err, 'createComment'); }

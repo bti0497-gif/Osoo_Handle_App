@@ -328,12 +328,14 @@ async function createComment(postId, data) {
   const id = newUUID();
   const docData = {
     id,
-    post_id:    postId,
-    author:     data.author  || '',
-    content:    data.content || '',
-    parent_id:   data.parent_id || null,
-    is_deleted: false,
-    created_at: new Date().toISOString()
+    post_id:     postId,
+    author:      data.author      || '',
+    author_role: data.author_role || '',
+    author_site: data.author_site || '',
+    content:     data.content     || '',
+    parent_id:   data.parent_id   || null,
+    is_deleted:  false,
+    created_at:  new Date().toISOString()
   };
 
   await db.collection('comments').doc(id).set(docData);

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, Notification, powerMonitor } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -74,6 +74,7 @@ let rendererRecoveryInProgress = false;
 let externalRecoveryRequested = false;
 let externalRecoveryRequestId = null;
 let startupRecoveryState = { phase: 'idle', updatedAt: null };
+let morningWakeUpTimer = null;
 const appStartedAt = new Date().toISOString();
 
 const FULL_EXIT_LOCK_TTL_MS = 8 * 60 * 60 * 1000;
@@ -1358,6 +1359,114 @@ async function buildPdfBufferFromHtml(htmlContent, printBackground) {
   }
 }
 
+function restoreAndFocusMainWindow(reason = 'unknown') {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+
+  try {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+
+    // Windows OS에서 다른 창 뒤에 가려지지 않도록 일시적으로 AlwaysOnTop 토글 후 포커스
+    mainWindow.setAlwaysOnTop(true);
+    mainWindow.focus();
+    if (!mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.focus();
+    }
+
+    setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.setAlwaysOnTop(false);
+      mainWindow.focus();
+      if (!mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.focus();
+        mainWindow.webContents.send('app:window-restored', { reason });
+        if (reason.startsWith('morning-wakeup') || reason === 'morning-startup') {
+          mainWindow.webContents.send('app:morning-wakeup', {
+            reason,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    }, 100);
+
+    console.log(`[Electron] Main window restored and focused (reason: ${reason})`);
+    return true;
+  } catch (err) {
+    console.error('[Electron] Failed to restore and focus main window:', err);
+    return false;
+  }
+}
+
+function getKstParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+
+  const partMap = {};
+  for (const p of parts) {
+    partMap[p.type] = p.value;
+  }
+  return {
+    year: parseInt(partMap.year, 10),
+    month: parseInt(partMap.month, 10),
+    day: parseInt(partMap.day, 10),
+    hour: parseInt(partMap.hour, 10),
+    minute: parseInt(partMap.minute, 10),
+    second: parseInt(partMap.second, 10),
+  };
+}
+
+function isKstMorningAttendanceHours(date = new Date()) {
+  const { hour, minute } = getKstParts(date);
+  return (hour >= 6 && hour < 8) || (hour === 8 && minute < 30);
+}
+
+function getNextMorningWakeUpDelayMs(targetHour = 6, targetMinute = 0, baseDate = new Date()) {
+  const { year, month, day } = getKstParts(baseDate);
+
+  const todayWakeUpIso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(targetHour).padStart(2, '0')}:${String(targetMinute).padStart(2, '0')}:00+09:00`;
+  let targetTimeMs = Date.parse(todayWakeUpIso);
+
+  if (baseDate.getTime() >= targetTimeMs) {
+    const tomorrow = new Date(baseDate.getTime() + 24 * 60 * 60 * 1000);
+    const tomorrowParts = getKstParts(tomorrow);
+    const tomorrowWakeUpIso = `${tomorrowParts.year}-${String(tomorrowParts.month).padStart(2, '0')}-${String(tomorrowParts.day).padStart(2, '0')}T${String(targetHour).padStart(2, '0')}:${String(targetMinute).padStart(2, '0')}:00+09:00`;
+    targetTimeMs = Date.parse(tomorrowWakeUpIso);
+  }
+
+  return Math.max(1000, targetTimeMs - baseDate.getTime());
+}
+
+function scheduleMorningWakeUp() {
+  if (morningWakeUpTimer) {
+    clearTimeout(morningWakeUpTimer);
+    morningWakeUpTimer = null;
+  }
+
+  const delayMs = getNextMorningWakeUpDelayMs(6, 0);
+  const wakeUpDate = new Date(Date.now() + delayMs);
+  console.log(`[Electron] Next morning wake-up scheduled in ${Math.round(delayMs / 1000 / 60)} minutes (at ${wakeUpDate.toISOString()})`);
+
+  morningWakeUpTimer = setTimeout(() => {
+    morningWakeUpTimer = null;
+    console.log('[Electron] Morning wake-up timer triggered (06:00 KST)');
+    restoreAndFocusMainWindow('morning-wakeup-timer');
+    scheduleMorningWakeUp();
+  }, delayMs);
+  morningWakeUpTimer.unref?.();
+}
+
 function createTray() {
   const iconPath = isDev
     ? path.join(__dirname, '..', 'public', 'icon.ico')
@@ -1368,18 +1477,7 @@ function createTray() {
     {
       label: '창 열기',
       click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-          mainWindow.focus();
-          mainWindow.webContents.focus();
-          console.log('[Tray] Restore requested from menu');
-          setTimeout(() => {
-            if (!mainWindow || mainWindow.isDestroyed()) return;
-            mainWindow.focus();
-            mainWindow.webContents.focus();
-            mainWindow.webContents.send('app:window-restored', { reason: 'tray-menu' });
-          }, 50);
-        }
+        restoreAndFocusMainWindow('tray-menu');
       }
     },
     { type: 'separator' },
@@ -1403,18 +1501,7 @@ function createTray() {
   tray.setContextMenu(contextMenu);
 
   tray.on('double-click', () => {
-    if (mainWindow) {
-      mainWindow.show();
-      mainWindow.focus();
-      mainWindow.webContents.focus();
-      console.log('[Tray] Restore requested by double-click');
-      setTimeout(() => {
-        if (!mainWindow || mainWindow.isDestroyed()) return;
-        mainWindow.focus();
-        mainWindow.webContents.focus();
-        mainWindow.webContents.send('app:window-restored', { reason: 'tray-double-click' });
-      }, 50);
-    }
+    restoreAndFocusMainWindow('tray-double-click');
   });
 }
 
@@ -1429,18 +1516,7 @@ if (!gotTheLock) {
 }
 
 app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-    mainWindow.webContents.focus();
-    setTimeout(() => {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
-      mainWindow.focus();
-      mainWindow.webContents.focus();
-      mainWindow.webContents.send('app:window-restored', { reason: 'second-instance' });
-    }, 50);
-  }
+  restoreAndFocusMainWindow('second-instance');
 });
 
 app.whenReady().then(() => {
@@ -1454,6 +1530,9 @@ app.whenReady().then(() => {
     console.warn('[Roadwork] Failed to load IPC handlers:', error.message);
   }
 
+  const isMorningHours = isKstMorningAttendanceHours();
+  console.log(`[Electron] App startup (background=${isBackgroundStartup ? 'yes' : 'no'}, morningHours=${isMorningHours ? 'yes' : 'no'})`);
+
   handleVersionMigration();
   startServer();
   startServerGuard();
@@ -1462,6 +1541,24 @@ app.whenReady().then(() => {
   startRuntimeTelemetry();
   createWindow({ showOnReady: !isBackgroundStartup });
   createTray();
+  scheduleMorningWakeUp();
+
+  if (isBackgroundStartup && isMorningHours) {
+    console.log('[Electron] Background startup during morning hours (06:00~08:30 KST) -> Restoring window to foreground');
+    setTimeout(() => {
+      restoreAndFocusMainWindow('morning-startup');
+    }, 1500);
+  }
+
+  powerMonitor.on('resume', () => {
+    console.log('[Electron] System resumed from sleep/standby');
+    if (isKstMorningAttendanceHours()) {
+      console.log('[Electron] System resumed during morning hours (06:00~08:30 KST) -> Restoring window');
+      restoreAndFocusMainWindow('morning-wakeup-resume');
+    }
+    scheduleMorningWakeUp();
+  });
+
   waitForServerReadyAndClearMaintenanceLocks().catch((error) => {
     console.warn('[MaintenanceLock] Failed while waiting for server readiness:', error.message);
   });
@@ -1475,6 +1572,8 @@ app.whenReady().then(() => {
       onBeforeInstall: async () => {
         isUpdateInstalling = true;
         isQuitting = true;
+        if (morningWakeUpTimer) clearTimeout(morningWakeUpTimer);
+        morningWakeUpTimer = null;
         if (serverGuardTimer) clearInterval(serverGuardTimer);
         if (serverRestartTimer) clearTimeout(serverRestartTimer);
         serverGuardTimer = null;
@@ -1496,6 +1595,8 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   isQuitting = true;
   console.log('[Electron] before-quit: app shutdown sequence started');
+  if (morningWakeUpTimer) clearTimeout(morningWakeUpTimer);
+  morningWakeUpTimer = null;
   if (serverGuardTimer) clearInterval(serverGuardTimer);
   if (serverRestartTimer) clearTimeout(serverRestartTimer);
   serverGuardTimer = null;

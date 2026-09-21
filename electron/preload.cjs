@@ -65,6 +65,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('app:window-restored', listener);
     return () => ipcRenderer.removeListener('app:window-restored', listener);
   },
+  onMorningWakeup: (callback) => {
+    const listener = (_event, info) => callback(info || {});
+    ipcRenderer.on('app:morning-wakeup', listener);
+    return () => ipcRenderer.removeListener('app:morning-wakeup', listener);
+  },
   invokeRoadwork: (channel, ...args) => {
     const allowed = [
       'roadwork:getPreloadPath',
