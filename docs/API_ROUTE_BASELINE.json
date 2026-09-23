@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 178,
-  "digest": "20f88e893fc284120fff747c2fcd827a17678964e969c51a1b5dd605f22efd48",
+  "endpointCount": 180,
+  "digest": "d0996fcfd3f1957fbaf0a80cb081db6441cebff3a9b2aa2e8877a57b73b7b9a0",
   "endpoints": [
     {
       "method": "GET",
@@ -150,6 +150,22 @@
     {
       "method": "DELETE",
       "path": "/api/auth/members/:id",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/remote-status",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/report-remote-attempt",
       "module": "./routes/authRoutes.cjs",
       "tier": 0,
       "mutation": true,

@@ -1,4 +1,4 @@
-﻿const { execSync } = require('child_process');
+const { execSync } = require('child_process');
 
 const KNOWN_REMOTE_PROCESSES = [
   'teamviewer.exe',
@@ -50,7 +50,7 @@ function getRemoteToolLabel(processName) {
   return REMOTE_TOOL_LABELS.find(([keyword]) => normalized.includes(keyword))?.[1] || processName;
 }
 
-function tryReadTasklistProcessNames() {
+function tryReadTasklistProcessEntries() {
   try {
     const output = execSync('tasklist /fo csv /nh', {
       encoding: 'utf8',
@@ -62,8 +62,12 @@ function tryReadTasklistProcessNames() {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const first = line.split('","')[0] || '';
-        return first.replace(/^"/, '').replace(/"$/, '').toLowerCase();
+        const parts = line.split('","');
+        if (parts.length < 2) return null;
+        return {
+          name: parts[0].replace(/^"/, '').toLowerCase(),
+          pid: parts[1].replace(/"/g, '')
+        };
       })
       .filter(Boolean);
   } catch {
@@ -71,7 +75,40 @@ function tryReadTasklistProcessNames() {
   }
 }
 
+function tryFindActiveRemoteConnections(procs) {
+  if (!procs || procs.length === 0) return [];
+  try {
+    const netstat = execSync('netstat -ano -p tcp', {
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    const active = [];
+    for (const proc of procs) {
+      const pidRegex = new RegExp(`\\s+ESTABLISHED\\s+${proc.pid}\\s*$`, 'm');
+      if (pidRegex.test(netstat)) {
+        active.push({
+          toolName: getRemoteToolLabel(proc.name),
+          procName: proc.name,
+          pid: proc.pid
+        });
+      }
+    }
+    return active;
+  } catch {
+    return [];
+  }
+}
+
+let lastDetectCache = null;
+let lastDetectAt = 0;
+
 function detectRemoteSession() {
+  const now = Date.now();
+  if (lastDetectCache && (now - lastDetectAt < 1500)) {
+    return lastDetectCache;
+  }
+
   const confirmedIndicators = [];
   const sessionName = String(process.env.SESSIONNAME || '').trim();
   const clientName = String(process.env.CLIENTNAME || '').trim();
@@ -87,16 +124,32 @@ function detectRemoteSession() {
     confirmedIndicators.push('ssh_connection');
   }
 
-  const runningProcessNames = tryReadTasklistProcessNames();
+  const runningEntries = tryReadTasklistProcessEntries();
+  const runningProcessNames = runningEntries.map((e) => e.name);
   const matchedRemoteProcesses = KNOWN_REMOTE_PROCESSES
     .filter((name) => runningProcessNames.includes(name));
   const matchedByKeyword = runningProcessNames
     .filter((proc) => KNOWN_REMOTE_PROCESS_KEYWORDS.some((keyword) => proc.includes(keyword)))
     .filter((proc) => !matchedRemoteProcesses.includes(proc));
 
+  const matchedEntries = runningEntries.filter((e) =>
+    matchedRemoteProcesses.includes(e.name) ||
+    KNOWN_REMOTE_PROCESS_KEYWORDS.some((k) => e.name.includes(k))
+  );
+
   const observedTools = [...new Set(
     [...matchedRemoteProcesses, ...matchedByKeyword].map(getRemoteToolLabel)
   )];
+
+  // Active remote connection check (e.g. AnyDesk, TeamViewer, RustDesk, Chrome Remote connected)
+  const activeRemoteSessions = tryFindActiveRemoteConnections(matchedEntries);
+  for (const active of activeRemoteSessions) {
+    confirmedIndicators.push(`active_remote:${active.toolName}(PID:${active.pid})`);
+  }
+
+  if (runningProcessNames.includes('rdpclip.exe')) {
+    confirmedIndicators.push('active_remote:Windows RDP(rdpclip.exe)');
+  }
 
   // A tray/service process only means that remote access is available. It is
   // not proof that a remote operator is currently controlling this PC. Keep
@@ -104,18 +157,24 @@ function detectRemoteSession() {
   // an installed tray tool for an active remote session.
   const detected = confirmedIndicators.length > 0;
   let sessionType = 'local';
-  if (sessionName.toUpperCase().startsWith('RDP-') || (clientName && clientName.toUpperCase() !== 'CONSOLE')) {
+  if (sessionName.toUpperCase().startsWith('RDP-') || (clientName && clientName.toUpperCase() !== 'CONSOLE') || runningProcessNames.includes('rdpclip.exe')) {
     sessionType = 'Windows RDP';
   } else if (sshConnection) {
     sessionType = 'SSH';
+  } else if (activeRemoteSessions.length > 0) {
+    sessionType = activeRemoteSessions[0].toolName;
   }
 
-  return {
+  const result = {
     detected,
     sessionType,
     evidence: confirmedIndicators.join('; '),
     observedTools
   };
+
+  lastDetectCache = result;
+  lastDetectAt = now;
+  return result;
 }
 
 module.exports = {

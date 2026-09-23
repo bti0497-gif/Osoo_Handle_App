@@ -634,13 +634,16 @@ function App() {
         setActiveTab('myinfo');
     };
 
-    const handleLogout = () => {
+    const handleLogout = async () => {
+        const result = await logout();
+        if (result?.code === 'REMOTE_LOGOUT_BLOCKED') {
+            return;
+        }
         clearRecordGridHistoryCache();
         import('./features/board/BoardModel').then(({ BoardModel }) => BoardModel.clearPostsCache());
         resetRecordGridSessions();
         setPreloadedUserId(null);
         setIsRoadworkMounted(false);
-        logout();
     };
 
     const handleTabChange = (nextTab) => {

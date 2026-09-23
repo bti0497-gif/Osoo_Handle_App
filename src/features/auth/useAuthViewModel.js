@@ -434,11 +434,15 @@ export const useAuthViewModel = () => {
             return { success: false, message: '이름 또는 비밀번호가 일치하지 않습니다.' };
         } catch (err) {
             console.error('Login Error:', err);
+            const isRemoteBlocked = err?.code === 'REMOTE_LOGIN_BLOCKED' || err?.data?.code === 'REMOTE_LOGIN_BLOCKED';
             return {
                 success: false,
-                message: Number(err?.status) === 401 && err?.data?.code !== 'LOCAL_API_UNAUTHORIZED'
-                    ? '이름 또는 비밀번호가 일치하지 않습니다.'
-                    : `로그인 처리 중 오류가 발생했습니다: ${err?.message || '알 수 없는 오류'}`,
+                code: err?.data?.code || err?.code,
+                message: isRemoteBlocked
+                    ? (err?.data?.message || err?.data?.error || '원격 시도는 차단되어 있습니다..')
+                    : Number(err?.status) === 401 && err?.data?.code !== 'LOCAL_API_UNAUTHORIZED'
+                        ? '이름 또는 비밀번호가 일치하지 않습니다.'
+                        : `로그인 처리 중 오류가 발생했습니다: ${err?.message || '알 수 없는 오류'}`,
             };
         }
     };
@@ -457,12 +461,16 @@ export const useAuthViewModel = () => {
                 }
             } catch (err) {
                 console.error('Logout sync failed:', err);
+                if (err?.code === 'REMOTE_LOGOUT_BLOCKED' || err?.data?.code === 'REMOTE_LOGOUT_BLOCKED') {
+                    alert(err?.data?.message || err?.message || '원격 시도는 차단되어 있습니다..');
+                    return { success: false, code: 'REMOTE_LOGOUT_BLOCKED', message: err?.data?.message || err?.message || '원격 시도는 차단되어 있습니다..' };
+                }
             }
         }
         await clearLocalAuthenticatedState({ hideToTray: false });
         await resetGlobalElectronSession();
         await refreshLoginHint();
-
+        return { success: true };
     };
 
     const resetAfterPasswordChange = async () => {

@@ -28,6 +28,9 @@ function detectRemoteSession(...args) {
 function recordAttendanceSessions(...args) {
   return require('../services/attendanceSessionService.cjs').recordAttendanceSessions(...args);
 }
+function resolveAttendanceSites(...args) {
+  return require('../services/attendanceSessionService.cjs').resolveAttendanceSites(...args);
+}
 function notifyBigQueryUserActivity(...args) {
   return require('../services/bigQueryTriggerService.cjs').notifyUserActivity(...args);
 }
@@ -472,6 +475,112 @@ module.exports = (db, appDataPath) => {
         return String(fallback?.name || '').trim();
     };
 
+    const recordRemoteAttemptRecord = (db, appDataPath, { name, member, remote, safeClientContext = {} }) => {
+        const targetMember = member || (name ? db.prepare('SELECT * FROM members WHERE name = ?').get(name) : null);
+        const memberName = targetMember?.name || name || 'unknown';
+        const memberId = targetMember?.id || null;
+
+        recordDiagnostic(db, appDataPath, {
+            level: 'warn',
+            area: 'auth',
+            action: 'remote-login-blocked',
+            result: 'blocked',
+            message: '원격 접속 상태에서 로그인 시도가 차단되었습니다.',
+            details: {
+                name: memberName,
+                memberId,
+                remoteSessionType: remote?.sessionType || 'remote',
+                remoteEvidence: remote?.evidence || '',
+                remoteDetected: Boolean(remote?.detected),
+                ...safeClientContext,
+            },
+        });
+
+        if (targetMember && String(targetMember.role || 'user') === 'user') {
+            const dateKST = getTodayLocal();
+            const enriched = enrichMemberWithSites(targetMember);
+            const requestedSite = {
+                site_id: enriched?.site_id || null,
+                site_name: enriched?.site_name1 || '',
+            };
+            const sites = resolveAttendanceSites(db, requestedSite);
+            for (const site of sites) {
+                const existing = db.prepare(`
+                    SELECT * FROM attendance
+                    WHERE member_id = ? AND date = ? AND (site_id = ? OR site_id IS NULL)
+                    ORDER BY id DESC LIMIT 1
+                `).get(targetMember.id, dateKST, site.site_id);
+
+                if (!existing) {
+                    db.prepare(`
+                        INSERT INTO attendance (
+                            member_id, member_name, site_id, site_name, date,
+                            login_time, logout_time, location_matched,
+                            remote_session_detected, remote_session_type, remote_session_evidence,
+                            auto_logout, is_synced, last_modified
+                        ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, 1, ?, ?, 0, 0, datetime('now', 'localtime'))
+                    `).run(
+                        targetMember.id,
+                        targetMember.name,
+                        site.site_id,
+                        site.site_name || '',
+                        dateKST,
+                        remote?.sessionType || 'remote',
+                        remote?.evidence || ''
+                    );
+                } else {
+                    db.prepare(`
+                        UPDATE attendance
+                        SET remote_session_detected = 1,
+                            remote_session_type = ?,
+                            remote_session_evidence = ?,
+                            is_synced = 0,
+                            last_modified = datetime('now', 'localtime')
+                        WHERE id = ?
+                    `).run(
+                        remote?.sessionType || 'remote',
+                        remote?.evidence || '',
+                        existing.id
+                    );
+                }
+            }
+        }
+
+        try {
+            uploadPendingDiagnostics(db, appDataPath).catch(() => {});
+        } catch (_) {}
+    };
+
+    router.get('/remote-status', (req, res) => {
+        try {
+            const remote = detectRemoteSession();
+            return res.json({
+                success: true,
+                remote: {
+                    detected: Boolean(remote?.detected),
+                    sessionType: remote?.sessionType || 'local',
+                    evidence: remote?.evidence || '',
+                    observedTools: remote?.observedTools || [],
+                },
+            });
+        } catch (err) {
+            return res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
+    router.post('/report-remote-attempt', (req, res) => {
+        const name = String(req.body?.name || '').trim();
+        try {
+            const remote = detectRemoteSession();
+            if (remote.detected) {
+                recordRemoteAttemptRecord(db, appDataPath, { name, remote });
+            }
+            return res.json({ success: true });
+        } catch (err) {
+            return res.status(500).json({ success: false, error: err.message });
+        }
+    });
+
     // 1. Local login.
     router.post('/local-login', async (req, res) => {
         const normalizedName = String(req.body?.name || '').trim();
@@ -534,6 +643,21 @@ module.exports = (db, appDataPath) => {
                     ...safeClientContext,
                 },
             });
+            const remote = detectRemoteSession();
+            if (remote.detected) {
+                const namedMember = db.prepare('SELECT * FROM members WHERE name = ?').get(normalizedName);
+                recordRemoteAttemptRecord(db, appDataPath, { name: normalizedName, member: namedMember, remote, safeClientContext });
+                return res.status(403).json({
+                    success: false,
+                    code: 'REMOTE_LOGIN_BLOCKED',
+                    message: '원격 시도는 차단되어 있습니다..',
+                    error: '원격 시도는 차단되어 있습니다..',
+                    remote: {
+                        sessionType: remote.sessionType,
+                        evidence: remote.evidence,
+                    },
+                });
+            }
             const namedMember = db.prepare('SELECT * FROM members WHERE name = ?').get(normalizedName);
             const member = namedMember
                 && String(namedMember.password || '') === submittedPassword
@@ -614,7 +738,6 @@ module.exports = (db, appDataPath) => {
             res.status(500).json({ success: false, error: err.message });
         }
     });
-
     // Authenticate against the Google Sheets member master.
     // Admin accounts remain remote-only so they can always use the latest credentials.
     router.post('/discovery-login', async (req, res) => {
@@ -651,6 +774,21 @@ module.exports = (db, appDataPath) => {
             if (isAdmin) {
                 setActiveUser(member, `discovery-login:${source}`);
                 return res.json({ success: true, member: enrichMemberWithSites(member), source });
+            }
+
+            const remote = detectRemoteSession();
+            if (remote.detected) {
+                recordRemoteAttemptRecord(db, appDataPath, { name, member, remote });
+                return res.status(403).json({
+                    success: false,
+                    code: 'REMOTE_LOGIN_BLOCKED',
+                    message: '원격 시도는 차단되어 있습니다..',
+                    error: '원격 시도는 차단되어 있습니다..',
+                    remote: {
+                        sessionType: remote.sessionType,
+                        evidence: remote.evidence,
+                    },
+                });
             }
 
             syncLocalMembers([member]);
@@ -948,6 +1086,59 @@ module.exports = (db, appDataPath) => {
         const logoutTime = getLocalTime();
 
         try {
+            const member = memberId ? db.prepare('SELECT * FROM members WHERE id = ?').get(memberId) : null;
+            const isFieldWorker = !member || String(member.role || 'user') === 'user';
+
+            if (!autoLogout && isFieldWorker) {
+                const remote = detectRemoteSession();
+                if (remote.detected) {
+                    recordDiagnostic(db, appDataPath, {
+                        level: 'warn',
+                        area: 'auth',
+                        action: 'remote-logout-blocked',
+                        result: 'blocked',
+                        message: '원격 접속 상태에서 로그아웃(퇴근) 시도가 차단되었습니다.',
+                        details: {
+                            memberId,
+                            memberName: member?.name || 'unknown',
+                            remoteSessionType: remote?.sessionType || 'remote',
+                            remoteEvidence: remote?.evidence || '',
+                            remoteDetected: Boolean(remote?.detected),
+                        },
+                    });
+
+                    db.prepare(`
+                        UPDATE attendance
+                        SET remote_session_detected = 1,
+                            remote_session_type = ?,
+                            remote_session_evidence = ?,
+                            is_synced = 0,
+                            last_modified = datetime('now', 'localtime')
+                        WHERE member_id = ? AND date = ? AND logout_time IS NULL
+                    `).run(
+                        remote?.sessionType || 'remote',
+                        remote?.evidence || '',
+                        memberId,
+                        dateKST
+                    );
+
+                    try {
+                        uploadPendingDiagnostics(db, appDataPath).catch(() => {});
+                    } catch (_) {}
+
+                    return res.status(403).json({
+                        success: false,
+                        code: 'REMOTE_LOGOUT_BLOCKED',
+                        message: '원격 시도는 차단되어 있습니다..',
+                        error: '원격 시도는 차단되어 있습니다..',
+                        remote: {
+                            sessionType: remote.sessionType,
+                            evidence: remote.evidence,
+                        },
+                    });
+                }
+            }
+
             clearActiveUser(memberId);
             db.prepare(`
         UPDATE attendance 

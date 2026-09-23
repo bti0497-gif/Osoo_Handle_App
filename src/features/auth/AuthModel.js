@@ -27,6 +27,27 @@ export const AuthModel = {
         }
     },
 
+    async getRemoteStatus() {
+        try {
+            const data = await apiClient.get('/api/auth/remote-status');
+            if (data?.success && data?.remote) {
+                return data.remote;
+            }
+            return { detected: false, sessionType: 'local', evidence: '' };
+        } catch (e) {
+            console.warn('[AuthModel] 원격 상태 조회 실패:', e);
+            return { detected: false, sessionType: 'local', evidence: '' };
+        }
+    },
+
+    async reportRemoteAttempt(name) {
+        try {
+            await apiClient.post('/api/auth/report-remote-attempt', { name });
+        } catch (e) {
+            console.warn('[AuthModel] 원격 시도 보고 실패:', e);
+        }
+    },
+
     async localLogin(name, password, diagnosticContext = {}) {
         try {
             const data = await apiClient.post('/api/auth/local-login', { name, password, diagnosticContext });
@@ -40,6 +61,13 @@ export const AuthModel = {
             // Credential rejection is expected. A local API token rejection
             // is a server-readiness fault, not a bad worker password.
             if (Number(e?.status) === 401 && e?.data?.code !== 'LOCAL_API_UNAUTHORIZED') return null;
+            if (Number(e?.status) === 403 && e?.data?.code === 'REMOTE_LOGIN_BLOCKED') {
+                const err = new Error(e?.data?.message || '원격 시도는 차단되어 있습니다..');
+                err.status = 403;
+                err.code = 'REMOTE_LOGIN_BLOCKED';
+                err.data = e.data;
+                throw err;
+            }
             throw e;
         }
     },
@@ -54,6 +82,13 @@ export const AuthModel = {
             return data;
         } catch (e) {
             console.error("Error during discoveryLogin:", e);
+            if (Number(e?.status) === 403 && e?.data?.code === 'REMOTE_LOGIN_BLOCKED') {
+                const err = new Error(e?.data?.message || '원격 시도는 차단되어 있습니다..');
+                err.status = 403;
+                err.code = 'REMOTE_LOGIN_BLOCKED';
+                err.data = e.data;
+                throw err;
+            }
             throw e;
         }
     },
@@ -88,9 +123,17 @@ export const AuthModel = {
                 memberId: member.id,
                 autoLogout
             });
-            if (!data.success) throw new Error(data.error);
+            if (!data.success) throw new Error(data.error || data.message);
+            return data;
         } catch (e) {
             console.error("Error recording logout:", e);
+            if (Number(e?.status) === 403 && e?.data?.code === 'REMOTE_LOGOUT_BLOCKED') {
+                const err = new Error(e?.data?.message || '원격 시도는 차단되어 있습니다..');
+                err.status = 403;
+                err.code = 'REMOTE_LOGOUT_BLOCKED';
+                err.data = e.data;
+                throw err;
+            }
             throw e;
         }
     },
