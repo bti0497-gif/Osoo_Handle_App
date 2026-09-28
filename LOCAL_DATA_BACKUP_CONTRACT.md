@@ -14,6 +14,8 @@
 
 ## Diagnostic Log Retention
 
-- On the first startup of each app version, diagnostic logs older than the current KST date are removed.
-- Cleanup is limited to the local diagnostic store and the Google Drive `앱진단로그` tree.
+- Detailed diagnostic events stay in the local SQLite upload queue only until Drive confirms receipt; after receipt, the message and detail payload are scrubbed while small summary fields remain for daily stability counts. Unsent items expire after 30 KST days.
+- Legacy local diagnostic JSONL files are removed after 14 KST days. New work activity history records only timestamp, work title, and result in `logs/activity/`, retained for 30 KST days or 500 MiB total, whichever limit is reached first.
+- On the first startup of each app version, Google Drive `앱진단로그` files older than 14 KST days are removed.
+- The raw `electron-server.log` keeps only bounded stderr (4 MiB maximum; an oversized legacy file is compacted on startup).
 - Logs created on the current KST date must remain available for field diagnosis.

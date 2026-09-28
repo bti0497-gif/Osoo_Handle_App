@@ -28,9 +28,6 @@ function detectRemoteSession(...args) {
 function recordAttendanceSessions(...args) {
   return require('../services/attendanceSessionService.cjs').recordAttendanceSessions(...args);
 }
-function resolveAttendanceSites(...args) {
-  return require('../services/attendanceSessionService.cjs').resolveAttendanceSites(...args);
-}
 function notifyBigQueryUserActivity(...args) {
   return require('../services/bigQueryTriggerService.cjs').notifyUserActivity(...args);
 }
@@ -496,55 +493,8 @@ module.exports = (db, appDataPath) => {
             },
         });
 
-        if (targetMember && String(targetMember.role || 'user') === 'user') {
-            const dateKST = getTodayLocal();
-            const enriched = enrichMemberWithSites(targetMember);
-            const requestedSite = {
-                site_id: enriched?.site_id || null,
-                site_name: enriched?.site_name1 || '',
-            };
-            const sites = resolveAttendanceSites(db, requestedSite);
-            for (const site of sites) {
-                const existing = db.prepare(`
-                    SELECT * FROM attendance
-                    WHERE member_id = ? AND date = ? AND (site_id = ? OR site_id IS NULL)
-                    ORDER BY id DESC LIMIT 1
-                `).get(targetMember.id, dateKST, site.site_id);
-
-                if (!existing) {
-                    db.prepare(`
-                        INSERT INTO attendance (
-                            member_id, member_name, site_id, site_name, date,
-                            login_time, logout_time, location_matched,
-                            remote_session_detected, remote_session_type, remote_session_evidence,
-                            auto_logout, is_synced, last_modified
-                        ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, 1, ?, ?, 0, 0, datetime('now', 'localtime'))
-                    `).run(
-                        targetMember.id,
-                        targetMember.name,
-                        site.site_id,
-                        site.site_name || '',
-                        dateKST,
-                        remote?.sessionType || 'remote',
-                        remote?.evidence || ''
-                    );
-                } else {
-                    db.prepare(`
-                        UPDATE attendance
-                        SET remote_session_detected = 1,
-                            remote_session_type = ?,
-                            remote_session_evidence = ?,
-                            is_synced = 0,
-                            last_modified = datetime('now', 'localtime')
-                        WHERE id = ?
-                    `).run(
-                        remote?.sessionType || 'remote',
-                        remote?.evidence || '',
-                        existing.id
-                    );
-                }
-            }
-        }
+        // A rejected login is an attempt, not attendance. Keep its timestamp and
+        // evidence in diagnostics without creating an open, login_time=NULL row.
 
         try {
             uploadPendingDiagnostics(db, appDataPath).catch(() => {});
@@ -553,7 +503,7 @@ module.exports = (db, appDataPath) => {
 
     router.get('/remote-status', (req, res) => {
         try {
-            const remote = detectRemoteSession();
+            const remote = detectRemoteSession({ useCache: true });
             return res.json({
                 success: true,
                 remote: {
@@ -850,6 +800,15 @@ module.exports = (db, appDataPath) => {
             if (String(member.role || '').trim() === 'admin' || String(member.name || '').trim() === 'admin') {
                 return res.json({ success: false, message: '관리자 세션은 저장할 수 없습니다.' });
             }
+            const remote = detectRemoteSession();
+            if (remote.detected) {
+                recordRemoteAttemptRecord(db, appDataPath, { name: member.name, member, remote });
+                return res.status(403).json({
+                    success: false,
+                    code: 'REMOTE_LOGIN_BLOCKED',
+                    message: '원격 시도는 차단되어 있습니다..',
+                });
+            }
             setActiveUser(member, 'session-token-restore');
             return res.json({
                 success: true,
@@ -1056,11 +1015,19 @@ module.exports = (db, appDataPath) => {
         const loginTime = getLocalTime();
 
         try {
+            const remote = detectRemoteSession();
+            if (remote.detected) {
+                recordDiagnostic(db, appDataPath, {
+                    level: 'warn', area: 'auth', action: 'remote-attendance-blocked', result: 'blocked',
+                    message: '원격 접속 상태에서 출근 기록 요청이 차단되었습니다.',
+                    details: { memberId, remoteSessionType: remote.sessionType, remoteEvidence: remote.evidence },
+                });
+                return res.status(403).json({ success: false, code: 'REMOTE_LOGIN_BLOCKED', message: '원격 시도는 차단되어 있습니다..' });
+            }
             const requestedSite = {
                 site_id: req.siteContext?.siteId || null,
                 site_name: req.siteContext?.siteName || '',
             };
-            const remote = detectRemoteSession();
             const sessions = recordAttendanceSessions(db, {
                 memberId,
                 memberName,
@@ -1089,21 +1056,24 @@ module.exports = (db, appDataPath) => {
             const member = memberId ? db.prepare('SELECT * FROM members WHERE id = ?').get(memberId) : null;
             const isFieldWorker = !member || String(member.role || 'user') === 'user';
 
-            if (!autoLogout && isFieldWorker) {
+            if (isFieldWorker) {
                 const remote = detectRemoteSession();
                 if (remote.detected) {
                     recordDiagnostic(db, appDataPath, {
                         level: 'warn',
                         area: 'auth',
-                        action: 'remote-logout-blocked',
+                        action: autoLogout ? 'remote-auto-logout-deferred' : 'remote-logout-blocked',
                         result: 'blocked',
-                        message: '원격 접속 상태에서 로그아웃(퇴근) 시도가 차단되었습니다.',
+                        message: autoLogout
+                            ? '원격 접속 중 자동 퇴근은 서버 정시 처리로 넘겼습니다.'
+                            : '원격 접속 상태에서 로그아웃(퇴근) 시도가 차단되었습니다.',
                         details: {
                             memberId,
                             memberName: member?.name || 'unknown',
                             remoteSessionType: remote?.sessionType || 'remote',
                             remoteEvidence: remote?.evidence || '',
                             remoteDetected: Boolean(remote?.detected),
+                            requestedAutoLogout: Boolean(autoLogout),
                         },
                     });
 
@@ -1114,7 +1084,7 @@ module.exports = (db, appDataPath) => {
                             remote_session_evidence = ?,
                             is_synced = 0,
                             last_modified = datetime('now', 'localtime')
-                        WHERE member_id = ? AND date = ? AND logout_time IS NULL
+                        WHERE member_id = ? AND date = ? AND logout_time IS NULL AND login_time IS NOT NULL
                     `).run(
                         remote?.sessionType || 'remote',
                         remote?.evidence || '',
@@ -1154,6 +1124,18 @@ module.exports = (db, appDataPath) => {
 
     router.post('/logout-current', (req, res) => {
         try {
+            const activeUser = getActiveUser();
+            if (activeUser && String(activeUser.role || 'user') === 'user') {
+                const remote = detectRemoteSession();
+                if (remote.detected) {
+                    recordDiagnostic(db, appDataPath, {
+                        level: 'warn', area: 'auth', action: 'remote-session-clear-blocked', result: 'blocked',
+                        message: '원격 접속 상태에서 현장 세션 해제 요청이 차단되었습니다.',
+                        details: { memberId: activeUser.id, remoteSessionType: remote.sessionType, remoteEvidence: remote.evidence },
+                    });
+                    return res.status(403).json({ success: false, code: 'REMOTE_LOGOUT_BLOCKED', message: '원격 시도는 차단되어 있습니다..' });
+                }
+            }
             clearActiveUser();
             res.json({ success: true });
         } catch (err) {
@@ -1266,4 +1248,3 @@ module.exports = (db, appDataPath) => {
 
     return router;
 };
-

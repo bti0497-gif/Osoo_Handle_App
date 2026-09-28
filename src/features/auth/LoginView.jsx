@@ -30,7 +30,6 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                 isRemoteBlockedRef.current = true;
                 setPass('');
                 setError('원격 시도는 차단되어 있습니다..');
-                void AuthModel.reportRemoteAttempt(targetName || loginHintName);
             } else {
                 if (isRemoteBlockedRef.current) {
                     setIsRemoteBlocked(false);
@@ -41,7 +40,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
         } catch (e) {
             console.warn('[LoginView] 원격 상태 점검 실패:', e);
         }
-    }, [name, loginHintName]);
+    }, [name]);
 
     useEffect(() => {
         const hasPrefilledName = Boolean(nameRef.current?.value);
@@ -117,7 +116,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
         if (isRemoteBlocked && name.trim().toLowerCase() !== 'admin') {
             setError('원격 시도는 차단되어 있습니다..');
             setPass('');
-            void AuthModel.reportRemoteAttempt(name || loginHintName);
+            await AuthModel.reportRemoteAttempt(name || loginHintName);
             return;
         }
         setSubmitting(true);
@@ -216,7 +215,6 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                                 if (isRemoteBlocked && name.trim().toLowerCase() !== 'admin') {
                                     setError('원격 시도는 차단되어 있습니다..');
                                     setPass('');
-                                    void AuthModel.reportRemoteAttempt(name || loginHintName);
                                 } else {
                                     void checkRemote();
                                 }
@@ -268,8 +266,8 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                     <button
                         type="submit"
                         className="btn-login-new"
-                        disabled={submitting || (isRemoteBlocked && name.trim().toLowerCase() !== 'admin')}
-                        style={isRemoteBlocked && name.trim().toLowerCase() !== 'admin' ? { opacity: 0.65, cursor: 'not-allowed' } : {}}
+                        disabled={submitting}
+                        style={isRemoteBlocked && name.trim().toLowerCase() !== 'admin' ? { opacity: 0.65 } : {}}
                     >
                         {submitting ? '로그인 확인 중…' : isRemoteBlocked && name.trim().toLowerCase() !== 'admin' ? '원격 차단됨' : '로그인'}
                     </button>

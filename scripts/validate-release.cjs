@@ -1352,12 +1352,14 @@ function validateRegressionContracts() {
       diagnosticLogServiceText.includes("runDiagnosticUploadWorker({ action: 'cleanup', cutoffIso })") &&
       diagnosticUploadWorkerText.includes("findFolderPath(getDriveRootFolderId(), ['앱진단로그'])") &&
       diagnosticUploadWorkerText.includes('item.createdTime < cutoffIso') &&
-      diagnosticLogServiceText.includes("entry.name.slice(0, 10) >= todayKst") &&
+      diagnosticLogServiceText.includes('cleanupLocalDiagnosticRetention(db, appDataPath)') &&
+      diagnosticLogServiceText.includes('entry.name.slice(0, 10) >= fileCutoff') &&
+      diagnosticLogServiceText.includes('uploaded_at IS NULL AND created_at < ?') &&
       authRoutesSecurityText.includes("router.post('/background-tasks/run-diagnostic-sync'") &&
       authRoutesSecurityText.includes('cleanupOldDiagnosticsOnVersionStart(db, appDataPath)') &&
       localDataBackupContractText.includes('Logs created on the current KST date must remain'),
-    '버전 첫 실행 오늘 이전 진단로그 정리 계약 유지',
-    '업데이트 후 과거 진단로그 정리 또는 오늘 로그 보존 규칙이 깨졌습니다'
+    '진단로그 보존기간·미전송 데이터 유예·현재 로그 보존 계약 유지',
+    '진단로그 보존기간 또는 미전송 데이터 유예 규칙이 깨졌습니다'
   );
 
   checkSource(

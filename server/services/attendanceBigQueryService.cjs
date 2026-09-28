@@ -131,7 +131,7 @@ async function syncAttendanceLogs(logs, siteMeta = {}) {
           FROM source_rows S
           WHERE T.id = S.id
             AND COALESCE(T.site_id, '') = COALESCE(S.site_id, '')
-            AND T.login_time = S.login_time
+            AND (T.login_time = S.login_time OR (T.login_time IS NULL AND S.login_time IS NULL))
         );
 
         INSERT INTO \`${DATASET_ID}.attendance\` (

@@ -13,6 +13,9 @@ function isDriveServiceLoaded() {
 const SECRET_KEY_PATTERN = /(password|passwd|pwd|token|secret|key|credential|authorization|cookie|client_secret|refresh_token)/i;
 const MAX_STRING_LENGTH = 2000;
 const MAX_DETAIL_LENGTH = 15000;
+const LOCAL_FILE_RETENTION_DAYS = 14;
+const UPLOADED_ROW_RETENTION_DAYS = 14;
+const PENDING_ROW_RETENTION_DAYS = 30;
 const SENSITIVE_STRING_PATTERNS = [
   [/-----BEGIN(?: [A-Z]+)* PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z]+)* PRIVATE KEY-----/gi, '<redacted:private-key>'],
   [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer <redacted>'],
@@ -78,14 +81,6 @@ function getAppVersion() {
   } catch (_) {
     return '';
   }
-}
-
-function normalizeSiteName(value) {
-  return String(value || 'unknown-site')
-    .normalize('NFC')
-    .replace(/[\\/:*?"<>|]/g, '_')
-    .replace(/\s+/g, '_')
-    .slice(0, 80);
 }
 
 function getSiteInfo(db) {
@@ -170,6 +165,41 @@ function getKstDayStartIso(dateKey) {
   return new Date(`${dateKey}T00:00:00+09:00`).toISOString();
 }
 
+function getKstCutoffIso(days) {
+  const day = new Date(Date.now() + (9 * 60 * 60 * 1000) - days * 86400000)
+    .toISOString().slice(0, 10);
+  return getKstDayStartIso(day);
+}
+
+function cleanupLocalDiagnosticRetention(db, appDataPath) {
+  const uploadedRows = db.prepare(`
+    DELETE FROM app_diagnostic_logs WHERE uploaded_at IS NOT NULL AND created_at < ?
+  `).run(getKstCutoffIso(UPLOADED_ROW_RETENTION_DAYS)).changes;
+  const pendingRows = db.prepare(`
+    DELETE FROM app_diagnostic_logs WHERE uploaded_at IS NULL AND created_at < ?
+  `).run(getKstCutoffIso(PENDING_ROW_RETENTION_DAYS)).changes;
+  const fileCutoff = getKstCutoffIso(LOCAL_FILE_RETENTION_DAYS).slice(0, 10);
+  let files = 0;
+  const dir = ensureDiagnosticDir(appDataPath);
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isFile() || !/^\d{4}-\d{2}-\d{2}_.*_diagnostics\.jsonl$/i.test(entry.name)) continue;
+    if (entry.name.slice(0, 10) >= fileCutoff) continue;
+    fs.unlinkSync(path.join(dir, entry.name));
+    files += 1;
+  }
+  return { uploadedRows, pendingRows, files };
+}
+
+function scrubUploadedDiagnosticRows(db, rows) {
+  if (!rows.length) return;
+  const scrubStmt = db.prepare(`
+    UPDATE app_diagnostic_logs
+    SET message = '', details_json = '{}', upload_error = NULL
+    WHERE id = ?
+  `);
+  db.transaction(() => rows.forEach((row) => scrubStmt.run(row.id)))();
+}
+
 async function cleanupOldDiagnosticsOnVersionStart(db, appDataPath) {
   const version = getAppVersion();
   if (!version) return { success: false, skipped: true, reason: 'version-unavailable' };
@@ -183,16 +213,10 @@ async function cleanupOldDiagnosticsOnVersionStart(db, appDataPath) {
   }
 
   const todayKst = getTodayKst();
-  const cutoffIso = getKstDayStartIso(todayKst);
-  const localDelete = db.prepare('DELETE FROM app_diagnostic_logs WHERE created_at < ?').run(cutoffIso);
-  let localFileCount = 0;
-  const diagnosticDir = ensureDiagnosticDir(appDataPath);
-  for (const entry of fs.readdirSync(diagnosticDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !/^\d{4}-\d{2}-\d{2}_.*_diagnostics\.jsonl$/i.test(entry.name)) continue;
-    if (entry.name.slice(0, 10) >= todayKst) continue;
-    fs.unlinkSync(path.join(diagnosticDir, entry.name));
-    localFileCount += 1;
-  }
+  const cutoffIso = getKstCutoffIso(LOCAL_FILE_RETENTION_DAYS);
+  const localCleanup = cleanupLocalDiagnosticRetention(db, appDataPath);
+  const localRowCount = localCleanup.uploadedRows + localCleanup.pendingRows;
+  const localFileCount = localCleanup.files;
 
   const driveCleanup = await runDiagnosticUploadWorker({ action: 'cleanup', cutoffIso });
   if (driveCleanup?.skipped) {
@@ -200,7 +224,7 @@ async function cleanupOldDiagnosticsOnVersionStart(db, appDataPath) {
       success: false,
       skipped: true,
       reason: driveCleanup.reason || 'drive-not-configured',
-      localRowCount: localDelete.changes,
+      localRowCount,
       localFileCount,
     };
   }
@@ -213,7 +237,7 @@ async function cleanupOldDiagnosticsOnVersionStart(db, appDataPath) {
     version,
     completedAt: new Date().toISOString(),
     todayKst,
-    localRowCount: localDelete.changes,
+    localRowCount,
     localFileCount,
     driveFileCount,
   }, null, 2), 'utf8');
@@ -221,18 +245,10 @@ async function cleanupOldDiagnosticsOnVersionStart(db, appDataPath) {
   return {
     success: true,
     version,
-    localRowCount: localDelete.changes,
+    localRowCount,
     localFileCount,
     driveFileCount,
   };
-}
-
-function dailyLogPath(appDataPath, siteName) {
-  const date = new Date().toISOString().slice(0, 10);
-  return path.join(
-    ensureDiagnosticDir(appDataPath),
-    `${date}_${normalizeSiteName(siteName)}_diagnostics.jsonl`
-  );
 }
 
 function toDetailsJson(details) {
@@ -293,13 +309,6 @@ function recordDiagnostic(db, appDataPath, event = {}) {
     console.warn('[diagnostic] failed to insert db log:', error.message);
   }
 
-  try {
-    const line = JSON.stringify({ id, ...payload }) + '\n';
-    fs.appendFileSync(dailyLogPath(appDataPath, payload.site_name), line, 'utf8');
-  } catch (error) {
-    console.warn('[diagnostic] failed to append file log:', error.message);
-  }
-
   if (diagnosticRecordedNotifier) {
     try {
       diagnosticRecordedNotifier({
@@ -352,6 +361,7 @@ async function uploadPendingDiagnostics(db, appDataPath, { limit = 200 } = {}) {
         workerResult.driveWebViewLink || null,
         row.id
       ));
+      scrubUploadedDiagnosticRows(db, rows);
     })();
     return {
       success: true,
@@ -404,6 +414,8 @@ function runDiagnosticUploadWorker(payload, { timeoutMs = 180000 } = {}) {
 module.exports = {
   buildDatabaseDiagnosticDetails,
   cleanupOldDiagnosticsOnVersionStart,
+  cleanupLocalDiagnosticRetention,
+  scrubUploadedDiagnosticRows,
   isDriveServiceLoaded,
   recordDiagnostic,
   setDiagnosticRecordedNotifier,

@@ -31,30 +31,11 @@ function writePortFileEarly(port) {
   }
 }
 
-// 로그 파일 기록 설정
-const logDir = path.join(resolveAppDataPathForPort(), 'logs');
-const logFile = path.join(logDir, 'electron-server.log');
-if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-const logStream = fs.createWriteStream(logFile, { flags: 'a', encoding: 'utf8' });
-
-function logToBoth(...args) {
-  const msg = args.map(String).join(' ');
-  logStream.write(msg + '\n');
-  console.log(...args);
-}
-function errorToBoth(...args) {
-  const msg = args.map(String).join(' ');
-  logStream.write('[ERROR] ' + msg + '\n');
-  console.error(...args);
-}
-
-// stdout/stderr 리다이렉트 (console.log/console.error 유지)
-process.stdout.write = ((orig) => function(chunk, encoding, cb) {
-  logStream.write(chunk);
-  return orig.call(process.stdout, chunk, encoding, cb);
-})(process.stdout.write);
+// stdout is already forwarded to Electron; persist only bounded stderr locally.
+const { createBoundedServerLog } = require('./services/boundedServerLogService.cjs');
+const serverLog = createBoundedServerLog(resolveAppDataPathForPort());
 process.stderr.write = ((orig) => function(chunk, encoding, cb) {
-  logStream.write('[STDERR] ' + chunk);
+  serverLog.append(chunk);
   return orig.call(process.stderr, chunk, encoding, cb);
 })(process.stderr.write);
 
@@ -204,6 +185,7 @@ function registerLazyApplication() {
   phaseStartedAt = Date.now();
   const {
     buildDatabaseDiagnosticDetails,
+    cleanupLocalDiagnosticRetention,
     isDriveServiceLoaded,
     recordDiagnostic,
     sanitize,
@@ -223,6 +205,19 @@ function registerLazyApplication() {
   // needs every successful API read. Failures and mutation/sync routes are
   // always recorded regardless of this switch.
   const DIAGNOSTIC_VERBOSE_INITIAL = process.env.DIAGNOSTIC_VERBOSE_INITIAL === 'true';
+  const runLocalLogCleanup = () => {
+    try {
+      const result = cleanupLocalDiagnosticRetention(db, appDataPath);
+      if (result.uploadedRows || result.pendingRows || result.files) {
+        console.log('[diagnostic] local log retention:', JSON.stringify(result));
+      }
+    } catch (error) {
+      console.error('[diagnostic] local log retention failed:', error);
+    }
+  };
+  runLocalLogCleanup();
+  const localLogCleanupTimer = setInterval(runLocalLogCleanup, 6 * 60 * 60 * 1000);
+  localLogCleanupTimer.unref?.();
   const recordServerRuntimeTelemetry = () => {
     const memory = process.memoryUsage();
     recordDiagnostic(db, appDataPath, {
@@ -358,6 +353,13 @@ function registerLazyApplication() {
     reportDiagnostic(event) {
       recordDiagnostic(db, appDataPath, event);
       scheduleDiagnosticUpload();
+    },
+  });
+  require('./services/attendanceAutoLogoutService.cjs').start({
+    db,
+    markPending: markBackgroundTaskPending,
+    reportDiagnostic(event) {
+      recordDiagnostic(db, appDataPath, event);
     },
   });
   recordServerRuntimeTelemetry();
@@ -543,6 +545,15 @@ function registerLazyApplication() {
     console.log('[Server] minimal build mode: auth routes only');
     return { appDataPath, normalizeLegacyPhotoFiles };
   }
+
+  const workActivityLog = require('./services/workActivityLogService.cjs').createWorkActivityLogService(appDataPath);
+  app.use(workActivityLog.middleware);
+  const activityRetentionTimer = setInterval(() => {
+    try { workActivityLog.prune(); } catch (error) {
+      console.error('[activity-log] retention cleanup failed:', error.message);
+    }
+  }, 6 * 60 * 60 * 1000);
+  activityRetentionTimer.unref?.();
 
   // --- Static file serving ---
   app.use('/uploads', express.static(path.join(appDataPath, 'uploads')));

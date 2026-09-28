@@ -74,16 +74,18 @@ function recordAttendanceSessions(db, {
       db.prepare(`
         UPDATE attendance
         SET site_name = ?,
-            remote_session_detected = ?,
-            remote_session_type = ?,
-            remote_session_evidence = ?,
+            remote_session_detected = CASE WHEN remote_session_detected = 1 OR ? = 1 THEN 1 ELSE 0 END,
+            remote_session_type = CASE WHEN ? = 1 THEN ? ELSE remote_session_type END,
+            remote_session_evidence = CASE WHEN ? = 1 THEN ? ELSE remote_session_evidence END,
             is_synced = 0,
             last_modified = datetime('now', 'localtime')
         WHERE id = ?
       `).run(
         site.site_name || '',
         remoteDetected ? 1 : 0,
+        remoteDetected ? 1 : 0,
         remoteType,
+        remoteDetected ? 1 : 0,
         remoteEvidence,
         activeSession.id
       );

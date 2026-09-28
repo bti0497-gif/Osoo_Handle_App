@@ -31,6 +31,9 @@ This file protects login, session restore, and attendance behavior. Do not chang
 - Remote attendance classification must depend only on confirmed remote-session evidence, never on missing or mismatched coordinates.
 - A running tray/service process is recorded as supporting evidence only and must not by itself classify the login as remote.
 - Confirmed remote sessions store the connection method or program name in `remote_session_type`.
+- A detected remote session blocks field worker login, signed-session restore, attendance creation, manual logout, and active-session clearing on the server. Admin login remains exempt.
+- Passive remote-status polling must not be recorded as a login attempt. Only an actual submit or server-rejected authentication request creates a blocked-attempt diagnostic; a rejected login must not create an attendance row.
+- The client-supplied `autoLogout` flag must never bypass the remote logout guard. The server closes open field attendance at 20:00 KST even if the client cannot send its automatic logout request.
 - Attendance write failure must not block a successful field worker login.
 - Location lookup and attendance recording run in the background after workspace entry, and their state must be shown in the existing status bar.
 - Logout closes all open attendance rows created for that member on the same day and marks them unsynced, including both configured directions in integrated management mode.

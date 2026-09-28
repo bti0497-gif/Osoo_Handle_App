@@ -71,7 +71,7 @@ function tryReadTasklistProcessEntries() {
       })
       .filter(Boolean);
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -96,16 +96,16 @@ function tryFindActiveRemoteConnections(procs) {
     }
     return active;
   } catch {
-    return [];
+    return null;
   }
 }
 
 let lastDetectCache = null;
 let lastDetectAt = 0;
 
-function detectRemoteSession() {
+function detectRemoteSession({ useCache = false } = {}) {
   const now = Date.now();
-  if (lastDetectCache && (now - lastDetectAt < 1500)) {
+  if (useCache && lastDetectCache && (now - lastDetectAt < 1500)) {
     return lastDetectCache;
   }
 
@@ -125,6 +125,15 @@ function detectRemoteSession() {
   }
 
   const runningEntries = tryReadTasklistProcessEntries();
+  if (runningEntries === null) {
+    return {
+      detected: true,
+      sessionType: 'unverified',
+      evidence: 'tasklist-unavailable',
+      observedTools: [],
+      verificationFailed: true,
+    };
+  }
   const runningProcessNames = runningEntries.map((e) => e.name);
   const matchedRemoteProcesses = KNOWN_REMOTE_PROCESSES
     .filter((name) => runningProcessNames.includes(name));
@@ -143,6 +152,15 @@ function detectRemoteSession() {
 
   // Active remote connection check (e.g. AnyDesk, TeamViewer, RustDesk, Chrome Remote connected)
   const activeRemoteSessions = tryFindActiveRemoteConnections(matchedEntries);
+  if (activeRemoteSessions === null) {
+    return {
+      detected: true,
+      sessionType: 'unverified',
+      evidence: 'netstat-unavailable',
+      observedTools,
+      verificationFailed: true,
+    };
+  }
   for (const active of activeRemoteSessions) {
     confirmedIndicators.push(`active_remote:${active.toolName}(PID:${active.pid})`);
   }
