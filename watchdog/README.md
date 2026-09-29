@@ -12,7 +12,13 @@
 - 앱이 서버 준비를 마치면 이전 `full-exit` 잠금은 해제되어 감시 보호가 다시 활성화됩니다.
 - 1.0.5부터 재시작 결정 시 재시작 주체·트리거, 관찰된 앱 PID/시작 시각, 마지막 앱 하트비트, 18731 포트 도달 여부, 재시작 창 횟수와 새로 시작한 PID를 함께 기록합니다. 비밀번호·토큰·업무 데이터는 기록하지 않습니다.
 
-`OsooWatchdog.exe`는 현재 로그인한 Windows 사용자 세션에서 Osoo Handle App의 생존 여부만 감시합니다. 데이터베이스나 Google 서비스에는 접근하지 않습니다.
+1.0.8부터 원격접속 진단 신호도 앱 본체에 전달합니다. 감시 대상은 **RustDesk와 Chrome Remote Desktop만**이며 TeamViewer, AnyDesk, Windows RDP 등은 판정하지 않습니다.
+
+- RustDesk는 실제 원격 세션 창의 표시 여부로 판정하며, 단순 실행/트레이 상주만으로 원격 접속이라 하지 않습니다.
+- Chrome Remote Desktop은 Windows Application 로그의 `chromoting` 연결/해제 이벤트로 판정합니다. 이벤트 메시지의 이메일·계정·IP는 로그에 복사하지 않습니다.
+- `%APPDATA%\Osoo_Handle_App\runtime\remote-session-state.json`을 기본 5초 간격으로 갱신합니다. 기록은 지원 도구별 `active/clear/unknown`, 확인 시각, 버전, 비식별 근거로 제한합니다. 키 입력, 마우스 좌표, 창 제목, 원격 사용자 식별자는 수집하지 않습니다.
+- 앱 서버가 신선한 `active` 신호를 받으면 로그인 제출과 저장 세션 복원을 거부하지만, 비밀번호 입력은 허용합니다. 원격 접속 중 로그아웃/세션 해제는 막지 않습니다.
+- 상태 파일이 없거나 15초보다 오래됐거나 읽을 수 없으면 런처 신호는 `unknown`으로 기록합니다. 앱은 이를 원격 차단으로 간주하지 않아 현장 사용자를 잠그지 않습니다.
 
 ## 빌드
 
@@ -32,4 +38,4 @@ powershell -ExecutionPolicy Bypass -File .\watchdog\build-watchdog.ps1
 .\watchdog\dist\OsooWatchdog.exe --once --dry-run --simulate-process-absent --app "C:\Program Files\Osoo Handle App\Osoo Handle App.exe" --runtime "$env:TEMP\osoo-watchdog-test"
 ```
 
-운영 시 상태 파일은 `%APPDATA%\Osoo_Handle_App\runtime`에 기록됩니다. `maintenance.json` 잠금이 유효하면 앱을 재시작하지 않습니다.
+운영 시 상태 파일은 `%APPDATA%\Osoo_Handle_App\runtime`에 기록됩니다. `maintenance.json` 잠금이 유효하면 앱을 재시작하지 않습니다. Watchdog 1.0.8의 원격 상태 갱신은 정비 잠금이나 앱 재기동 경로와 독립적으로 매 검사 주기에 수행됩니다.

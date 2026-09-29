@@ -6,6 +6,8 @@ using System.IO;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using Microsoft.Win32;
 using System.Text;
 using System.Threading;
 
@@ -13,8 +15,8 @@ using System.Threading;
 [assembly: System.Reflection.AssemblyDescription("Background watchdog for Osoo Handle App")]
 [assembly: System.Reflection.AssemblyCompany("Osoo")]
 [assembly: System.Reflection.AssemblyProduct("Osoo Handle App Watchdog")]
-[assembly: System.Reflection.AssemblyVersion("1.0.7.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.7.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.8.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.8.0")]
 
 namespace OsooWatchdog
 {
@@ -113,6 +115,12 @@ namespace OsooWatchdog
         private static string pendingServerRecoveryRequestId;
         private static DateTime nextServerRecoveryRequestAt = DateTime.MinValue;
         private static string lastServerRecoveryResponseId;
+        private static string lastRemoteStateKey;
+        private static DateTime lastRemoteStateLogAt = DateTime.MinValue;
+        private static bool chromotingCursorInitialized;
+        private static int lastChromotingRecordIndex = -1;
+        private static string lastChromotingEventState = "unknown";
+        private static DateTime lastChromotingConnectedAt = DateTime.MinValue;
         private static Options options;
         private static string runtimeDirectory;
         private static string logPath;
@@ -136,7 +144,7 @@ namespace OsooWatchdog
                     return 2;
                 }
 
-                Log("watchdog-start", "ok", "version=1.0.7; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
+                Log("watchdog-start", "ok", "version=1.0.8; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
                 do
                 {
                     try { CheckOnce(); }
@@ -152,6 +160,8 @@ namespace OsooWatchdog
 
         private static void CheckOnce()
         {
+            RefreshRemoteSessionState();
+
             string maintenanceReason;
             DateTime maintenanceExpiry;
             if (TryGetActiveMaintenance(out maintenanceReason, out maintenanceExpiry))
@@ -854,6 +864,224 @@ namespace OsooWatchdog
             catch { return null; }
         }
 
+        private static void RefreshRemoteSessionState()
+        {
+            string rustDeskState;
+            string rustDeskEvidence;
+            DetectRustDeskSession(out rustDeskState, out rustDeskEvidence);
+
+            string chromeState;
+            string chromeEvidence;
+            DetectChromeRemoteDesktopSession(out chromeState, out chromeEvidence);
+
+            bool detected = rustDeskState == "active" || chromeState == "active";
+            bool unknown = !detected && (rustDeskState == "unknown" || chromeState == "unknown");
+            string state = detected ? "active" : unknown ? "unknown" : "clear";
+            string sessionType = rustDeskState == "active"
+                ? "RustDesk"
+                : chromeState == "active" ? "Chrome Remote Desktop" : unknown ? "unknown" : "local";
+            var observedTools = new List<string>();
+            if (rustDeskState == "active") observedTools.Add("RustDesk");
+            if (chromeState == "active") observedTools.Add("Chrome Remote Desktop");
+            var evidence = new List<string>();
+            if (!String.IsNullOrEmpty(rustDeskEvidence)) evidence.Add("rustdesk:" + rustDeskEvidence);
+            if (!String.IsNullOrEmpty(chromeEvidence)) evidence.Add("chrome-remote-desktop:" + chromeEvidence);
+            DateTime checkedAt = DateTime.UtcNow;
+            string evidenceText = String.Join("; ", evidence.ToArray());
+            string json = "{\n"
+                + "  \"version\": \"1.0.8\",\n"
+                + "  \"checkedAt\": " + JsonString(checkedAt.ToString("o")) + ",\n"
+                + "  \"state\": " + JsonString(state) + ",\n"
+                + "  \"sessionType\": " + JsonString(sessionType) + ",\n"
+                + "  \"evidence\": " + JsonString(evidenceText) + ",\n"
+                + "  \"observedTools\": [" + String.Join(", ", observedTools.ConvertAll(JsonString).ToArray()) + "],\n"
+                + "  \"sources\": {\"rustDesk\": " + JsonString(rustDeskState)
+                + ", \"chromeRemoteDesktop\": " + JsonString(chromeState) + "}\n} \n";
+            AtomicWrite(Path.Combine(runtimeDirectory, "remote-session-state.json"), json);
+
+            string stateKey = state + "|" + sessionType + "|" + rustDeskState + "|" + chromeState + "|" + evidenceText;
+            if (stateKey != lastRemoteStateKey || checkedAt - lastRemoteStateLogAt >= TimeSpan.FromMinutes(5))
+            {
+                lastRemoteStateKey = stateKey;
+                lastRemoteStateLogAt = checkedAt;
+                Log("remote-session-detection", state, "sessionType=" + sessionType
+                    + "; rustDesk=" + rustDeskState
+                    + "; chromeRemoteDesktop=" + chromeState
+                    + "; evidence=" + evidenceText);
+            }
+        }
+
+        private static void DetectRustDeskSession(out string state, out string evidence)
+        {
+            state = "clear";
+            evidence = "no-active-session-window";
+            Process[] processes;
+            try { processes = Process.GetProcessesByName("rustdesk"); }
+            catch (Exception ex)
+            {
+                state = "unknown";
+                evidence = "process-query-failed-" + ex.GetType().Name;
+                return;
+            }
+            if (processes == null || processes.Length == 0) return;
+
+            var processIds = new HashSet<int>();
+            foreach (Process process in processes)
+            {
+                try { if (!process.HasExited) processIds.Add(process.Id); }
+                catch { }
+                finally { process.Dispose(); }
+            }
+            if (processIds.Count == 0) return;
+
+            bool queryFailed = false;
+            bool activeSessionWindow = false;
+            bool enumerationCompleted = EnumWindows(delegate(IntPtr window, IntPtr statePointer)
+            {
+                try
+                {
+                    if (!IsWindowVisible(window)) return true;
+                    uint processId;
+                    GetWindowThreadProcessId(window, out processId);
+                    if (!processIds.Contains((int)processId)) return true;
+                    var title = new StringBuilder(512);
+                    GetWindowText(window, title, title.Capacity);
+                    string windowTitle = title.ToString().Trim();
+                    const string sessionTitleSuffix = " - RustDesk";
+                    if (windowTitle.Length > sessionTitleSuffix.Length
+                        && windowTitle.EndsWith(sessionTitleSuffix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        activeSessionWindow = true;
+                        return false;
+                    }
+                }
+                catch { queryFailed = true; }
+                return true;
+            }, IntPtr.Zero);
+            if (!enumerationCompleted && !activeSessionWindow) queryFailed = true;
+
+            if (activeSessionWindow)
+            {
+                state = "active";
+                evidence = "visible-remote-session-window";
+            }
+            else if (queryFailed)
+            {
+                state = "unknown";
+                evidence = "window-enumeration-incomplete";
+            }
+        }
+
+        private static void DetectChromeRemoteDesktopSession(out string state, out string evidence)
+        {
+            state = "clear";
+            evidence = "no-connected-client-event";
+            const string sourceRegistryPath = @"SYSTEM\CurrentControlSet\Services\EventLog\Application\chromoting";
+            try
+            {
+                using (RegistryKey sourceKey = Registry.LocalMachine.OpenSubKey(sourceRegistryPath))
+                {
+                    if (sourceKey == null)
+                    {
+                        evidence = "event-source-not-installed";
+                        return;
+                    }
+                }
+
+                using (var applicationLog = new EventLog("Application"))
+                {
+                    EventLogEntryCollection entries = applicationLog.Entries;
+                    int newestRecordIndex = entries.Count > 0 ? entries[entries.Count - 1].Index : -1;
+                    bool rebuildCursor = !chromotingCursorInitialized || newestRecordIndex < lastChromotingRecordIndex;
+                    if (rebuildCursor)
+                    {
+                        int start = Math.Max(0, entries.Count - 1000);
+                        for (int index = entries.Count - 1; index >= start; index--)
+                        {
+                            EventLogEntry entry = entries[index];
+                            if (!String.Equals(entry.Source, "chromoting", StringComparison.OrdinalIgnoreCase)) continue;
+                            long eventId = entry.InstanceId;
+                            if (eventId != 1 && eventId != 2) continue;
+                            ApplyChromotingEvent(eventId, entry.TimeGenerated.ToUniversalTime());
+                            break;
+                        }
+                        chromotingCursorInitialized = true;
+                    }
+                    else if (newestRecordIndex > lastChromotingRecordIndex)
+                    {
+                        for (int index = entries.Count - 1; index >= 0; index--)
+                        {
+                            EventLogEntry entry = entries[index];
+                            if (entry.Index <= lastChromotingRecordIndex) break;
+                            if (!String.Equals(entry.Source, "chromoting", StringComparison.OrdinalIgnoreCase)) continue;
+                            long eventId = entry.InstanceId;
+                            if (eventId != 1 && eventId != 2) continue;
+                            ApplyChromotingEvent(eventId, entry.TimeGenerated.ToUniversalTime());
+                            break;
+                        }
+                    }
+                    lastChromotingRecordIndex = newestRecordIndex;
+
+                    if (lastChromotingEventState == "connected")
+                    {
+                        if (DateTime.UtcNow - lastChromotingConnectedAt > TimeSpan.FromHours(24))
+                        {
+                            state = "unknown";
+                            evidence = "connected-event-older-than-24h";
+                        }
+                        else
+                        {
+                            state = "active";
+                            evidence = "client-connected-event";
+                        }
+                    }
+                    else if (lastChromotingEventState == "disconnected")
+                    {
+                        state = "clear";
+                        evidence = "client-disconnected-event";
+                    }
+                    else
+                    {
+                        state = "unknown";
+                        evidence = "no-session-event-in-recent-history";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                state = "unknown";
+                evidence = "event-log-query-failed-" + ex.GetType().Name;
+            }
+        }
+
+        private static void ApplyChromotingEvent(long eventId, DateTime eventAt)
+        {
+            if (eventId == 1)
+            {
+                lastChromotingEventState = "connected";
+                lastChromotingConnectedAt = eventAt;
+            }
+            else if (eventId == 2)
+            {
+                lastChromotingEventState = "disconnected";
+                lastChromotingConnectedAt = DateTime.MinValue;
+            }
+        }
+
+        private delegate bool EnumWindowsCallback(IntPtr window, IntPtr state);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr state);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr window);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetWindowText(IntPtr window, StringBuilder text, int maxCount);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetWindowThreadProcessId(IntPtr window, out uint processId);
+
         private static void WriteStatus(string state, string appPath, string reason)
         {
             DateTime now = DateTime.UtcNow;
@@ -861,7 +1089,7 @@ namespace OsooWatchdog
             if (statusKey == lastStatusKey && now - lastStatusAt < TimeSpan.FromMinutes(1)) return;
             lastStatusKey = statusKey;
             lastStatusAt = now;
-            string json = "{\n  \"version\": \"1.0.7\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
+            string json = "{\n  \"version\": \"1.0.8\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
             AtomicWrite(Path.Combine(runtimeDirectory, "watchdog-status.json"), json);
         }
 
@@ -881,7 +1109,7 @@ namespace OsooWatchdog
                 string createdAt = DateTime.UtcNow.ToString("o");
                 string line = createdAt + "\t" + action + "\t" + result + (String.IsNullOrEmpty(details) ? "" : "\t" + details) + Environment.NewLine;
                 File.AppendAllText(logPath, line, new UTF8Encoding(false));
-                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.7\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
+                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.8\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
                 File.AppendAllText(Path.Combine(runtimeDirectory, "watchdog-events.jsonl"), eventJson, new UTF8Encoding(false));
             }
             catch { }
@@ -904,7 +1132,15 @@ namespace OsooWatchdog
         {
             string temporary = path + ".tmp";
             File.WriteAllText(temporary, content, new UTF8Encoding(false));
-            if (File.Exists(path)) File.Delete(path);
+            if (File.Exists(path))
+            {
+                try
+                {
+                    File.Replace(temporary, path, null);
+                    return;
+                }
+                catch { TryDelete(path); }
+            }
             File.Move(temporary, path);
         }
 

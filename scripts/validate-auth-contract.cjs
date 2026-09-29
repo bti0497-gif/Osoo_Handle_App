@@ -134,8 +134,8 @@ check(
     'must authenticate through remote discovery only',
     'Field workers authenticate only against the member information provisioned into the local DB',
     'must not request or compare PC coordinates',
-    'must depend only on confirmed remote-session evidence',
-    'must not by itself classify the login as remote',
+    'must depend only on a fresh watchdog signal',
+    'must not classify a login as remote',
     'store the connection method or program name in `remote_session_type`',
     'Attendance write failure must not block a successful field worker login',
     'must enter the workspace without waiting for location lookup or attendance recording',
@@ -195,16 +195,44 @@ check(
 
 check(
   containsAll(remoteSessionDetectText, [
-    "sessionType = 'Windows RDP'",
-    "sessionType = 'SSH'",
-    'const detected = confirmedIndicators.length > 0',
-    'evidence: confirmedIndicators.join',
-    'observedTools',
-  ]) &&
-    !remoteSessionDetectText.includes('const detected = indicators.length > 0') &&
-    !remoteSessionDetectText.includes('observedIndicators.push'),
-  'remote detector separates confirmed sessions from running tray tools',
-  'a running remote-control tray process may be misclassified as an active remote session'
+    "const REQUIRED_WATCHDOG_VERSION = '1.0.8'",
+    "statePath = REMOTE_STATE_FILE",
+    "state.state === 'active'",
+    "['RustDesk', 'Chrome Remote Desktop'].includes(tool)",
+    'MAX_STATE_AGE_MS',
+    'watchdog-state-stale',
+  ]) && !/teamviewer|anydesk|parsec|todesk|sunlogin|SSH|Windows RDP/i.test(remoteSessionDetectText),
+  'field app trusts only the fresh watchdog RustDesk/Chrome Remote Desktop signal',
+  'field app still performs broad local remote-tool detection or accepts stale launcher signals'
+);
+
+check(
+  authRoutesText.includes("action: 'remote-attendance-recorded', result: 'recorded'")
+    && !authRoutesText.includes("action: 'remote-attendance-blocked'"),
+  'an already-authenticated attendance write is diagnosed but not blocked by the remote login signal',
+  'the remote login signal still blocks the separate attendance-write endpoint'
+);
+
+check(
+  containsAll(loginViewText, [
+    'placeholder="비밀번호"',
+    'value={pass}',
+    'setPass(e.target.value)',
+    'onLogin(name, nativeInput',
+  ]) && !loginViewText.includes('disabled={isRemoteBlocked')
+    && !loginViewText.includes('getRemoteStatus')
+    && !loginViewText.includes('원격 접속이 감지되었습니다. 비밀번호 입력은 가능하며 로그인 제출은 차단됩니다.')
+    && loginViewText.includes("setPass('')"),
+  'login screen keeps remote status hidden until submit; server rejection is shown and password is cleared',
+  'login screen exposes remote status before submit or does not clear rejected password input'
+);
+
+check(
+  !authRoutesText.includes("action: autoLogout ? 'remote-auto-logout-deferred' : 'remote-logout-blocked'")
+    && !authRoutesText.includes("action: 'remote-session-clear-blocked'")
+    && authRoutesText.includes("action: autoLogout ? 'remote-auto-logout-allowed' : 'remote-logout-allowed'"),
+  'remote signal never traps an authenticated field worker by blocking logout/session clear',
+  'remote-detected logout or session clear is still rejected'
 );
 
 check(

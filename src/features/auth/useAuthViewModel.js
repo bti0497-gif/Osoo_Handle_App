@@ -439,7 +439,7 @@ export const useAuthViewModel = () => {
                 success: false,
                 code: err?.data?.code || err?.code,
                 message: isRemoteBlocked
-                    ? (err?.data?.message || err?.data?.error || '원격 시도는 차단되어 있습니다..')
+                    ? (err?.data?.message || err?.data?.error || '원격 접속 상태에서는 로그인할 수 없습니다.')
                     : Number(err?.status) === 401 && err?.data?.code !== 'LOCAL_API_UNAUTHORIZED'
                         ? '이름 또는 비밀번호가 일치하지 않습니다.'
                         : `로그인 처리 중 오류가 발생했습니다: ${err?.message || '알 수 없는 오류'}`,

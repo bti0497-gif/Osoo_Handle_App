@@ -28,12 +28,17 @@ This file protects login, session restore, and attendance behavior. Do not chang
 - A single-site field worker login creates or reuses one open attendance row for the same member, date, and site.
 - When bidirectional integrated management is enabled, one login creates or reuses one open attendance row for each configured direction. The rows must remain distinguished by `site_id`.
 - Field worker attendance must not request or compare PC coordinates. Site identity already comes from the locally selected site.
-- Remote attendance classification must depend only on confirmed remote-session evidence, never on missing or mismatched coordinates.
-- A running tray/service process is recorded as supporting evidence only and must not by itself classify the login as remote.
+- Remote attendance classification must depend only on a fresh watchdog signal for an active RustDesk or Chrome Remote Desktop session, never on missing or mismatched coordinates.
+- A running tray/service process alone must not classify a login as remote; the watchdog uses session-specific evidence.
+- TeamViewer is excluded because it is used by the PLC management vendor; AnyDesk, Windows RDP, SSH, and other remote tools are not login-blocking signals.
+- The watchdog publishes a versioned runtime signal. A missing, stale, unreadable, or unsupported signal is diagnosed as unknown and fails open so it cannot lock out local users.
+- The login form must always allow password input. The server makes the final login/restore decision when the user submits; renderer polling must never disable or clear the password field.
 - Confirmed remote sessions store the connection method or program name in `remote_session_type`.
-- A detected remote session blocks field worker login, signed-session restore, attendance creation, manual logout, and active-session clearing on the server. Admin login remains exempt.
+- A detected remote session blocks field worker login and signed-session restore on the server. Admin discovery login remains exempt.
+- If an already-authenticated session later requests attendance creation while the remote signal is active, allow the attendance write but attach the confirmed remote evidence for diagnosis; do not turn this endpoint into a second login lock.
+- A detected remote session must not block manual logout, scheduled logout, or active-session clearing. The server logs that the request was allowed and closes attendance normally.
 - Passive remote-status polling must not be recorded as a login attempt. Only an actual submit or server-rejected authentication request creates a blocked-attempt diagnostic; a rejected login must not create an attendance row.
-- The client-supplied `autoLogout` flag must never bypass the remote logout guard. The server closes open field attendance at 20:00 KST even if the client cannot send its automatic logout request.
+- The client-supplied `autoLogout` flag controls only the attendance-row marker; it is not a remote-login bypass. The server closes open field attendance at 20:00 KST even if the client cannot send its automatic logout request.
 - Attendance write failure must not block a successful field worker login.
 - Location lookup and attendance recording run in the background after workspace entry, and their state must be shown in the existing status bar.
 - Logout closes all open attendance rows created for that member on the same day and marks them unsynced, including both configured directions in integrated management mode.

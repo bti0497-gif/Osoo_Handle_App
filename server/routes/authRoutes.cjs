@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const { issueLocalSessionToken, verifyLocalSessionToken } = require('../services/localSessionTokenService.cjs');
 // Lazy require wrappers keep startup validation light.
 function syncAttendanceLogs(...args) {
@@ -61,6 +62,11 @@ function cleanupOldDiagnosticsOnVersionStart(...args) {
 
 module.exports = (db, appDataPath) => {
     const router = express.Router();
+    const detectCurrentRemoteSession = () => detectRemoteSession({
+        statePath: path.join(appDataPath, 'runtime', 'remote-session-state.json'),
+    });
+    let lastRemoteSignalDiagnosticKey = '';
+    let lastRemoteSignalDiagnosticAt = 0;
     const toSessionMember = (member) => {
         const { password, ...safeMember } = member || {};
         return safeMember;
@@ -503,7 +509,33 @@ module.exports = (db, appDataPath) => {
 
     router.get('/remote-status', (req, res) => {
         try {
-            const remote = detectRemoteSession({ useCache: true });
+            const remote = detectCurrentRemoteSession();
+            const signalKey = [remote?.detected ? 'active' : remote?.verificationFailed ? 'unknown' : 'clear', remote?.sessionType, remote?.evidence].join('|');
+            const now = Date.now();
+            if (signalKey !== lastRemoteSignalDiagnosticKey || now - lastRemoteSignalDiagnosticAt >= 30 * 60 * 1000) {
+                lastRemoteSignalDiagnosticKey = signalKey;
+                lastRemoteSignalDiagnosticAt = now;
+                recordDiagnostic(db, appDataPath, {
+                    level: remote?.detected || remote?.verificationFailed ? 'warn' : 'info',
+                    area: 'auth',
+                    action: 'remote-launcher-signal',
+                    result: remote?.detected ? 'active' : remote?.verificationFailed ? 'unknown' : 'clear',
+                    message: remote?.detected
+                        ? '감시 런처에서 지원 원격 접속의 활성 신호를 받았습니다.'
+                        : remote?.verificationFailed
+                            ? '감시 런처 원격 접속 신호가 오래됐거나 확인되지 않습니다. 로그인 차단에는 사용하지 않습니다.'
+                            : '감시 런처에서 활성 원격 접속이 없음을 확인했습니다.',
+                    details: {
+                        source: remote?.source || 'watchdog',
+                        watchdogVersion: remote?.watchdogVersion || null,
+                        sessionType: remote?.sessionType || 'unknown',
+                        stateAgeMs: Number.isFinite(remote?.stateAgeMs) ? remote.stateAgeMs : null,
+                        evidence: remote?.evidence || '',
+                        observedTools: remote?.observedTools || [],
+                        failOpen: Boolean(remote?.verificationFailed),
+                    },
+                });
+            }
             return res.json({
                 success: true,
                 remote: {
@@ -511,6 +543,9 @@ module.exports = (db, appDataPath) => {
                     sessionType: remote?.sessionType || 'local',
                     evidence: remote?.evidence || '',
                     observedTools: remote?.observedTools || [],
+                    verificationFailed: Boolean(remote?.verificationFailed),
+                    watchdogVersion: remote?.watchdogVersion || null,
+                    stateAgeMs: Number.isFinite(remote?.stateAgeMs) ? remote.stateAgeMs : null,
                 },
             });
         } catch (err) {
@@ -521,7 +556,7 @@ module.exports = (db, appDataPath) => {
     router.post('/report-remote-attempt', (req, res) => {
         const name = String(req.body?.name || '').trim();
         try {
-            const remote = detectRemoteSession();
+            const remote = detectCurrentRemoteSession();
             if (remote.detected) {
                 recordRemoteAttemptRecord(db, appDataPath, { name, remote });
             }
@@ -593,15 +628,15 @@ module.exports = (db, appDataPath) => {
                     ...safeClientContext,
                 },
             });
-            const remote = detectRemoteSession();
+            const remote = detectCurrentRemoteSession();
             if (remote.detected) {
                 const namedMember = db.prepare('SELECT * FROM members WHERE name = ?').get(normalizedName);
                 recordRemoteAttemptRecord(db, appDataPath, { name: normalizedName, member: namedMember, remote, safeClientContext });
                 return res.status(403).json({
                     success: false,
                     code: 'REMOTE_LOGIN_BLOCKED',
-                    message: '원격 시도는 차단되어 있습니다..',
-                    error: '원격 시도는 차단되어 있습니다..',
+                    message: '원격 접속 상태에서는 로그인할 수 없습니다.',
+                    error: '원격 접속 상태에서는 로그인할 수 없습니다.',
                     remote: {
                         sessionType: remote.sessionType,
                         evidence: remote.evidence,
@@ -726,14 +761,14 @@ module.exports = (db, appDataPath) => {
                 return res.json({ success: true, member: enrichMemberWithSites(member), source });
             }
 
-            const remote = detectRemoteSession();
+            const remote = detectCurrentRemoteSession();
             if (remote.detected) {
                 recordRemoteAttemptRecord(db, appDataPath, { name, member, remote });
                 return res.status(403).json({
                     success: false,
                     code: 'REMOTE_LOGIN_BLOCKED',
-                    message: '원격 시도는 차단되어 있습니다..',
-                    error: '원격 시도는 차단되어 있습니다..',
+                    message: '원격 접속 상태에서는 로그인할 수 없습니다.',
+                    error: '원격 접속 상태에서는 로그인할 수 없습니다.',
                     remote: {
                         sessionType: remote.sessionType,
                         evidence: remote.evidence,
@@ -800,13 +835,13 @@ module.exports = (db, appDataPath) => {
             if (String(member.role || '').trim() === 'admin' || String(member.name || '').trim() === 'admin') {
                 return res.json({ success: false, message: '관리자 세션은 저장할 수 없습니다.' });
             }
-            const remote = detectRemoteSession();
+            const remote = detectCurrentRemoteSession();
             if (remote.detected) {
                 recordRemoteAttemptRecord(db, appDataPath, { name: member.name, member, remote });
                 return res.status(403).json({
                     success: false,
                     code: 'REMOTE_LOGIN_BLOCKED',
-                    message: '원격 시도는 차단되어 있습니다..',
+                    message: '원격 접속 상태에서는 로그인할 수 없습니다.',
                 });
             }
             setActiveUser(member, 'session-token-restore');
@@ -1015,14 +1050,13 @@ module.exports = (db, appDataPath) => {
         const loginTime = getLocalTime();
 
         try {
-            const remote = detectRemoteSession();
+            const remote = detectCurrentRemoteSession();
             if (remote.detected) {
                 recordDiagnostic(db, appDataPath, {
-                    level: 'warn', area: 'auth', action: 'remote-attendance-blocked', result: 'blocked',
-                    message: '원격 접속 상태에서 출근 기록 요청이 차단되었습니다.',
+                    level: 'warn', area: 'auth', action: 'remote-attendance-recorded', result: 'recorded',
+                    message: '로그인은 차단 대상이지만 인증된 세션의 출근기록 요청은 허용하고 원격 근거를 함께 기록했습니다.',
                     details: { memberId, remoteSessionType: remote.sessionType, remoteEvidence: remote.evidence },
                 });
-                return res.status(403).json({ success: false, code: 'REMOTE_LOGIN_BLOCKED', message: '원격 시도는 차단되어 있습니다..' });
             }
             const requestedSite = {
                 site_id: req.siteContext?.siteId || null,
@@ -1057,26 +1091,24 @@ module.exports = (db, appDataPath) => {
             const isFieldWorker = !member || String(member.role || 'user') === 'user';
 
             if (isFieldWorker) {
-                const remote = detectRemoteSession();
+                const remote = detectCurrentRemoteSession();
                 if (remote.detected) {
                     recordDiagnostic(db, appDataPath, {
-                        level: 'warn',
+                        level: 'info',
                         area: 'auth',
-                        action: autoLogout ? 'remote-auto-logout-deferred' : 'remote-logout-blocked',
-                        result: 'blocked',
+                        action: autoLogout ? 'remote-auto-logout-allowed' : 'remote-logout-allowed',
+                        result: 'allowed',
                         message: autoLogout
-                            ? '원격 접속 중 자동 퇴근은 서버 정시 처리로 넘겼습니다.'
-                            : '원격 접속 상태에서 로그아웃(퇴근) 시도가 차단되었습니다.',
+                            ? '원격 접속 감지와 관계없이 예약된 로그아웃을 정상 처리했습니다.'
+                            : '원격 접속 감지와 관계없이 사용자의 로그아웃을 허용했습니다.',
                         details: {
                             memberId,
                             memberName: member?.name || 'unknown',
-                            remoteSessionType: remote?.sessionType || 'remote',
-                            remoteEvidence: remote?.evidence || '',
-                            remoteDetected: Boolean(remote?.detected),
+                            remoteSessionType: remote.sessionType,
+                            remoteEvidence: remote.evidence,
                             requestedAutoLogout: Boolean(autoLogout),
                         },
                     });
-
                     db.prepare(`
                         UPDATE attendance
                         SET remote_session_detected = 1,
@@ -1085,27 +1117,7 @@ module.exports = (db, appDataPath) => {
                             is_synced = 0,
                             last_modified = datetime('now', 'localtime')
                         WHERE member_id = ? AND date = ? AND logout_time IS NULL AND login_time IS NOT NULL
-                    `).run(
-                        remote?.sessionType || 'remote',
-                        remote?.evidence || '',
-                        memberId,
-                        dateKST
-                    );
-
-                    try {
-                        uploadPendingDiagnostics(db, appDataPath).catch(() => {});
-                    } catch (_) {}
-
-                    return res.status(403).json({
-                        success: false,
-                        code: 'REMOTE_LOGOUT_BLOCKED',
-                        message: '원격 시도는 차단되어 있습니다..',
-                        error: '원격 시도는 차단되어 있습니다..',
-                        remote: {
-                            sessionType: remote.sessionType,
-                            evidence: remote.evidence,
-                        },
-                    });
+                    `).run(remote.sessionType || 'remote', remote.evidence || '', memberId, dateKST);
                 }
             }
 
@@ -1126,14 +1138,13 @@ module.exports = (db, appDataPath) => {
         try {
             const activeUser = getActiveUser();
             if (activeUser && String(activeUser.role || 'user') === 'user') {
-                const remote = detectRemoteSession();
+                const remote = detectCurrentRemoteSession();
                 if (remote.detected) {
                     recordDiagnostic(db, appDataPath, {
-                        level: 'warn', area: 'auth', action: 'remote-session-clear-blocked', result: 'blocked',
-                        message: '원격 접속 상태에서 현장 세션 해제 요청이 차단되었습니다.',
+                        level: 'info', area: 'auth', action: 'remote-session-clear-allowed', result: 'allowed',
+                        message: '원격 접속 감지와 관계없이 현장 세션 해제를 허용했습니다.',
                         details: { memberId: activeUser.id, remoteSessionType: remote.sessionType, remoteEvidence: remote.evidence },
                     });
-                    return res.status(403).json({ success: false, code: 'REMOTE_LOGOUT_BLOCKED', message: '원격 시도는 차단되어 있습니다..' });
                 }
             }
             clearActiveUser();

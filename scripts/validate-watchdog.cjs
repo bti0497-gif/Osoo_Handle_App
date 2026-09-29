@@ -39,7 +39,11 @@ assert.ok(mainProcess.includes("['update', 'full-exit'].forEach((reason) =>"), '
 assert.ok(mainProcess.includes('waitForServerReadyAndClearMaintenanceLocks'), 'server-ready maintenance lock recovery contract is missing');
 assert.ok(/catch\r?\n\s*\{/.test(watchdogSource) && watchdogSource.includes('return true;'), 'watchdog does not fail safe when process path inspection is denied');
 assert.ok(watchdogSource.includes('TimeSpan.FromMinutes(1)') && watchdogSource.includes('lastStatusKey'), 'watchdog status writes are not throttled for always-on field PCs');
-assert.ok(watchdogSource.includes('version=1.0.7'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(watchdogSource.includes('version=1.0.8'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(watchdogSource.includes('RefreshRemoteSessionState()') && watchdogSource.includes('remote-session-state.json'), 'watchdog does not publish its remote-session signal');
+assert.ok(watchdogSource.includes('DetectRustDeskSession') && watchdogSource.includes('DetectChromeRemoteDesktopSession'), 'watchdog remote detection sources are incomplete');
+assert.ok(watchdogSource.includes('visible-remote-session-window') && watchdogSource.includes('client-connected-event'), 'watchdog remote evidence contract is incomplete');
+assert.ok(!/teamviewer|anydesk|parsec|todesk|sunlogin|rdpclip/i.test(watchdogSource), 'watchdog still treats an excluded remote tool as a detection source');
 assert.ok(watchdogSource.includes('update-uac-observation') && watchdogSource.includes('UpdateUacObservationPath'), 'watchdog does not persist update/UAC observation state');
 assert.ok(watchdogSource.includes('Process.GetProcessesByName("Consent")'), 'watchdog does not observe the Windows UAC consent process during update maintenance');
 assert.ok(mainProcess.includes("appendElectronRecoveryDiagnostic('runtime-telemetry', 'observed'") && mainProcess.includes('process.getProcessMemoryInfo()'), 'Electron runtime memory telemetry contract is missing');
@@ -141,6 +145,13 @@ try {
   const restartRuntime = path.join(testRoot, 'restart');
   const restartStatus = run(restartRuntime);
   assert.strictEqual(restartStatus.state, 'dry-run-restart');
+  const remoteState = JSON.parse(fs.readFileSync(path.join(restartRuntime, 'remote-session-state.json'), 'utf8'));
+  assert.strictEqual(remoteState.version, '1.0.8');
+  assert.ok(['active', 'clear', 'unknown'].includes(remoteState.state));
+  assert.ok(['active', 'clear', 'unknown'].includes(remoteState.sources.rustDesk));
+  assert.ok(['active', 'clear', 'unknown'].includes(remoteState.sources.chromeRemoteDesktop));
+  assert.ok(remoteState.observedTools.every((tool) => ['RustDesk', 'Chrome Remote Desktop'].includes(tool)));
+  assert.ok(!JSON.stringify(remoteState).match(/@|\b\d{1,3}(?:\.\d{1,3}){3}\b|TeamViewer/i), 'remote signal contains an identity, IP address, or excluded tool');
   const restartEvents = fs.readFileSync(path.join(restartRuntime, 'watchdog-events.jsonl'), 'utf8')
     .trim().split(/\r?\n/).map((line) => JSON.parse(line));
   const restartDiagnostic = restartEvents.find((event) => event.action === 'app-restart' && event.result === 'dry-run');

@@ -33,10 +33,10 @@ export const AuthModel = {
             if (data?.success && data?.remote) {
                 return data.remote;
             }
-            return { detected: false, sessionType: 'local', evidence: '' };
+            return { detected: false, sessionType: 'unknown', evidence: 'remote-status-unavailable', verificationFailed: true };
         } catch (e) {
             console.warn('[AuthModel] 원격 상태 조회 실패:', e);
-            return { detected: false, sessionType: 'local', evidence: '' };
+            return { detected: false, sessionType: 'unknown', evidence: 'remote-status-request-failed', verificationFailed: true };
         }
     },
 
@@ -62,7 +62,7 @@ export const AuthModel = {
             // is a server-readiness fault, not a bad worker password.
             if (Number(e?.status) === 401 && e?.data?.code !== 'LOCAL_API_UNAUTHORIZED') return null;
             if (Number(e?.status) === 403 && e?.data?.code === 'REMOTE_LOGIN_BLOCKED') {
-                const err = new Error(e?.data?.message || '원격 시도는 차단되어 있습니다..');
+                const err = new Error(e?.data?.message || '원격 접속 상태에서는 로그인할 수 없습니다.');
                 err.status = 403;
                 err.code = 'REMOTE_LOGIN_BLOCKED';
                 err.data = e.data;
@@ -83,7 +83,7 @@ export const AuthModel = {
         } catch (e) {
             console.error("Error during discoveryLogin:", e);
             if (Number(e?.status) === 403 && e?.data?.code === 'REMOTE_LOGIN_BLOCKED') {
-                const err = new Error(e?.data?.message || '원격 시도는 차단되어 있습니다..');
+                const err = new Error(e?.data?.message || '원격 접속 상태에서는 로그인할 수 없습니다.');
                 err.status = 403;
                 err.code = 'REMOTE_LOGIN_BLOCKED';
                 err.data = e.data;
