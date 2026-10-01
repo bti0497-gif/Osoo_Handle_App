@@ -1283,10 +1283,10 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    sludgePhotoRoutesText.includes('if (!siteId) throw new Error') &&
+      sludgePhotoRoutesText.includes('if (!siteId) throw new Error') &&
       sludgePhotoRoutesText.includes('AND site_id = ?') &&
       sludgePhotoRoutesText.includes('amount <= 0') &&
-      sludgePhotoRoutesText.includes('hasPositiveAmount || hasAttachedRecord'),
+      sludgePhotoRoutesText.includes('hasPositiveAmount || hasLocalEvidence'),
     '슬러지사진대지 현장 범위 및 실제 반출행 계약 유지',
     '슬러지사진대지에 다른 현장 또는 0 반출 기본행이 표시될 수 있습니다'
   );
