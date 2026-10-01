@@ -418,6 +418,55 @@ function registerLazyApplication() {
     '/api/water-quality/bulk',
     '/api/operation-status',
   ]);
+  const ROADWORK_HELPER_DATA_PATH = '/api/roadwork-helper/all';
+
+  // 작업 저장 성공과 공사입력 도우미 조회가 같은 날짜/현장 자료를
+  // 보고 있는지 확인하기 위한 최소 요약만 진단로그에 남긴다(업무 수치 제외).
+  const TRACKED_ROADWORK_INPUT_PATHS = new Set([
+    '/api/flows/bulk',
+    '/api/medicines/bulk',
+    '/api/kits/bulk',
+    '/api/water-quality/bulk',
+    '/api/operation-status',
+  ]);
+
+  function summarizeRoadworkPayload(payload) {
+    const groups = {
+      flow: Array.isArray(payload?.flow) ? payload.flow : [],
+      electricity: Array.isArray(payload?.electricity) ? payload.electricity : [],
+      medicine: Array.isArray(payload?.medicine) ? payload.medicine : [],
+      kit: Array.isArray(payload?.kit) ? payload.kit : [],
+    };
+    const hasReading = (row) => row?.todayReading !== null
+      && row?.todayReading !== undefined
+      && row?.todayReading !== '';
+    const fillableRowCounts = {
+      flow: groups.flow.filter((row) => hasReading(row) || Number(row.todayFlow || 0) !== 0).length,
+      electricity: groups.electricity.filter((row) => hasReading(row) || Number(row.usage || 0) !== 0).length,
+      medicine: groups.medicine.filter((row) => Number(row.purchase || 0) !== 0 || Number(row.usage || 0) !== 0).length,
+      kit: groups.kit.filter((row) => Number(row.purchase || 0) !== 0 || Number(row.usage || 0) !== 0).length,
+    };
+    return {
+      responseDate: String(payload?.date || '').slice(0, 10),
+      rowCounts: Object.fromEntries(Object.entries(groups).map(([key, rows]) => [key, rows.length])),
+      fillableRowCounts,
+      hasFillData: Object.values(fillableRowCounts).some((count) => count > 0),
+    };
+  }
+
+  function summarizeRoadworkInput(method, pathName, body) {
+    const items = Array.isArray(body?.items) ? body.items : [];
+    const dates = [...new Set([
+      body?.date,
+      ...items.map((item) => item?.date),
+    ].map((value) => String(value || '').slice(0, 10)).filter(Boolean))].slice(0, 8);
+    return {
+      category: pathName.split('/')[2] || 'unknown',
+      method,
+      dates,
+      recordCount: pathName === '/api/operation-status' ? 1 : items.length,
+    };
+  }
 
   app.use((req, res, next) => {
     const method = String(req.method || '').toUpperCase();
@@ -425,6 +474,8 @@ function registerLazyApplication() {
     const isApiPath = pathName.startsWith('/api/');
     const isRoadworkDiagnosticRequest = method === 'POST'
       && pathName === '/api/roadwork-helper/diagnostic';
+    const isRoadworkDataRead = method === 'GET' && pathName === ROADWORK_HELPER_DATA_PATH;
+    const isTrackedRoadworkInput = method === 'POST' && TRACKED_ROADWORK_INPUT_PATHS.has(pathName);
     const shouldWatchMethod = method === 'POST' || method === 'PUT' || method === 'DELETE';
     const shouldWatchPath = BIGQUERY_IMMEDIATE_SYNC_PREFIXES.some((prefix) => pathName.startsWith(prefix));
     const shouldTriggerSync = shouldWatchMethod
@@ -435,6 +486,8 @@ function registerLazyApplication() {
     const shouldLogSuccessfulResponse = shouldInspect
       && (DIAGNOSTIC_VERBOSE_INITIAL
         || isRoadworkDiagnosticRequest
+        || isRoadworkDataRead
+        || isTrackedRoadworkInput
         || (shouldTriggerSync && !STABLE_SUCCESS_MUTATION_PATHS.has(pathName)));
 
     if (!shouldInspect && !shouldTriggerSync) return next();
@@ -451,12 +504,16 @@ function registerLazyApplication() {
       if (shouldLogResponse) {
         try {
           const rawResponseText = args?.[0] ? String(args[0]) : '';
+          const isSafeSummaryOnly = isRoadworkDataRead || isTrackedRoadworkInput;
           const responseText = pathName === '/api/settings/web-app-credentials'
             ? '<redacted credential response>'
-            : rawResponseText.slice(0, 2000);
+            : isSafeSummaryOnly
+              ? '<omitted from minimized diagnostic summary>'
+              : rawResponseText.slice(0, 2000);
+          let parsedResponse = null;
           let responseCount;
           try {
-            const parsedResponse = rawResponseText ? JSON.parse(rawResponseText) : null;
+            parsedResponse = rawResponseText ? JSON.parse(rawResponseText) : null;
             if (Array.isArray(parsedResponse)) {
               responseCount = parsedResponse.length;
             } else if (Array.isArray(parsedResponse?.history)) {
@@ -469,6 +526,15 @@ function registerLazyApplication() {
           } catch (_) {
             responseCount = undefined;
           }
+          const roadworkDataSummary = isRoadworkDataRead && res.statusCode >= 200 && res.statusCode < 400
+            ? summarizeRoadworkPayload(parsedResponse)
+            : undefined;
+          const inputSummary = isTrackedRoadworkInput
+            ? summarizeRoadworkInput(method, pathName, req.body || {})
+            : undefined;
+          const responseError = res.statusCode >= 400 && parsedResponse && typeof parsedResponse === 'object'
+            ? String(parsedResponse.userMessage || parsedResponse.message || parsedResponse.error || '').slice(0, 300)
+            : undefined;
           const roadworkDiagnosticEvent = isRoadworkDiagnosticRequest
             ? String(requestBody?.event || '').trim().slice(0, 80)
             : '';
@@ -519,8 +585,15 @@ function registerLazyApplication() {
                   resolvedSiteName: String(req.siteContext?.siteName || '').trim(),
                 },
                 query: sanitize(req.query || {}),
-                body: requestBody,
-                response: DIAGNOSTIC_VERBOSE_INITIAL || res.statusCode >= 400 ? responseText : undefined,
+                body: isTrackedRoadworkInput
+                  ? inputSummary
+                  : requestBody,
+                roadworkDataSummary,
+                inputSummary,
+                responseError,
+                response: (DIAGNOSTIC_VERBOSE_INITIAL || res.statusCode >= 400) && !isSafeSummaryOnly
+                  ? responseText
+                  : undefined,
               },
             });
           }

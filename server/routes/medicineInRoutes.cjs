@@ -6,7 +6,7 @@ const {
   COMMON_MULTIPART_LIMITS,
   MAX_IMAGE_BYTES,
   MAX_IMAGE_PIXELS,
-  imageFileFilter,
+  medicinePhotoFileFilter,
 } = require('../middleware/uploadSecurity.cjs');
 const { openExcelFile } = require('../services/excelOpenService.cjs');
 const { getAvailableReportOutputPath } = require('../services/reportOutputPathService.cjs');
@@ -232,13 +232,25 @@ async function savePhotoToLocal(appDataPath, year, mm, date, medicineName, srcPa
   const destPath = path.join(destDir, fileName);
   // BMP는 raw 픽셀로 디코딩 후 변환
   const isBmp = srcBuf[0] === 0x42 && srcBuf[1] === 0x4D;
-  if (isBmp) {
-    const bmpRaw = decodeBmpToRgb(srcBuf);
-    await sharp(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
-      .jpeg({ quality: 90 }).toFile(destPath);
-  } else {
-    await sharp(srcBuf).rotate().jpeg({ quality: 90 }).toFile(destPath);
+  let jpegBuffer;
+  try {
+    if (isBmp) {
+      const bmpRaw = decodeBmpToRgb(srcBuf);
+      jpegBuffer = await sharp(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
+        .jpeg({ quality: 90 }).toBuffer();
+    } else {
+      jpegBuffer = await sharp(srcBuf, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate().jpeg({ quality: 90 }).toBuffer();
+    }
+  } catch (error) {
+    if (['.heic', '.heif'].includes(path.extname(srcPath).toLowerCase())) {
+      error.statusCode = /pixel limit|too many pixels/i.test(String(error.message || error)) ? 413 : 415;
+      error.message = error.statusCode === 413
+        ? '사진 해상도가 허용 범위를 초과했습니다.'
+        : 'HEIC/HEIF 사진을 JPEG로 변환하지 못했습니다. 휴대폰에서 JPEG 호환 형식으로 다시 저장해 주세요.';
+    }
+    throw error;
   }
+  fs.writeFileSync(destPath, jpegBuffer);
   return destPath;
 }
 
@@ -657,6 +669,7 @@ module.exports = function (db, baseDir, appDataPath) {
             }
           } catch (e) {
             console.warn(`[medicine-in save] 사진 저장 실패 (${medicineName}):`, e.message);
+            throw e;
           }
         }
       }
@@ -669,7 +682,7 @@ module.exports = function (db, baseDir, appDataPath) {
       });
     } catch (err) {
       console.error('[medicine-in save]', err);
-      res.status(500).json({ success: false, error: err.message });
+      res.status(err.statusCode || 500).json({ success: false, error: err.message });
     }
   });
 
@@ -681,7 +694,7 @@ module.exports = function (db, baseDir, appDataPath) {
   const photoUpload = multer({
     storage: multer.memoryStorage(),
     limits: { ...COMMON_MULTIPART_LIMITS, fileSize: MAX_IMAGE_BYTES, files: 1 },
-    fileFilter: imageFileFilter,
+    fileFilter: medicinePhotoFileFilter,
   });
   router.post('/api/medicine-in/upload-photo', photoUpload.single('photo'), async (req, res) => {
     try {
@@ -701,13 +714,30 @@ module.exports = function (db, baseDir, appDataPath) {
       const destPath = path.join(destDir, fileName);
       const srcBuf = req.file.buffer;
       const isBmp = srcBuf[0] === 0x42 && srcBuf[1] === 0x4D;
-      if (isBmp) {
-        const bmpRaw = decodeBmpToRgb(srcBuf);
-        await sharp(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
-          .jpeg({ quality: 90 }).toFile(destPath);
-      } else {
-        await sharp(srcBuf, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate().jpeg({ quality: 90 }).toFile(destPath);
+      let jpegBuffer;
+      try {
+        if (isBmp) {
+          const bmpRaw = decodeBmpToRgb(srcBuf);
+          jpegBuffer = await sharp(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
+            .jpeg({ quality: 90 }).toBuffer();
+        } else {
+          jpegBuffer = await sharp(srcBuf, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate().jpeg({ quality: 90 }).toBuffer();
+        }
+      } catch (error) {
+        const extension = path.extname(String(req.file.originalname || '')).toLowerCase();
+        if (extension === '.heic' || extension === '.heif') {
+          const pixelLimitExceeded = /pixel limit|too many pixels/i.test(String(error?.message || error));
+          return res.status(pixelLimitExceeded ? 413 : 415).json({
+            success: false,
+            code: pixelLimitExceeded ? 'IMAGE_PIXEL_LIMIT_EXCEEDED' : 'HEIC_CONVERSION_FAILED',
+            error: pixelLimitExceeded
+              ? '사진 해상도가 허용 범위를 초과했습니다.'
+              : 'HEIC/HEIF 사진을 JPEG로 변환하지 못했습니다. 휴대폰에서 JPEG 호환 형식으로 다시 저장해 주세요.',
+          });
+        }
+        throw error;
       }
+      fs.writeFileSync(destPath, jpegBuffer);
       const url = `/api/medicine-in/photo?p=${encodeURIComponent(getMedicinePhotoRelativePath(yearStr, fileName, photoScope))}`;
       updateMedicinePhotoUrl(db, 'medicine', date, medicineName, url, req.siteContext?.siteId);
       updateMedicinePhotoUrl(db, 'kit', date, medicineName, url, req.siteContext?.siteId);

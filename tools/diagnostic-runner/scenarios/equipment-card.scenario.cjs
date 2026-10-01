@@ -18,6 +18,27 @@ module.exports = {
         '공법별 기본 장비 프로비저닝에 실패했습니다.', 'EQUIPMENT_PROVISIONING_FAILED', response.json);
       ctx.assert(response.json.some((row) => row.management_no === 'M-103A'),
         '호기별 기본 장비가 없습니다.', 'EQUIPMENT_UNIT_SEED_MISSING');
+      for (const [name, baseNo] of [['응집제 주입펌프', 'M-405'], ['폴리머 주입펌프', 'M-407']]) {
+        const units = response.json.filter((row) => row.equipment_name.startsWith(`${name} `));
+        ctx.assert(units.length === 2
+          && units.some((row) => row.management_no === `${baseNo}A`)
+          && units.some((row) => row.management_no === `${baseNo}B`),
+        `${name} 기본 2대 A/B 시드가 누락됐습니다.`, 'CHEMICAL_PUMP_DEFAULT_COUNT_BROKEN', { name, units });
+      }
+    });
+
+    await ctx.step('chemical-pump-third-unit-catalog', async () => {
+      const created = await ctx.request('POST', '/api/equipment/catalog', {
+        body: {
+          selections: [{
+            entry: { name: '응집제 주입펌프', process: '응집침전조', group: '약품펌프류' },
+            count: 1,
+          }],
+        },
+      });
+      ctx.assert(created.ok && created.json?.created?.some((row) => (
+        row.managementNo === 'M-405C' && row.name === '응집제 주입펌프 C'
+      )), '약품펌프 카탈로그에서 3호기(C) 추가에 실패했습니다.', 'CHEMICAL_PUMP_THIRD_UNIT_FAILED', created.json);
     });
 
     await ctx.step('equipment-create-and-status', async () => {

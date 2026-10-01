@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { rememberRoadworkSessionUrl } from './roadworkSessionBridge';
-import { useRoadworkHelperViewModel } from './useRoadworkHelperViewModel';
+import { hasRoadworkFillData, summarizeRoadworkData, useRoadworkHelperViewModel } from './useRoadworkHelperViewModel';
 import { RoadworkHelperModel } from './RoadworkHelperModel';
 import { capturePhotoInputDiagnostic } from './photoInputDiagnostic';
 import './components/RoadworkHelperModal.css';
@@ -81,8 +81,17 @@ const ROADWORK_STATUS_SCRIPT = `
 (() => {
   const normalizeDate = (value) => {
     const text = String(value || '').trim();
-    const match = text.match(/(20\\d{2})\\D?(\\d{2})\\D?(\\d{2})/);
-    return match ? match.slice(1, 4).join('-') : '';
+    const match = text.match(/(20\\d{2})\\D*(\\d{1,2})\\D*(\\d{1,2})/);
+    if (!match) return '';
+    const [, year, month, day] = match;
+    const normalized = [year, month.padStart(2, '0'), day.padStart(2, '0')].join('-');
+    const parsed = new Date(`${normalized}T00:00:00`);
+    return Number.isNaN(parsed.getTime())
+      || parsed.getFullYear() !== Number(year)
+      || parsed.getMonth() + 1 !== Number(month)
+      || parsed.getDate() !== Number(day)
+      ? ''
+      : normalized;
   };
 
   const isVisible = (element) => {
@@ -1007,10 +1016,21 @@ export default function RoadworkHelperView({ currentUser }) {
   // so it must never override the window identity or its webview partition.
   const currentUserSiteId = String(currentUser?.site_id || '').trim();
   const activeSiteId = String(windowSiteId || currentUserSiteId).trim();
-  const vm = useRoadworkHelperViewModel(activeSiteId);
   const roadworkPartition = activeSiteId
     ? `persist:osoo-roadwork-${activeSiteId.replace(/[^a-zA-Z0-9_-]/g, '_')}`
     : 'persist:osoo-roadwork';
+  const recordRoadworkDiagnostic = React.useCallback((event, details = {}) => {
+    RoadworkHelperModel.recordDiagnostic(event, {
+      ...details,
+      windowSiteId,
+      rendererActiveSiteId: activeSiteId,
+      rendererCurrentUserSiteId: currentUserSiteId,
+      roadworkPartition,
+    }).catch((error) => {
+      console.warn('[Roadwork Helper] Failed to record diagnostic:', error?.message || error);
+    });
+  }, [activeSiteId, currentUserSiteId, roadworkPartition, windowSiteId]);
+  const vm = useRoadworkHelperViewModel(activeSiteId, recordRoadworkDiagnostic);
   const rootRef = useRef(null);
   const webviewRef = useRef(null);
   const lastRefreshAtRef = useRef(0);
@@ -1021,6 +1041,7 @@ export default function RoadworkHelperView({ currentUser }) {
   const lastKeepAliveCheckRef = useRef(null);
   const lastKeepAliveRegistrationRef = useRef({ path: '', at: 0 });
   const lastUnexpectedLoginAtRef = useRef(0);
+  const lastObservedDailyDateRef = useRef(null);
   const lastExternalContextRef = useRef({ fingerprint: '', context: null });
   const lastExternalMismatchRef = useRef('');
   const [loadError, setLoadError] = useState(null);
@@ -1066,22 +1087,6 @@ export default function RoadworkHelperView({ currentUser }) {
   useEffect(() => {
     fetchConfig();
   }, [fetchConfig]);
-
-  const recordRoadworkDiagnostic = React.useCallback((event, details = {}) => {
-    // Every helper diagnostic carries the immutable window identity separately
-    // from the shared authenticated user.  This makes directional-site
-    // investigations distinguish a logging attribution issue from a real
-    // request-scope violation.
-    RoadworkHelperModel.recordDiagnostic(event, {
-      ...details,
-      windowSiteId,
-      rendererActiveSiteId: activeSiteId,
-      rendererCurrentUserSiteId: currentUserSiteId,
-      roadworkPartition,
-    }).catch((error) => {
-      console.warn('[Roadwork Helper] Failed to record diagnostic:', error?.message || error);
-    });
-  }, [activeSiteId, currentUserSiteId, roadworkPartition, windowSiteId]);
 
   const captureExternalRoadworkContext = React.useCallback(async (webview, trigger) => {
     if (!webview || webviewRef.current !== webview) return;
@@ -1319,6 +1324,20 @@ export default function RoadworkHelperView({ currentUser }) {
 
       try {
         const nextStatus = await webview.executeJavaScript(ROADWORK_STATUS_SCRIPT);
+        if (nextStatus?.isDailyLog) {
+          const observedDate = String(nextStatus.date || '').slice(0, 10);
+          if (lastObservedDailyDateRef.current !== observedDate) {
+            recordRoadworkDiagnostic('daily-log-date-observed', {
+              previousDate: lastObservedDailyDateRef.current,
+              observedDate,
+              dateAvailable: Boolean(observedDate),
+              canAutoFill: Boolean(nextStatus.canAutoFill),
+            });
+            lastObservedDailyDateRef.current = observedDate;
+          }
+        } else {
+          lastObservedDailyDateRef.current = null;
+        }
         if (nextStatus?.isDailyLog && nextStatus?.dailyUrl) {
           rememberRoadworkSessionUrl(roadworkPartition, nextStatus.dailyUrl);
           // 메인 WebSquare가 먼저 로드된 뒤 일일운영일지 iframe이 늦게 준비된다.
@@ -1498,7 +1517,51 @@ export default function RoadworkHelperView({ currentUser }) {
       setIsFilling(true);
       setStatusMessage('');
       setPhotoProgress(null);
+      const pageStatusBeforeFetch = await webview.executeJavaScript(ROADWORK_STATUS_SCRIPT);
+      if (!pageStatusBeforeFetch?.date || pageStatusBeforeFetch.date !== roadworkStatus.date || !pageStatusBeforeFetch.canAutoFill) {
+        recordRoadworkDiagnostic('auto-fill-aborted-page-date-mismatch', {
+          selectedDate: roadworkStatus.date,
+          currentPageDate: String(pageStatusBeforeFetch?.date || '').slice(0, 10),
+          pageEditable: Boolean(pageStatusBeforeFetch?.canAutoFill),
+          reason: !pageStatusBeforeFetch?.date ? 'page-date-unavailable' : 'page-date-changed-or-not-editable',
+        });
+        setStatusMessage('도로공사 일지 날짜를 확인하지 못했거나 화면 날짜가 바뀌었습니다. 날짜 선택 후 다시 시도해 주세요.');
+        return;
+      }
       const latestPayload = await RoadworkHelperModel.fetchAll(roadworkStatus.date, activeSiteId);
+      const latestSummary = summarizeRoadworkData(latestPayload);
+      const responseDate = String(latestPayload?.date || '').slice(0, 10);
+      recordRoadworkDiagnostic(latestSummary.hasFillData ? 'auto-fill-data-refresh-completed' : 'auto-fill-data-refresh-empty', {
+        requestedDate: roadworkStatus.date,
+        responseDate,
+        requestedSiteId: activeSiteId,
+        ...latestSummary,
+      });
+      if (responseDate !== roadworkStatus.date) {
+        recordRoadworkDiagnostic('auto-fill-aborted-response-date-mismatch', {
+          requestedDate: roadworkStatus.date,
+          responseDate,
+          requestedSiteId: activeSiteId,
+        });
+        setStatusMessage('조회 결과 날짜가 도로공사 화면의 날짜와 달라 입력을 중단했습니다. 날짜와 현장을 확인해 주세요.');
+        return;
+      }
+      const pageStatusBeforeApply = await webview.executeJavaScript(ROADWORK_STATUS_SCRIPT);
+      if (pageStatusBeforeApply?.date !== roadworkStatus.date || !pageStatusBeforeApply?.canAutoFill) {
+        recordRoadworkDiagnostic('auto-fill-aborted-page-date-changed-during-query', {
+          selectedDate: roadworkStatus.date,
+          currentPageDate: String(pageStatusBeforeApply?.date || '').slice(0, 10),
+          pageEditable: Boolean(pageStatusBeforeApply?.canAutoFill),
+          requestedSiteId: activeSiteId,
+        });
+        setStatusMessage('조회 중 도로공사 화면의 날짜나 입력 상태가 바뀌어 자동입력을 중단했습니다. 다시 시도해 주세요.');
+        return;
+      }
+      if (!hasRoadworkFillData(latestPayload)) {
+        setStatusMessage('저장된 입력 자료를 찾지 못했습니다. 날짜와 현장을 확인하고 다시 조회해 주세요.');
+        setPhotoProgress(null);
+        return;
+      }
       const result = await webview.executeJavaScript(buildRoadworkAutoFillScript({
         flow: latestPayload.flow || [],
         electricity: latestPayload.electricity || [],
@@ -1697,14 +1760,18 @@ export default function RoadworkHelperView({ currentUser }) {
   const newButtonRect = roadworkStatus.newButtonRect;
   const showAutoFill = Boolean(webviewUrl && newButtonRect);
   const isOutsideDailyLog = Boolean(webviewUrl && !roadworkStatus.isDailyLog);
-  const disableAutoFill = !roadworkStatus.canAutoFill || roadworkStatus.date !== vm.date || vm.loading || isFilling || !vm.hasFillData;
-  const autoFillLabel = vm.loading
-    ? '데이터 확인 중'
+  const disableAutoFill = !roadworkStatus.date || !roadworkStatus.canAutoFill || roadworkStatus.date !== vm.date || vm.loading || isFilling || Boolean(vm.error) || !vm.hasFillData;
+  const autoFillLabel = !roadworkStatus.date
+    ? '일자 확인 중'
+    : vm.loading
+      ? '데이터 확인 중'
     : isFilling
       ? '채우는 중'
-      : vm.hasFillData
-        ? '자동 채우기'
-        : '데이터 없음';
+      : vm.error
+        ? '조회 오류'
+        : vm.hasFillData
+          ? '자동 채우기'
+          : '데이터 없음';
 
   return (
     <div className="roadwork-page" ref={rootRef}>
@@ -1746,7 +1813,7 @@ export default function RoadworkHelperView({ currentUser }) {
           className="roadwork-autofill-button"
           onClick={handleAutoFill}
           disabled={disableAutoFill}
-          title={vm.hasFillData ? '현재 수정 가능한 일지에 로컬 데이터와 사진을 채웁니다.' : '이 날짜에 채울 로컬 데이터가 없습니다.'}
+          title={vm.error ? '로컬 데이터 조회에 실패했습니다. 아래에서 다시 조회해 주세요.' : vm.hasFillData ? '현재 수정 가능한 일지에 로컬 데이터와 사진을 채웁니다.' : '이 날짜에 채울 로컬 데이터가 없습니다.'}
           style={{
             top: `${Math.max(8, Number(newButtonRect.top || 0))}px`,
             left: `${Math.max(8, Number(newButtonRect.left || 0) - 116)}px`,
@@ -1765,6 +1832,13 @@ export default function RoadworkHelperView({ currentUser }) {
               <span style={{ width: `${photoProgress.percent}%` }} />
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {vm.error && !vm.loading ? (
+        <div className="roadwork-autofill-status is-error" role="alert">
+          <span>로컬 데이터 조회 실패: {vm.error}</span>
+          <button type="button" onClick={() => vm.reload()}>다시 조회</button>
         </div>
       ) : null}
 

@@ -3,11 +3,15 @@
 const assert = require('assert');
 const express = require('express');
 const Database = require('better-sqlite3');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { ensureSiteDataIsolation } = require('../server/services/siteDataIsolationMigrationService.cjs');
 const { createSiteContextMiddleware } = require('../server/middleware/siteContext.cjs');
 
 async function main() {
   const db = new Database(':memory:');
+  const appDataPath = fs.mkdtempSync(path.join(os.tmpdir(), 'osoo-roadwork-harness-'));
   let server;
   try {
     db.exec(`
@@ -61,7 +65,11 @@ async function main() {
         item_code TEXT NOT NULL, UNIQUE(date, measurement_group, location, item_code)
       );
       CREATE TABLE sludge_photo_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL UNIQUE, site_id TEXT
+        id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, sludge_amount REAL,
+        sludge_photo_path TEXT, sludge_photo_taken_at TEXT, certificate_photo_path TEXT,
+        note TEXT, site_name TEXT, author TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        last_modified TEXT DEFAULT CURRENT_TIMESTAMP, site_id TEXT NOT NULL,
+        UNIQUE(site_id, date)
       );
       CREATE TABLE work_records (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL);
     `);
@@ -82,6 +90,7 @@ async function main() {
     app.use(require('../server/routes/medicineRoutes.cjs')(db));
     app.use(require('../server/routes/kitRoutes.cjs')(db));
     app.use(require('../server/routes/roadworkHelperRoutes.cjs')(db));
+    app.use(require('../server/routes/sludgePhotoRoutes.cjs')(db, process.cwd(), appDataPath));
     server = await new Promise((resolve) => {
       const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
     });
@@ -100,10 +109,33 @@ async function main() {
       return data;
     };
 
+    fs.mkdirSync(path.join(appDataPath, '사진관리', '슬러지', 'site-a', '2026'), { recursive: true });
+    fs.writeFileSync(path.join(appDataPath, '사진관리', '슬러지', 'site-a', '2026', '20260727-청소필증.jpg'), Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+    db.prepare(`
+      INSERT INTO sludge_photo_logs (date, sludge_amount, sludge_photo_path, certificate_photo_path, site_id, site_name)
+      VALUES
+        ('2026-07-25', 0, '/사진관리/슬러지/site-a/2026/20260725-슬러지1.jpg', NULL, 'site-a', '테스트휴게소(동쪽방향)'),
+        ('2026-07-26', 0, NULL, NULL, 'site-a', '테스트휴게소(동쪽방향)'),
+        ('2026-07-27', 0, NULL, '/사진관리/슬러지/site-a/2026/20260727-청소필증.jpg', 'site-a', '테스트휴게소(동쪽방향)')
+    `).run();
+    db.prepare(`
+      INSERT INTO flow_readings (date, type, raw_value, calculated_flow, sludge_export, site_id, site_name)
+      VALUES
+        ('2026-07-28', '슬러지', 0, 0, 0, 'site-a', '테스트휴게소(동쪽방향)'),
+        ('2026-07-29', '슬러지', 5, 5, 5, 'site-a', '테스트휴게소(동쪽방향)')
+    `).run();
+    const sludgePhotos = await request('site-a', '/api/sludge-photos?year=2026&month=7');
+    assert.deepStrictEqual(sludgePhotos.items.map((row) => row.date), ['2026-07-27', '2026-07-29']);
+    assert.strictEqual(sludgePhotos.items[0].sludge_amount, 0); // 실제 증빙 사진이 있으므로 보존
+    assert.strictEqual(sludgePhotos.items[1].sludge_amount, 5);
+
     for (const [siteId, raw] of [['site-a', 100], ['site-b', 900]]) {
       await request(siteId, '/api/flows/bulk', {
         date: '2026-07-24',
-        items: [{ type: '유입유량계', raw_value: raw, calculated_flow: raw }],
+        items: [
+          { type: '유입유량계', raw_value: raw, calculated_flow: raw },
+          { type: '전력량', raw_value: raw + 10, calculated_flow: 10 },
+        ],
       });
       await request(siteId, '/api/medicines/bulk', {
         items: [{ medicine_name: '포도당', date: '2026-07-24', purchase_amount: raw, usage_amount: 0, current_inventory: raw }],
@@ -111,14 +143,30 @@ async function main() {
       await request(siteId, '/api/kits/bulk', {
         items: [{ kit_name: '암모니아', date: '2026-07-24', purchase_amount: raw, usage_amount: 0, current_inventory: raw }],
       });
+
+      // Save -> helper read 즉시 왕복: 사용자가 저장 직후 자동채우기를
+      // 눌렀을 때 같은 날짜/현장의 자료가 조회되는 핵심 회귀 시나리오.
+      if (siteId === 'site-a') {
+        const immediateResponse = await fetch(`${baseUrl}/api/roadwork-helper/all?date=2026-07-24`, {
+          headers: { 'x-osoo-site-id': siteId },
+        });
+        assert.strictEqual(immediateResponse.status, 200);
+        assert.strictEqual(immediateResponse.headers.get('cache-control'), 'no-store');
+        const immediate = await immediateResponse.json();
+        assert.strictEqual(immediate.date, '2026-07-24');
+        assert.strictEqual(immediate.flow.find((row) => row.item === '유입유량계')?.todayReading, 100);
+        assert.strictEqual(immediate.electricity.find((row) => row.item === '전력량')?.usage, 10);
+        assert.strictEqual(immediate.medicine.find((row) => row.item === '포도당')?.purchase, 100);
+        assert.strictEqual(immediate.kit.find((row) => row.item === '암모니아')?.purchase, 100);
+      }
     }
 
-    const flowA = await request('site-a', '/api/flows?date=2026-07-24');
-    const flowB = await request('site-b', '/api/flows?date=2026-07-24');
-    assert.strictEqual(flowA.length, 1);
-    assert.strictEqual(flowB.length, 1);
-    assert.strictEqual(flowA[0].raw_value, 100);
-    assert.strictEqual(flowB[0].raw_value, 900);
+    const flowA = await request('site-a', '/api/flows?date=2026-07-24&site_id=site-a');
+    const flowB = await request('site-b', '/api/flows?date=2026-07-24&site_id=site-b');
+    assert.strictEqual(flowA.length, 2);
+    assert.strictEqual(flowB.length, 2);
+    assert.strictEqual(flowA.find((row) => row.type === '유입유량계')?.raw_value, 100);
+    assert.strictEqual(flowB.find((row) => row.type === '유입유량계')?.raw_value, 900);
     assert.strictEqual(db.prepare("SELECT COUNT(*) count FROM medicine_logs WHERE date='2026-07-24'").get().count, 2);
     assert.strictEqual(db.prepare("SELECT COUNT(*) count FROM kit_logs WHERE date='2026-07-24'").get().count, 2);
 
@@ -133,6 +181,11 @@ async function main() {
     assert.ok(!roadworkA.medicine.some((row) => row.item === '응집제'));
     assert.ok(!roadworkA.kit.some((row) => row.item === '질산성질소'));
     assert.ok(!roadworkA.medicine.some((row) => row.item.endsWith('_purchase')));
+
+    const otherDate = await request('site-a', '/api/roadwork-helper/all?date=2026-07-25');
+    assert.strictEqual(otherDate.date, '2026-07-25');
+    assert.strictEqual(otherDate.flow.find((row) => row.item === '유입유량계')?.todayReading, null);
+    assert.strictEqual(otherDate.medicine.find((row) => row.item === '포도당')?.purchase, 0);
 
     const denied = await fetch(`${baseUrl}/api/flows?date=2026-07-24`, {
       headers: { 'x-osoo-site-id': 'site-c' },
@@ -220,14 +273,17 @@ async function main() {
     const repeatedOperationalWithoutSite = await fetch(`${baseUrl}/api/flows/history`);
     assert.strictEqual(repeatedOperationalWithoutSite.status, 409);
     assert.strictEqual(siteDiagnostics.filter((event) => event.details?.code === 'SITE_CONTEXT_REQUIRED').length, 1);
-    console.log('✓ 양방향 창별 유량·약품·키트 HTTP 저장 및 조회 분리 검증 통과');
-    console.log('✓ 공사입력도우미 현장별 초기 조회·설정 보조항목 제외 검증 통과');
+    console.log('✓ 저장 직후 동일 날짜·현장 공사입력도우미 왕복조회 및 no-store 검증 통과');
+    console.log('✓ 양방향 창별 유량·전력·약품·키트 HTTP 저장 및 조회 분리 검증 통과');
+    console.log('✓ 슬러지 반출량 0인 고아행 숨김 및 실제 증빙/양수 반출 보존 검증 통과');
+    console.log('✓ 공사입력도우미 날짜 경계·현장별 초기 조회·설정 보조항목 제외 검증 통과');
     console.log('✓ 허용되지 않은 site_id 요청 차단 검증 통과');
     console.log('✓ 로그인·현장전환 복구 경로 허용 및 무범위 운영 조회 차단 검증 통과');
     console.log('✓ 누락·비활성 현장과 오래된 창 컨텍스트 복구 시뮬레이션 통과');
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
     db.close();
+    fs.rmSync(appDataPath, { recursive: true, force: true });
   }
 }
 

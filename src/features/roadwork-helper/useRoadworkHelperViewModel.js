@@ -38,7 +38,49 @@ function toTsv(columns, rows) {
   return body.join('\n');
 }
 
-export function useRoadworkHelperViewModel(siteId = '') {
+export function hasRoadworkFillData(payload = {}) {
+  const flow = Array.isArray(payload.flow) ? payload.flow : [];
+  const electricity = Array.isArray(payload.electricity) ? payload.electricity : [];
+  const inventory = [
+    ...(Array.isArray(payload.medicine) ? payload.medicine : []),
+    ...(Array.isArray(payload.kit) ? payload.kit : []),
+  ];
+  return flow.some((row) => (
+    row.todayReading !== null
+    && row.todayReading !== undefined
+    && row.todayReading !== ''
+  ) || Number(row.todayFlow || 0) !== 0)
+    || electricity.some((row) => (
+      row.todayReading !== null
+      && row.todayReading !== undefined
+      && row.todayReading !== ''
+    ) || Number(row.usage || 0) !== 0)
+    || inventory.some((row) => Number(row.purchase || 0) !== 0 || Number(row.usage || 0) !== 0);
+}
+
+export function summarizeRoadworkData(payload = {}) {
+  const safePayload = {
+    flow: Array.isArray(payload.flow) ? payload.flow : [],
+    electricity: Array.isArray(payload.electricity) ? payload.electricity : [],
+    medicine: Array.isArray(payload.medicine) ? payload.medicine : [],
+    kit: Array.isArray(payload.kit) ? payload.kit : [],
+  };
+  const hasTodayReading = (row) => row.todayReading !== null
+    && row.todayReading !== undefined
+    && row.todayReading !== '';
+  return {
+    rowCounts: Object.fromEntries(Object.entries(safePayload).map(([key, rows]) => [key, rows.length])),
+    fillableRowCounts: {
+      flow: safePayload.flow.filter((row) => hasTodayReading(row) || Number(row.todayFlow || 0) !== 0).length,
+      electricity: safePayload.electricity.filter((row) => hasTodayReading(row) || Number(row.usage || 0) !== 0).length,
+      medicine: safePayload.medicine.filter((row) => Number(row.purchase || 0) !== 0 || Number(row.usage || 0) !== 0).length,
+      kit: safePayload.kit.filter((row) => Number(row.purchase || 0) !== 0 || Number(row.usage || 0) !== 0).length,
+    },
+    hasFillData: hasRoadworkFillData(safePayload),
+  };
+}
+
+export function useRoadworkHelperViewModel(siteId = '', recordDiagnostic = () => {}) {
   const [date, setDate] = useState(getTodayKST());
   const [data, setData] = useState({ flow: [], electricity: [], medicine: [], kit: [] });
   const [loading, setLoading] = useState(false);
@@ -52,22 +94,64 @@ export function useRoadworkHelperViewModel(siteId = '') {
     setLoading(true);
     setError('');
     setData({ flow: [], electricity: [], medicine: [], kit: [] });
+    recordDiagnostic('data-query-started', {
+      requestedDate: targetDate,
+      requestedSiteId: siteId,
+      requestSequence,
+    });
     try {
       const res = await RoadworkHelperModel.fetchAll(targetDate, siteId);
-      if (requestSequence !== requestSequenceRef.current) return;
+      const summary = summarizeRoadworkData(res);
+      if (requestSequence !== requestSequenceRef.current) {
+        recordDiagnostic('data-query-superseded', {
+          requestedDate: targetDate,
+          responseDate: String(res?.date || '').slice(0, 10),
+          requestedSiteId: siteId,
+          requestSequence,
+          ...summary,
+        });
+        return;
+      }
+      const responseDate = String(res?.date || '').slice(0, 10);
+      if (responseDate !== targetDate) {
+        setError('선택한 날짜의 자료인지 확인하지 못했습니다. 날짜를 다시 선택해 조회해 주세요.');
+        recordDiagnostic('data-query-date-mismatch', {
+          requestedDate: targetDate,
+          responseDate,
+          requestedSiteId: siteId,
+          requestSequence,
+          ...summary,
+        });
+        return;
+      }
       setData({
         flow: res.flow || [],
         electricity: res.electricity || [],
         medicine: res.medicine || [],
         kit: res.kit || [],
       });
+      recordDiagnostic(summary.hasFillData ? 'data-query-completed' : 'data-query-empty', {
+        requestedDate: targetDate,
+        responseDate: String(res?.date || '').slice(0, 10),
+        requestedSiteId: siteId,
+        requestSequence,
+        ...summary,
+      });
     } catch (err) {
       if (requestSequence !== requestSequenceRef.current) return;
       setError(err.message || '공사 입력 도우미 데이터를 불러오지 못했습니다.');
+      recordDiagnostic('data-query-failed', {
+        requestedDate: targetDate,
+        requestedSiteId: siteId,
+        requestSequence,
+        statusCode: Number(err?.status || 0),
+        errorName: String(err?.name || 'Error').slice(0, 80),
+        reason: String(err?.message || err || '').slice(0, 200),
+      });
     } finally {
       if (requestSequence === requestSequenceRef.current) setLoading(false);
     }
-  }, [date, siteId]);
+  }, [date, siteId, recordDiagnostic]);
 
   useEffect(() => {
     load(date);
@@ -105,24 +189,7 @@ export function useRoadworkHelperViewModel(siteId = '') {
   }), [data]);
 
   const hasFillData = useMemo(() => {
-    const hasFlow = fillPayload.flow.some((row) => (
-      row.todayReading !== null
-      && row.todayReading !== undefined
-      && row.todayReading !== ''
-    ) || Number(row.todayFlow || 0) !== 0);
-
-    const hasElectricity = fillPayload.electricity.some((row) => (
-      row.todayReading !== null
-      && row.todayReading !== undefined
-      && row.todayReading !== ''
-    ) || Number(row.usage || 0) !== 0);
-
-    const hasInventory = [...fillPayload.medicine, ...fillPayload.kit].some((row) => (
-      Number(row.purchase || 0) !== 0
-      || Number(row.usage || 0) !== 0
-    ));
-
-    return hasFlow || hasElectricity || hasInventory;
+    return hasRoadworkFillData(fillPayload);
   }, [fillPayload]);
 
   const copySection = useCallback(async (section) => {

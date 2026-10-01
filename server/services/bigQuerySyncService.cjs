@@ -6,6 +6,7 @@ const { db, appDataPath } = require('../database.cjs');
 const { getBigQueryClient, DATASET_ID } = require('./bigQueryClientService.cjs');
 const { recordDiagnostic } = require('./diagnosticLogService.cjs');
 const { isAdminSessionActive, getActiveUser } = require('./activeUserSessionService.cjs');
+const { syncRemoteSessionObservations } = require('./remoteSessionObservationSyncService.cjs');
 
 // 3. 현장 정보(현장명, 관리자명) 가져오기
 function getSiteInfo() {
@@ -471,6 +472,11 @@ async function syncAll({ shouldContinue = () => true } = {}) {
     // 이전 동기화가 비정상 종료된 것이므로, 다시 '대기' 상태(is_synced=0)로 되돌려 재시도 유도
     db.prepare(`UPDATE ${tableName} SET is_synced = 0 WHERE is_synced = 2`).run();
     results[tableName] = await syncTable(tableName);
+  }
+  if (shouldContinue()) {
+    results.remote_session_observations = await syncRemoteSessionObservations();
+  } else {
+    results.remote_session_observations = { success: true, count: 0, paused: true, reason: 'user-activity' };
   }
   return results;
 }

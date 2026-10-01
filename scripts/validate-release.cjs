@@ -1757,10 +1757,12 @@ function validateRegressionContracts() {
   );
 
   checkSource(
-    roadworkModelText.includes("apiClient.get('/api/roadwork-helper/all', { date, siteId })") &&
+    roadworkModelText.includes("apiClient.get('/api/roadwork-helper/all', { date, siteId }, { cache: 'no-store' })") &&
       roadworkViewModelText.includes('flow: res.flow || []') &&
       roadworkViewModelText.includes('electricity: res.electricity || []') &&
       roadworkViewModelText.includes('medicine: res.medicine || []') &&
+      roadworkViewModelText.includes('hasRoadworkFillData(fillPayload)') &&
+      roadworkViewText.includes("'조회 오류'") &&
       roadworkViewModelText.includes('navigator.clipboard.writeText'),
     '공사입력 도우미 Model/ViewModel 데이터 계약 유지',
     '공사입력 도우미의 일괄 조회 또는 안전한 데이터 정규화 계약이 깨졌습니다'
@@ -2466,6 +2468,11 @@ function printSummary() {
 }
 
 function validateSiteRouteRuntimeContract() {
+  if (process.env.OSOO_RELEASE_ROADWORK_HARNESS_PASSED === '1') {
+    success('공사입력도우미 저장→SQLite→조회 회귀 하네스 선행 통과(중복 실행 생략)');
+    return;
+  }
+
   const scriptPath = path.join(BASE_DIR, 'scripts', 'validate-site-route-isolation.cjs');
   const result = spawnSync(process.execPath, [scriptPath], {
     cwd: BASE_DIR,

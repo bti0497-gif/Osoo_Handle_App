@@ -9,6 +9,7 @@ const MAX_IMAGE_PIXELS = 50_000_000;
 const COMMON_MULTIPART_LIMITS = { fields: 30, parts: 40, fieldSize: 1 * MB };
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif', '.tif', '.tiff', '.heic', '.heif']);
+const HEIF_EXTENSIONS = new Set(['.heic', '.heif']);
 const BOARD_EXTENSIONS = new Set([
   ...IMAGE_EXTENSIONS,
   '.pdf', '.txt', '.csv', '.zip',
@@ -31,6 +32,15 @@ function createExtensionFilter(extensions, message, { requireImageMime = false }
 }
 
 const imageFileFilter = createExtensionFilter(IMAGE_EXTENSIONS, '지원하는 이미지 파일만 업로드할 수 있습니다.', { requireImageMime: true });
+// 일부 휴대폰·Windows 조합은 HEIC/HEIF 파일을 application/octet-stream으로 전송한다.
+// 이 확장자는 이후 sharp 디코딩/JPEG 변환에 성공해야만 저장되므로 MIME 표기만으로 거절하지 않는다.
+const medicinePhotoFileFilter = (req, file, callback) => {
+  if (HEIF_EXTENSIONS.has(extensionOf(file))) {
+    callback(null, true);
+    return;
+  }
+  imageFileFilter(req, file, callback);
+};
 const boardFileFilter = createExtensionFilter(BOARD_EXTENSIONS, '지원하지 않는 첨부파일 형식입니다.');
 const templateFileFilter = createExtensionFilter(TEMPLATE_EXTENSIONS, '엑셀·HWPX 양식 파일만 업로드할 수 있습니다.');
 
@@ -66,6 +76,7 @@ module.exports = {
   MAX_TEMPLATE_BYTES,
   boardFileFilter,
   imageFileFilter,
+  medicinePhotoFileFilter,
   templateFileFilter,
   uploadErrorMiddleware,
 };

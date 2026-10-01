@@ -2,7 +2,7 @@ import { apiClient } from '../../core/api';
 
 export const RoadworkHelperModel = {
   async fetchAll(date, siteId) {
-    return apiClient.get('/api/roadwork-helper/all', { date, siteId });
+    return apiClient.get('/api/roadwork-helper/all', { date, siteId }, { cache: 'no-store' });
   },
 
   async recordDiagnostic(event, details = {}) {

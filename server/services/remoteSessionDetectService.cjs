@@ -5,8 +5,13 @@ const path = require('path');
 const { APP_DATA_ROOT } = require('../config/runtimeConfig.cjs');
 
 const REMOTE_STATE_FILE = path.join(APP_DATA_ROOT, 'runtime', 'remote-session-state.json');
-const REQUIRED_WATCHDOG_VERSION = '1.0.8';
+const REQUIRED_WATCHDOG_VERSION = '1.0.9';
 const MAX_STATE_AGE_MS = 15_000;
+// Login enforcement is deliberately disabled until the launcher can distinguish
+// an actually connected remote operator from a visible RustDesk window.
+// Keep the signal reader for diagnostics, but do not use it to block users or
+// label attendance records until a later, explicitly validated release.
+const REMOTE_LOGIN_ENFORCEMENT_ENABLED = false;
 
 function compareVersions(left, right) {
   const a = String(left || '').split('.').map((part) => Number(part) || 0);
@@ -66,6 +71,7 @@ function detectRemoteSession({ statePath = REMOTE_STATE_FILE } = {}) {
 
 module.exports = {
   MAX_STATE_AGE_MS,
+  REMOTE_LOGIN_ENFORCEMENT_ENABLED,
   REMOTE_STATE_FILE,
   REQUIRED_WATCHDOG_VERSION,
   detectRemoteSession,

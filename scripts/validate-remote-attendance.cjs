@@ -17,7 +17,7 @@ async function main() {
   const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osoo-remote-attendance-test-'));
   const db = new Database(':memory:');
   const remoteStatePath = path.join(testDataDir, 'remote-session-state.json');
-  const writeRemoteState = (state, checkedAt = new Date().toISOString(), version = '1.0.8') => {
+  const writeRemoteState = (state, checkedAt = new Date().toISOString(), version = '1.0.9') => {
     fs.writeFileSync(remoteStatePath, JSON.stringify({
       version,
       checkedAt,
@@ -30,6 +30,7 @@ async function main() {
   writeRemoteState('active');
   const freshActiveRemote = remoteDetector.detectRemoteSession({ statePath: remoteStatePath });
   assert.equal(freshActiveRemote.detected, true);
+  assert.equal(remoteDetector.REMOTE_LOGIN_ENFORCEMENT_ENABLED, false, '원격 로그인 차단은 새 판정 기준이 마련될 때까지 비활성화되어야 합니다.');
   assert.deepEqual(freshActiveRemote.observedTools, ['RustDesk'], '지원하지 않는 도구 이름은 앱 신호에서 제외해야 합니다.');
   writeRemoteState('clear');
   assert.equal(remoteDetector.detectRemoteSession({ statePath: remoteStatePath }).detected, false);
@@ -92,29 +93,27 @@ async function main() {
   const countLog = (action) => db.prepare('SELECT COUNT(*) AS n FROM app_diagnostic_logs WHERE action = ?').get(action).n;
 
   try {
-    const blockedLogin = await request('local-login', { name: '현장근로자', password: 'test-password' });
-    assert.equal(detectionOptions.at(-1)?.useCache, undefined, '로그인 허용 판정은 캐시 결과를 쓰면 안 됩니다.');
-    assert.equal(blockedLogin.status, 403);
-    assert.equal(blockedLogin.body.code, 'REMOTE_LOGIN_BLOCKED');
-    assert.equal(countAttendance(), 0, '차단된 로그인은 출근 행을 만들면 안 됩니다.');
-    assert.equal(countLog('remote-login-blocked'), 1);
-    assert.match(db.prepare("SELECT details_json FROM app_diagnostic_logs WHERE action = 'remote-login-blocked'").get().details_json, /visible-remote-session-window/);
-    assert.equal(activeSession.getActiveUser(), null);
+    const unblockedLogin = await request('local-login', { name: '현장근로자', password: 'test-password' });
+    assert.equal(detectionOptions.length, 0, '로그인 차단이 비활성화된 동안 로그인은 원격 탐지기를 호출하지 않아야 합니다.');
+    assert.equal(unblockedLogin.status, 200, '감지기가 active여도 비활성화 상태에서는 현장 로그인을 막지 않습니다.');
+    assert.equal(countAttendance(), 0, '로그인 자체와 출근 기록은 기존처럼 분리되어야 합니다.');
+    assert.equal(countLog('remote-login-blocked'), 0);
+    assert.ok(activeSession.getActiveUser());
 
     const payload = { v: 1, memberId: 'worker-1', issuedAt: Date.now(), expiresAt: Date.now() + 3600000, nonce: 'test' };
     const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const signature = crypto.createHmac('sha256', 'worker-1\ntest-password').update(encoded).digest('base64url');
-    const blockedRestore = await request('restore-session', { sessionToken: `${encoded}.${signature}` });
-    assert.equal(detectionOptions.at(-1)?.useCache, undefined, '세션 복원 판정은 매번 새 감지 결과를 써야 합니다.');
-    assert.equal(blockedRestore.status, 403);
+    const allowedRestore = await request('restore-session', { sessionToken: `${encoded}.${signature}` });
+    assert.equal(detectionOptions.length, 0, '로그인 차단이 비활성화된 동안 세션 복원은 원격 탐지기를 호출하지 않아야 합니다.');
+    assert.equal(allowedRestore.status, 200, '감지기가 active여도 세션 복원은 계속 허용해야 합니다.');
     assert.equal(countAttendance(), 0);
 
     const allowedAttendance = await request('attendance', { memberId: 'worker-1', memberName: '현장근로자' });
-    assert.equal(detectionOptions.at(-1)?.useCache, undefined, '출근 판정은 매번 새 감지 결과를 써야 합니다.');
+    assert.equal(detectionOptions.length, 0, '로그인 차단이 비활성화된 동안 출근기록에 원격 탐지기를 호출하지 않아야 합니다.');
     assert.equal(allowedAttendance.status, 200, '로그인 이후의 출근기록은 원격 신호로 차단하지 않습니다.');
     assert.equal(countAttendance(), 1);
-    assert.equal(countLog('remote-attendance-recorded'), 1);
-    assert.equal(db.prepare('SELECT remote_session_detected FROM attendance').get().remote_session_detected, 1);
+    assert.equal(countLog('remote-attendance-recorded'), 0, '비활성화된 감지 신호를 근태 기록에 귀속하지 않습니다.');
+    assert.equal(db.prepare('SELECT remote_session_detected FROM attendance').get().remote_session_detected, 0);
 
     remote = { detected: false, sessionType: 'local', evidence: '', observedTools: [] };
     const localLogin = await request('local-login', { name: '현장근로자', password: 'test-password' });
@@ -128,26 +127,27 @@ async function main() {
     const manualLogout = await request('logout', { memberId: 'worker-1', autoLogout: false });
     assert.equal(manualLogout.status, 200, '원격 감지로 수동 로그아웃을 막으면 안 됩니다.');
     assert.ok(db.prepare('SELECT logout_time FROM attendance').get().logout_time);
-    assert.equal(countLog('remote-logout-allowed'), 1);
+    assert.equal(countLog('remote-logout-allowed'), 0, '비활성화된 감지 신호를 로그아웃 근태 정보에 추가하지 않습니다.');
+    assert.equal(db.prepare('SELECT remote_session_detected FROM attendance').get().remote_session_detected, 0);
 
     db.prepare('UPDATE attendance SET logout_time = NULL, auto_logout = 0').run();
     activeSession.setActiveUser({ id: 'worker-1', name: '현장근로자', role: 'user' }, 'test-session');
     const scheduledLogout = await request('logout', { memberId: 'worker-1', autoLogout: true });
     assert.equal(scheduledLogout.status, 200, '원격 감지 중에도 자동 로그아웃을 완료해야 합니다.');
     assert.equal(db.prepare('SELECT auto_logout FROM attendance').get().auto_logout, 1);
-    assert.equal(countLog('remote-auto-logout-allowed'), 1);
+    assert.equal(countLog('remote-auto-logout-allowed'), 0);
 
     activeSession.setActiveUser({ id: 'worker-1', name: '현장근로자', role: 'user' }, 'test-session');
     const allowedClear = await request('logout-current', {});
     assert.equal(allowedClear.status, 200, '원격 감지로 현장 세션 해제를 막으면 안 됩니다.');
     assert.equal(activeSession.getActiveUser(), null);
-    assert.equal(countLog('remote-session-clear-allowed'), 1);
+    assert.equal(countLog('remote-session-clear-allowed'), 0);
 
     remote = { detected: false, sessionType: 'local', evidence: '', observedTools: [] };
     const repeatedAttendance = await request('attendance', { memberId: 'worker-1', memberName: '현장근로자' });
     assert.equal(repeatedAttendance.status, 200);
     assert.equal(countAttendance(), 2);
-    assert.equal(db.prepare('SELECT remote_session_detected FROM attendance').get().remote_session_detected, 1);
+    assert.equal(db.prepare('SELECT remote_session_detected FROM attendance').get().remote_session_detected, 0);
 
     const date = '2026-09-28';
     db.prepare('UPDATE attendance SET date = ?, logout_time = NULL').run(date);
@@ -156,7 +156,7 @@ async function main() {
     assert.deepEqual(db.prepare('SELECT DISTINCT logout_time, auto_logout FROM attendance').all(), [
       { logout_time: '20:00:00', auto_logout: 1 },
     ]);
-    console.log('PASS: 원격 로그인·복원 차단, 출근기록 허용·근거기록, 원격 중 수동/자동 퇴근·세션 해제 허용, 서버 20:00 마감');
+    console.log('PASS: 원격 신호 관측은 유지, 로그인·세션 복원 차단 비활성화, 출퇴근 원격 플래그 미기록, 서버 20:00 마감');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     remoteDetector.detectRemoteSession = originalDetect;

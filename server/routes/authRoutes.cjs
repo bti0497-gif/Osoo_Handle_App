@@ -26,6 +26,9 @@ function findMemberInDriveBackup(...args) {
 function detectRemoteSession(...args) {
   return require('../services/remoteSessionDetectService.cjs').detectRemoteSession(...args);
 }
+function isRemoteLoginEnforcementEnabled() {
+  return require('../services/remoteSessionDetectService.cjs').REMOTE_LOGIN_ENFORCEMENT_ENABLED === true;
+}
 function recordAttendanceSessions(...args) {
   return require('../services/attendanceSessionService.cjs').recordAttendanceSessions(...args);
 }
@@ -65,6 +68,15 @@ module.exports = (db, appDataPath) => {
     const detectCurrentRemoteSession = () => detectRemoteSession({
         statePath: path.join(appDataPath, 'runtime', 'remote-session-state.json'),
     });
+    const detectEnforcedRemoteSession = () => isRemoteLoginEnforcementEnabled()
+        ? detectCurrentRemoteSession()
+        : {
+            detected: false,
+            sessionType: 'local',
+            evidence: 'remote-login-enforcement-disabled',
+            observedTools: [],
+            verificationFailed: false,
+        };
     let lastRemoteSignalDiagnosticKey = '';
     let lastRemoteSignalDiagnosticAt = 0;
     const toSessionMember = (member) => {
@@ -529,6 +541,7 @@ module.exports = (db, appDataPath) => {
                         source: remote?.source || 'watchdog',
                         watchdogVersion: remote?.watchdogVersion || null,
                         sessionType: remote?.sessionType || 'unknown',
+                        enforcementEnabled: isRemoteLoginEnforcementEnabled(),
                         stateAgeMs: Number.isFinite(remote?.stateAgeMs) ? remote.stateAgeMs : null,
                         evidence: remote?.evidence || '',
                         observedTools: remote?.observedTools || [],
@@ -540,6 +553,7 @@ module.exports = (db, appDataPath) => {
                 success: true,
                 remote: {
                     detected: Boolean(remote?.detected),
+                    enforcementEnabled: isRemoteLoginEnforcementEnabled(),
                     sessionType: remote?.sessionType || 'local',
                     evidence: remote?.evidence || '',
                     observedTools: remote?.observedTools || [],
@@ -556,8 +570,8 @@ module.exports = (db, appDataPath) => {
     router.post('/report-remote-attempt', (req, res) => {
         const name = String(req.body?.name || '').trim();
         try {
-            const remote = detectCurrentRemoteSession();
-            if (remote.detected) {
+            const remote = detectEnforcedRemoteSession();
+            if (remote.detected && isRemoteLoginEnforcementEnabled()) {
                 recordRemoteAttemptRecord(db, appDataPath, { name, remote });
             }
             return res.json({ success: true });
@@ -628,8 +642,8 @@ module.exports = (db, appDataPath) => {
                     ...safeClientContext,
                 },
             });
-            const remote = detectCurrentRemoteSession();
-            if (remote.detected) {
+            const remote = detectEnforcedRemoteSession();
+            if (remote.detected && isRemoteLoginEnforcementEnabled()) {
                 const namedMember = db.prepare('SELECT * FROM members WHERE name = ?').get(normalizedName);
                 recordRemoteAttemptRecord(db, appDataPath, { name: normalizedName, member: namedMember, remote, safeClientContext });
                 return res.status(403).json({
@@ -761,8 +775,8 @@ module.exports = (db, appDataPath) => {
                 return res.json({ success: true, member: enrichMemberWithSites(member), source });
             }
 
-            const remote = detectCurrentRemoteSession();
-            if (remote.detected) {
+            const remote = detectEnforcedRemoteSession();
+            if (remote.detected && isRemoteLoginEnforcementEnabled()) {
                 recordRemoteAttemptRecord(db, appDataPath, { name, member, remote });
                 return res.status(403).json({
                     success: false,
@@ -835,8 +849,8 @@ module.exports = (db, appDataPath) => {
             if (String(member.role || '').trim() === 'admin' || String(member.name || '').trim() === 'admin') {
                 return res.json({ success: false, message: '관리자 세션은 저장할 수 없습니다.' });
             }
-            const remote = detectCurrentRemoteSession();
-            if (remote.detected) {
+            const remote = detectEnforcedRemoteSession();
+            if (remote.detected && isRemoteLoginEnforcementEnabled()) {
                 recordRemoteAttemptRecord(db, appDataPath, { name: member.name, member, remote });
                 return res.status(403).json({
                     success: false,
@@ -1050,7 +1064,7 @@ module.exports = (db, appDataPath) => {
         const loginTime = getLocalTime();
 
         try {
-            const remote = detectCurrentRemoteSession();
+            const remote = detectEnforcedRemoteSession();
             if (remote.detected) {
                 recordDiagnostic(db, appDataPath, {
                     level: 'warn', area: 'auth', action: 'remote-attendance-recorded', result: 'recorded',
@@ -1091,7 +1105,7 @@ module.exports = (db, appDataPath) => {
             const isFieldWorker = !member || String(member.role || 'user') === 'user';
 
             if (isFieldWorker) {
-                const remote = detectCurrentRemoteSession();
+                const remote = detectEnforcedRemoteSession();
                 if (remote.detected) {
                     recordDiagnostic(db, appDataPath, {
                         level: 'info',
@@ -1138,7 +1152,7 @@ module.exports = (db, appDataPath) => {
         try {
             const activeUser = getActiveUser();
             if (activeUser && String(activeUser.role || 'user') === 'user') {
-                const remote = detectCurrentRemoteSession();
+                const remote = detectEnforcedRemoteSession();
                 if (remote.detected) {
                     recordDiagnostic(db, appDataPath, {
                         level: 'info', area: 'auth', action: 'remote-session-clear-allowed', result: 'allowed',

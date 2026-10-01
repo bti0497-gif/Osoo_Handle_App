@@ -195,7 +195,7 @@ check(
 
 check(
   containsAll(remoteSessionDetectText, [
-    "const REQUIRED_WATCHDOG_VERSION = '1.0.8'",
+    "const REQUIRED_WATCHDOG_VERSION = '1.0.9'",
     "statePath = REMOTE_STATE_FILE",
     "state.state === 'active'",
     "['RustDesk', 'Chrome Remote Desktop'].includes(tool)",

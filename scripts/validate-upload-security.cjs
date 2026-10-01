@@ -7,6 +7,7 @@ const {
   MAX_TEMPLATE_BYTES,
   boardFileFilter,
   imageFileFilter,
+  medicinePhotoFileFilter,
   templateFileFilter,
   uploadErrorMiddleware,
 } = require('../server/middleware/uploadSecurity.cjs');
@@ -19,6 +20,11 @@ async function run() {
   assert.strictEqual((await accepts(imageFileFilter, { originalname: '현장사진.jpg', mimetype: 'image/jpeg' })).allowed, true);
   assert.ok((await accepts(imageFileFilter, { originalname: '위장사진.exe', mimetype: 'image/jpeg' })).error);
   assert.ok((await accepts(imageFileFilter, { originalname: '위장사진.jpg', mimetype: 'application/octet-stream' })).error);
+  assert.strictEqual((await accepts(medicinePhotoFileFilter, { originalname: '약품사진.heic', mimetype: 'application/octet-stream' })).allowed, true);
+  assert.strictEqual((await accepts(medicinePhotoFileFilter, { originalname: '약품사진.heif', mimetype: 'application/octet-stream' })).allowed, true);
+  assert.strictEqual((await accepts(medicinePhotoFileFilter, { originalname: '약품사진.heic', mimetype: 'image/heic' })).allowed, true);
+  assert.ok((await accepts(medicinePhotoFileFilter, { originalname: '위장사진.jpg', mimetype: 'application/octet-stream' })).error);
+  assert.ok((await accepts(medicinePhotoFileFilter, { originalname: '위장사진.exe', mimetype: 'image/heic' })).error);
   assert.strictEqual((await accepts(boardFileFilter, { originalname: '일지양식.hwpx', mimetype: 'application/octet-stream' })).allowed, true);
   assert.ok((await accepts(boardFileFilter, { originalname: '실행파일.exe', mimetype: 'application/octet-stream' })).error);
   assert.strictEqual((await accepts(templateFileFilter, { originalname: '월운영보고서.xlsx' })).allowed, true);

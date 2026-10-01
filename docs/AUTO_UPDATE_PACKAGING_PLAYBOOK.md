@@ -148,11 +148,17 @@ Test-Path -LiteralPath 'templates/reports/설비이력카드.xlsx'
 
 ### 7.3 저비용 회귀검증
 
+`npm run release:runner`는 일반 진단 회귀보다 먼저 **ROADWORK DATA FLOW HARNESS**를 실행한다. 격리된 검증용 SQLite에서 통합입력 저장 API → 로컬 SQLite → 공사입력 도우미 조회를 즉시 왕복해 날짜·현장·반환값과 캐시 방지 계약을 확인하고, 슬러지 반출량 0인 고아행은 숨기되 실제 증빙 파일 및 양수 반출 행은 보존하는지 검사한다. 실패하면 이후 회귀 및 패키징 단계로 넘어가지 않는다. 이 하네스는 운영 DB나 외부 서비스에 접근하지 않는다.
+
+선행 하네스가 통과하면 뒤의 전체 `npm run validate`에서 동일한 현장/API 시나리오는 중복 실행하지 않으며, `npm run validate`를 단독 실행할 때는 기존대로 해당 검증을 수행한다.
+
+단독 저비용 회귀검증은 다음 명령을 사용한다. 정식 패키징을 시작하면 `npm run release:runner`가 위 하네스를 자동으로 가장 먼저 실행한다.
+
 ```powershell
 node tools/diagnostic-runner/runner.cjs --scenario all --lint --changed
 ```
 
-실패하면 패키징하지 않는다. 관련 산출물만 읽고 수정한 뒤 다시 실행한다.
+실패하면 패키징하지 않는다. 실패 단계와 하네스 출력만 확인해 수정한 뒤 러너를 다시 실행한다.
 
 ### 7.4 전체 검증
 

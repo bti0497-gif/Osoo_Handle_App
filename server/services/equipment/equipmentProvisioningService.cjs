@@ -72,9 +72,9 @@ const A2O_ONLY_DEFS = () => [
   card('FLT-104', '침전조', '유량계', '외부반송유량계', { model: '전자유량계' }),
   card('M-403', '응집침전조', '감속기', '감속기', { model: '중심구동 스크래퍼용', power: '0.75 kW', accessory: '스크래퍼 포함' }),
   card('M-404', '응집침전조', '탱크류', '응집제탱크', { model: 'PE 저장탱크', unit: '개', location: '약품실' }),
-  card('M-405', '응집침전조', '약품펌프류', '응집제 주입펌프', { model: '정량 다이어프램 펌프', power: '0.1 kW', location: '약품실', notes: '예비 포함 시 추가 등록' }),
+  ...unitCards(null, '응집침전조', '약품펌프류', '응집제 주입펌프', { managementNoBase: 'M-405', model: '정량 다이어프램 펌프', power: '0.1 kW', location: '약품실', notes: '기본 2대 · 추가 시 C, D, E...' }),
   card('M-406', '응집침전조', '탱크류', '폴리머탱크', { model: 'PE 저장탱크', unit: '개', location: '약품실', accessory: '교반기 포함' }),
-  card('M-407', '응집침전조', '약품펌프류', '폴리머 주입펌프', { model: '정량 다이어프램 펌프', power: '0.1 kW', location: '약품실', notes: '예비 포함 시 추가 등록' }),
+  ...unitCards(null, '응집침전조', '약품펌프류', '폴리머 주입펌프', { managementNoBase: 'M-407', model: '정량 다이어프램 펌프', power: '0.1 kW', location: '약품실', notes: '기본 2대 · 추가 시 C, D, E...' }),
 ];
 
 const MBR_ONLY_DEFS = () => [

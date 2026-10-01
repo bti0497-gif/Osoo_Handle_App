@@ -15,8 +15,8 @@ using System.Threading;
 [assembly: System.Reflection.AssemblyDescription("Background watchdog for Osoo Handle App")]
 [assembly: System.Reflection.AssemblyCompany("Osoo")]
 [assembly: System.Reflection.AssemblyProduct("Osoo Handle App Watchdog")]
-[assembly: System.Reflection.AssemblyVersion("1.0.8.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.8.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.9.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.9.0")]
 
 namespace OsooWatchdog
 {
@@ -121,6 +121,8 @@ namespace OsooWatchdog
         private static int lastChromotingRecordIndex = -1;
         private static string lastChromotingEventState = "unknown";
         private static DateTime lastChromotingConnectedAt = DateTime.MinValue;
+        private static DateTime lastChromotingEventAt = DateTime.MinValue;
+        private static long lastChromotingEventId;
         private static Options options;
         private static string runtimeDirectory;
         private static string logPath;
@@ -144,7 +146,7 @@ namespace OsooWatchdog
                     return 2;
                 }
 
-                Log("watchdog-start", "ok", "version=1.0.8; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
+                Log("watchdog-start", "ok", "version=1.0.9; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
                 do
                 {
                     try { CheckOnce(); }
@@ -868,7 +870,9 @@ namespace OsooWatchdog
         {
             string rustDeskState;
             string rustDeskEvidence;
-            DetectRustDeskSession(out rustDeskState, out rustDeskEvidence);
+            int rustDeskProcessCount;
+            bool rustDeskWindowDetected;
+            DetectRustDeskSession(out rustDeskState, out rustDeskEvidence, out rustDeskProcessCount, out rustDeskWindowDetected);
 
             string chromeState;
             string chromeEvidence;
@@ -889,7 +893,7 @@ namespace OsooWatchdog
             DateTime checkedAt = DateTime.UtcNow;
             string evidenceText = String.Join("; ", evidence.ToArray());
             string json = "{\n"
-                + "  \"version\": \"1.0.8\",\n"
+                + "  \"version\": \"1.0.9\",\n"
                 + "  \"checkedAt\": " + JsonString(checkedAt.ToString("o")) + ",\n"
                 + "  \"state\": " + JsonString(state) + ",\n"
                 + "  \"sessionType\": " + JsonString(sessionType) + ",\n"
@@ -904,6 +908,8 @@ namespace OsooWatchdog
             {
                 lastRemoteStateKey = stateKey;
                 lastRemoteStateLogAt = checkedAt;
+                WriteRemoteObservation(checkedAt, state, rustDeskState, rustDeskEvidence, rustDeskProcessCount,
+                    rustDeskWindowDetected, chromeState, chromeEvidence);
                 Log("remote-session-detection", state, "sessionType=" + sessionType
                     + "; rustDesk=" + rustDeskState
                     + "; chromeRemoteDesktop=" + chromeState
@@ -911,10 +917,64 @@ namespace OsooWatchdog
             }
         }
 
-        private static void DetectRustDeskSession(out string state, out string evidence)
+        private static void WriteRemoteObservation(DateTime checkedAt, string overallState,
+            string rustDeskState, string rustDeskEvidence, int rustDeskProcessCount, bool rustDeskWindowDetected,
+            string chromeState, string chromeEvidence)
+        {
+            try
+            {
+                string observedAt = checkedAt.ToString("o");
+                string chromeEventAt = lastChromotingEventAt == DateTime.MinValue
+                    ? null : lastChromotingEventAt.ToString("o");
+                long chromeAgeSeconds = lastChromotingEventAt == DateTime.MinValue
+                    ? -1 : Math.Max(0, (long)(checkedAt - lastChromotingEventAt).TotalSeconds);
+                string chromeEventState = lastChromotingEventState;
+                string decisionReason = overallState == "active"
+                    ? "one-or-more-source-active" : overallState == "unknown"
+                        ? "no-active-source-and-one-or-more-source-unknown" : "all-sources-clear";
+                string rawSignals = "{\"checkedAt\":" + JsonString(observedAt)
+                    + ",\"rustDesk\":{\"state\":" + JsonString(rustDeskState)
+                    + ",\"evidence\":" + JsonString(rustDeskEvidence)
+                    + ",\"processCount\":" + rustDeskProcessCount.ToString(CultureInfo.InvariantCulture)
+                    + ",\"visibleSessionWindow\":" + rustDeskWindowDetected.ToString().ToLowerInvariant() + "}"
+                    + ",\"chromeRemoteDesktop\":{\"state\":" + JsonString(chromeState)
+                    + ",\"evidence\":" + JsonString(chromeEvidence)
+                    + ",\"eventState\":" + JsonString(chromeEventState)
+                    + ",\"eventId\":" + lastChromotingEventId.ToString(CultureInfo.InvariantCulture)
+                    + ",\"eventAt\":" + JsonString(chromeEventAt)
+                    + ",\"signalAgeSeconds\":" + (chromeAgeSeconds < 0 ? "null" : chromeAgeSeconds.ToString(CultureInfo.InvariantCulture)) + "}}";
+                string eventJson = "{\"observation_id\":" + JsonString(Guid.NewGuid().ToString("N"))
+                    + ",\"createdAt\":" + JsonString(observedAt)
+                    + ",\"version\":\"1.0.9\",\"detector_version\":\"1\",\"area\":\"watchdog\",\"action\":\"remote-session-detection\""
+                    + ",\"result\":" + JsonString(overallState)
+                    + ",\"overall_state\":" + JsonString(overallState)
+                    + ",\"decision_reason\":" + JsonString(decisionReason)
+                    + ",\"rustdesk_state\":" + JsonString(rustDeskState)
+                    + ",\"rustdesk_evidence\":" + JsonString(rustDeskEvidence)
+                    + ",\"rustdesk_signal_at\":" + JsonString(rustDeskWindowDetected ? observedAt : null)
+                    + ",\"rustdesk_process_count\":" + rustDeskProcessCount.ToString(CultureInfo.InvariantCulture)
+                    + ",\"rustdesk_window_detected\":" + rustDeskWindowDetected.ToString().ToLowerInvariant()
+                    + ",\"chrome_state\":" + JsonString(chromeState)
+                    + ",\"chrome_evidence\":" + JsonString(chromeEvidence)
+                    + ",\"chrome_event_state\":" + JsonString(chromeEventState)
+                    + ",\"chrome_event_id\":" + lastChromotingEventId.ToString(CultureInfo.InvariantCulture)
+                    + ",\"chrome_event_at\":" + JsonString(chromeEventAt)
+                    + ",\"chrome_signal_age_seconds\":" + (chromeAgeSeconds < 0 ? "null" : chromeAgeSeconds.ToString(CultureInfo.InvariantCulture))
+                    + ",\"raw_signals\":" + rawSignals + "}" + Environment.NewLine;
+                File.AppendAllText(Path.Combine(runtimeDirectory, "remote-session-observations.jsonl"), eventJson, new UTF8Encoding(false));
+            }
+            catch (Exception ex)
+            {
+                Log("remote-session-observation-write", "failed", ex.GetType().Name);
+            }
+        }
+
+        private static void DetectRustDeskSession(out string state, out string evidence, out int processCount, out bool windowDetected)
         {
             state = "clear";
             evidence = "no-active-session-window";
+            processCount = 0;
+            windowDetected = false;
             Process[] processes;
             try { processes = Process.GetProcessesByName("rustdesk"); }
             catch (Exception ex)
@@ -933,6 +993,7 @@ namespace OsooWatchdog
                 finally { process.Dispose(); }
             }
             if (processIds.Count == 0) return;
+            processCount = processIds.Count;
 
             bool queryFailed = false;
             bool activeSessionWindow = false;
@@ -962,6 +1023,7 @@ namespace OsooWatchdog
 
             if (activeSessionWindow)
             {
+                windowDetected = true;
                 state = "active";
                 evidence = "visible-remote-session-window";
             }
@@ -1002,6 +1064,7 @@ namespace OsooWatchdog
                             if (!String.Equals(entry.Source, "chromoting", StringComparison.OrdinalIgnoreCase)) continue;
                             long eventId = entry.InstanceId;
                             if (eventId != 1 && eventId != 2) continue;
+                            lastChromotingEventId = eventId;
                             ApplyChromotingEvent(eventId, entry.TimeGenerated.ToUniversalTime());
                             break;
                         }
@@ -1016,6 +1079,7 @@ namespace OsooWatchdog
                             if (!String.Equals(entry.Source, "chromoting", StringComparison.OrdinalIgnoreCase)) continue;
                             long eventId = entry.InstanceId;
                             if (eventId != 1 && eventId != 2) continue;
+                            lastChromotingEventId = eventId;
                             ApplyChromotingEvent(eventId, entry.TimeGenerated.ToUniversalTime());
                             break;
                         }
@@ -1056,6 +1120,7 @@ namespace OsooWatchdog
 
         private static void ApplyChromotingEvent(long eventId, DateTime eventAt)
         {
+            lastChromotingEventAt = eventAt;
             if (eventId == 1)
             {
                 lastChromotingEventState = "connected";
@@ -1089,7 +1154,7 @@ namespace OsooWatchdog
             if (statusKey == lastStatusKey && now - lastStatusAt < TimeSpan.FromMinutes(1)) return;
             lastStatusKey = statusKey;
             lastStatusAt = now;
-            string json = "{\n  \"version\": \"1.0.8\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
+            string json = "{\n  \"version\": \"1.0.9\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
             AtomicWrite(Path.Combine(runtimeDirectory, "watchdog-status.json"), json);
         }
 
@@ -1109,7 +1174,7 @@ namespace OsooWatchdog
                 string createdAt = DateTime.UtcNow.ToString("o");
                 string line = createdAt + "\t" + action + "\t" + result + (String.IsNullOrEmpty(details) ? "" : "\t" + details) + Environment.NewLine;
                 File.AppendAllText(logPath, line, new UTF8Encoding(false));
-                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.8\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
+                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.9\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
                 File.AppendAllText(Path.Combine(runtimeDirectory, "watchdog-events.jsonl"), eventJson, new UTF8Encoding(false));
             }
             catch { }

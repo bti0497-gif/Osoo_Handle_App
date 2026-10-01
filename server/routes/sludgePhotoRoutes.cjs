@@ -468,7 +468,7 @@ function resolveLocalSludgePhotoPath(appDataPath, row, label) {
   return resolveLocalPathFromUrl(appDataPath, resolvedUrl);
 }
 
-function getMergedSludgeRows(db, start, end, siteContext = {}) {
+function getMergedSludgeRows(db, start, end, siteContext = {}, appDataPath = '') {
   const siteId = String(siteContext.siteId || siteContext.site_id || '').trim();
   if (!siteId) throw new Error('슬러지 조회에 site_id가 필요합니다.');
   const photoRows = db.prepare(
@@ -523,8 +523,13 @@ function getMergedSludgeRows(db, start, end, siteContext = {}) {
     .filter((row) => {
       const amount = Number(row?.sludge_amount);
       const hasPositiveAmount = Number.isFinite(amount) && amount > 0;
-      const hasAttachedRecord = Boolean(row?.sludge_photo_path || row?.certificate_photo_path);
-      return hasPositiveAmount || hasAttachedRecord;
+      // A stale DB URL is not evidence that a photo still exists. Keep zero-
+      // amount rows only when a usable local evidence file remains available.
+      const hasLocalEvidence = Boolean(
+        resolveLocalSludgePhotoPath(appDataPath, row, '반출')
+        || resolveLocalSludgePhotoPath(appDataPath, row, '청소필증')
+      );
+      return hasPositiveAmount || hasLocalEvidence;
     })
     .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
 }
@@ -543,7 +548,7 @@ module.exports = function (db, baseDir, appDataPath) {
       const start   = `${year}-${mm}-01`;
       const lastDay = new Date(year, month, 0).getDate();
       const end     = `${year}-${mm}-${String(lastDay).padStart(2, '0')}`;
-      const rows = getMergedSludgeRows(db, start, end, req.siteContext);
+      const rows = getMergedSludgeRows(db, start, end, req.siteContext, appDataPath);
       const items = rows.map((r) => {
         const photoFiles = listPhotoSequenceFiles(appDataPath, r.date, req.siteContext?.siteId);
         const sludgePhotoUrls = photoFiles.sludge

@@ -21,6 +21,7 @@ const electronVersion = '40.6.0';
 
 const steps = [
   'PREFLIGHT',
+  'ROADWORK DATA FLOW HARNESS',
   'REGRESSION',
   'PREPARED VALIDATION',
   'NATIVE/ELECTRON ABI PREPARATION',
@@ -465,6 +466,7 @@ async function main() {
   }
 
   const plannedCommands = [
+    ['ROADWORK DATA FLOW HARNESS', 'node', ['tools/release-runner/roadwork-data-harness.cjs']],
     ['REGRESSION', 'node', ['tools/diagnostic-runner/runner.cjs', '--scenario', 'all', '--lint', '--changed']],
     ['PREPARED VALIDATION', 'node', ['tools/diagnostic-runner/validate-prepared.cjs']],
     ['NATIVE/ELECTRON ABI PREPARATION', 'npx', ['@electron/rebuild', '--force', '--arch=x64', `--version=${electronVersion}`]],
@@ -516,7 +518,10 @@ async function main() {
       const commandResult = await runCommandAsync(command, args, {
         stepName: name,
         debug: options.debug,
-        env: { OSOO_RELEASE_OUTPUT_DIR: outputDirectory },
+        env: {
+          OSOO_RELEASE_OUTPUT_DIR: outputDirectory,
+          ...(name === 'PREPARED VALIDATION' ? { OSOO_RELEASE_ROADWORK_HARNESS_PASSED: '1' } : {}),
+        },
         onProgress: (info) => {
           writeProgress({
             version: packageJson.version,

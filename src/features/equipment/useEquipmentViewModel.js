@@ -487,7 +487,9 @@ export function useEquipmentViewModel() {
           }
           return;
         }
-        const target = checked ? Math.max(1, Number(catalogCounts[item.key]) || current || 1) : 0;
+        const target = checked
+          ? Math.max(1, Number(catalogCounts[item.key]) || current || Number(item.defaultCount) || 1)
+          : 0;
         if (target > current) {
           additions.push({ entry: { name: item.name, process: item.process, group: group.group, category3: item.category3 }, count: target - current });
           changeCount += 1;

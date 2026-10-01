@@ -1,5 +1,5 @@
 // 장비 추가 카탈로그 모달: 체크 = 목록 등록, 해제 = 목록 제거(양방향 동기화).
-// 개수형(펌프·교반기·브로아·막분리)의 스테퍼는 '원하는 대수'로, 늘리면 다음 호기가
+// 개수형(펌프·약품펌프·교반기·브로아·막분리)의 스테퍼는 '원하는 대수'로, 늘리면 다음 호기가
 // 추가되고 줄이면 높은 호기부터 제거된다. 상태와 생성/제거 규칙은 ViewModel/Model이 담당한다.
 import React from 'react';
 import { EQUIPMENT_PROCESS_ORDER, EQUIPMENT_TYPE_ORDER } from './equipmentPreviewData';
@@ -74,7 +74,7 @@ export default function EquipmentCatalogModal({
                     const exists = info.count > 0;
                     const countable = group.supportsCount;
                     const checked = Boolean(checks[item.key]);
-                    const count = Math.min(26, Math.max(1, Number(counts[item.key]) || info.count || 1));
+                    const count = Math.min(26, Math.max(1, Number(counts[item.key]) || info.count || Number(item.defaultCount) || 1));
                     const subParts = [item.process];
                     if (exists && !countable) subParts.push(info.numbers.join(', '));
                     return (

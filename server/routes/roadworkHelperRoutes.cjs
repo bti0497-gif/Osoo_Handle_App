@@ -6,6 +6,16 @@ function normalizeDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : new Date().toISOString().slice(0, 10);
 }
 
+function isValidExactDate(value) {
+  const text = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const [year, month, day] = text.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() + 1 === month
+    && date.getUTCDate() === day;
+}
+
 function addDays(date, offset) {
   const [year, month, day] = String(date || '').split('-').map(Number);
   const d = new Date(Date.UTC(year, month - 1, day));
@@ -287,7 +297,12 @@ module.exports = function (db) {
 
   router.get('/api/roadwork-helper/all', async (req, res) => {
     try {
-      const date = normalizeDate(req.query.date);
+      res.setHeader('Cache-Control', 'no-store');
+      const requestedDate = String(req.query.date || '').trim();
+      if (!isValidExactDate(requestedDate)) {
+        return res.status(400).json({ success: false, code: 'ROADWORK_DATE_INVALID', message: '조회 날짜가 없거나 올바르지 않습니다.' });
+      }
+      const date = requestedDate;
       const scope = buildScope(db, req.siteContext);
       return res.json({
         success: true,
