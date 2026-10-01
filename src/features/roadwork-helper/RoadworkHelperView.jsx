@@ -85,7 +85,7 @@ const ROADWORK_STATUS_SCRIPT = `
     if (!match) return '';
     const [, year, month, day] = match;
     const normalized = [year, month.padStart(2, '0'), day.padStart(2, '0')].join('-');
-    const parsed = new Date(`${normalized}T00:00:00`);
+    const parsed = new Date(normalized + 'T00:00:00');
     return Number.isNaN(parsed.getTime())
       || parsed.getFullYear() !== Number(year)
       || parsed.getMonth() + 1 !== Number(month)
