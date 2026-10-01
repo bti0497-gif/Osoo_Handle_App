@@ -32,7 +32,7 @@ assert.match(roadworkRuntime, /ipcMain\.handle\('roadwork:getRoadworkUrl'[\s\S]*
 assert.match(roadworkRuntime, /getScopedCredential\(db, 'road_web', getSiteIdFromSender\(event\)\)/);
 
 const fetchConfigStart = roadworkView.indexOf('const fetchConfig = React.useCallback');
-const fetchConfigEnd = roadworkView.indexOf('const recordRoadworkDiagnostic', fetchConfigStart);
+const fetchConfigEnd = roadworkView.indexOf('const captureExternalRoadworkContext', fetchConfigStart);
 assert.ok(fetchConfigStart >= 0 && fetchConfigEnd > fetchConfigStart, 'roadwork fetchConfig contract block is missing');
 const fetchConfigBlock = roadworkView.slice(fetchConfigStart, fetchConfigEnd);
 assert.doesNotMatch(fetchConfigBlock, /SettingsModel|apiClient|fetch\s*\(|\/api\/settings|google\s*sheet/i);
