@@ -13,7 +13,10 @@ try {
   console.log(`[Roadwork Harness] isolated SQLite ready (Node ABI ${prepared.abi}, reused=${prepared.reused})`);
 
   const preload = path.join(__dirname, '..', 'diagnostic-runner', 'lib', 'validation-sqlite-preload.cjs');
-  const nodeOptions = [process.env.NODE_OPTIONS, `--require "${preload}"`].filter(Boolean).join(' ');
+  // NODE_OPTIONS reparses this value in a second process; forward slashes keep
+  // Windows drive paths intact through that parser, including paths with spaces.
+  const preloadForNodeOptions = preload.replace(/\\/g, '/');
+  const nodeOptions = [process.env.NODE_OPTIONS, `--require "${preloadForNodeOptions}"`].filter(Boolean).join(' ');
   const result = spawnSync(process.execPath, ['scripts/validate-site-route-isolation.cjs'], {
     cwd: projectRoot,
     env: { ...process.env, NODE_OPTIONS: nodeOptions },
