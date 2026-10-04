@@ -393,7 +393,10 @@ export const useAuthViewModel = () => {
             const normalizedName = String(name || '').trim();
             const isPrimaryAdminLogin = normalizedName.toLowerCase() === 'admin';
             const loginResult = isPrimaryAdminLogin
-                ? await AuthModel.discoveryLogin(normalizedName, password)
+                ? await AuthModel.discoveryLogin(normalizedName, password, {
+                    requestPurpose: 'login-screen',
+                    ...diagnosticContext,
+                })
                 : await AuthModel.localLogin(normalizedName, password, {
                     requestPurpose: 'login-screen',
                     ...diagnosticContext,

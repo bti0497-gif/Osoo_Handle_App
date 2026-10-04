@@ -46,6 +46,7 @@ const activeUserText = read('server/services/activeUserSessionService.cjs');
 const attendanceBqText = read('server/services/attendanceBigQueryService.cjs');
 const attendanceSessionText = read('server/services/attendanceSessionService.cjs');
 const remoteSessionDetectText = read('server/services/remoteSessionDetectService.cjs');
+const remoteSessionObservationSyncText = read('server/services/remoteSessionObservationSyncService.cjs');
 const databaseText = read('server/database.cjs');
 const appText = read('src/App.jsx');
 const mainText = read('src/main.jsx');
@@ -195,7 +196,7 @@ check(
 
 check(
   containsAll(remoteSessionDetectText, [
-    "const REQUIRED_WATCHDOG_VERSION = '1.0.9'",
+    "const REQUIRED_WATCHDOG_VERSION = '1.0.10'",
     "statePath = REMOTE_STATE_FILE",
     "state.state === 'active'",
     "['RustDesk', 'Chrome Remote Desktop'].includes(tool)",
@@ -204,6 +205,25 @@ check(
   ]) && !/teamviewer|anydesk|parsec|todesk|sunlogin|SSH|Windows RDP/i.test(remoteSessionDetectText),
   'field app trusts only the fresh watchdog RustDesk/Chrome Remote Desktop signal',
   'field app still performs broad local remote-tool detection or accepts stale launcher signals'
+);
+
+check(
+  containsAll(authRoutesText, [
+    'recordObservedRemoteLoginAttempt',
+    "route: 'local-login'",
+    "route: 'discovery-login'",
+    "action: 'remote-login-attempt'",
+    "inputOrigin: 'unverified'",
+    'passwordValueCaptured: false',
+    'detectCurrentRemoteSession()',
+  ]) && containsAll(remoteSessionObservationSyncText, [
+    'remote-login-attempts.jsonl',
+    "'remote-login-attempt'",
+    'MERGE \\`${DATASET_ID}.${TABLE_NAME}\\`',
+  ]) && authModelText.includes("{ name, password, diagnosticContext }")
+    && authVmText.includes('AuthModel.discoveryLogin(normalizedName, password, {'),
+  'remote-session login submissions are queued without passwords or blocking and retain input-origin uncertainty',
+  'remote login submission observations are missing, falsely claim input origin, or risk capturing credentials'
 );
 
 check(
@@ -346,7 +366,7 @@ check(
 check(
   containsAll(authVmText, [
     'const isPrimaryAdminLogin',
-    '? await AuthModel.discoveryLogin(normalizedName, password)',
+    '? await AuthModel.discoveryLogin(normalizedName, password, {',
     ': await AuthModel.localLogin(normalizedName, password, {',
     "requestPurpose: 'login-screen'",
   ]) &&

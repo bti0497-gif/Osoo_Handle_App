@@ -12,6 +12,8 @@ function getDefaultPaths() {
   return {
     observationFile: path.join(runtimePath, 'remote-session-observations.jsonl'),
     cursorFile: path.join(runtimePath, 'remote-session-observations.bq-cursor.json'),
+    loginAttemptFile: path.join(runtimePath, 'remote-login-attempts.jsonl'),
+    loginAttemptCursorFile: path.join(runtimePath, 'remote-login-attempts.bq-cursor.json'),
   };
 }
 
@@ -67,7 +69,8 @@ function readPendingObservations(observationFile, cursorFile) {
   const completeText = buffer.subarray(0, lastNewline).toString('utf8');
   const rows = completeText.split(/\r?\n/).filter(Boolean).map((line) => {
     const event = JSON.parse(line);
-    if (event.action !== 'remote-session-detection' || !event.observation_id || !event.createdAt) {
+    if (!['remote-session-detection', 'remote-login-attempt'].includes(event.action)
+      || !event.observation_id || !event.createdAt) {
       throw new Error('remote-session-observation-invalid-record');
     }
     return event;
@@ -75,20 +78,47 @@ function readPendingObservations(observationFile, cursorFile) {
   return { rows, offset, nextOffset: offset + lastNewline + 1 };
 }
 
+function appendRemoteLoginAttemptObservation(event, options = {}) {
+  if (!event || event.action !== 'remote-login-attempt' || !event.observation_id || !event.createdAt) {
+    throw new Error('remote-login-attempt-invalid-record');
+  }
+  const defaults = options.appDataPath || options.loginAttemptFile ? null : getDefaultPaths();
+  const runtimePath = options.appDataPath
+    ? path.join(options.appDataPath, 'runtime')
+    : options.loginAttemptFile
+      ? path.dirname(options.loginAttemptFile)
+      : path.dirname(defaults.loginAttemptFile);
+  const loginAttemptFile = options.loginAttemptFile || path.join(runtimePath, 'remote-login-attempts.jsonl');
+  fs.mkdirSync(path.dirname(loginAttemptFile), { recursive: true });
+  fs.appendFileSync(loginAttemptFile, `${JSON.stringify(event)}\n`, 'utf8');
+  return loginAttemptFile;
+}
+
 async function syncRemoteSessionObservations(options = {}) {
   const defaults = options.observationFile && options.cursorFile ? null : getDefaultPaths();
   const observationFile = options.observationFile || defaults.observationFile;
   const cursorFile = options.cursorFile || defaults.cursorFile;
+  const loginAttemptFile = options.loginAttemptFile
+    || defaults?.loginAttemptFile
+    || path.join(path.dirname(observationFile), 'remote-login-attempts.jsonl');
+  const loginAttemptCursorFile = options.loginAttemptCursorFile
+    || defaults?.loginAttemptCursorFile
+    || path.join(path.dirname(observationFile), 'remote-login-attempts.bq-cursor.json');
   const localDb = options.db || require('../database.cjs').db;
   const getClient = options.getBigQueryClient || getBigQueryClient;
   let pending;
+  let pendingLoginAttempts;
   try {
     pending = readPendingObservations(observationFile, cursorFile);
+    pendingLoginAttempts = readPendingObservations(loginAttemptFile, loginAttemptCursorFile);
   } catch (error) {
     return { success: false, count: 0, error: error.message };
   }
-  if (pending.rows.length === 0) {
+  if (pending.rows.length === 0 && pendingLoginAttempts.rows.length === 0) {
     if (pending.nextOffset > pending.offset) writeCursor(cursorFile, pending.nextOffset);
+    if (pendingLoginAttempts.nextOffset > pendingLoginAttempts.offset) {
+      writeCursor(loginAttemptCursorFile, pendingLoginAttempts.nextOffset);
+    }
     return { success: true, count: 0 };
   }
 
@@ -99,17 +129,19 @@ async function syncRemoteSessionObservations(options = {}) {
     const row = localDb.prepare('SELECT site_id, site_name FROM app_settings WHERE id = 1').get() || {};
     return { siteId: row.site_id || null, siteName: row.site_name || null };
   })();
-  const rows = pending.rows.map((event) => ({
+  const rows = [...pending.rows, ...pendingLoginAttempts.rows].map((event) => ({
     observation_id: String(event.observation_id),
     site_id: site.siteId,
     site_name: site.siteName,
     observed_at: event.createdAt,
     uploaded_at: new Date().toISOString(),
     app_version: options.appVersion || getAppVersion(),
-    watchdog_version: String(event.version || ''),
+    watchdog_version: String(event.watchdog_version || (event.action === 'remote-session-detection' ? event.version : '') || ''),
     detector_version: String(event.detector_version || ''),
     overall_state: String(event.overall_state || event.result || 'unknown'),
-    decision_reason: String(event.decision_reason || ''),
+    decision_reason: event.action === 'remote-login-attempt'
+      ? ['remote-login-attempt', event.decision_reason].filter(Boolean).join('|')
+      : String(event.decision_reason || ''),
     rustdesk_state: String(event.rustdesk_state || 'unknown'),
     rustdesk_evidence: String(event.rustdesk_evidence || ''),
     rustdesk_signal_at: event.rustdesk_signal_at || null,
@@ -197,10 +229,15 @@ async function syncRemoteSessionObservations(options = {}) {
       params: { rows_json: JSON.stringify(rows) },
     });
     writeCursor(cursorFile, pending.nextOffset);
+    writeCursor(loginAttemptCursorFile, pendingLoginAttempts.nextOffset);
     return { success: true, count: rows.length };
   } catch (error) {
     return { success: false, count: 0, error: error.message };
   }
 }
 
-module.exports = { readPendingObservations, syncRemoteSessionObservations };
+module.exports = {
+  appendRemoteLoginAttemptObservation,
+  readPendingObservations,
+  syncRemoteSessionObservations,
+};

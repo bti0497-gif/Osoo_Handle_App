@@ -72,9 +72,9 @@ export const AuthModel = {
         }
     },
 
-    async discoveryLogin(name, password) {
+    async discoveryLogin(name, password, diagnosticContext = {}) {
         try {
-            const data = await apiClient.post('/api/auth/discovery-login', { name, password });
+            const data = await apiClient.post('/api/auth/discovery-login', { name, password, diagnosticContext });
             if (!data.success) {
                 console.error("Discovery login failed:", data.message);
                 return null;

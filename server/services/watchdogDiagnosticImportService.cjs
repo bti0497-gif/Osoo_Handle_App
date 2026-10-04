@@ -55,7 +55,7 @@ function importRuntimeDiagnostics(db, appDataPath, sourceFileName, fallbackArea)
   for (const line of lines) {
     try {
       const event = JSON.parse(line);
-      const remoteObservation = event.action === 'remote-session-detection';
+      const remoteObservation = ['remote-session-detection', 'remote-login-attempt'].includes(event.action);
       recordDiagnostic(db, appDataPath, {
         createdAt: event.createdAt,
         level: event.result === 'failed' ? 'error' : event.result === 'waiting' ? 'warn' : 'info',
@@ -105,10 +105,13 @@ function importWatchdogDiagnostics(db, appDataPath) {
   const watchdog = importRuntimeDiagnostics(db, appDataPath, 'watchdog-events.jsonl', 'watchdog');
   const electron = importRuntimeDiagnostics(db, appDataPath, 'electron-recovery-events.jsonl', 'electron');
   const remoteObservations = importRuntimeDiagnostics(db, appDataPath, 'remote-session-observations.jsonl', 'watchdog');
+  const remoteLoginAttempts = importRuntimeDiagnostics(db, appDataPath, 'remote-login-attempts.jsonl', 'auth');
   return {
-    success: Boolean(watchdog.success && electron.success && remoteObservations.success),
-    imported: Number(watchdog.imported || 0) + Number(electron.imported || 0) + Number(remoteObservations.imported || 0),
-    malformed: Number(watchdog.malformed || 0) + Number(electron.malformed || 0) + Number(remoteObservations.malformed || 0),
+    success: Boolean(watchdog.success && electron.success && remoteObservations.success && remoteLoginAttempts.success),
+    imported: Number(watchdog.imported || 0) + Number(electron.imported || 0)
+      + Number(remoteObservations.imported || 0) + Number(remoteLoginAttempts.imported || 0),
+    malformed: Number(watchdog.malformed || 0) + Number(electron.malformed || 0)
+      + Number(remoteObservations.malformed || 0) + Number(remoteLoginAttempts.malformed || 0),
   };
 }
 

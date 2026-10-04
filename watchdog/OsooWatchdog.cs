@@ -15,8 +15,8 @@ using System.Threading;
 [assembly: System.Reflection.AssemblyDescription("Background watchdog for Osoo Handle App")]
 [assembly: System.Reflection.AssemblyCompany("Osoo")]
 [assembly: System.Reflection.AssemblyProduct("Osoo Handle App Watchdog")]
-[assembly: System.Reflection.AssemblyVersion("1.0.9.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.9.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.11.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.11.0")]
 
 namespace OsooWatchdog
 {
@@ -91,6 +91,171 @@ namespace OsooWatchdog
         public string RuntimePath;
     }
 
+    // Diagnostic only: aggregate Windows input flags while this app owns the foreground.
+    // Never retain keys, text, pointer coordinates, window titles, or individual events.
+    internal static class RemoteInputMonitor
+    {
+        private const int KeyboardHook = 13;
+        private const int MouseHook = 14;
+        private const int InjectedFlag = 0x10; // LLKHF_INJECTED; mouse uses 0x01 below.
+        private static readonly object Gate = new object();
+        private static readonly Queue<InputSample> Samples = new Queue<InputSample>();
+        private static HookProc keyboardCallback = OnKeyboard;
+        private static HookProc mouseCallback = OnMouse;
+        private static volatile bool foregroundIsApp;
+        private static volatile bool keyboardReady;
+        private static volatile bool mouseReady;
+        private static int keyboardError;
+        private static int mouseError;
+        private static string outputPath;
+
+        private struct InputSample { public long Ticks; public bool Keyboard; public bool Injected; public bool LowerIntegrity; }
+        private delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
+        [StructLayout(LayoutKind.Sequential)] private struct KeyboardData
+        { public uint VkCode, ScanCode, Flags, Time; public IntPtr ExtraInfo; }
+        [StructLayout(LayoutKind.Sequential)] private struct Point { public int X, Y; }
+        [StructLayout(LayoutKind.Sequential)] private struct MouseData
+        { public Point Position; public uint MouseDataValue, Flags, Time; public IntPtr ExtraInfo; }
+        [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int idHook, HookProc callback, IntPtr module, uint threadId);
+        [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll")] private static extern int GetMessage(out NativeMessage message, IntPtr window, uint min, uint max);
+        [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+        [StructLayout(LayoutKind.Sequential)] private struct NativeMessage
+        { public IntPtr Window; public uint Message; public IntPtr WParam, LParam; public uint Time; public Point Position; public uint Private; }
+
+        public static void Start(string runtimeDirectory)
+        {
+            outputPath = Path.Combine(runtimeDirectory, "remote-input-state.json");
+            var hookThread = new Thread(RunHooks) { IsBackground = true, Name = "Osoo input diagnostics" };
+            var samplingThread = new Thread(RunSampler) { IsBackground = true, Name = "Osoo input summary" };
+            hookThread.Start();
+            samplingThread.Start();
+        }
+
+        private static void RunHooks()
+        {
+            IntPtr keyboard = SetWindowsHookEx(KeyboardHook, keyboardCallback, IntPtr.Zero, 0);
+            keyboardReady = keyboard != IntPtr.Zero;
+            if (!keyboardReady) keyboardError = Marshal.GetLastWin32Error();
+            IntPtr mouse = SetWindowsHookEx(MouseHook, mouseCallback, IntPtr.Zero, 0);
+            mouseReady = mouse != IntPtr.Zero;
+            if (!mouseReady) mouseError = Marshal.GetLastWin32Error();
+            if (!keyboardReady && !mouseReady) return;
+            NativeMessage message;
+            while (GetMessage(out message, IntPtr.Zero, 0, 0) > 0) { }
+        }
+
+        private static IntPtr OnKeyboard(int code, IntPtr wParam, IntPtr lParam)
+        {
+            if (code >= 0 && foregroundIsApp)
+            {
+                uint flags = Marshal.PtrToStructure<KeyboardData>(lParam).Flags;
+                AddSample(true, (flags & InjectedFlag) != 0, (flags & 0x02) != 0);
+            }
+            return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+        }
+
+        private static IntPtr OnMouse(int code, IntPtr wParam, IntPtr lParam)
+        {
+            if (code >= 0 && foregroundIsApp)
+            {
+                uint flags = Marshal.PtrToStructure<MouseData>(lParam).Flags;
+                AddSample(false, (flags & 0x01) != 0, (flags & 0x02) != 0);
+            }
+            return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+        }
+
+        private static void AddSample(bool keyboard, bool injected, bool lowerIntegrity)
+        {
+            lock (Gate)
+            {
+                Samples.Enqueue(new InputSample { Ticks = DateTime.UtcNow.Ticks, Keyboard = keyboard,
+                    Injected = injected, LowerIntegrity = lowerIntegrity });
+                while (Samples.Count > 4096) Samples.Dequeue();
+            }
+        }
+
+        private static void RunSampler()
+        {
+            while (true)
+            {
+                try { foregroundIsApp = IsAppForeground(); WriteSummary(); }
+                catch { foregroundIsApp = false; }
+                Thread.Sleep(1000);
+            }
+        }
+
+        private static bool IsAppForeground()
+        {
+            IntPtr window = GetForegroundWindow();
+            if (window == IntPtr.Zero) return false;
+            uint processId;
+            GetWindowThreadProcessId(window, out processId);
+            if (processId == 0) return false;
+            using (Process process = Process.GetProcessById((int)processId))
+                return String.Equals(process.ProcessName, "Osoo Handle App", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void WriteSummary()
+        {
+            DateTime now = DateTime.UtcNow;
+            int keyInjected = 0, keyPhysical = 0, keyInjectedRecent = 0, keyPhysicalRecent = 0;
+            int mouseInjected = 0, mousePhysical = 0, lowerIntegrity = 0;
+            long lastKeyTicks = 0, lastInjectedKeyTicks = 0, lastNonInjectedKeyTicks = 0;
+            lock (Gate)
+            {
+                while (Samples.Count > 0 && now.Ticks - Samples.Peek().Ticks > TimeSpan.FromSeconds(30).Ticks) Samples.Dequeue();
+                foreach (InputSample sample in Samples)
+                {
+                    if (sample.Keyboard)
+                    {
+                        if (sample.Injected)
+                        {
+                            keyInjected++;
+                            if (now.Ticks - sample.Ticks <= TimeSpan.FromSeconds(5).Ticks) keyInjectedRecent++;
+                            lastInjectedKeyTicks = sample.Ticks;
+                        }
+                        else
+                        {
+                            keyPhysical++;
+                            if (now.Ticks - sample.Ticks <= TimeSpan.FromSeconds(5).Ticks) keyPhysicalRecent++;
+                            lastNonInjectedKeyTicks = sample.Ticks;
+                        }
+                        lastKeyTicks = sample.Ticks;
+                    }
+                    else if (sample.Injected) mouseInjected++;
+                    else mousePhysical++;
+                    if (sample.LowerIntegrity) lowerIntegrity++;
+                }
+            }
+            string json = "{\"version\":\"1.0.11\",\"checkedAt\":\"" + now.ToString("o") + "\",\"foregroundIsApp\":"
+                + foregroundIsApp.ToString().ToLowerInvariant()
+                + ",\"keyboardHookReady\":" + keyboardReady.ToString().ToLowerInvariant()
+                + ",\"mouseHookReady\":" + mouseReady.ToString().ToLowerInvariant()
+                + ",\"keyboardHookError\":" + keyboardError.ToString(CultureInfo.InvariantCulture)
+                + ",\"mouseHookError\":" + mouseError.ToString(CultureInfo.InvariantCulture)
+                + ",\"windowSeconds\":30,\"keyboardInjected\":" + keyInjected.ToString(CultureInfo.InvariantCulture)
+                + ",\"keyboardNonInjected\":" + keyPhysical.ToString(CultureInfo.InvariantCulture)
+                + ",\"keyboardInjectedLast5Seconds\":" + keyInjectedRecent.ToString(CultureInfo.InvariantCulture)
+                + ",\"keyboardNonInjectedLast5Seconds\":" + keyPhysicalRecent.ToString(CultureInfo.InvariantCulture)
+                + ",\"mouseInjected\":" + mouseInjected.ToString(CultureInfo.InvariantCulture)
+                + ",\"mouseNonInjected\":" + mousePhysical.ToString(CultureInfo.InvariantCulture)
+                + ",\"lowerIntegrityInjected\":" + lowerIntegrity.ToString(CultureInfo.InvariantCulture)
+                + ",\"lastKeyboardAgeMs\":" + (lastKeyTicks == 0 ? "null" : ((now.Ticks - lastKeyTicks) / 10000).ToString(CultureInfo.InvariantCulture))
+                + ",\"lastInjectedKeyboardAgeMs\":" + (lastInjectedKeyTicks == 0 ? "null" : ((now.Ticks - lastInjectedKeyTicks) / 10000).ToString(CultureInfo.InvariantCulture))
+                + ",\"lastNonInjectedKeyboardAgeMs\":" + (lastNonInjectedKeyTicks == 0 ? "null" : ((now.Ticks - lastNonInjectedKeyTicks) / 10000).ToString(CultureInfo.InvariantCulture)) + "}";
+            string temporary = outputPath + ".tmp";
+            File.WriteAllText(temporary, json, new UTF8Encoding(false));
+            if (File.Exists(outputPath))
+            {
+                try { File.Replace(temporary, outputPath, null); return; }
+                catch { File.Delete(outputPath); }
+            }
+            File.Move(temporary, outputPath);
+        }
+    }
+
     internal static class Program
     {
         private const string MutexName = "Local\\OsooHandleAppWatchdog-1.0";
@@ -123,6 +288,15 @@ namespace OsooWatchdog
         private static DateTime lastChromotingConnectedAt = DateTime.MinValue;
         private static DateTime lastChromotingEventAt = DateTime.MinValue;
         private static long lastChromotingEventId;
+        private static long lastChromotingChannelEventId;
+        private static DateTime lastChromotingChannelEventAt = DateTime.MinValue;
+        private static readonly HashSet<string> lastChromotingTransports = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static int chromeHostProcessCount = -1;
+        private static int chromeDesktopProcessCount = -1;
+        private static int chromeAssistanceHostProcessCount = -1;
+        private static int chromeNativeHostProcessCount = -1;
+        private static bool chromotingEventSourceAvailable;
+        private static bool chromotingEventLogReadable;
         private static Options options;
         private static string runtimeDirectory;
         private static string logPath;
@@ -146,7 +320,8 @@ namespace OsooWatchdog
                     return 2;
                 }
 
-                Log("watchdog-start", "ok", "version=1.0.9; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
+                Log("watchdog-start", "ok", "version=1.0.11; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
+                if (!options.Once) RemoteInputMonitor.Start(runtimeDirectory);
                 do
                 {
                     try { CheckOnce(); }
@@ -881,8 +1056,9 @@ namespace OsooWatchdog
             bool detected = rustDeskState == "active" || chromeState == "active";
             bool unknown = !detected && (rustDeskState == "unknown" || chromeState == "unknown");
             string state = detected ? "active" : unknown ? "unknown" : "clear";
-            string sessionType = rustDeskState == "active"
-                ? "RustDesk"
+            string sessionType = rustDeskState == "active" && chromeState == "active"
+                ? "multiple"
+                : rustDeskState == "active" ? "RustDesk"
                 : chromeState == "active" ? "Chrome Remote Desktop" : unknown ? "unknown" : "local";
             var observedTools = new List<string>();
             if (rustDeskState == "active") observedTools.Add("RustDesk");
@@ -893,7 +1069,7 @@ namespace OsooWatchdog
             DateTime checkedAt = DateTime.UtcNow;
             string evidenceText = String.Join("; ", evidence.ToArray());
             string json = "{\n"
-                + "  \"version\": \"1.0.9\",\n"
+                + "  \"version\": \"1.0.11\",\n"
                 + "  \"checkedAt\": " + JsonString(checkedAt.ToString("o")) + ",\n"
                 + "  \"state\": " + JsonString(state) + ",\n"
                 + "  \"sessionType\": " + JsonString(sessionType) + ",\n"
@@ -903,7 +1079,17 @@ namespace OsooWatchdog
                 + ", \"chromeRemoteDesktop\": " + JsonString(chromeState) + "}\n} \n";
             AtomicWrite(Path.Combine(runtimeDirectory, "remote-session-state.json"), json);
 
-            string stateKey = state + "|" + sessionType + "|" + rustDeskState + "|" + chromeState + "|" + evidenceText;
+            string stateKey = state + "|" + sessionType + "|" + rustDeskState + "|" + chromeState + "|" + evidenceText
+                + "|rustdesk-processes=" + rustDeskProcessCount.ToString(CultureInfo.InvariantCulture)
+                + "|rustdesk-window=" + rustDeskWindowDetected.ToString(CultureInfo.InvariantCulture)
+                + "|chrome-host=" + chromeHostProcessCount.ToString(CultureInfo.InvariantCulture)
+                + "|chrome-desktop=" + chromeDesktopProcessCount.ToString(CultureInfo.InvariantCulture)
+                + "|chrome-assist=" + chromeAssistanceHostProcessCount.ToString(CultureInfo.InvariantCulture)
+                + "|chrome-native=" + chromeNativeHostProcessCount.ToString(CultureInfo.InvariantCulture)
+                + "|chrome-event=" + lastChromotingEventId.ToString(CultureInfo.InvariantCulture)
+                + "|chrome-transport=" + GetChromotingTransportsSummary()
+                + "|chrome-source=" + chromotingEventSourceAvailable.ToString(CultureInfo.InvariantCulture)
+                + "|chrome-log=" + chromotingEventLogReadable.ToString(CultureInfo.InvariantCulture);
             if (stateKey != lastRemoteStateKey || checkedAt - lastRemoteStateLogAt >= TimeSpan.FromMinutes(5))
             {
                 lastRemoteStateKey = stateKey;
@@ -928,7 +1114,14 @@ namespace OsooWatchdog
                     ? null : lastChromotingEventAt.ToString("o");
                 long chromeAgeSeconds = lastChromotingEventAt == DateTime.MinValue
                     ? -1 : Math.Max(0, (long)(checkedAt - lastChromotingEventAt).TotalSeconds);
+                string chromeChannelEventAt = lastChromotingChannelEventAt == DateTime.MinValue
+                    ? null : lastChromotingChannelEventAt.ToString("o");
+                long chromeChannelAgeSeconds = lastChromotingChannelEventAt == DateTime.MinValue
+                    ? -1 : Math.Max(0, (long)(checkedAt - lastChromotingChannelEventAt).TotalSeconds);
                 string chromeEventState = lastChromotingEventState;
+                string rustDeskInterpretation = rustDeskWindowDetected
+                    ? "session-window-visible-direction-unverified"
+                    : rustDeskProcessCount > 0 ? "process-present-no-session-window" : "no-process";
                 string decisionReason = overallState == "active"
                     ? "one-or-more-source-active" : overallState == "unknown"
                         ? "no-active-source-and-one-or-more-source-unknown" : "all-sources-clear";
@@ -936,16 +1129,27 @@ namespace OsooWatchdog
                     + ",\"rustDesk\":{\"state\":" + JsonString(rustDeskState)
                     + ",\"evidence\":" + JsonString(rustDeskEvidence)
                     + ",\"processCount\":" + rustDeskProcessCount.ToString(CultureInfo.InvariantCulture)
-                    + ",\"visibleSessionWindow\":" + rustDeskWindowDetected.ToString().ToLowerInvariant() + "}"
+                    + ",\"visibleSessionWindow\":" + rustDeskWindowDetected.ToString().ToLowerInvariant()
+                    + ",\"interpretation\":" + JsonString(rustDeskInterpretation) + "}"
                     + ",\"chromeRemoteDesktop\":{\"state\":" + JsonString(chromeState)
                     + ",\"evidence\":" + JsonString(chromeEvidence)
+                    + ",\"eventSourceAvailable\":" + chromotingEventSourceAvailable.ToString().ToLowerInvariant()
+                    + ",\"eventLogReadable\":" + chromotingEventLogReadable.ToString().ToLowerInvariant()
+                    + ",\"hostProcessCount\":" + chromeHostProcessCount.ToString(CultureInfo.InvariantCulture)
+                    + ",\"desktopProcessCount\":" + chromeDesktopProcessCount.ToString(CultureInfo.InvariantCulture)
+                    + ",\"assistanceHostProcessCount\":" + chromeAssistanceHostProcessCount.ToString(CultureInfo.InvariantCulture)
+                    + ",\"nativeHostProcessCount\":" + chromeNativeHostProcessCount.ToString(CultureInfo.InvariantCulture)
                     + ",\"eventState\":" + JsonString(chromeEventState)
                     + ",\"eventId\":" + lastChromotingEventId.ToString(CultureInfo.InvariantCulture)
                     + ",\"eventAt\":" + JsonString(chromeEventAt)
-                    + ",\"signalAgeSeconds\":" + (chromeAgeSeconds < 0 ? "null" : chromeAgeSeconds.ToString(CultureInfo.InvariantCulture)) + "}}";
+                    + ",\"signalAgeSeconds\":" + (chromeAgeSeconds < 0 ? "null" : chromeAgeSeconds.ToString(CultureInfo.InvariantCulture))
+                    + ",\"channelEventId\":" + lastChromotingChannelEventId.ToString(CultureInfo.InvariantCulture)
+                    + ",\"channelEventAt\":" + JsonString(chromeChannelEventAt)
+                    + ",\"channelAgeSeconds\":" + (chromeChannelAgeSeconds < 0 ? "null" : chromeChannelAgeSeconds.ToString(CultureInfo.InvariantCulture))
+                    + ",\"transports\":" + GetChromotingTransportsJson() + "}}";
                 string eventJson = "{\"observation_id\":" + JsonString(Guid.NewGuid().ToString("N"))
                     + ",\"createdAt\":" + JsonString(observedAt)
-                    + ",\"version\":\"1.0.9\",\"detector_version\":\"1\",\"area\":\"watchdog\",\"action\":\"remote-session-detection\""
+                    + ",\"version\":\"1.0.11\",\"detector_version\":\"3\",\"area\":\"watchdog\",\"action\":\"remote-session-detection\""
                     + ",\"result\":" + JsonString(overallState)
                     + ",\"overall_state\":" + JsonString(overallState)
                     + ",\"decision_reason\":" + JsonString(decisionReason)
@@ -1036,6 +1240,12 @@ namespace OsooWatchdog
 
         private static void DetectChromeRemoteDesktopSession(out string state, out string evidence)
         {
+            chromeHostProcessCount = CountProcessesByName("remoting_host");
+            chromeDesktopProcessCount = CountProcessesByName("remoting_desktop");
+            chromeAssistanceHostProcessCount = CountProcessesByName("remote_assistance_host");
+            chromeNativeHostProcessCount = CountProcessesByName("remoting_native_messaging_host");
+            chromotingEventSourceAvailable = false;
+            chromotingEventLogReadable = false;
             state = "clear";
             evidence = "no-connected-client-event";
             const string sourceRegistryPath = @"SYSTEM\CurrentControlSet\Services\EventLog\Application\chromoting";
@@ -1049,41 +1259,81 @@ namespace OsooWatchdog
                         return;
                     }
                 }
+                chromotingEventSourceAvailable = true;
 
                 using (var applicationLog = new EventLog("Application"))
                 {
                     EventLogEntryCollection entries = applicationLog.Entries;
+                    chromotingEventLogReadable = true;
                     int newestRecordIndex = entries.Count > 0 ? entries[entries.Count - 1].Index : -1;
                     bool rebuildCursor = !chromotingCursorInitialized || newestRecordIndex < lastChromotingRecordIndex;
                     if (rebuildCursor)
                     {
+                        lastChromotingTransports.Clear();
                         int start = Math.Max(0, entries.Count - 1000);
+                        bool foundSessionEvent = false;
+                        var observedTransports = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         for (int index = entries.Count - 1; index >= start; index--)
                         {
                             EventLogEntry entry = entries[index];
                             if (!String.Equals(entry.Source, "chromoting", StringComparison.OrdinalIgnoreCase)) continue;
-                            long eventId = entry.InstanceId;
-                            if (eventId != 1 && eventId != 2) continue;
-                            lastChromotingEventId = eventId;
-                            ApplyChromotingEvent(eventId, entry.TimeGenerated.ToUniversalTime());
-                            break;
+                            long eventId = GetChromotingEventId(entry);
+                            if (!foundSessionEvent && eventId == 4)
+                            {
+                                lastChromotingChannelEventId = eventId;
+                                lastChromotingChannelEventAt = entry.TimeGenerated.ToUniversalTime();
+                                string transport = GetChromotingTransport(entry);
+                                observedTransports.Add(transport);
+                                if (transport == "relay" || transport == "stun") lastChromotingTransports.Add(transport);
+                            }
+                            if (!foundSessionEvent && (eventId == 1 || eventId == 2))
+                            {
+                                lastChromotingEventId = eventId;
+                                ApplyChromotingEvent(eventId, entry.TimeGenerated.ToUniversalTime());
+                                foundSessionEvent = true;
+                                if (eventId == 2) lastChromotingTransports.Clear();
+                            }
+                            if (foundSessionEvent) break;
                         }
                         chromotingCursorInitialized = true;
                     }
                     else if (newestRecordIndex > lastChromotingRecordIndex)
                     {
+                        bool foundSessionEvent = false;
+                        var observedTransports = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         for (int index = entries.Count - 1; index >= 0; index--)
                         {
                             EventLogEntry entry = entries[index];
                             if (entry.Index <= lastChromotingRecordIndex) break;
                             if (!String.Equals(entry.Source, "chromoting", StringComparison.OrdinalIgnoreCase)) continue;
-                            long eventId = entry.InstanceId;
-                            if (eventId != 1 && eventId != 2) continue;
-                            lastChromotingEventId = eventId;
-                            ApplyChromotingEvent(eventId, entry.TimeGenerated.ToUniversalTime());
-                            break;
+                            long eventId = GetChromotingEventId(entry);
+                            if (!foundSessionEvent && eventId == 4)
+                            {
+                                lastChromotingChannelEventId = eventId;
+                                lastChromotingChannelEventAt = entry.TimeGenerated.ToUniversalTime();
+                                string transport = GetChromotingTransport(entry);
+                                observedTransports.Add(transport);
+                                if (transport == "relay" || transport == "stun") lastChromotingTransports.Add(transport);
+                            }
+                            if (!foundSessionEvent && (eventId == 1 || eventId == 2))
+                            {
+                                lastChromotingEventId = eventId;
+                                ApplyChromotingEvent(eventId, entry.TimeGenerated.ToUniversalTime());
+                                foundSessionEvent = true;
+                                if (eventId == 1)
+                                {
+                                    lastChromotingTransports.Clear();
+                                    foreach (string transport in observedTransports)
+                                    {
+                                        if (transport == "relay" || transport == "stun") lastChromotingTransports.Add(transport);
+                                    }
+                                }
+                                else lastChromotingTransports.Clear();
+                            }
+                            if (foundSessionEvent) break;
                         }
                     }
+                    else if (lastChromotingEventState == "disconnected") lastChromotingTransports.Clear();
                     lastChromotingRecordIndex = newestRecordIndex;
 
                     if (lastChromotingEventState == "connected")
@@ -1116,6 +1366,57 @@ namespace OsooWatchdog
                 state = "unknown";
                 evidence = "event-log-query-failed-" + ex.GetType().Name;
             }
+        }
+
+        private static int CountProcessesByName(string processName)
+        {
+            try
+            {
+                Process[] processes = Process.GetProcessesByName(processName);
+                int count = processes == null ? 0 : processes.Length;
+                if (processes != null)
+                {
+                    foreach (Process process in processes) process.Dispose();
+                }
+                return count;
+            }
+            catch { return -1; }
+        }
+
+        private static string GetChromotingTransport(EventLogEntry entry)
+        {
+            try
+            {
+                string message = entry.Message ?? String.Empty;
+                if (message.IndexOf("connection='relay'", StringComparison.OrdinalIgnoreCase) >= 0) return "relay";
+                if (message.IndexOf("connection='stun'", StringComparison.OrdinalIgnoreCase) >= 0) return "stun";
+            }
+            catch { }
+            return "other-or-unparsed";
+        }
+
+        private static List<string> GetChromotingTransports()
+        {
+            var transports = new List<string>(lastChromotingTransports);
+            transports.Sort(StringComparer.OrdinalIgnoreCase);
+            return transports;
+        }
+
+        private static string GetChromotingTransportsSummary()
+        {
+            return String.Join("+", GetChromotingTransports().ToArray());
+        }
+
+        private static string GetChromotingTransportsJson()
+        {
+            return "[" + String.Join(",", GetChromotingTransports().ConvertAll(JsonString).ToArray()) + "]";
+        }
+
+        private static long GetChromotingEventId(EventLogEntry entry)
+        {
+            // InstanceId includes severity/facility bits (for example 0x40000001
+            // for displayed EventID 1). The low 16 bits are the Windows event ID.
+            return entry == null ? -1 : entry.InstanceId & 0xFFFF;
         }
 
         private static void ApplyChromotingEvent(long eventId, DateTime eventAt)
@@ -1154,7 +1455,7 @@ namespace OsooWatchdog
             if (statusKey == lastStatusKey && now - lastStatusAt < TimeSpan.FromMinutes(1)) return;
             lastStatusKey = statusKey;
             lastStatusAt = now;
-            string json = "{\n  \"version\": \"1.0.9\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
+            string json = "{\n  \"version\": \"1.0.11\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
             AtomicWrite(Path.Combine(runtimeDirectory, "watchdog-status.json"), json);
         }
 
@@ -1174,7 +1475,7 @@ namespace OsooWatchdog
                 string createdAt = DateTime.UtcNow.ToString("o");
                 string line = createdAt + "\t" + action + "\t" + result + (String.IsNullOrEmpty(details) ? "" : "\t" + details) + Environment.NewLine;
                 File.AppendAllText(logPath, line, new UTF8Encoding(false));
-                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.9\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
+                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.11\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
                 File.AppendAllText(Path.Combine(runtimeDirectory, "watchdog-events.jsonl"), eventJson, new UTF8Encoding(false));
             }
             catch { }

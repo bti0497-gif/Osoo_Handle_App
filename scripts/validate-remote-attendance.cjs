@@ -17,7 +17,7 @@ async function main() {
   const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osoo-remote-attendance-test-'));
   const db = new Database(':memory:');
   const remoteStatePath = path.join(testDataDir, 'remote-session-state.json');
-  const writeRemoteState = (state, checkedAt = new Date().toISOString(), version = '1.0.9') => {
+  const writeRemoteState = (state, checkedAt = new Date().toISOString(), version = '1.0.10') => {
     fs.writeFileSync(remoteStatePath, JSON.stringify({
       version,
       checkedAt,
@@ -93,9 +93,31 @@ async function main() {
   const countLog = (action) => db.prepare('SELECT COUNT(*) AS n FROM app_diagnostic_logs WHERE action = ?').get(action).n;
 
   try {
+    fs.mkdirSync(path.join(testDataDir, 'runtime'), { recursive: true });
+    fs.writeFileSync(path.join(testDataDir, 'runtime', 'remote-input-state.json'), JSON.stringify({
+      checkedAt: new Date().toISOString(), foregroundIsApp: true,
+      keyboardHookReady: true, mouseHookReady: true, keyboardHookError: 0, mouseHookError: 0,
+      windowSeconds: 30, keyboardInjected: 4, keyboardNonInjected: 0,
+      keyboardInjectedLast5Seconds: 2, keyboardNonInjectedLast5Seconds: 0,
+      mouseInjected: 2, mouseNonInjected: 0, lowerIntegrityInjected: 0,
+      lastKeyboardAgeMs: 230, lastInjectedKeyboardAgeMs: 230, lastNonInjectedKeyboardAgeMs: null,
+      forbiddenRawKey: 'this-must-not-be-copied',
+    }));
     const unblockedLogin = await request('local-login', { name: '현장근로자', password: 'test-password' });
-    assert.equal(detectionOptions.length, 0, '로그인 차단이 비활성화된 동안 로그인은 원격 탐지기를 호출하지 않아야 합니다.');
+    assert.equal(detectionOptions.length, 1, '차단이 꺼져 있어도 실제 제출 시점의 원격 상태를 관측해야 합니다.');
     assert.equal(unblockedLogin.status, 200, '감지기가 active여도 비활성화 상태에서는 현장 로그인을 막지 않습니다.');
+    const attemptQueue = path.join(testDataDir, 'runtime', 'remote-login-attempts.jsonl');
+    const attemptEvents = fs.readFileSync(attemptQueue, 'utf8').trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    assert.equal(attemptEvents.length, 1, '원격 상태가 active인 실제 로그인 제출은 별도 이벤트로 남아야 합니다.');
+    assert.equal(attemptEvents[0].action, 'remote-login-attempt');
+    assert.equal(attemptEvents[0].overall_state, 'active');
+    assert.equal(attemptEvents[0].raw_signals.loginAttempt.inputOrigin, 'unverified');
+    assert.equal(attemptEvents[0].raw_signals.inputSignals.status, 'available');
+    assert.equal(attemptEvents[0].raw_signals.inputSignals.keyboardInjected, 4);
+    assert.equal(attemptEvents[0].raw_signals.inputSignals.keyboardInjectedLast5Seconds, 2);
+    assert.equal(JSON.stringify(attemptEvents).includes('this-must-not-be-copied'), false, '입력 상태 파일의 허용되지 않은 필드는 전송하면 안 됩니다.');
+    assert.equal(attemptEvents[0].raw_signals.loginAttempt.passwordValueCaptured, false);
+    assert.equal(JSON.stringify(attemptEvents).includes('test-password'), false, '원문 비밀번호를 시도 로그에 기록하면 안 됩니다.');
     assert.equal(countAttendance(), 0, '로그인 자체와 출근 기록은 기존처럼 분리되어야 합니다.');
     assert.equal(countLog('remote-login-blocked'), 0);
     assert.ok(activeSession.getActiveUser());
@@ -104,12 +126,12 @@ async function main() {
     const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const signature = crypto.createHmac('sha256', 'worker-1\ntest-password').update(encoded).digest('base64url');
     const allowedRestore = await request('restore-session', { sessionToken: `${encoded}.${signature}` });
-    assert.equal(detectionOptions.length, 0, '로그인 차단이 비활성화된 동안 세션 복원은 원격 탐지기를 호출하지 않아야 합니다.');
+    assert.equal(detectionOptions.length, 1, '세션 복원은 원격 로그인 시도 관측 분기에 포함되지 않습니다.');
     assert.equal(allowedRestore.status, 200, '감지기가 active여도 세션 복원은 계속 허용해야 합니다.');
     assert.equal(countAttendance(), 0);
 
     const allowedAttendance = await request('attendance', { memberId: 'worker-1', memberName: '현장근로자' });
-    assert.equal(detectionOptions.length, 0, '로그인 차단이 비활성화된 동안 출근기록에 원격 탐지기를 호출하지 않아야 합니다.');
+    assert.equal(detectionOptions.length, 1, '출근기록은 원격 로그인 시도 관측 분기에 포함되지 않습니다.');
     assert.equal(allowedAttendance.status, 200, '로그인 이후의 출근기록은 원격 신호로 차단하지 않습니다.');
     assert.equal(countAttendance(), 1);
     assert.equal(countLog('remote-attendance-recorded'), 0, '비활성화된 감지 신호를 근태 기록에 귀속하지 않습니다.');

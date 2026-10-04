@@ -5,7 +5,7 @@ const path = require('path');
 const { APP_DATA_ROOT } = require('../config/runtimeConfig.cjs');
 
 const REMOTE_STATE_FILE = path.join(APP_DATA_ROOT, 'runtime', 'remote-session-state.json');
-const REQUIRED_WATCHDOG_VERSION = '1.0.9';
+const REQUIRED_WATCHDOG_VERSION = '1.0.10';
 const MAX_STATE_AGE_MS = 15_000;
 // Login enforcement is deliberately disabled until the launcher can distinguish
 // an actually connected remote operator from a visible RustDesk window.

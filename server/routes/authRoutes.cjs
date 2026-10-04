@@ -1,5 +1,7 @@
 const express = require('express');
+const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const { issueLocalSessionToken, verifyLocalSessionToken } = require('../services/localSessionTokenService.cjs');
 // Lazy require wrappers keep startup validation light.
 function syncAttendanceLogs(...args) {
@@ -58,6 +60,9 @@ function recordDiagnostic(...args) {
 }
 function uploadPendingDiagnostics(...args) {
   return require('../services/diagnosticLogService.cjs').uploadPendingDiagnostics(...args);
+}
+function appendRemoteLoginAttemptObservation(...args) {
+  return require('../services/remoteSessionObservationSyncService.cjs').appendRemoteLoginAttemptObservation(...args);
 }
 function cleanupOldDiagnosticsOnVersionStart(...args) {
   return require('../services/diagnosticLogService.cjs').cleanupOldDiagnosticsOnVersionStart(...args);
@@ -519,6 +524,149 @@ module.exports = (db, appDataPath) => {
         } catch (_) {}
     };
 
+    const recordObservedRemoteLoginAttempt = (
+        db,
+        appDataPath,
+        { route, name, member, passwordProvided, remote, safeClientContext = {} }
+    ) => {
+        const role = String(member?.role || '').trim();
+        const sessionState = remote?.detected ? 'active' : remote?.verificationFailed ? 'unknown' : 'clear';
+        if (sessionState === 'clear') return false;
+
+        const createdAt = new Date().toISOString();
+        const observationId = crypto.randomUUID();
+        const tools = Array.isArray(remote?.observedTools)
+            ? remote.observedTools.filter((tool) => ['RustDesk', 'Chrome Remote Desktop'].includes(tool))
+            : [];
+        const enforcementEnabled = isRemoteLoginEnforcementEnabled();
+        let inputSignals = { status: 'unavailable', interpretation: 'No fresh input-monitor snapshot was available.' };
+        try {
+            const snapshot = JSON.parse(fs.readFileSync(path.join(appDataPath, 'runtime', 'remote-input-state.json'), 'utf8'));
+            const ageMs = Date.now() - Date.parse(snapshot.checkedAt);
+            if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= 10000) {
+                const numberOrNull = (value) => Number.isSafeInteger(value) && value >= 0 ? value : null;
+                inputSignals = {
+                    status: snapshot.keyboardHookReady && snapshot.mouseHookReady ? 'available' : 'partial',
+                    ageMs,
+                    foregroundIsApp: snapshot.foregroundIsApp === true,
+                    keyboardHookReady: snapshot.keyboardHookReady === true,
+                    mouseHookReady: snapshot.mouseHookReady === true,
+                    keyboardHookError: numberOrNull(snapshot.keyboardHookError),
+                    mouseHookError: numberOrNull(snapshot.mouseHookError),
+                    windowSeconds: numberOrNull(snapshot.windowSeconds),
+                    keyboardInjected: numberOrNull(snapshot.keyboardInjected),
+                    keyboardNonInjected: numberOrNull(snapshot.keyboardNonInjected),
+                    keyboardInjectedLast5Seconds: numberOrNull(snapshot.keyboardInjectedLast5Seconds),
+                    keyboardNonInjectedLast5Seconds: numberOrNull(snapshot.keyboardNonInjectedLast5Seconds),
+                    mouseInjected: numberOrNull(snapshot.mouseInjected),
+                    mouseNonInjected: numberOrNull(snapshot.mouseNonInjected),
+                    lowerIntegrityInjected: numberOrNull(snapshot.lowerIntegrityInjected),
+                    lastKeyboardAgeMs: numberOrNull(snapshot.lastKeyboardAgeMs),
+                    lastInjectedKeyboardAgeMs: numberOrNull(snapshot.lastInjectedKeyboardAgeMs),
+                    lastNonInjectedKeyboardAgeMs: numberOrNull(snapshot.lastNonInjectedKeyboardAgeMs),
+                    interpretation: 'Windows injection flags are aggregate signals, not proof of input source or remote tool.',
+                };
+            } else inputSignals = { status: 'stale', ageMs: Number.isFinite(ageMs) ? ageMs : null };
+        } catch (_) {}
+        const decisionReason = [
+            'login-submit',
+            `remote-session-${sessionState}`,
+            'input-origin-unverified',
+            `input-monitor-${inputSignals.status}`,
+            enforcementEnabled ? 'policy-enforcement-enabled' : 'policy-observe-only',
+        ].join(';');
+        const loginAttempt = {
+            route,
+            attemptId: safeClientContext.loginAttemptId || observationId,
+            memberId: member?.id || null,
+            memberRole: role || 'unknown',
+            attemptedName: String(name || '').slice(0, 120),
+            credentialProvided: Boolean(passwordProvided),
+            requestPurpose: safeClientContext.requestPurpose || 'unspecified',
+            rendererInputSource: safeClientContext.inputSource || 'unknown',
+            inputOrigin: 'unverified',
+            passwordValueCaptured: false,
+        };
+        const remoteSession = {
+            state: sessionState,
+            sessionType: remote?.sessionType || 'unknown',
+            evidence: remote?.evidence || '',
+            observedTools: tools,
+            verificationFailed: Boolean(remote?.verificationFailed),
+            stateAgeMs: Number.isFinite(remote?.stateAgeMs) ? remote.stateAgeMs : null,
+            watchdogVersion: remote?.watchdogVersion || null,
+        };
+        const event = {
+            observation_id: observationId,
+            createdAt,
+            version: String(process.env.OSOO_APP_VERSION || ''),
+            watchdog_version: String(remote?.watchdogVersion || ''),
+            detector_version: String(remote?.detectorVersion || ''),
+            action: 'remote-login-attempt',
+            result: 'attempt-observed',
+            overall_state: sessionState,
+            decision_reason: decisionReason,
+            rustdesk_state: tools.includes('RustDesk') ? 'active' : sessionState === 'unknown' ? 'unknown' : 'clear',
+            rustdesk_evidence: tools.includes('RustDesk') ? 'watchdog-session-active' : 'no-active-session-evidence',
+            rustdesk_signal_at: null,
+            rustdesk_process_count: null,
+            rustdesk_window_detected: null,
+            chrome_state: tools.includes('Chrome Remote Desktop') ? 'active' : sessionState === 'unknown' ? 'unknown' : 'clear',
+            chrome_evidence: tools.includes('Chrome Remote Desktop') ? 'watchdog-session-active' : 'no-active-session-evidence',
+            chrome_event_state: 'not-captured-at-login-submit',
+            chrome_event_id: null,
+            chrome_event_at: null,
+            chrome_signal_age_seconds: null,
+            raw_signals: {
+                eventKind: 'login-attempt-during-remote-session-state',
+                loginAttempt,
+                remoteSession,
+                inputSignals,
+                policy: {
+                    enforcementEnabled,
+                    blockedByThisObservation: false,
+                },
+                interpretation: 'A remote session was active or unverifiable when login was submitted; this record does not prove that the input arrived through that remote channel.',
+            },
+        };
+
+        try {
+            appendRemoteLoginAttemptObservation(event, { appDataPath });
+        } catch (error) {
+            try {
+                recordDiagnostic(db, appDataPath, {
+                    level: 'error',
+                    area: 'auth',
+                    action: 'remote-login-attempt-queue',
+                    result: 'failed',
+                    message: '원격 세션 중 로그인 제출 관측을 동기화 대기열에 기록하지 못했습니다.',
+                    details: { errorName: error?.name || 'Error', route, observationId },
+                });
+            } catch (_) {}
+        }
+
+        try {
+            recordDiagnostic(db, appDataPath, {
+                level: sessionState === 'active' ? 'warn' : 'info',
+                area: 'auth',
+                action: 'remote-login-attempt-observed',
+                result: sessionState === 'active' ? 'remote-session-active-input-origin-unverified' : 'remote-session-state-unknown',
+                message: '원격 세션 상태가 활성 또는 미확인인 동안 로그인 제출이 관측되었습니다. 입력 경로는 확인되지 않았습니다.',
+                details: {
+                    observationId,
+                    ...loginAttempt,
+                    remoteSession,
+                    enforcementEnabled,
+                    blocked: false,
+                },
+            });
+        } catch (_) {}
+        try {
+            uploadPendingDiagnostics(db, appDataPath).catch(() => {});
+        } catch (_) {}
+        return true;
+    };
+
     router.get('/remote-status', (req, res) => {
         try {
             const remote = detectCurrentRemoteSession();
@@ -628,6 +776,22 @@ module.exports = (db, appDataPath) => {
             lastWindowFocusAgeMs: safeDuration(diagnosticContext.lastWindowFocusAgeMs),
         };
         try {
+            const namedMember = normalizedName
+                ? db.prepare('SELECT * FROM members WHERE name = ?').get(normalizedName)
+                : null;
+            if (requestPurpose !== 'current-entry-verification') {
+                try {
+                    const remoteAtSubmit = detectCurrentRemoteSession();
+                    recordObservedRemoteLoginAttempt(db, appDataPath, {
+                        route: 'local-login',
+                        name: normalizedName,
+                        member: namedMember,
+                        passwordProvided: Boolean(submittedPassword),
+                        remote: remoteAtSubmit,
+                        safeClientContext,
+                    });
+                } catch (_) {}
+            }
             recordDiagnostic(db, appDataPath, {
                 level: 'info',
                 area: 'auth',
@@ -644,7 +808,6 @@ module.exports = (db, appDataPath) => {
             });
             const remote = detectEnforcedRemoteSession();
             if (remote.detected && isRemoteLoginEnforcementEnabled()) {
-                const namedMember = db.prepare('SELECT * FROM members WHERE name = ?').get(normalizedName);
                 recordRemoteAttemptRecord(db, appDataPath, { name: normalizedName, member: namedMember, remote, safeClientContext });
                 return res.status(403).json({
                     success: false,
@@ -657,7 +820,6 @@ module.exports = (db, appDataPath) => {
                     },
                 });
             }
-            const namedMember = db.prepare('SELECT * FROM members WHERE name = ?').get(normalizedName);
             const member = namedMember
                 && String(namedMember.password || '') === submittedPassword
                 ? namedMember
@@ -742,6 +904,38 @@ module.exports = (db, appDataPath) => {
     router.post('/discovery-login', async (req, res) => {
         const name = String(req.body?.name || '').trim();
         const password = String(req.body?.password || '');
+        const rawDiagnosticContext = req.body?.diagnosticContext;
+        const diagnosticContext = rawDiagnosticContext && typeof rawDiagnosticContext === 'object'
+            ? rawDiagnosticContext
+            : {};
+        const safeClientContext = {
+            requestPurpose: 'login-screen',
+            loginAttemptId: /^[a-z0-9-]{1,64}$/i.test(String(diagnosticContext.loginAttemptId || ''))
+                ? String(diagnosticContext.loginAttemptId)
+                : null,
+            submitSequence: Number.isInteger(Number(diagnosticContext.submitSequence))
+                && Number(diagnosticContext.submitSequence) >= 0
+                && Number(diagnosticContext.submitSequence) <= 1000
+                ? Number(diagnosticContext.submitSequence)
+                : null,
+            inputSource: diagnosticContext.inputSource === 'native-field' ? 'native-field' : 'unknown',
+        };
+
+        let cachedMember = null;
+        try {
+            cachedMember = name ? db.prepare('SELECT * FROM members WHERE name = ?').get(name) : null;
+        } catch (_) {}
+        try {
+            const remoteAtSubmit = detectCurrentRemoteSession();
+            recordObservedRemoteLoginAttempt(db, appDataPath, {
+                route: 'discovery-login',
+                name,
+                member: cachedMember,
+                passwordProvided: Boolean(password),
+                remote: remoteAtSubmit,
+                safeClientContext,
+            });
+        } catch (_) {}
 
         if (!name || !password) {
             return res.status(400).json({ success: false, message: '이름과 비밀번호를 입력해 주세요.' });
