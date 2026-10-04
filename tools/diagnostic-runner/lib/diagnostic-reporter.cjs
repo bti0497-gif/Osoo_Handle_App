@@ -10,12 +10,13 @@
 const fs = require('fs');
 const path = require('path');
 
-function buildResult({ runId, mode, scenario, port, runtime, startedAt, durationMs, scenarios, externalCalls, database, artifacts }) {
+function buildResult({ runId, mode, scenario, excludedScenarios = [], port, runtime, startedAt, durationMs, scenarios, externalCalls, database, artifacts }) {
   const failed = scenarios.some((item) => item.status === 'failed');
   return {
     runId,
     mode,
     scenario: scenario === 'all' ? 'all' : scenario,
+    excludedScenarios,
     port,
     runtime,
     status: failed ? 'failed' : 'passed',
@@ -69,6 +70,7 @@ function renderReportHtml(result) {
 <div class="summary meta">
   runId ${escape(result.runId)} · mode ${escape(result.mode)} · scenario ${escape(result.scenario)} ·
   port ${escape(result.port)} · ${escape(result.durationMs)}ms · started ${escape(result.startedAt)}<br>
+  동적 제외 시나리오: ${escape((result.excludedScenarios || []).join(', ') || '없음')}<br>
   외부 호출 — drive ${escape(external.drive ?? 0)} / bigquery ${escape(external.bigquery ?? 0)} /
   firebase ${escape(external.firebase ?? 0)} / blocked ${escape(external.blockedRequests ?? 0)}<br>
   DB integrity ${escape(db.integrityCheck || '-')} · fixture ${escape(db.fixtureIntegrity || '-')}
@@ -101,6 +103,9 @@ function renderAgentReportMd(result) {
   lines.push('');
   lines.push(`- 실행: ${result.runId} · 전체 상태: **${result.status.toUpperCase()}**`);
   lines.push(`- 시작: ${result.startedAt} · 소요: ${result.durationMs}ms · 모드: ${result.mode}`);
+  if ((result.excludedScenarios || []).length > 0) {
+    lines.push(`- 동적 시뮬레이션 제외(전체 린트 적용): ${result.excludedScenarios.join(', ')}`);
+  }
   lines.push(`- 런타임: node ${result.runtime ? result.runtime.nodeVersion : '?'} (abi ${result.runtime ? result.runtime.nodeModulesAbi : '?'}) · better-sqlite3 ${result.runtime ? result.runtime.betterSqlite3Version : '?'} · ${result.runtime ? result.runtime.abiPreflight : '?'}`);
   lines.push(`- 외부 호출: drive ${result.externalCalls.drive} / bigquery ${result.externalCalls.bigquery} / firebase ${result.externalCalls.firebase} / 차단 ${result.externalCalls.blockedRequests}`);
   lines.push(`- DB: integrity ${result.database.integrityCheck} · fixture ${result.database.fixtureIntegrity || '-'}`);

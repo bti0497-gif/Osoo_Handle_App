@@ -152,10 +152,10 @@ Test-Path -LiteralPath 'templates/reports/설비이력카드.xlsx'
 
 선행 하네스가 통과하면 뒤의 전체 `npm run validate`에서 동일한 현장/API 시나리오는 중복 실행하지 않으며, `npm run validate`를 단독 실행할 때는 기존대로 해당 검증을 수행한다.
 
-단독 저비용 회귀검증은 다음 명령을 사용한다. 정식 패키징을 시작하면 `npm run release:runner`가 위 하네스를 자동으로 가장 먼저 실행한다.
+단독 저비용 회귀검증은 다음 명령을 사용한다. 이 `--changed` 방식은 일반 개발 중 변경 범위만 빠르게 확인할 때 사용한다. 정식 릴리즈 러너의 회귀 단계는 작업 트리가 깨끗해도 대상 시나리오 전체가 실행되도록 한다. 게시판·QnTECH 사진 가져오기는 이 환경에서 성공 흐름을 시뮬레이션하지 않고 전체 ESLint만 적용하며, 현장 사용 중 오류는 진단로그로 확인한다.
 
 ```powershell
-node tools/diagnostic-runner/runner.cjs --scenario all --lint --changed
+node tools/diagnostic-runner/runner.cjs --scenario all --exclude board,qntech-photo --lint
 ```
 
 실패하면 패키징하지 않는다. 실패 단계와 하네스 출력만 확인해 수정한 뒤 러너를 다시 실행한다.

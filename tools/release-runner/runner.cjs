@@ -467,7 +467,9 @@ async function main() {
 
   const plannedCommands = [
     ['ROADWORK DATA FLOW HARNESS', 'node', ['tools/release-runner/roadwork-data-harness.cjs']],
-    ['REGRESSION', 'node', ['tools/diagnostic-runner/runner.cjs', '--scenario', 'all', '--lint', '--changed']],
+    // Release gate must exercise every implemented workflow scenario even when
+    // the working tree is clean (changed-scope then selects only health).
+    ['REGRESSION', 'node', ['tools/diagnostic-runner/runner.cjs', '--scenario', 'all', '--exclude', 'board,qntech-photo', '--lint']],
     ['PREPARED VALIDATION', 'node', ['tools/diagnostic-runner/validate-prepared.cjs']],
     ['NATIVE/ELECTRON ABI PREPARATION', 'npx', ['@electron/rebuild', '--force', '--arch=x64', `--version=${electronVersion}`]],
     ['PACKAGE', 'npm', ['run', 'release:safe']],

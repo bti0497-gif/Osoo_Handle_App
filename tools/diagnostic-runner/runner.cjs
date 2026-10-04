@@ -46,7 +46,7 @@ const SCENARIO_ORDER = discoverScenarios();
 const EXIT_CODES = { passed: 0, failed: 1, blocked: 2 };
 
 function parseArgs(argv) {
-  const options = { scenario: 'all', mode: 'local', ui: false, lint: false, coverage: false, changed: null, keepArtifacts: false, list: false };
+  const options = { scenario: 'all', mode: 'local', ui: false, lint: false, coverage: false, changed: null, exclude: [], keepArtifacts: false, list: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--scenario') options.scenario = argv[++index] || 'all';
@@ -55,6 +55,10 @@ function parseArgs(argv) {
     else if (arg === '--keep-artifacts') options.keepArtifacts = true;
     else if (arg === '--lint') options.lint = true;
     else if (arg === '--coverage') options.coverage = true;
+    else if (arg === '--exclude') {
+      const value = argv[++index] || '';
+      options.exclude.push(...value.split(',').map((name) => name.trim()).filter(Boolean));
+    }
     else if (arg === '--changed') {
       options.changed = argv[index + 1] && !argv[index + 1].startsWith('--') ? argv[++index] : true;
     }
@@ -214,6 +218,7 @@ async function main() {
 
   const runnerRoot = RUNNER_ROOT;
   let scenarioNames = options.scenario === 'all' ? SCENARIO_ORDER : [options.scenario];
+  let excludedScenarioNames = [];
   let changedSelection = null;
   if (options.changed) {
     const ref = options.changed === true ? null : options.changed;
@@ -233,6 +238,17 @@ async function main() {
   if (options.changed && !changedSelection.all) {
     scenarioNames = scenarioNames.filter((name) => changedSelection.scenarios.includes(name) || name === 'health');
     scenarioNames = SCENARIO_ORDER.filter((name) => scenarioNames.includes(name)); // 실행 순서 유지
+  }
+  const unknownExclusions = options.exclude.filter((name) => !SCENARIO_ORDER.includes(name));
+  if (unknownExclusions.length > 0) {
+    console.error(`알 수 없는 제외 시나리오: ${unknownExclusions.join(', ')}`);
+    process.exit(EXIT_CODES.blocked);
+  }
+  if (options.exclude.length > 0) {
+    const excluded = new Set(options.exclude);
+    excludedScenarioNames = scenarioNames.filter((name) => excluded.has(name));
+    scenarioNames = scenarioNames.filter((name) => !excluded.has(name));
+    console.log(`[exclude] 동적 시뮬레이션 제외: ${excludedScenarioNames.join(', ') || '선택된 시나리오 없음'} (린트는 전체 코드 대상)`);
   }
   if (options.list) {
     console.log('사용 가능 시나리오:', SCENARIO_ORDER.join(', '));
@@ -431,6 +447,7 @@ async function main() {
       runId: workspace.runId,
       mode: options.mode,
       scenario: options.scenario,
+      excludedScenarios: excludedScenarioNames,
       port,
       runtime,
       startedAt,

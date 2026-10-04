@@ -14,6 +14,15 @@ const SYSTEM_SUSPEND_GAP_MS = 5 * 60 * 1_000;
 const ROUTINE_BACKGROUND_SLOW_API_MS = 30_000;
 const DAILY_SUMMARY_HOUR_KST = 20;
 
+function isStartedRecoveryEvent(row) {
+  // Count the execution marker once, not monitoring, handoff, cooldown or dry-run events.
+  const actionsByArea = {
+    watchdog: ['app-restart', 'server-recovery', 'emergency-recovery'],
+    electron: ['embedded-server-recovery'],
+  };
+  return row.result === 'started' && (actionsByArea[row.area] || []).includes(row.action);
+}
+
 function kstDateKey(now = new Date()) {
   return new Intl.DateTimeFormat('sv-SE', {
     timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -159,7 +168,7 @@ function createServerPerformanceDiagnosticService({
     ));
     const photoEvents = countAreaAction(['photo', '사진']);
     const syncEvents = countAreaAction(['sync', '동기화']);
-    const recoveryEvents = countAreaAction(['recovery', 'watchdog'], ['recovery', 'restart', 'emergency']);
+    const recoveryEvents = events.filter(isStartedRecoveryEvent);
     const failed = (rows) => rows.filter((row) => (
       ['error', 'warn'].includes(String(row.level || '').toLowerCase())
       || ['failed', 'error', 'rejected', 'degraded'].includes(String(row.result || '').toLowerCase())
@@ -438,4 +447,5 @@ function createServerPerformanceDiagnosticService({
 
 module.exports = {
   createServerPerformanceDiagnosticService,
+  isStartedRecoveryEvent,
 };

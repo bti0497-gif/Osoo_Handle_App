@@ -1,11 +1,25 @@
 'use strict';
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { createServerPerformanceDiagnosticService } = require('../server/services/serverPerformanceDiagnosticService.cjs');
+const { createServerPerformanceDiagnosticService, isStartedRecoveryEvent } = require('../server/services/serverPerformanceDiagnosticService.cjs');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const { runRequest, measurePhase } = require('../server/services/requestPhaseService.cjs');
 
 (async () => {
+  const recoveryRows = [
+    ...['app-restart', 'server-recovery', 'emergency-recovery'].map(action => ({ area: 'watchdog', action, result: 'started' })),
+    { area: 'electron', action: 'embedded-server-recovery', result: 'started' },
+    ...['clear', 'active', 'unknown'].map(result => ({ area: 'watchdog', action: 'remote-session-detection', result })),
+    { area: 'watchdog', action: 'startup', result: 'started' },
+    { area: 'watchdog', action: 'restart-cooldown', result: 'started' },
+    ...['waiting', 'requested', 'accepted', 'failed', 'blocked', 'dry-run'].map(result => ({ area: 'watchdog', action: 'server-recovery', result })),
+    { area: 'watchdog', action: 'server-only-recovery', result: 'requested' },
+    { area: 'electron', action: 'embedded-server-health-restored', result: 'ok' },
+    { area: 'site-context', action: 'recovery-route-allowed', result: 'allowed' },
+  ];
+  assert.equal(recoveryRows.filter(isStartedRecoveryEvent).length, 4);
+  assert.equal(recoveryRows.slice(4).filter(isStartedRecoveryEvent).length, 0);
+  console.log('PASS: recovery counts execution markers only; monitoring and handoff excluded');
   const first = {}, second = {};
   await Promise.all([
     runRequest(first, () => measurePhase('local-list', () => sleep(5))),

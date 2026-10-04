@@ -25,6 +25,7 @@
 node tools/diagnostic-runner/runner.cjs --scenario health
 node tools/diagnostic-runner/runner.cjs --scenario all
 node tools/diagnostic-runner/runner.cjs --scenario all --lint   # npm run lint 결과를 리포트에 포함
+node tools/diagnostic-runner/runner.cjs --scenario all --exclude board,qntech-photo --lint # 성공 흐름 미검증 메뉴를 동적 시험에서 제외
 node tools/diagnostic-runner/runner.cjs --scenario all --ui    # (실험적) Playwright UI 검사
 node tools/diagnostic-runner/runner.cjs --scenario all --keep-artifacts
 node tools/diagnostic-runner/runner.cjs --list
@@ -64,8 +65,8 @@ node tools/diagnostic-runner/leak-check.cjs --win-unpacked release/win-unpacked
 | 서버 복구 | recovery | implemented |
 | 양방향 현장 격리 | site-isolation (403/409 포함) | implemented |
 
-- `contract-pending` 항목은 현재 동작을 고정하는 트립와이어다. 계약이 바뀌면 해당 단계가 실패하며 승격을 요구한다.
-- 게시판은 Firebase 키 없이 쓰기·조회 모두 500(로컬 폴백 없음)이 현재 계약이다.
+- `contract-pending`은 해당 기능의 정상 성공 흐름이 이 격리 환경에서 검증되지 않았다는 표시다. 앱이 항상 실패한다는 뜻은 아니다.
+- 게시판·QnTECH 사진 가져오기는 릴리즈 하네스에서 동적 시나리오를 실행하지 않고 전체 ESLint만 적용한다. 현장 사용 중 오류는 수집된 진단로그로 판단한다. 수동 실행 시 `--exclude` 없이 기존의 격리/실패 경로 탐침을 실행할 수 있다.
 
 ## 격리 계약
 
