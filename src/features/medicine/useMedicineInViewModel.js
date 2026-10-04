@@ -121,18 +121,20 @@ export function useMedicineInViewModel(currentUser) {
 
   const uploadBrowserOnlyPhotos = async (date, entries = []) => {
     let driveUploadFailureCount = 0;
+    const previewWarnings = [];
     for (const { name, file } of entries) {
       const res = await MedicineInModel.uploadPhoto(date, name, file);
       if (!res?.success) {
-        console.warn(`[medicine-in] 사진 업로드 실패 ${name}:`, res?.error);
+        throw new Error(res?.error || `${name} 사진을 로컬에 저장하지 못했습니다.`);
       } else if (res.driveUploaded === false) {
         driveUploadFailureCount += 1;
       }
+      if (res.previewWarning?.message) previewWarnings.push(`${name}: ${res.previewWarning.message}`);
     }
-    return driveUploadFailureCount;
+    return { driveUploadFailureCount, previewWarnings };
   };
 
-  const collectPhotoPathsByName = (targetTab) => {
+  const collectPhotoPathsByName = useCallback((targetTab) => {
     const photoPathsByName = {};
     const uploadTargets = [];
     const sourceItems = targetTab === 'medicine' ? medicineItems : kitItems;
@@ -157,7 +159,7 @@ export function useMedicineInViewModel(currentUser) {
     }
 
     return { photoPathsByName, uploadTargets };
-  };
+  }, [medicineItems, kitItems, tradePhotoFile]);
 
   const handleSave = useCallback(async () => {
     const targetItems = tab === 'medicine' ? medicineItems : kitItems;
@@ -172,7 +174,7 @@ export function useMedicineInViewModel(currentUser) {
       const date = tab === 'medicine' ? medicineDate : kitDate;
       const { photoPathsByName, uploadTargets } = collectPhotoPathsByName(tab);
 
-      const browserDriveFailures = await uploadBrowserOnlyPhotos(date, uploadTargets);
+      const browserUploadResult = await uploadBrowserOnlyPhotos(date, uploadTargets);
 
       const items = targetItems.map((item) => ({ name: item.name, purchase: Number(item.purchase) || 0 }));
       const result = await MedicineInModel.saveItems({
@@ -184,22 +186,24 @@ export function useMedicineInViewModel(currentUser) {
       });
 
       if (!result?.success) throw new Error(result?.error || '저장 실패');
-      const driveFailureCount = browserDriveFailures + Number(result.driveUploadFailureCount || 0);
+      const driveFailureCount = browserUploadResult.driveUploadFailureCount + Number(result.driveUploadFailureCount || 0);
+      const previewWarnings = [
+        ...browserUploadResult.previewWarnings,
+        ...(result.photoWarnings || []).map((warning) => `${warning.medicineName}: ${warning.message}`),
+      ];
       const successMessage = tab === 'medicine'
         ? '약품 입고량이 저장되었습니다.'
         : '키트 입고량이 저장되었습니다.';
-      showToast(
-        driveFailureCount > 0
-          ? `${successMessage} 로컬 사진은 저장됐지만 Drive 업로드 ${driveFailureCount}건은 실패했습니다.`
-          : successMessage,
-        driveFailureCount > 0 ? 'warning' : 'success'
-      );
+      const notices = [];
+      if (driveFailureCount > 0) notices.push(`로컬 사진은 저장됐지만 Drive 업로드 ${driveFailureCount}건은 실패했습니다.`);
+      if (previewWarnings.length > 0) notices.push(`HEIC 원본을 로컬에 저장하고 Drive 업로드 대기열에 넣었습니다. ${previewWarnings[0]}`);
+      showToast([successMessage, ...notices].join(' '), notices.length > 0 ? 'warning' : 'success');
     } catch (err) {
       showToast(err.message || '저장에 실패했습니다.', 'error');
     } finally {
       setIsSaving(false);
     }
-  }, [tab, medicineItems, kitItems, medicineDate, kitDate, tradePhotoFile, showToast, requestContext]);
+  }, [tab, medicineItems, kitItems, medicineDate, kitDate, showToast, requestContext, collectPhotoPathsByName]);
 
   const handleExport = useCallback(async () => {
     setIsExporting(true);
@@ -211,8 +215,11 @@ export function useMedicineInViewModel(currentUser) {
       const kitPhotos = collectPhotoPathsByName('kit');
 
       let driveUploadFailureCount = 0;
-      driveUploadFailureCount += await uploadBrowserOnlyPhotos(medicineDate, medPhotos.uploadTargets);
-      driveUploadFailureCount += await uploadBrowserOnlyPhotos(kitDate, kitPhotos.uploadTargets);
+      const previewWarnings = [];
+      const medicineUploadResult = await uploadBrowserOnlyPhotos(medicineDate, medPhotos.uploadTargets);
+      const kitUploadResult = await uploadBrowserOnlyPhotos(kitDate, kitPhotos.uploadTargets);
+      driveUploadFailureCount += medicineUploadResult.driveUploadFailureCount + kitUploadResult.driveUploadFailureCount;
+      previewWarnings.push(...medicineUploadResult.previewWarnings, ...kitUploadResult.previewWarnings);
 
       const medicineSaveResult = await MedicineInModel.saveItems({
         tab: 'medicine',
@@ -236,6 +243,10 @@ export function useMedicineInViewModel(currentUser) {
       }
       driveUploadFailureCount += Number(medicineSaveResult?.driveUploadFailureCount || 0);
       driveUploadFailureCount += Number(kitSaveResult?.driveUploadFailureCount || 0);
+      previewWarnings.push(
+        ...(medicineSaveResult?.photoWarnings || []).map((warning) => `${warning.medicineName}: ${warning.message}`),
+        ...(kitSaveResult?.photoWarnings || []).map((warning) => `${warning.medicineName}: ${warning.message}`)
+      );
 
       const photoPaths = {};
       medicineItems.forEach((item) => {
@@ -275,18 +286,17 @@ export function useMedicineInViewModel(currentUser) {
       });
 
       if (!result?.success) throw new Error(result?.userMessage || result?.error || '생성 실패');
-      showToast(
-        driveUploadFailureCount > 0
-          ? `약품입고일지가 생성됐습니다. 로컬 사진은 저장됐지만 Drive 업로드 ${driveUploadFailureCount}건은 실패했습니다.`
-          : '약품입고일지가 생성되었습니다.',
-        driveUploadFailureCount > 0 ? 'warning' : 'success'
-      );
+      previewWarnings.push(...(result.photoWarnings || []).map((warning) => `${warning.medicineName}: ${warning.message}`));
+      const notices = [];
+      if (driveUploadFailureCount > 0) notices.push(`로컬 사진은 저장됐지만 Drive 업로드 ${driveUploadFailureCount}건은 실패했습니다.`);
+      if (previewWarnings.length > 0) notices.push(`HEIC 원본은 로컬에 저장하고 Drive 업로드 대기열에 넣었습니다. ${previewWarnings[0]}`);
+      showToast(['약품입고일지가 생성되었습니다.', ...notices].join(' '), notices.length > 0 ? 'warning' : 'success');
     } catch (err) {
       showToast(err.message || '약품입고일지 생성에 실패했습니다.', 'error');
     } finally {
       setIsExporting(false);
     }
-  }, [year, month, medicineDate, kitDate, medicineItems, kitItems, tradePhotoFile, showToast, requestContext]);
+  }, [year, month, medicineDate, kitDate, medicineItems, kitItems, tradePhotoFile, showToast, requestContext, collectPhotoPathsByName]);
 
   const yearOptions = Array.from({ length: 4 }, (_, i) => currentYear - 2 + i);
   const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1);

@@ -67,6 +67,7 @@ export default function PhotoManagementTab({ date, onError }) {
     const [previewZoom, setPreviewZoom] = useState(1);
     const [previewRotation, setPreviewRotation] = useState(0);
     const [localPhotoUrls, setLocalPhotoUrls] = useState({});
+    const [previewErrors, setPreviewErrors] = useState({});
     const [photoLoadError, setPhotoLoadError] = useState('');
     const [isDeletingPhoto, setIsDeletingPhoto] = useState(false);
     const onErrorRef = useRef(onError);
@@ -140,6 +141,7 @@ export default function PhotoManagementTab({ date, onError }) {
         setBusyKey(key);
         try {
             const uploadedUrls = [];
+            const previewWarnings = [];
             const indexedRow = itemName === '거래명세서'
                 ? {
                     ...row,
@@ -160,6 +162,7 @@ export default function PhotoManagementTab({ date, onError }) {
                 if (!result?.success) throw new Error(result?.error || '사진 저장에 실패했습니다.');
                 emitPhotoDiagnostic('upload-api-succeeded', { category: isKit ? 'kit' : 'medicine', date: row.date, itemName });
                 if (result.url) uploadedUrls.push(result.url);
+                if (result.previewWarning?.message) previewWarnings.push(result.previewWarning.message);
             }
             await reload();
             if (uploadedUrls.length > 0) {
@@ -190,6 +193,9 @@ export default function PhotoManagementTab({ date, onError }) {
                         )),
                     };
                 });
+            }
+            if (previewWarnings.length > 0) {
+                showToast(`HEIC 원본은 로컬에 저장하고 Drive 업로드 대기열에 넣었습니다. ${previewWarnings[0]}`, 'warning');
             }
         } catch (error) {
             emitPhotoDiagnostic('upload-failed', { category: isKit ? 'kit' : 'medicine', date: row.date, itemName, message: String(error?.message || error).slice(0, 240) });
@@ -248,11 +254,13 @@ export default function PhotoManagementTab({ date, onError }) {
         let cancelled = false;
         const objectUrls = [];
         setLocalPhotoUrls({});
+        setPreviewErrors({});
         setPhotoLoadError('');
 
         if (galleryPhotos.length === 0) return undefined;
 
         Promise.all(galleryPhotos.map(async (photo) => {
+            let imageFetched = false;
             try {
                 const normalizedUrl = normalizeLocalPhotoUrl(photo.url);
                 const response = await apiClient.getRaw(normalizedUrl);
@@ -264,11 +272,15 @@ export default function PhotoManagementTab({ date, onError }) {
                         statusCode: response.status,
                         urlPath: normalizedUrl.split('?')[0],
                     });
-                    return null;
+                return { url: photo.url, error: '사진 파일을 불러오지 못했습니다.', decodeFailed: false };
                 }
                 const objectUrl = URL.createObjectURL(await response.blob());
                 objectUrls.push(objectUrl);
-                return [photo.url, objectUrl];
+                imageFetched = true;
+                const image = new Image();
+                image.src = objectUrl;
+                await image.decode();
+                return { url: photo.url, objectUrl };
             } catch (error) {
                 emitPhotoDiagnostic('preview-load-failed', {
                     category,
@@ -276,13 +288,21 @@ export default function PhotoManagementTab({ date, onError }) {
                     label: photo.label,
                     errorName: error?.name || 'Error',
                 });
-                return null;
+                return imageFetched
+                    ? { url: photo.url, error: '미리보기 실패 · JPEG 변환 요망', decodeFailed: true }
+                    : { url: photo.url, error: '사진 파일을 불러오지 못했습니다.', decodeFailed: false };
             }
         })).then((entries) => {
             if (cancelled) return;
-            const loadedEntries = entries.filter(Boolean);
-            setLocalPhotoUrls(Object.fromEntries(loadedEntries));
-            if (loadedEntries.length === 0) setPhotoLoadError('로컬 사진을 불러오지 못했습니다.');
+            const loadedEntries = entries.filter((entry) => entry?.objectUrl);
+            const errors = entries.filter((entry) => entry?.error);
+            setLocalPhotoUrls(Object.fromEntries(loadedEntries.map(({ url, objectUrl }) => [url, objectUrl])));
+            setPreviewErrors(Object.fromEntries(errors.map(({ url, error }) => [url, error])));
+            if (loadedEntries.length === 0 && errors.length > 0) {
+                setPhotoLoadError(errors.some((entry) => entry.decodeFailed)
+                    ? '사진은 저장되어 있지만 미리보기에 실패했습니다. JPEG로 변환해 다시 올려 주세요.'
+                    : '사진 파일을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+            }
         });
 
         return () => {
@@ -390,6 +410,7 @@ export default function PhotoManagementTab({ date, onError }) {
                         {category === 'medicine' && rows.length > 0 && (
                             <SludgePhotoButton
                                 label="거래명세표"
+                                accept="image/*,.heic,.heif"
                                 multiple
                                 busy={busyKey === `${rows[0].date}:거래명세서`}
                                 hasPhoto={data.tradePhotoDates.length > 0}
@@ -443,6 +464,7 @@ export default function PhotoManagementTab({ date, onError }) {
                                 <div className="unified-photo-management__actions">
                                     <SludgePhotoButton
                                         label="입고사진"
+                                        accept="image/*,.heic,.heif"
                                         multiple
                                         busy={busyKey === `${row.date}:${row.name}`}
                                         hasPhoto={Boolean(row.photoUrl)}
@@ -462,6 +484,7 @@ export default function PhotoManagementTab({ date, onError }) {
                                 <div className="unified-photo-management__actions">
                                     <SludgePhotoButton
                                         label="키트사진"
+                                        accept="image/*,.heic,.heif"
                                         multiple
                                         busy={busyKey === `${row.date}:${row.name}`}
                                         hasPhoto={Boolean(row.photoUrl)}
@@ -489,7 +512,7 @@ export default function PhotoManagementTab({ date, onError }) {
                             >
                                 {getLoadedPhotoUrl(photo)
                                     ? <img src={getLoadedPhotoUrl(photo)} alt={photo.label} />
-                                    : <span className="unified-photo-management__thumbnail-loading">불러오는 중…</span>}
+                                    : <span className="unified-photo-management__thumbnail-loading">{previewErrors[photo.url] || '불러오는 중…'}</span>}
                                 <span>{photo.date} · {photo.label}</span>
                             </button>
                         ))}

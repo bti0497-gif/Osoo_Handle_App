@@ -39,7 +39,7 @@ const router = express.Router();
 const BASE_MEDICINES = ['중탄산나트륨', '포도당', '팩(PAC)'];
 const BASE_KITS = ['암모니아성질소(NH3-N)', '질산성질소(NO3-N)', '인산염인(PO4-P)', '알칼리도(ALK)'];
 
-const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']);
+const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif', '.heic', '.heif']);
 
 const drive = new Proxy({}, {
   get(_target, property) {
@@ -216,42 +216,119 @@ function siteWhere(scope) {
   throw new Error('현재 현장의 site_id가 없어 약품·키트 자료를 조회할 수 없습니다.');
 }
 
+function createHeicConversionError(code, statusCode = 415, cause = null) {
+  const error = new Error(code === 'HEIC_PIXEL_LIMIT_EXCEEDED'
+    ? 'HEIC/HEIF 사진 해상도가 허용 범위를 초과했습니다.'
+    : 'HEIC/HEIF 사진을 JPEG로 변환하지 못했습니다.');
+  error.code = code;
+  error.statusCode = statusCode;
+  if (cause) error.cause = cause;
+  return error;
+}
+
+async function convertHeicBufferToJpeg(srcBuf) {
+  let decode;
+  try {
+    decode = require('heic-decode');
+  } catch (error) {
+    throw createHeicConversionError('HEIC_DECODER_UNAVAILABLE', 500, error);
+  }
+
+  let images;
+  try {
+    images = await decode.all({ buffer: srcBuf });
+  } catch (error) {
+    throw createHeicConversionError('HEIC_DECODE_FAILED', 415, error);
+  }
+
+  try {
+    const image = images[0];
+    if (!image) throw createHeicConversionError('HEIC_IMAGE_NOT_FOUND');
+    const { width, height } = image;
+    if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) {
+      throw createHeicConversionError('HEIC_INVALID_DIMENSIONS');
+    }
+    if (width * height > MAX_IMAGE_PIXELS) {
+      throw createHeicConversionError('HEIC_PIXEL_LIMIT_EXCEEDED', 413);
+    }
+
+    const decoded = await image.decode();
+    if (decoded.width !== width || decoded.height !== height
+      || decoded.data.byteLength !== width * height * 4) {
+      throw createHeicConversionError('HEIC_INVALID_PIXEL_DATA');
+    }
+    const sharp = require('sharp');
+    const pixelBuffer = Buffer.from(decoded.data.buffer, decoded.data.byteOffset, decoded.data.byteLength);
+    return await sharp(pixelBuffer, {
+      raw: { width: decoded.width, height: decoded.height, channels: 4 },
+      limitInputPixels: MAX_IMAGE_PIXELS,
+    }).flatten({ background: '#ffffff' }).jpeg({ quality: 90 }).toBuffer();
+  } catch (error) {
+    if (error?.code?.startsWith('HEIC_')) throw error;
+    throw createHeicConversionError('HEIC_DECODE_FAILED', 415, error);
+  } finally {
+    try { images.dispose(); } catch (_) {}
+  }
+}
+
+async function convertImageBufferToJpeg(srcBuf, extension) {
+  const normalizedExtension = String(extension || '').toLowerCase();
+  if (['.heic', '.heif'].includes(normalizedExtension)) {
+    return convertHeicBufferToJpeg(srcBuf);
+  }
+
+  const sharp = require('sharp');
+  const isBmp = srcBuf[0] === 0x42 && srcBuf[1] === 0x4D;
+  if (isBmp) {
+    const bmpRaw = decodeBmpToRgb(srcBuf);
+    return sharp(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
+      .jpeg({ quality: 90 }).toBuffer();
+  }
+  return sharp(srcBuf, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate().jpeg({ quality: 90 }).toBuffer();
+}
+
+async function prepareMedicinePhotoForStorage(srcBuf, extension) {
+  const normalizedExtension = String(extension || '').toLowerCase();
+  try {
+    return {
+      buffer: await convertImageBufferToJpeg(srcBuf, normalizedExtension),
+      extension: '.jpg',
+      previewAvailable: true,
+      previewWarning: null,
+    };
+  } catch (error) {
+    if (!['.heic', '.heif'].includes(normalizedExtension)) throw error;
+    // Conversion failure may keep the original, but an image over the existing
+    // pixel safety limit must never bypass the upload guard via that fallback.
+    if (error?.code === 'HEIC_PIXEL_LIMIT_EXCEEDED') throw error;
+    return {
+      buffer: srcBuf,
+      extension: normalizedExtension,
+      previewAvailable: false,
+      previewWarning: {
+        code: error?.code || 'HEIC_PREVIEW_CONVERSION_FAILED',
+        message: 'HEIC 원본 업로드는 성공했지만 미리보기용 JPEG 변환에 실패했습니다. 미리보기가 안 되면 JPEG로 변환해 다시 올려 주세요.',
+      },
+    };
+  }
+}
+
 /**
- * 사진 파일을 로컬 디렉토리에 JPG로 변환 저장
- * {appDataPath}/사진관리/약품입고/{year}/{yyyymmdd}+{약품명}.jpg
+ * 사진 파일은 JPEG 변환을 우선 시도하고, HEIC 변환 실패 시 원본을 보존
+ * {appDataPath}/사진관리/약품입고/{year}/{yyyymmdd}+{약품명}.{jpg|heic|heif}
  */
 async function savePhotoToLocal(appDataPath, year, mm, date, medicineName, srcPath, scope = {}, photoIndex = 0) {
   if (!srcPath || !fs.existsSync(srcPath)) return null;
-  const sharp = require('sharp');
   const srcBuf = fs.readFileSync(srcPath);
   const yyyymmdd = String(date || '').replace(/-/g, '').slice(0, 8);
   const suffix = Number(photoIndex) > 0 ? `-${Number(photoIndex) + 1}` : '';
-  const fileName = `${yyyymmdd}+${sanitizeName(medicineName)}${suffix}.jpg`;
+  const prepared = await prepareMedicinePhotoForStorage(srcBuf, path.extname(srcPath));
+  const fileName = `${yyyymmdd}+${sanitizeName(medicineName)}${suffix}${prepared.extension}`;
   const destDir = getMedicinePhotoYearDir(appDataPath, year, scope);
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
   const destPath = path.join(destDir, fileName);
-  // BMP는 raw 픽셀로 디코딩 후 변환
-  const isBmp = srcBuf[0] === 0x42 && srcBuf[1] === 0x4D;
-  let jpegBuffer;
-  try {
-    if (isBmp) {
-      const bmpRaw = decodeBmpToRgb(srcBuf);
-      jpegBuffer = await sharp(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
-        .jpeg({ quality: 90 }).toBuffer();
-    } else {
-      jpegBuffer = await sharp(srcBuf, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate().jpeg({ quality: 90 }).toBuffer();
-    }
-  } catch (error) {
-    if (['.heic', '.heif'].includes(path.extname(srcPath).toLowerCase())) {
-      error.statusCode = /pixel limit|too many pixels/i.test(String(error.message || error)) ? 413 : 415;
-      error.message = error.statusCode === 413
-        ? '사진 해상도가 허용 범위를 초과했습니다.'
-        : 'HEIC/HEIF 사진을 JPEG로 변환하지 못했습니다. 휴대폰에서 JPEG 호환 형식으로 다시 저장해 주세요.';
-    }
-    throw error;
-  }
-  fs.writeFileSync(destPath, jpegBuffer);
-  return destPath;
+  fs.writeFileSync(destPath, prepared.buffer);
+  return { localPath: destPath, ...prepared };
 }
 
 async function uploadMedicinePhotoToDrive(db, date, medicineName, localPath, siteNameOverride = '', photoIndex = 0) {
@@ -265,11 +342,15 @@ async function uploadMedicinePhotoToDrive(db, date, medicineName, localPath, sit
       getDriveRootFolderId(),
       managementPhotoSegments(date)
     );
+    const extension = path.extname(localPath).toLowerCase();
+    const driveExtension = ['.heic', '.heif'].includes(extension) ? extension : '.jpg';
+    const mimeType = driveExtension === '.heic' ? 'image/heic'
+      : driveExtension === '.heif' ? 'image/heif' : 'image/jpeg';
     return await uploadBufferToFolder({
       folderId: folder.id,
-      fileName: managementPhotoName(date, siteName, medicineName, Number(photoIndex) || 0, '.jpg'),
+      fileName: managementPhotoName(date, siteName, medicineName, Number(photoIndex) || 0, driveExtension),
       buffer: fs.readFileSync(localPath),
-      mimeType: 'image/jpeg',
+      mimeType,
     });
   } catch (err) {
     console.warn(`[medicine-in] Drive 사진 업로드 실패 (${medicineName}):`, err.message);
@@ -288,10 +369,12 @@ async function findRemoteMedicinePhoto(db, date, medicineName, siteNameOverride 
       getDriveRootFolderId(),
       managementPhotoSegments(date)
     );
-    const managementFileName = managementPhotoName(date, siteName, medicineName, 0, '.jpg');
-    const managementFile = await findFileInFolder(managementFolder.id, managementFileName);
-    if (managementFile) {
-      return { ...managementFile, fileName: managementFileName, folderId: managementFolder.id };
+    for (const extension of ['.jpg', '.heic', '.heif']) {
+      const managementFileName = managementPhotoName(date, siteName, medicineName, 0, extension);
+      const managementFile = await findFileInFolder(managementFolder.id, managementFileName);
+      if (managementFile) {
+        return { ...managementFile, fileName: managementFileName, folderId: managementFolder.id };
+      }
     }
 
     const legacyFolder = await findFolderPath(
@@ -299,9 +382,12 @@ async function findRemoteMedicinePhoto(db, date, medicineName, siteNameOverride 
       medicinePhotoSegments(siteName, date)
     );
     if (!legacyFolder) return null;
-    const legacyFileName = medicinePhotoName(date, medicineName, 0, '.jpg');
-    const legacyFile = await findFileInFolder(legacyFolder.id, legacyFileName);
-    return legacyFile ? { ...legacyFile, fileName: legacyFileName, folderId: legacyFolder.id } : null;
+    for (const extension of ['.jpg', '.heic', '.heif']) {
+      const legacyFileName = medicinePhotoName(date, medicineName, 0, extension);
+      const legacyFile = await findFileInFolder(legacyFolder.id, legacyFileName);
+      if (legacyFile) return { ...legacyFile, fileName: legacyFileName, folderId: legacyFolder.id };
+    }
+    return null;
   } catch (err) {
     console.warn(`[medicine-in] Drive 사진 조회 실패 (${medicineName}):`, err.message);
     return null;
@@ -324,7 +410,9 @@ async function restoreMedicinePhotoFromDrive(db, appDataPath, date, medicineName
   if (!buffer) return null;
   const yearStr = String(date).slice(0, 4);
   const stamp = String(date || '').replace(/-/g, '').slice(0, 8);
-  const fileName = `${stamp}+${sanitizeName(medicineName)}.jpg`;
+  const remoteExtension = path.extname(String(remote.fileName || '')).toLowerCase();
+  const extension = ['.heic', '.heif'].includes(remoteExtension) ? remoteExtension : '.jpg';
+  const fileName = `${stamp}+${sanitizeName(medicineName)}${extension}`;
   const scope = getMedicinePhotoScope(db, siteId);
   const destDir = getMedicinePhotoYearDir(appDataPath, yearStr, scope);
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
@@ -578,6 +666,7 @@ module.exports = function (db, baseDir, appDataPath) {
     try {
       const { tab, date, items, photoPaths } = req.body;
       const drivePhotoResults = [];
+      const photoWarnings = [];
 
       if (!date || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ success: false, error: '유효하지 않은 요청입니다.' });
@@ -655,7 +744,8 @@ module.exports = function (db, baseDir, appDataPath) {
         for (const [medicineName, filePath] of Object.entries(photoPaths)) {
           try {
             const photoScope = getMedicinePhotoScope(db, metadata.siteId);
-            const localPath = await savePhotoToLocal(appDataPath, yearStr, mmStr, date, medicineName, filePath, photoScope);
+            const savedPhoto = await savePhotoToLocal(appDataPath, yearStr, mmStr, date, medicineName, filePath, photoScope);
+            const localPath = savedPhoto?.localPath;
             if (localPath) {
               const fileName = path.basename(localPath);
               const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(getMedicinePhotoRelativePath(yearStr, fileName, photoScope))}`;
@@ -665,7 +755,10 @@ module.exports = function (db, baseDir, appDataPath) {
                 dedupeKey: `medicine:${localPath}`,
                 payload: { date, itemName: medicineName, localPath, siteName: req.siteContext?.siteName || '', photoIndex: 0 },
               });
-              drivePhotoResults.push({ medicineName, queued: true });
+              drivePhotoResults.push({ medicineName, queued: true, storedFormat: savedPhoto.extension.slice(1) });
+              if (!savedPhoto.previewAvailable) {
+                photoWarnings.push({ medicineName, message: savedPhoto.previewWarning.message });
+              }
             }
           } catch (e) {
             console.warn(`[medicine-in save] 사진 저장 실패 (${medicineName}):`, e.message);
@@ -679,6 +772,7 @@ module.exports = function (db, baseDir, appDataPath) {
         drivePhotoResults,
         driveUploadFailureCount: 0,
         driveQueuedCount: drivePhotoResults.filter((item) => item.queued).length,
+        photoWarnings,
       });
     } catch (err) {
       console.error('[medicine-in save]', err);
@@ -704,40 +798,16 @@ module.exports = function (db, baseDir, appDataPath) {
         return res.status(400).json({ success: false, error: 'date, medicineName, photo 필드가 필요합니다.' });
       }
       const yearStr = date.split('-')[0];
-      const sharp = require('sharp');
       const yyyymmdd = String(date || '').replace(/-/g, '').slice(0, 8);
       const suffix = photoIndex > 0 ? `-${photoIndex + 1}` : '';
-      const fileName = `${yyyymmdd}+${sanitizeName(medicineName)}${suffix}.jpg`;
+      const extension = path.extname(String(req.file.originalname || '')).toLowerCase();
+      const prepared = await prepareMedicinePhotoForStorage(req.file.buffer, extension);
+      const fileName = `${yyyymmdd}+${sanitizeName(medicineName)}${suffix}${prepared.extension}`;
       const photoScope = getMedicinePhotoScope(db, req.siteContext?.siteId);
       const destDir = getMedicinePhotoYearDir(appDataPath, yearStr, photoScope);
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
       const destPath = path.join(destDir, fileName);
-      const srcBuf = req.file.buffer;
-      const isBmp = srcBuf[0] === 0x42 && srcBuf[1] === 0x4D;
-      let jpegBuffer;
-      try {
-        if (isBmp) {
-          const bmpRaw = decodeBmpToRgb(srcBuf);
-          jpegBuffer = await sharp(bmpRaw.data, { raw: { width: bmpRaw.width, height: bmpRaw.height, channels: 3 } })
-            .jpeg({ quality: 90 }).toBuffer();
-        } else {
-          jpegBuffer = await sharp(srcBuf, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate().jpeg({ quality: 90 }).toBuffer();
-        }
-      } catch (error) {
-        const extension = path.extname(String(req.file.originalname || '')).toLowerCase();
-        if (extension === '.heic' || extension === '.heif') {
-          const pixelLimitExceeded = /pixel limit|too many pixels/i.test(String(error?.message || error));
-          return res.status(pixelLimitExceeded ? 413 : 415).json({
-            success: false,
-            code: pixelLimitExceeded ? 'IMAGE_PIXEL_LIMIT_EXCEEDED' : 'HEIC_CONVERSION_FAILED',
-            error: pixelLimitExceeded
-              ? '사진 해상도가 허용 범위를 초과했습니다.'
-              : 'HEIC/HEIF 사진을 JPEG로 변환하지 못했습니다. 휴대폰에서 JPEG 호환 형식으로 다시 저장해 주세요.',
-          });
-        }
-        throw error;
-      }
-      fs.writeFileSync(destPath, jpegBuffer);
+      fs.writeFileSync(destPath, prepared.buffer);
       const url = `/api/medicine-in/photo?p=${encodeURIComponent(getMedicinePhotoRelativePath(yearStr, fileName, photoScope))}`;
       updateMedicinePhotoUrl(db, 'medicine', date, medicineName, url, req.siteContext?.siteId);
       updateMedicinePhotoUrl(db, 'kit', date, medicineName, url, req.siteContext?.siteId);
@@ -756,10 +826,13 @@ module.exports = function (db, baseDir, appDataPath) {
         success: true,
         url,
         driveQueued: true,
+        storedFormat: prepared.extension.slice(1),
+        previewAvailable: prepared.previewAvailable,
+        previewWarning: prepared.previewWarning,
       });
     } catch (err) {
       console.error('[medicine-in upload-photo]', err);
-      res.status(500).json({ success: false, error: err.message });
+      res.status(err.statusCode || 500).json({ success: false, code: err.code || 'PHOTO_UPLOAD_FAILED', error: err.message });
     }
   });
 
@@ -860,6 +933,7 @@ module.exports = function (db, baseDir, appDataPath) {
 
       // 사진 바인딩: photoPaths = { '{{기본1사진}}': 'C:\\...\\photo.jpg' }
       const imageMap = {}; // { '{{기본1사진}}': Buffer }
+      const photoWarnings = [];
 
       // placeholder → 약품명 역매핑 (로컬 저장 시 사용)
       const placeholderToName = {};
@@ -877,7 +951,14 @@ module.exports = function (db, baseDir, appDataPath) {
         for (const [placeholder, filePath] of Object.entries(photoPaths)) {
           if (!filePath || !fs.existsSync(filePath)) continue;
           try {
-            imageMap[placeholder] = fs.readFileSync(filePath);
+            const originalBuffer = fs.readFileSync(filePath);
+            const extension = path.extname(filePath).toLowerCase();
+            const prepared = await prepareMedicinePhotoForStorage(originalBuffer, extension);
+            if (prepared.previewAvailable) imageMap[placeholder] = prepared.buffer;
+            else photoWarnings.push({
+              medicineName: placeholderToName[placeholder] || placeholder,
+              message: prepared.previewWarning.message,
+            });
 
             // 로컬 구조화 디렉토리에 사진 복사
             const medicineName = placeholderToName[placeholder];
@@ -887,7 +968,8 @@ module.exports = function (db, baseDir, appDataPath) {
               const useDate = isKit ? (kitDate || `${y}-${mm}-01`) : (medicineDate || `${y}-${mm}-01`);
               try {
                 const photoScope = getMedicinePhotoScope(db, req.siteContext?.siteId);
-                const localPath = await savePhotoToLocal(appDataPath, y, mm, useDate, medicineName, filePath, photoScope);
+                const savedPhoto = await savePhotoToLocal(appDataPath, y, mm, useDate, medicineName, filePath, photoScope);
+                const localPath = savedPhoto?.localPath;
                 if (localPath) {
                   const fileName = path.basename(localPath);
                   const localUrl = `/api/medicine-in/photo?p=${encodeURIComponent(getMedicinePhotoRelativePath(String(useDate).slice(0, 4), fileName, photoScope))}`;
@@ -903,6 +985,7 @@ module.exports = function (db, baseDir, appDataPath) {
                       photoIndex: 0,
                     },
                   });
+                  if (!savedPhoto.previewAvailable) photoWarnings.push({ medicineName, message: savedPhoto.previewWarning.message });
                 }
               } catch (e) {
                 console.warn('[medicine-in export] 로컬 사진 저장 실패:', e.message);
@@ -927,8 +1010,15 @@ module.exports = function (db, baseDir, appDataPath) {
         const found = photoMap[key];
         if (!found?.localPath || !fs.existsSync(found.localPath)) continue;
         try {
-          imageMap[placeholder] = fs.readFileSync(found.localPath);
-          console.log(`[medicine-in export] fallback 사진 적용: ${medicineName} → ${found.localPath}`);
+          const storedBuffer = fs.readFileSync(found.localPath);
+          const extension = path.extname(found.localPath).toLowerCase();
+          const prepared = await prepareMedicinePhotoForStorage(storedBuffer, extension);
+          if (prepared.previewAvailable) {
+            imageMap[placeholder] = prepared.buffer;
+            console.log(`[medicine-in export] fallback 사진 적용: ${medicineName} → ${found.localPath}`);
+          } else {
+            photoWarnings.push({ medicineName, message: prepared.previewWarning.message });
+          }
         } catch (e) {
           console.warn(`[medicine-in export] fallback 사진 읽기 실패 (${medicineName}):`, e.message);
         }
@@ -951,7 +1041,7 @@ module.exports = function (db, baseDir, appDataPath) {
       });
 
       await openExcelFile(outputPath);
-      res.json({ success: true });
+      res.json({ success: true, photoWarnings });
     } catch (err) {
       console.error('[medicine-in export]', err);
       res.status(500).json({
@@ -991,6 +1081,9 @@ module.exports = function (db, baseDir, appDataPath) {
     if (!fs.existsSync(resolved)) {
       return res.status(404).send('Not found');
     }
+    const extension = path.extname(resolved).toLowerCase();
+    if (extension === '.heic') res.type('image/heic');
+    else if (extension === '.heif') res.type('image/heif');
     res.sendFile(resolved);
   });
 
@@ -1282,5 +1375,7 @@ module.exports.__photoIsolationTest = {
   getMedicinePhotoRelativePath,
   scanMedicinePhotos,
   scanMedicinePhotoDates,
+  convertHeicBufferToJpeg,
+  prepareMedicinePhotoForStorage,
 };
 module.exports.__uploadMedicinePhotoToDrive = uploadMedicinePhotoToDrive;

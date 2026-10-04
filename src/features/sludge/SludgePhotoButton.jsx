@@ -6,6 +6,7 @@ export default function SludgePhotoButton({
   disabled = false,
   busy = false,
   multiple = false,
+  accept = 'image/*',
   onFile,
   onFiles,
   onDiagnostic,
@@ -44,7 +45,7 @@ export default function SludgePhotoButton({
       <input
         ref={ref}
         type="file"
-        accept="image/*"
+        accept={accept}
         multiple={multiple}
         disabled={isDisabled}
         style={{ display: 'none' }}

@@ -99,7 +99,7 @@ const PhotoButton = React.memo(({ onFile, hasPhoto }) => {
       <input
         ref={ref}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         style={{ display: 'none' }}
         onChange={(event) => {
           const file = event.target.files?.[0];
