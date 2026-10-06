@@ -15,8 +15,8 @@ using System.Threading;
 [assembly: System.Reflection.AssemblyDescription("Background watchdog for Osoo Handle App")]
 [assembly: System.Reflection.AssemblyCompany("Osoo")]
 [assembly: System.Reflection.AssemblyProduct("Osoo Handle App Watchdog")]
-[assembly: System.Reflection.AssemblyVersion("1.0.11.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.11.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.13.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.13.0")]
 
 namespace OsooWatchdog
 {
@@ -83,6 +83,7 @@ namespace OsooWatchdog
     {
         public bool Once;
         public bool DryRun;
+        public bool MonitorOnly;
         public bool NoDelay;
         public bool SimulateAbsent;
         public int IntervalSeconds = 5;
@@ -108,6 +109,36 @@ namespace OsooWatchdog
         private static int keyboardError;
         private static int mouseError;
         private static string outputPath;
+        private static string runtimeDirectory;
+        private static long lastInputObservationAtTicks;
+        private static long nextInputObservationAtTicks;
+        private static int pendingKeyInjected;
+        private static int pendingKeyNonInjected;
+        private static int pendingMouseInjected;
+        private static int pendingMouseNonInjected;
+        private static int pendingLowerIntegrityInjected;
+
+        [DataContract]
+        private sealed class RemoteSessionSnapshot
+        {
+            [DataMember(Name = "checkedAt")] public string CheckedAt;
+            [DataMember(Name = "state")] public string State;
+            [DataMember(Name = "sources")] public RemoteSessionSources Sources;
+        }
+
+        [DataContract]
+        private sealed class RemoteSessionSources
+        {
+            [DataMember(Name = "rustDesk")] public string RustDesk;
+            [DataMember(Name = "chromeRemoteDesktop")] public string ChromeRemoteDesktop;
+        }
+
+        [DataContract]
+        private sealed class AppHeartbeatSnapshot
+        {
+            [DataMember(Name = "appPid")] public int AppPid;
+            [DataMember(Name = "checkedAt")] public string CheckedAt;
+        }
 
         private struct InputSample { public long Ticks; public bool Keyboard; public bool Injected; public bool LowerIntegrity; }
         private delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
@@ -126,7 +157,10 @@ namespace OsooWatchdog
 
         public static void Start(string runtimeDirectory)
         {
+            RemoteInputMonitor.runtimeDirectory = runtimeDirectory;
             outputPath = Path.Combine(runtimeDirectory, "remote-input-state.json");
+            lastInputObservationAtTicks = DateTime.UtcNow.Ticks;
+            nextInputObservationAtTicks = DateTime.UtcNow.AddSeconds(30).Ticks;
             var hookThread = new Thread(RunHooks) { IsBackground = true, Name = "Osoo input diagnostics" };
             var samplingThread = new Thread(RunSampler) { IsBackground = true, Name = "Osoo input summary" };
             hookThread.Start();
@@ -172,6 +206,14 @@ namespace OsooWatchdog
             {
                 Samples.Enqueue(new InputSample { Ticks = DateTime.UtcNow.Ticks, Keyboard = keyboard,
                     Injected = injected, LowerIntegrity = lowerIntegrity });
+                if (keyboard)
+                {
+                    if (injected) pendingKeyInjected++;
+                    else pendingKeyNonInjected++;
+                }
+                else if (injected) pendingMouseInjected++;
+                else pendingMouseNonInjected++;
+                if (lowerIntegrity) pendingLowerIntegrityInjected++;
                 while (Samples.Count > 4096) Samples.Dequeue();
             }
         }
@@ -193,19 +235,60 @@ namespace OsooWatchdog
             uint processId;
             GetWindowThreadProcessId(window, out processId);
             if (processId == 0) return false;
+            int heartbeatProcessId;
+            if (TryGetFreshHeartbeatProcessId(out heartbeatProcessId))
+                return processId == (uint)heartbeatProcessId;
             using (Process process = Process.GetProcessById((int)processId))
                 return String.Equals(process.ProcessName, "Osoo Handle App", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool TryGetFreshHeartbeatProcessId(out int processId)
+        {
+            processId = 0;
+            try
+            {
+                string heartbeatPath = Path.Combine(runtimeDirectory, "app-heartbeat.json");
+                if (!File.Exists(heartbeatPath)) return false;
+                var serializer = new DataContractJsonSerializer(typeof(AppHeartbeatSnapshot));
+                AppHeartbeatSnapshot heartbeat;
+                using (FileStream stream = File.OpenRead(heartbeatPath))
+                    heartbeat = (AppHeartbeatSnapshot)serializer.ReadObject(stream);
+                DateTime checkedAt;
+                if (heartbeat == null || heartbeat.AppPid <= 0 || !DateTime.TryParse(heartbeat.CheckedAt,
+                    CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out checkedAt)) return false;
+                double ageSeconds = (DateTime.UtcNow - checkedAt.ToUniversalTime()).TotalSeconds;
+                if (ageSeconds < -5 || ageSeconds > 15) return false;
+                processId = heartbeat.AppPid;
+                return true;
+            }
+            catch { return false; }
         }
 
         private static void WriteSummary()
         {
             DateTime now = DateTime.UtcNow;
             int keyInjected = 0, keyPhysical = 0, keyInjectedRecent = 0, keyPhysicalRecent = 0;
-            int mouseInjected = 0, mousePhysical = 0, lowerIntegrity = 0;
+            int mouseInjected = 0, mousePhysical = 0, mouseInjectedRecent = 0, mousePhysicalRecent = 0, lowerIntegrity = 0;
+            int observedKeyInjected = 0, observedKeyNonInjected = 0;
+            int observedMouseInjected = 0, observedMouseNonInjected = 0, observedLowerIntegrity = 0;
             long lastKeyTicks = 0, lastInjectedKeyTicks = 0, lastNonInjectedKeyTicks = 0;
+            long lastMouseTicks = 0, lastInjectedMouseTicks = 0, lastNonInjectedMouseTicks = 0;
+            long observationStartedAtTicks = lastInputObservationAtTicks;
+            bool inputObservationDue = now.Ticks >= nextInputObservationAtTicks;
+            long observationWindowSeconds = inputObservationDue
+                ? Math.Max(1, (now.Ticks - observationStartedAtTicks) / TimeSpan.TicksPerSecond) : 0;
             lock (Gate)
             {
                 while (Samples.Count > 0 && now.Ticks - Samples.Peek().Ticks > TimeSpan.FromSeconds(30).Ticks) Samples.Dequeue();
+                if (inputObservationDue)
+                {
+                    observedKeyInjected = pendingKeyInjected;
+                    observedKeyNonInjected = pendingKeyNonInjected;
+                    observedMouseInjected = pendingMouseInjected;
+                    observedMouseNonInjected = pendingMouseNonInjected;
+                    observedLowerIntegrity = pendingLowerIntegrityInjected;
+                    pendingKeyInjected = pendingKeyNonInjected = pendingMouseInjected = pendingMouseNonInjected = pendingLowerIntegrityInjected = 0;
+                }
                 foreach (InputSample sample in Samples)
                 {
                     if (sample.Keyboard)
@@ -224,12 +307,29 @@ namespace OsooWatchdog
                         }
                         lastKeyTicks = sample.Ticks;
                     }
-                    else if (sample.Injected) mouseInjected++;
-                    else mousePhysical++;
+                    else if (sample.Injected)
+                    {
+                        mouseInjected++;
+                        if (now.Ticks - sample.Ticks <= TimeSpan.FromSeconds(5).Ticks) mouseInjectedRecent++;
+                        lastInjectedMouseTicks = sample.Ticks;
+                        lastMouseTicks = sample.Ticks;
+                    }
+                    else
+                    {
+                        mousePhysical++;
+                        if (now.Ticks - sample.Ticks <= TimeSpan.FromSeconds(5).Ticks) mousePhysicalRecent++;
+                        lastNonInjectedMouseTicks = sample.Ticks;
+                        lastMouseTicks = sample.Ticks;
+                    }
                     if (sample.LowerIntegrity) lowerIntegrity++;
                 }
             }
-            string json = "{\"version\":\"1.0.11\",\"checkedAt\":\"" + now.ToString("o") + "\",\"foregroundIsApp\":"
+            if (inputObservationDue)
+            {
+                lastInputObservationAtTicks = now.Ticks;
+                nextInputObservationAtTicks = now.AddSeconds(30).Ticks;
+            }
+            string json = "{\"version\":\"1.0.13\",\"checkedAt\":\"" + now.ToString("o") + "\",\"foregroundIsApp\":"
                 + foregroundIsApp.ToString().ToLowerInvariant()
                 + ",\"keyboardHookReady\":" + keyboardReady.ToString().ToLowerInvariant()
                 + ",\"mouseHookReady\":" + mouseReady.ToString().ToLowerInvariant()
@@ -241,24 +341,123 @@ namespace OsooWatchdog
                 + ",\"keyboardNonInjectedLast5Seconds\":" + keyPhysicalRecent.ToString(CultureInfo.InvariantCulture)
                 + ",\"mouseInjected\":" + mouseInjected.ToString(CultureInfo.InvariantCulture)
                 + ",\"mouseNonInjected\":" + mousePhysical.ToString(CultureInfo.InvariantCulture)
+                + ",\"mouseInjectedLast5Seconds\":" + mouseInjectedRecent.ToString(CultureInfo.InvariantCulture)
+                + ",\"mouseNonInjectedLast5Seconds\":" + mousePhysicalRecent.ToString(CultureInfo.InvariantCulture)
                 + ",\"lowerIntegrityInjected\":" + lowerIntegrity.ToString(CultureInfo.InvariantCulture)
-                + ",\"lastKeyboardAgeMs\":" + (lastKeyTicks == 0 ? "null" : ((now.Ticks - lastKeyTicks) / 10000).ToString(CultureInfo.InvariantCulture))
-                + ",\"lastInjectedKeyboardAgeMs\":" + (lastInjectedKeyTicks == 0 ? "null" : ((now.Ticks - lastInjectedKeyTicks) / 10000).ToString(CultureInfo.InvariantCulture))
-                + ",\"lastNonInjectedKeyboardAgeMs\":" + (lastNonInjectedKeyTicks == 0 ? "null" : ((now.Ticks - lastNonInjectedKeyTicks) / 10000).ToString(CultureInfo.InvariantCulture)) + "}";
+                + ",\"lastInputAgeMs\":" + AgeMillisecondsJson(now.Ticks, Math.Max(lastKeyTicks, lastMouseTicks))
+                + ",\"lastKeyboardAgeMs\":" + AgeMillisecondsJson(now.Ticks, lastKeyTicks)
+                + ",\"lastInjectedKeyboardAgeMs\":" + AgeMillisecondsJson(now.Ticks, lastInjectedKeyTicks)
+                + ",\"lastNonInjectedKeyboardAgeMs\":" + AgeMillisecondsJson(now.Ticks, lastNonInjectedKeyTicks)
+                + ",\"lastMouseAgeMs\":" + AgeMillisecondsJson(now.Ticks, lastMouseTicks)
+                + ",\"lastInjectedMouseAgeMs\":" + AgeMillisecondsJson(now.Ticks, lastInjectedMouseTicks)
+                + ",\"lastNonInjectedMouseAgeMs\":" + AgeMillisecondsJson(now.Ticks, lastNonInjectedMouseTicks) + "}";
             string temporary = outputPath + ".tmp";
             File.WriteAllText(temporary, json, new UTF8Encoding(false));
+            bool replaced = false;
             if (File.Exists(outputPath))
             {
-                try { File.Replace(temporary, outputPath, null); return; }
+                try { File.Replace(temporary, outputPath, null); replaced = true; }
                 catch { File.Delete(outputPath); }
             }
-            File.Move(temporary, outputPath);
+            if (!replaced) File.Move(temporary, outputPath);
+            if (inputObservationDue && (observedKeyInjected + observedKeyNonInjected + observedMouseInjected + observedMouseNonInjected) > 0)
+            {
+                WriteInputObservation(now, observationStartedAtTicks, observationWindowSeconds,
+                    observedKeyInjected, observedKeyNonInjected, observedMouseInjected, observedMouseNonInjected,
+                    keyInjectedRecent, keyPhysicalRecent, mouseInjectedRecent, mousePhysicalRecent, observedLowerIntegrity,
+                    lastKeyTicks, lastInjectedKeyTicks, lastNonInjectedKeyTicks,
+                    lastMouseTicks, lastInjectedMouseTicks, lastNonInjectedMouseTicks);
+            }
+        }
+
+        private static string AgeMillisecondsJson(long nowTicks, long eventTicks)
+        {
+            return eventTicks == 0 ? "null" : Math.Max(0, (nowTicks - eventTicks) / 10000).ToString(CultureInfo.InvariantCulture);
+        }
+
+        private static void WriteInputObservation(DateTime observedAt, long windowStartedAtTicks, long windowSeconds,
+            int keyInjected, int keyNonInjected, int mouseInjected, int mouseNonInjected,
+            int keyInjectedRecent, int keyNonInjectedRecent, int mouseInjectedRecent, int mouseNonInjectedRecent,
+            int lowerIntegrity, long lastKeyTicks, long lastInjectedKeyTicks, long lastNonInjectedKeyTicks,
+            long lastMouseTicks, long lastInjectedMouseTicks, long lastNonInjectedMouseTicks)
+        {
+            try
+            {
+                string overallState = "unknown";
+                string rustDeskState = "unknown";
+                string chromeState = "unknown";
+                long remoteStateAgeSeconds = -1;
+                string statePath = Path.Combine(runtimeDirectory, "remote-session-state.json");
+                if (File.Exists(statePath))
+                {
+                    try
+                    {
+                        RemoteSessionSnapshot snapshot;
+                        var serializer = new DataContractJsonSerializer(typeof(RemoteSessionSnapshot));
+                        using (FileStream stream = File.OpenRead(statePath))
+                            snapshot = (RemoteSessionSnapshot)serializer.ReadObject(stream);
+                        DateTime checkedAt;
+                        if (snapshot != null && DateTime.TryParse(snapshot.CheckedAt, CultureInfo.InvariantCulture,
+                            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out checkedAt))
+                        {
+                            remoteStateAgeSeconds = Math.Max(0, (long)(observedAt - checkedAt.ToUniversalTime()).TotalSeconds);
+                            if (remoteStateAgeSeconds <= 15 && IsKnownRemoteState(snapshot.State)) overallState = snapshot.State;
+                            if (snapshot.Sources != null)
+                            {
+                                if (remoteStateAgeSeconds <= 15 && IsKnownRemoteState(snapshot.Sources.RustDesk)) rustDeskState = snapshot.Sources.RustDesk;
+                                if (remoteStateAgeSeconds <= 15 && IsKnownRemoteState(snapshot.Sources.ChromeRemoteDesktop)) chromeState = snapshot.Sources.ChromeRemoteDesktop;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                string timestamp = observedAt.ToString("o", CultureInfo.InvariantCulture);
+                string windowStartedAt = new DateTime(windowStartedAtTicks, DateTimeKind.Utc).ToString("o", CultureInfo.InvariantCulture);
+                string eventJson = "{\"observation_id\":\"" + Guid.NewGuid().ToString("N") + "\""
+                    + ",\"createdAt\":\"" + timestamp + "\",\"version\":\"1.0.13\",\"watchdog_version\":\"1.0.13\""
+                    + ",\"detector_version\":\"4\",\"area\":\"watchdog\",\"action\":\"remote-input-observation\""
+                    + ",\"result\":\"" + overallState + "\",\"overall_state\":\"" + overallState + "\""
+                    + ",\"decision_reason\":\"foreground-app-input-aggregate;origin-unverified\""
+                    + ",\"rustdesk_state\":\"" + rustDeskState + "\",\"chrome_state\":\"" + chromeState + "\""
+                    + ",\"raw_signals\":{\"inputObservation\":{\"captureScope\":\"foreground-app-only\""
+                    + ",\"inputOrigin\":\"unverified\",\"windowSeconds\":" + windowSeconds.ToString(CultureInfo.InvariantCulture)
+                    + ",\"keyboardHookReady\":" + keyboardReady.ToString().ToLowerInvariant()
+                    + ",\"mouseHookReady\":" + mouseReady.ToString().ToLowerInvariant()
+                    + ",\"keyboardHookError\":" + keyboardError.ToString(CultureInfo.InvariantCulture)
+                    + ",\"mouseHookError\":" + mouseError.ToString(CultureInfo.InvariantCulture)
+                    + ",\"keyboardInjected\":" + keyInjected.ToString(CultureInfo.InvariantCulture)
+                    + ",\"keyboardNonInjected\":" + keyNonInjected.ToString(CultureInfo.InvariantCulture)
+                    + ",\"keyboardInjectedLast5Seconds\":" + keyInjectedRecent.ToString(CultureInfo.InvariantCulture)
+                    + ",\"keyboardNonInjectedLast5Seconds\":" + keyNonInjectedRecent.ToString(CultureInfo.InvariantCulture)
+                    + ",\"mouseInjected\":" + mouseInjected.ToString(CultureInfo.InvariantCulture)
+                    + ",\"mouseNonInjected\":" + mouseNonInjected.ToString(CultureInfo.InvariantCulture)
+                    + ",\"mouseInjectedLast5Seconds\":" + mouseInjectedRecent.ToString(CultureInfo.InvariantCulture)
+                    + ",\"mouseNonInjectedLast5Seconds\":" + mouseNonInjectedRecent.ToString(CultureInfo.InvariantCulture)
+                    + ",\"lowerIntegrityInjected\":" + lowerIntegrity.ToString(CultureInfo.InvariantCulture)
+                    + ",\"windowStartedAt\":\"" + windowStartedAt + "\""
+                    + ",\"lastKeyboardAgeMs\":" + AgeMillisecondsJson(observedAt.Ticks, lastKeyTicks)
+                    + ",\"lastInjectedKeyboardAgeMs\":" + AgeMillisecondsJson(observedAt.Ticks, lastInjectedKeyTicks)
+                    + ",\"lastNonInjectedKeyboardAgeMs\":" + AgeMillisecondsJson(observedAt.Ticks, lastNonInjectedKeyTicks)
+                    + ",\"lastMouseAgeMs\":" + AgeMillisecondsJson(observedAt.Ticks, lastMouseTicks)
+                    + ",\"lastInjectedMouseAgeMs\":" + AgeMillisecondsJson(observedAt.Ticks, lastInjectedMouseTicks)
+                    + ",\"lastNonInjectedMouseAgeMs\":" + AgeMillisecondsJson(observedAt.Ticks, lastNonInjectedMouseTicks)
+                    + ",\"remoteSessionSignalAgeSeconds\":" + (remoteStateAgeSeconds < 0 ? "null" : remoteStateAgeSeconds.ToString(CultureInfo.InvariantCulture))
+                    + "}}}" + Environment.NewLine;
+                File.AppendAllText(Path.Combine(runtimeDirectory, "remote-session-observations.jsonl"), eventJson, new UTF8Encoding(false));
+            }
+            catch { }
+        }
+
+        private static bool IsKnownRemoteState(string state)
+        {
+            return state == "active" || state == "clear" || state == "unknown";
         }
     }
 
     internal static class Program
     {
         private const string MutexName = "Local\\OsooHandleAppWatchdog-1.0";
+        private const string DiagnosticMonitorMutexName = "Local\\OsooHandleAppWatchdogDiagnostic-1.0";
         private const int MaxRestarts = 3;
         private const int DedicatedServerPort = 18731;
         private const int ServerHealthFailureLimit = 3;
@@ -312,7 +511,8 @@ namespace OsooWatchdog
             logPath = Path.Combine(runtimeDirectory, "watchdog.log");
 
             bool createdNew;
-            using (var mutex = new Mutex(true, MutexName, out createdNew))
+            string mutexName = options.MonitorOnly ? DiagnosticMonitorMutexName : MutexName;
+            using (var mutex = new Mutex(true, mutexName, out createdNew))
             {
                 if (!createdNew)
                 {
@@ -320,12 +520,17 @@ namespace OsooWatchdog
                     return 2;
                 }
 
-                Log("watchdog-start", "ok", "version=1.0.11; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
+                Log("watchdog-start", "ok", "version=1.0.13; mode=" + (options.MonitorOnly ? "diagnostic-only" : "supervisor")
+                    + "; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
                 if (!options.Once) RemoteInputMonitor.Start(runtimeDirectory);
                 do
                 {
-                    try { CheckOnce(); }
-                    catch (Exception ex) { Log("watchdog-check", "failed", ex.GetType().Name + ": " + ex.Message); }
+                    try
+                    {
+                        if (options.MonitorOnly) RefreshRemoteSessionState();
+                        else CheckOnce();
+                    }
+                    catch (Exception ex) { Log(options.MonitorOnly ? "diagnostic-monitor" : "watchdog-check", "failed", ex.GetType().Name + ": " + ex.Message); }
                     if (options.Once) break;
                     // UAC 창은 짧게 나타날 수 있다. 업데이트 잠금 관찰 중에만
                     // 1초 단위로 확인하고, 평상시에는 기존 간격을 유지한다.
@@ -1069,7 +1274,7 @@ namespace OsooWatchdog
             DateTime checkedAt = DateTime.UtcNow;
             string evidenceText = String.Join("; ", evidence.ToArray());
             string json = "{\n"
-                + "  \"version\": \"1.0.11\",\n"
+                + "  \"version\": \"1.0.13\",\n"
                 + "  \"checkedAt\": " + JsonString(checkedAt.ToString("o")) + ",\n"
                 + "  \"state\": " + JsonString(state) + ",\n"
                 + "  \"sessionType\": " + JsonString(sessionType) + ",\n"
@@ -1149,7 +1354,7 @@ namespace OsooWatchdog
                     + ",\"transports\":" + GetChromotingTransportsJson() + "}}";
                 string eventJson = "{\"observation_id\":" + JsonString(Guid.NewGuid().ToString("N"))
                     + ",\"createdAt\":" + JsonString(observedAt)
-                    + ",\"version\":\"1.0.11\",\"detector_version\":\"3\",\"area\":\"watchdog\",\"action\":\"remote-session-detection\""
+                    + ",\"version\":\"1.0.13\",\"watchdog_version\":\"1.0.13\",\"detector_version\":\"4\",\"area\":\"watchdog\",\"action\":\"remote-session-detection\""
                     + ",\"result\":" + JsonString(overallState)
                     + ",\"overall_state\":" + JsonString(overallState)
                     + ",\"decision_reason\":" + JsonString(decisionReason)
@@ -1455,7 +1660,7 @@ namespace OsooWatchdog
             if (statusKey == lastStatusKey && now - lastStatusAt < TimeSpan.FromMinutes(1)) return;
             lastStatusKey = statusKey;
             lastStatusAt = now;
-            string json = "{\n  \"version\": \"1.0.11\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
+            string json = "{\n  \"version\": \"1.0.13\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
             AtomicWrite(Path.Combine(runtimeDirectory, "watchdog-status.json"), json);
         }
 
@@ -1475,7 +1680,7 @@ namespace OsooWatchdog
                 string createdAt = DateTime.UtcNow.ToString("o");
                 string line = createdAt + "\t" + action + "\t" + result + (String.IsNullOrEmpty(details) ? "" : "\t" + details) + Environment.NewLine;
                 File.AppendAllText(logPath, line, new UTF8Encoding(false));
-                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.11\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
+                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.13\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
                 File.AppendAllText(Path.Combine(runtimeDirectory, "watchdog-events.jsonl"), eventJson, new UTF8Encoding(false));
             }
             catch { }
@@ -1522,6 +1727,7 @@ namespace OsooWatchdog
                 string arg = args[i];
                 if (arg == "--once") parsed.Once = true;
                 else if (arg == "--dry-run") parsed.DryRun = true;
+                else if (arg == "--monitor-only") parsed.MonitorOnly = true;
                 else if (arg == "--no-delay") parsed.NoDelay = true;
                 else if (arg == "--simulate-process-absent") parsed.SimulateAbsent = true;
                 else if (arg == "--app" && i + 1 < args.Length) parsed.AppPath = args[++i];

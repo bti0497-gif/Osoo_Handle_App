@@ -547,6 +547,7 @@ module.exports = (db, appDataPath) => {
                 const numberOrNull = (value) => Number.isSafeInteger(value) && value >= 0 ? value : null;
                 inputSignals = {
                     status: snapshot.keyboardHookReady && snapshot.mouseHookReady ? 'available' : 'partial',
+                    snapshotCheckedAt: snapshot.checkedAt || null,
                     ageMs,
                     foregroundIsApp: snapshot.foregroundIsApp === true,
                     keyboardHookReady: snapshot.keyboardHookReady === true,
@@ -560,10 +561,16 @@ module.exports = (db, appDataPath) => {
                     keyboardNonInjectedLast5Seconds: numberOrNull(snapshot.keyboardNonInjectedLast5Seconds),
                     mouseInjected: numberOrNull(snapshot.mouseInjected),
                     mouseNonInjected: numberOrNull(snapshot.mouseNonInjected),
+                    mouseInjectedLast5Seconds: numberOrNull(snapshot.mouseInjectedLast5Seconds),
+                    mouseNonInjectedLast5Seconds: numberOrNull(snapshot.mouseNonInjectedLast5Seconds),
                     lowerIntegrityInjected: numberOrNull(snapshot.lowerIntegrityInjected),
+                    lastInputAgeMs: numberOrNull(snapshot.lastInputAgeMs),
                     lastKeyboardAgeMs: numberOrNull(snapshot.lastKeyboardAgeMs),
                     lastInjectedKeyboardAgeMs: numberOrNull(snapshot.lastInjectedKeyboardAgeMs),
                     lastNonInjectedKeyboardAgeMs: numberOrNull(snapshot.lastNonInjectedKeyboardAgeMs),
+                    lastMouseAgeMs: numberOrNull(snapshot.lastMouseAgeMs),
+                    lastInjectedMouseAgeMs: numberOrNull(snapshot.lastInjectedMouseAgeMs),
+                    lastNonInjectedMouseAgeMs: numberOrNull(snapshot.lastNonInjectedMouseAgeMs),
                     interpretation: 'Windows injection flags are aggregate signals, not proof of input source or remote tool.',
                 };
             } else inputSignals = { status: 'stale', ageMs: Number.isFinite(ageMs) ? ageMs : null };

@@ -14,6 +14,27 @@ const activeSession = require('../server/services/activeUserSessionService.cjs')
 const { closeDueAttendance } = require('../server/services/attendanceAutoLogoutService.cjs');
 
 async function main() {
+  const sanitizedInputSignals = diagnostics.sanitize({
+    keyboardInjected: 4,
+    keyboardNonInjected: 2,
+    lastKeyboardAgeMs: 230,
+    mouseInjected: 1,
+    mouseInjectedLast5Seconds: 1,
+    lastMouseAgeMs: 145,
+    apiKey: 'must-be-redacted',
+    accessToken: 'must-also-be-redacted',
+    password: 'must-never-be-kept',
+  });
+  assert.equal(sanitizedInputSignals.keyboardInjected, 4, 'aggregate keyboard evidence must survive diagnostic sanitization');
+  assert.equal(sanitizedInputSignals.keyboardNonInjected, 2, 'non-injected keyboard counts must survive diagnostic sanitization');
+  assert.equal(sanitizedInputSignals.lastKeyboardAgeMs, 230, 'safe input timestamps must survive diagnostic sanitization');
+  assert.equal(sanitizedInputSignals.mouseInjected, 1, 'aggregate mouse evidence must survive diagnostic sanitization');
+  assert.equal(sanitizedInputSignals.mouseInjectedLast5Seconds, 1, 'recent mouse evidence must survive diagnostic sanitization');
+  assert.equal(sanitizedInputSignals.lastMouseAgeMs, 145, 'safe mouse recency must survive diagnostic sanitization');
+  assert.equal(sanitizedInputSignals.apiKey, '<redacted>');
+  assert.equal(sanitizedInputSignals.accessToken, '<redacted>');
+  assert.equal(sanitizedInputSignals.password, '<redacted>');
+
   const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osoo-remote-attendance-test-'));
   const db = new Database(':memory:');
   const remoteStatePath = path.join(testDataDir, 'remote-session-state.json');
@@ -99,8 +120,10 @@ async function main() {
       keyboardHookReady: true, mouseHookReady: true, keyboardHookError: 0, mouseHookError: 0,
       windowSeconds: 30, keyboardInjected: 4, keyboardNonInjected: 0,
       keyboardInjectedLast5Seconds: 2, keyboardNonInjectedLast5Seconds: 0,
-      mouseInjected: 2, mouseNonInjected: 0, lowerIntegrityInjected: 0,
+      mouseInjected: 2, mouseNonInjected: 0, mouseInjectedLast5Seconds: 1, mouseNonInjectedLast5Seconds: 0,
+      lowerIntegrityInjected: 0, lastInputAgeMs: 120,
       lastKeyboardAgeMs: 230, lastInjectedKeyboardAgeMs: 230, lastNonInjectedKeyboardAgeMs: null,
+      lastMouseAgeMs: 145, lastInjectedMouseAgeMs: 145, lastNonInjectedMouseAgeMs: null,
       forbiddenRawKey: 'this-must-not-be-copied',
     }));
     const unblockedLogin = await request('local-login', { name: '현장근로자', password: 'test-password' });
@@ -115,6 +138,9 @@ async function main() {
     assert.equal(attemptEvents[0].raw_signals.inputSignals.status, 'available');
     assert.equal(attemptEvents[0].raw_signals.inputSignals.keyboardInjected, 4);
     assert.equal(attemptEvents[0].raw_signals.inputSignals.keyboardInjectedLast5Seconds, 2);
+    assert.equal(attemptEvents[0].raw_signals.inputSignals.mouseInjectedLast5Seconds, 1);
+    assert.equal(attemptEvents[0].raw_signals.inputSignals.lastInputAgeMs, 120);
+    assert.equal(attemptEvents[0].raw_signals.inputSignals.lastMouseAgeMs, 145);
     assert.equal(JSON.stringify(attemptEvents).includes('this-must-not-be-copied'), false, '입력 상태 파일의 허용되지 않은 필드는 전송하면 안 됩니다.');
     assert.equal(attemptEvents[0].raw_signals.loginAttempt.passwordValueCaptured, false);
     assert.equal(JSON.stringify(attemptEvents).includes('test-password'), false, '원문 비밀번호를 시도 로그에 기록하면 안 됩니다.');

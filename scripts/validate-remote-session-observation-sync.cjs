@@ -38,7 +38,22 @@ async function main() {
     raw_signals: { probe: 'test' },
   };
   const completeLine = `${JSON.stringify(event)}\n`;
-  fs.writeFileSync(observationFile, `${completeLine}{"partial":`, 'utf8');
+  const inputEvent = {
+    observation_id: 'input-001',
+    createdAt: '2026-10-01T01:00:30.000Z',
+    version: '1.0.13',
+    watchdog_version: '1.0.13',
+    detector_version: '4',
+    action: 'remote-input-observation',
+    result: 'active',
+    overall_state: 'active',
+    decision_reason: 'foreground-app-input-aggregate;origin-unverified',
+    rustdesk_state: 'clear',
+    chrome_state: 'active',
+    raw_signals: { inputObservation: { captureScope: 'foreground-app-only', inputOrigin: 'unverified', windowSeconds: 30, keyboardInjected: 7, keyboardNonInjected: 3, mouseInjected: 2, mouseNonInjected: 1 } },
+  };
+  const inputLine = `${JSON.stringify(inputEvent)}\n`;
+  fs.writeFileSync(observationFile, `${completeLine}${inputLine}{"partial":`, 'utf8');
   appendRemoteLoginAttemptObservation({
     observation_id: 'attempt-001',
     createdAt: '2026-10-01T01:02:00.000Z',
@@ -60,9 +75,10 @@ async function main() {
 
   try {
     const firstRead = readPendingObservations(observationFile, cursorFile);
-    assert.equal(firstRead.rows.length, 1, 'only complete JSONL records should be read');
+    assert.equal(firstRead.rows.length, 2, 'only complete JSONL records should be read');
     assert.equal(firstRead.rows[0].observation_id, 'obs-001');
-    assert.equal(firstRead.nextOffset, Buffer.byteLength(completeLine));
+    assert.equal(firstRead.rows[1].action, 'remote-input-observation');
+    assert.equal(firstRead.nextOffset, Buffer.byteLength(completeLine + inputLine));
     const pendingAttempts = readPendingObservations(loginAttemptFile, loginAttemptCursorFile);
     assert.equal(pendingAttempts.rows.length, 1, 'remote login submissions must use the existing observation contract');
     assert.equal(pendingAttempts.rows[0].action, 'remote-login-attempt');
@@ -84,7 +100,7 @@ async function main() {
       getBigQueryClient: () => fakeBigQuery,
       appVersion: '1.1.52-test',
     });
-    assert.deepEqual(result, { success: true, count: 2 });
+    assert.deepEqual(result, { success: true, count: 3 });
     assert.match(captured.query, /MERGE `daily_log_system\.remote_session_observations`/);
     assert.match(captured.query, /target\.observation_id = source\.observation_id/);
     const sentRows = JSON.parse(captured.params.rows_json);
@@ -94,12 +110,18 @@ async function main() {
     assert.equal(JSON.parse(attemptRow.raw_signals).loginAttempt.passwordValueCaptured, false);
     assert.equal(JSON.parse(attemptRow.raw_signals).loginAttempt.inputOrigin, 'unverified');
     assert.equal(JSON.parse(attemptRow.raw_signals).loginAttempt.attemptedName, '테스트 사용자');
+    const inputRow = sentRows.find((row) => row.observation_id === 'input-001');
+    assert.ok(inputRow, 'foreground input summaries must be included in the existing BigQuery observation sync');
+    assert.match(inputRow.decision_reason, /^remote-input-observation\|foreground-app-input-aggregate/);
+    assert.equal(inputRow.watchdog_version, '1.0.13');
+    assert.equal(JSON.parse(inputRow.raw_signals).inputObservation.keyboardInjected, 7);
+    assert.equal(JSON.parse(inputRow.raw_signals).inputObservation.keyboardNonInjected, 3);
     assert.equal(sentRows[0].site_id, 'site-1');
     assert.equal(sentRows[0].site_name, '테스트현장');
     assert.equal(sentRows[0].watchdog_version, '1.0.10');
     assert.equal(sentRows[0].chrome_signal_age_seconds, null);
     assert.deepEqual(JSON.parse(sentRows[0].raw_signals), { probe: 'test' });
-    assert.equal(JSON.parse(fs.readFileSync(cursorFile, 'utf8')).offset, Buffer.byteLength(completeLine));
+    assert.equal(JSON.parse(fs.readFileSync(cursorFile, 'utf8')).offset, Buffer.byteLength(completeLine + inputLine));
 
     const failingCursor = path.join(root, 'failed-cursor.json');
     const failed = await syncRemoteSessionObservations({

@@ -55,7 +55,9 @@ function importRuntimeDiagnostics(db, appDataPath, sourceFileName, fallbackArea)
   for (const line of lines) {
     try {
       const event = JSON.parse(line);
-      const remoteObservation = ['remote-session-detection', 'remote-login-attempt'].includes(event.action);
+      const remoteObservation = [
+        'remote-session-detection', 'remote-login-attempt', 'remote-input-observation',
+      ].includes(event.action);
       recordDiagnostic(db, appDataPath, {
         createdAt: event.createdAt,
         level: event.result === 'failed' ? 'error' : event.result === 'waiting' ? 'warn' : 'info',

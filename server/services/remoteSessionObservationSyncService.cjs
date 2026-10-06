@@ -69,7 +69,7 @@ function readPendingObservations(observationFile, cursorFile) {
   const completeText = buffer.subarray(0, lastNewline).toString('utf8');
   const rows = completeText.split(/\r?\n/).filter(Boolean).map((line) => {
     const event = JSON.parse(line);
-    if (!['remote-session-detection', 'remote-login-attempt'].includes(event.action)
+    if (!['remote-session-detection', 'remote-login-attempt', 'remote-input-observation'].includes(event.action)
       || !event.observation_id || !event.createdAt) {
       throw new Error('remote-session-observation-invalid-record');
     }
@@ -136,11 +136,11 @@ async function syncRemoteSessionObservations(options = {}) {
     observed_at: event.createdAt,
     uploaded_at: new Date().toISOString(),
     app_version: options.appVersion || getAppVersion(),
-    watchdog_version: String(event.watchdog_version || (event.action === 'remote-session-detection' ? event.version : '') || ''),
+    watchdog_version: String(event.watchdog_version || (['remote-session-detection', 'remote-input-observation'].includes(event.action) ? event.version : '') || ''),
     detector_version: String(event.detector_version || ''),
     overall_state: String(event.overall_state || event.result || 'unknown'),
-    decision_reason: event.action === 'remote-login-attempt'
-      ? ['remote-login-attempt', event.decision_reason].filter(Boolean).join('|')
+    decision_reason: ['remote-login-attempt', 'remote-input-observation'].includes(event.action)
+      ? [event.action, event.decision_reason].filter(Boolean).join('|')
       : String(event.decision_reason || ''),
     rustdesk_state: String(event.rustdesk_state || 'unknown'),
     rustdesk_evidence: String(event.rustdesk_evidence || ''),

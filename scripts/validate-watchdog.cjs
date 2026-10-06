@@ -18,6 +18,7 @@ const installerHooks = fs.readFileSync(path.join(root, 'scripts', 'installer-hoo
 const integratedInstaller = fs.readFileSync(path.join(root, 'scripts', 'build-integrated-installer.ps1'), 'utf8');
 const packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
 const mainProcess = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8');
+const devRunner = fs.readFileSync(path.join(root, 'run-all.cjs'), 'utf8');
 const appSource = fs.readFileSync(path.join(root, 'src', 'App.jsx'), 'utf8');
 const watchdogSource = fs.readFileSync(path.join(root, 'watchdog', 'OsooWatchdog.cs'), 'utf8');
 const serverIndex = fs.readFileSync(path.join(root, 'server', 'index.cjs'), 'utf8');
@@ -39,9 +40,18 @@ assert.ok(mainProcess.includes("['update', 'full-exit'].forEach((reason) =>"), '
 assert.ok(mainProcess.includes('waitForServerReadyAndClearMaintenanceLocks'), 'server-ready maintenance lock recovery contract is missing');
 assert.ok(/catch\r?\n\s*\{/.test(watchdogSource) && watchdogSource.includes('return true;'), 'watchdog does not fail safe when process path inspection is denied');
 assert.ok(watchdogSource.includes('TimeSpan.FromMinutes(1)') && watchdogSource.includes('lastStatusKey'), 'watchdog status writes are not throttled for always-on field PCs');
-assert.ok(watchdogSource.includes('version=1.0.11'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(watchdogSource.includes('version=1.0.13'), 'watchdog behavioral changes did not bump the diagnostic version');
 assert.ok(watchdogSource.includes('remote-input-state.json') && watchdogSource.includes('SetWindowsHookEx'), 'diagnostic-only input provenance monitor is missing');
 assert.ok(!/VkCode\.ToString|ScanCode\.ToString|Position\.X\.ToString|Position\.Y\.ToString/.test(watchdogSource), 'input-monitor must not serialize keys or pointer coordinates');
+assert.ok(watchdogSource.includes('remote-input-observation') && watchdogSource.includes('foreground-app-input-aggregate;origin-unverified'), 'watchdog does not persist low-volume, foreground-only input summaries');
+assert.ok(watchdogSource.includes('nextInputObservationAtTicks = now.AddSeconds(30).Ticks'), 'watchdog input summaries are not rate-limited to 30-second windows');
+assert.ok(watchdogSource.includes('mouseInjectedLast5Seconds') && watchdogSource.includes('mouseNonInjectedLast5Seconds'), 'watchdog mouse input summary lacks recent five-second counts');
+assert.ok(watchdogSource.includes('lastInputAgeMs') && watchdogSource.includes('lastInjectedMouseAgeMs') && watchdogSource.includes('lastNonInjectedMouseAgeMs'), 'watchdog input summary lacks keyboard/mouse recency fields');
+assert.ok(watchdogSource.includes('windowStartedAt') && watchdogSource.includes('lastMouseAgeMs'), 'watchdog observation lacks a time window anchor or mouse recency');
+assert.ok(watchdogSource.includes('app-heartbeat.json') && watchdogSource.includes('TryGetFreshHeartbeatProcessId'), 'watchdog does not scope input observation to the fresh Electron app PID');
+assert.ok(watchdogSource.includes('--monitor-only') && watchdogSource.includes('DiagnosticMonitorMutexName'), 'watchdog is missing its isolated, non-restarting diagnostic mode');
+assert.ok(devRunner.includes('startDevelopmentInputMonitor') && devRunner.includes("'--monitor-only'"), 'dev:all does not start the diagnostic-only watchdog for remote input tests');
+assert.ok(devRunner.includes('killProcessTree(diagnosticWatchdog)'), 'dev:all does not stop its diagnostic watchdog during shutdown');
 assert.ok(watchdogSource.includes('RefreshRemoteSessionState()') && watchdogSource.includes('remote-session-state.json'), 'watchdog does not publish its remote-session signal');
 assert.ok(watchdogSource.includes('DetectRustDeskSession') && watchdogSource.includes('DetectChromeRemoteDesktopSession'), 'watchdog remote detection sources are incomplete');
 assert.ok(watchdogSource.includes('visible-remote-session-window') && watchdogSource.includes('client-connected-event'), 'watchdog remote evidence contract is incomplete');
@@ -148,7 +158,7 @@ try {
   const restartStatus = run(restartRuntime);
   assert.strictEqual(restartStatus.state, 'dry-run-restart');
   const remoteState = JSON.parse(fs.readFileSync(path.join(restartRuntime, 'remote-session-state.json'), 'utf8'));
-  assert.strictEqual(remoteState.version, '1.0.11');
+  assert.strictEqual(remoteState.version, '1.0.13');
   assert.ok(watchdogSource.includes('entry.InstanceId & 0xFFFF'), 'Chrome Remote Desktop detector must extract the displayed event ID from InstanceId');
   assert.ok(watchdogSource.includes('hostProcessCount') && watchdogSource.includes('visibleSessionWindow'), 'remote observations must separate process presence from session evidence');
   assert.ok(['active', 'clear', 'unknown'].includes(remoteState.state));
@@ -163,6 +173,16 @@ try {
   assert.ok(restartDiagnostic?.details.includes('trigger=simulate-app-absent'), 'app restart diagnostic does not record its trigger');
   assert.ok(restartDiagnostic?.details.includes('observedAppProcesses='), 'app restart diagnostic does not record observed processes');
   assert.ok(restartDiagnostic?.details.includes('heartbeat='), 'app restart diagnostic does not record heartbeat state');
+
+  const diagnosticOnlyRuntime = path.join(testRoot, 'diagnostic-only');
+  const diagnosticOnlyRun = spawnSync(executable, [
+    '--once', '--dry-run', '--no-delay', '--simulate-process-absent', '--monitor-only',
+    '--app', fakeApp, '--runtime', diagnosticOnlyRuntime,
+  ], { windowsHide: true, timeout: 10_000 });
+  assert.strictEqual(diagnosticOnlyRun.status, 0, diagnosticOnlyRun.error?.message || 'diagnostic-only watchdog failed');
+  assert.ok(['active', 'clear', 'unknown'].includes(JSON.parse(fs.readFileSync(path.join(diagnosticOnlyRuntime, 'remote-session-state.json'), 'utf8')).state));
+  assert.ok(!fs.existsSync(path.join(diagnosticOnlyRuntime, 'watchdog-status.json')), 'diagnostic-only mode must not publish a supervisor restart status');
+  assert.ok(!fs.readFileSync(path.join(diagnosticOnlyRuntime, 'watchdog-events.jsonl'), 'utf8').includes('app-restart'), 'diagnostic-only mode must never request an app restart');
 
   const lockedRuntime = path.join(testRoot, 'locked');
   fs.mkdirSync(lockedRuntime, { recursive: true });
@@ -256,9 +276,28 @@ try {
         drive_web_view_link TEXT, upload_attempts INTEGER DEFAULT 0, upload_error TEXT
       );
     `);
+    fs.appendFileSync(path.join(importRuntime, 'remote-session-observations.jsonl'), `${JSON.stringify({
+      observation_id: 'input-sanitizer-test',
+      createdAt: new Date().toISOString(),
+      version: '1.0.13',
+      detector_version: '4',
+      area: 'watchdog',
+      action: 'remote-input-observation',
+      result: 'active',
+      overall_state: 'active',
+      decision_reason: 'foreground-app-input-aggregate;origin-unverified',
+      rustdesk_state: 'clear',
+      chrome_state: 'active',
+      raw_signals: { inputObservation: { keyboardInjected: 4, keyboardNonInjected: 2, lastKeyboardAgeMs: 230, apiKey: 'must-be-redacted' } },
+    })}\n`, 'utf8');
     const firstImport = importWatchdogDiagnostics(db, importAppData);
     assert.ok(firstImport.imported >= 1);
     assert.strictEqual(db.prepare("SELECT COUNT(*) count FROM app_diagnostic_logs WHERE area = 'watchdog'").get().count, firstImport.imported);
+    const inputDiagnostic = JSON.parse(db.prepare("SELECT details_json FROM app_diagnostic_logs WHERE action = 'remote-input-observation'").get().details_json);
+    assert.equal(inputDiagnostic.rawSignals.inputObservation.keyboardInjected, 4, 'safe keyboard aggregate must survive watchdog import and diagnostic sanitization');
+    assert.equal(inputDiagnostic.rawSignals.inputObservation.keyboardNonInjected, 2);
+    assert.equal(inputDiagnostic.rawSignals.inputObservation.lastKeyboardAgeMs, 230);
+    assert.equal(inputDiagnostic.rawSignals.inputObservation.apiKey, '<redacted>', 'real secret fields must still be redacted');
     const secondImport = importWatchdogDiagnostics(db, importAppData);
     assert.strictEqual(secondImport.imported, 0);
 

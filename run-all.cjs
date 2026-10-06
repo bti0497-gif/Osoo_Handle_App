@@ -1,4 +1,5 @@
 const { spawn } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 
 const FRONTEND_PORT = 18735;
@@ -7,6 +8,7 @@ const BACKEND_PORT_MAX = 18734;
 
 let frontend = null;
 let electron = null;
+let diagnosticWatchdog = null;
 let isShuttingDown = false;
 
 console.log('Restarting Frontend and Electron app...');
@@ -192,6 +194,7 @@ function shutdown(exitCode = 0) {
     console.log('\nShutting down dev processes...');
     killProcessTree(frontend);
     killProcessTree(electron);
+    killProcessTree(diagnosticWatchdog);
 
     setTimeout(() => process.exit(exitCode), 300);
 }
@@ -247,10 +250,33 @@ async function startAll() {
         });
         bindChildExit(electron, 'electron');
         await waitForBackendReady();
+        if (process.platform === 'win32') startDevelopmentInputMonitor();
     }
 
     process.on('SIGINT', () => shutdown(0));
     process.on('SIGTERM', () => shutdown(0));
+}
+
+function startDevelopmentInputMonitor() {
+    const watchdogPath = path.join(__dirname, 'watchdog', 'dist', 'OsooWatchdog.exe');
+    if (!fs.existsSync(watchdogPath)) {
+        console.warn('[Watchdog] Diagnostic monitor missing; run npm run watchdog:build before remote-input testing.');
+        return;
+    }
+    const appDataPath = process.env.APPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Roaming');
+    const runtimePath = path.join(appDataPath, 'Osoo_Handle_App', 'runtime');
+    diagnosticWatchdog = spawn(watchdogPath, ['--monitor-only', '--interval', '5', '--runtime', runtimePath], {
+        cwd: __dirname,
+        stdio: 'inherit',
+        windowsHide: true,
+    });
+    diagnosticWatchdog.on('error', (error) => {
+        console.warn(`[Watchdog] Development input monitor could not start: ${error.message}`);
+    });
+    diagnosticWatchdog.on('exit', (code) => {
+        if (!isShuttingDown) console.warn(`[Watchdog] Development input monitor exited unexpectedly (code=${code}).`);
+    });
+    console.log('[Watchdog] Diagnostic-only input monitor started for the development app.');
 }
 
 startAll().catch((error) => {

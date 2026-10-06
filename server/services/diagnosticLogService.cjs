@@ -10,7 +10,10 @@ function isDriveServiceLoaded() {
   return Boolean(loadedService?.isDriveClientInitialized?.());
 }
 
-const SECRET_KEY_PATTERN = /(password|passwd|pwd|token|secret|key|credential|authorization|cookie|client_secret|refresh_token)/i;
+const SECRET_KEY_TOKENS = new Set([
+  'password', 'passwd', 'pwd', 'passphrase', 'token', 'secret', 'key', 'credential',
+  'authorization', 'cookie', 'private',
+]);
 const MAX_STRING_LENGTH = 2000;
 const MAX_DETAIL_LENGTH = 15000;
 const LOCAL_FILE_RETENTION_DAYS = 14;
@@ -58,7 +61,12 @@ function sanitize(value, depth = 0) {
   if (typeof value === 'object') {
     const out = {};
     for (const [key, child] of Object.entries(value)) {
-      if (SECRET_KEY_PATTERN.test(key)) {
+      const normalizedKey = key
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_');
+      const keyTokens = normalizedKey.split('_').filter(Boolean);
+      if (keyTokens.some((token) => SECRET_KEY_TOKENS.has(token))) {
         out[key] = '<redacted>';
       } else {
         out[key] = sanitize(child, depth + 1);
