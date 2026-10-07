@@ -419,7 +419,7 @@ async function run(options) {
         parsedRecordCount: records.length,
       })),
     };
-    reportPath = writeReport(path.dirname(ARCHIVE_DB_PATH), options.year, options.month, report);
+    reportPath = writeReport(APP_DATA_ROOT, options.year, options.month, report);
     if (downloadRoot) {
       fs.writeFileSync(path.join(downloadRoot, 'analysis-summary.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
     }
