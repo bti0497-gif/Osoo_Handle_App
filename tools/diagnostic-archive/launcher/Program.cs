@@ -30,6 +30,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private const string DiagnosticScriptRelativePath = "tools/diagnostic-archive/import-drive-diagnostics.cjs";
     private static readonly TimeZoneInfo KoreaTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Korea Standard Time");
     private static readonly TimeSpan CollectionStart = new(9, 0, 0);
+    private static readonly TimeSpan LastPollStartExclusive = new(18, 46, 0);
     private static readonly TimeSpan CollectionEnd = new(19, 0, 0);
     private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan ProcessTimeout = TimeSpan.FromMinutes(10);
@@ -161,11 +162,20 @@ internal sealed class TrayApplicationContext : ApplicationContext
             ExitThread();
             return;
         }
-        if (_polling) return;
+        if (_polling)
+        {
+            if (time >= LastPollStartExclusive) SetStatus("진단 수집기: 마지막 수집 마무리 중 · 19시 종료");
+            return;
+        }
 
         if (time < CollectionStart)
         {
             SetStatus("진단 수집기: 오전 9시 대기");
+            return;
+        }
+        if (time >= LastPollStartExclusive)
+        {
+            SetStatus("진단 수집기: 오늘 확인 종료 · 19시 종료");
             return;
         }
 
@@ -190,10 +200,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         if (_polling) return;
         var now = GetKoreaNow();
-        if (now.TimeOfDay < CollectionStart || now.TimeOfDay >= CollectionEnd)
+        if (!IsWithinCollectionWindow(now))
         {
             MessageBox.Show(
-                "진단로그 자동 확인 시간은 오전 9시부터 오후 7시까지입니다.",
+                "진단로그 확인 시간은 오전 9시부터 오후 6시 45분까지입니다.",
                 "운영시간 안내",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -467,7 +477,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     }
 
     private static bool IsWithinCollectionWindow(DateTimeOffset koreaTime) =>
-        koreaTime.TimeOfDay >= CollectionStart && koreaTime.TimeOfDay < CollectionEnd;
+        koreaTime.TimeOfDay >= CollectionStart && koreaTime.TimeOfDay < LastPollStartExclusive;
 
     private static bool IsStartupRegistered()
     {
@@ -536,7 +546,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             (new DateTimeOffset(2026, 10, 7, 8, 59, 59, offset), false),
             (new DateTimeOffset(2026, 10, 7, 9, 0, 0, offset), true),
-            (new DateTimeOffset(2026, 10, 7, 18, 59, 59, offset), true),
+            (new DateTimeOffset(2026, 10, 7, 18, 45, 59, offset), true),
+            (new DateTimeOffset(2026, 10, 7, 18, 46, 0, offset), false),
             (new DateTimeOffset(2026, 10, 7, 19, 0, 0, offset), false),
         };
         foreach (var (time, expected) in windowCases)
@@ -552,6 +563,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             (new DateTimeOffset(2026, 10, 7, 9, 0, 0, offset), new DateTimeOffset(2026, 10, 7, 9, 15, 0, offset)),
             (new DateTimeOffset(2026, 10, 7, 10, 7, 0, offset), new DateTimeOffset(2026, 10, 7, 10, 15, 0, offset)),
+            (new DateTimeOffset(2026, 10, 7, 18, 30, 0, offset), new DateTimeOffset(2026, 10, 7, 18, 45, 0, offset)),
             (new DateTimeOffset(2026, 10, 7, 18, 50, 0, offset), new DateTimeOffset(2026, 10, 7, 19, 0, 0, offset)),
         };
         foreach (var (time, expected) in scheduleCases)
@@ -563,7 +575,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
         }
 
-        Console.WriteLine("PASS: KST 09:00–19:00 window and 15-minute poll schedule");
+        Console.WriteLine("PASS: KST collection starts 09:00–18:45; 19:00 shutdown and 15-minute cadence");
         return 0;
     }
 
