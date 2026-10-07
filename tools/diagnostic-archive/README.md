@@ -48,3 +48,29 @@ node tools/diagnostic-archive/import-drive-diagnostics.cjs --year 2026 --month 1
 보고서에는 이번 실행에서 선택한 파일과 새로 적재한 행 수, 해당 월에 누적된 집계(`bySite`, `byVersion`, `byFeature`, `byResult`), 오류 사례가 포함됩니다. 잘못된 JSONL 행도 `parse-error` 레코드로 보존하고 오류 사례에 표시합니다.
 
 Drive 인증 정보와 `GOOGLE_DRIVE_FOLDER_ID`는 앱과 동일한 런타임 설정을 사용합니다. 인증이 없거나 지정한 연/월 폴더를 찾지 못하면 스크립트가 오류로 종료되며 원본은 삭제하지 않습니다.
+
+## 트레이 자동 수집기
+
+중앙관리자 PC에서만 사용하는 별도 Windows 트레이 앱입니다. 앱 본체의 Electron 설정·패키지에는 포함하지 않습니다. Node.js와 이 저장소의 수집 스크립트를 호출하며, AI 서비스는 호출하지 않습니다.
+
+- Windows 사용자 로그인 시 자동 시작하며, 트레이 메뉴에서 자동 시작을 끄거나 켤 수 있습니다.
+- 한국시간 오전 9시부터 오후 7시까지 15분 간격으로 확인합니다. 오전 9시 전에는 대기하고, 오후 7시에는 종료합니다.
+- 새 로그가 없으면 DB를 열거나 빈 보고서를 만들지 않고 조용히 다음 주기를 기다립니다.
+- 로그가 있으면 기존 안전 순서대로 로컬 DB와 JSON 보고서를 저장한 후에만 Drive 원본 삭제를 시도합니다.
+- 실행 결과와 오류만 간단히 `%APPDATA%\Osoo_Handle_App\diagnostic-analysis\launcher.log`에 남깁니다. 사진/로그 원문이나 자격증명은 런처 로그에 기록하지 않습니다.
+- 설정은 `%APPDATA%\Osoo_Handle_App\diagnostic-analysis\tray-settings.json`에 저장됩니다. 실행 파일을 저장소 밖으로 옮긴 경우 `ProjectRoot`와 `NodePath`를 지정할 수 있습니다.
+
+빌드(저장소 루트에서):
+
+```powershell
+dotnet publish tools/diagnostic-archive/launcher/OsooDiagnosticTray.csproj `
+  -c Release -r win-x64 --self-contained false `
+  -p:PublishSingleFile=true `
+  -o tools/diagnostic-archive/launcher/publish
+```
+
+이 중앙관리자 PC에 설치된 .NET 8 Desktop Runtime을 사용하므로 자체 런타임을 중복 포함하지 않습니다. 빌드 산출물은 Git 및 현장관리자 앱 패키지에서 제외됩니다. 시간표 로직은 아래 명령으로 Drive에 접속하지 않고 자체 점검할 수 있습니다.
+
+```powershell
+tools/diagnostic-archive/launcher/publish/OsooDiagnosticTray.exe --self-test
+```

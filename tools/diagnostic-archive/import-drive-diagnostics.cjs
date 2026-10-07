@@ -67,6 +67,7 @@ function parseArgs(argv) {
     listOnly: false,
     clearLocalArchive: false,
     confirmClearLocalArchive: false,
+    exitIfEmpty: false,
     help: false,
   };
 
@@ -91,6 +92,10 @@ function parseArgs(argv) {
     }
     if (arg === '--confirm-clear-local-archive') {
       options.confirmClearLocalArchive = true;
+      continue;
+    }
+    if (arg === '--exit-if-empty') {
+      options.exitIfEmpty = true;
       continue;
     }
     if (arg === '--delete-after-analysis') {
@@ -320,6 +325,7 @@ function printUsage() {
     '  --site NAME             Match a site-name fragment in the Drive filename (default: all)',
     '  --limit-issues N        Maximum issue examples in the report (default: 80)',
     '  --list-only             List matching files without downloading or changing anything',
+    '  --exit-if-empty         Do not open the archive DB or write a report when no files match',
     '  --keep-drive-files      Save to the database/report without deleting Drive files',
     '  --download-dir PATH     Also save downloaded JSONL files to this local directory',
     '  --clear-local-archive   Clear local analysis rows (requires the confirmation flag)',
@@ -383,6 +389,15 @@ async function run(options) {
         createdTime: file.createdTime || null,
         modifiedTime: file.modifiedTime || null,
       })),
+    };
+  }
+
+  if (options.exitIfEmpty && diagnosticFiles.length === 0) {
+    return {
+      folder: path.posix.join(TEXT.diagnosticRoot, options.year, options.month),
+      selectedFileCount: 0,
+      skippedEmpty: true,
+      driveFilesDeleted: 0,
     };
   }
 

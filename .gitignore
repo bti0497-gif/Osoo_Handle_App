@@ -19,6 +19,9 @@ test-build/
 .tmp-validation/
 tmp/**
 tools/diagnostic-runner/node_modules/
+tools/diagnostic-archive/launcher/bin/
+tools/diagnostic-archive/launcher/obj/
+tools/diagnostic-archive/launcher/publish*/
 
 # Local databases and generated reports
 *.db
