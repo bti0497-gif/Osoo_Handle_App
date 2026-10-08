@@ -446,6 +446,7 @@ function createServerPerformanceDiagnosticService({
 }
 
 module.exports = {
+  memorySnapshot,
   createServerPerformanceDiagnosticService,
   isStartedRecoveryEvent,
 };

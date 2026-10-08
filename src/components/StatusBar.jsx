@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { useStatusBarViewModel } from './useStatusBarViewModel';
 
 const StatusBar = ({ title, helpText, locationStatus = { status: 'idle', message: '' } }) => {
+    const system = useStatusBarViewModel();
+    const memoryColor = system.level === 'low' ? '#f87171' : system.level === 'warning' ? '#fbbf24' : system.level === 'normal' ? '#4ade80' : '#94a3b8';
+    const memoryLabel = system.memory
+        ? `메모리 ${system.level === 'low' ? '부족' : system.level === 'warning' ? '주의' : '정상'} · 여유 ${(system.memory.freeBytes / 1024 ** 3).toFixed(1)}GB`
+        : '메모리 확인 중';
+    const memoryDetail = system.memory
+        ? `PC 전체 메모리 ${(system.memory.totalBytes / 1024 ** 3).toFixed(1)}GB · 여유 ${system.memory.freePercent}%${system.sustainedLow ? '\n여유 메모리가 5분 이상 부족합니다. 입력 내용을 저장한 뒤 재부팅하면 도움이 될 수 있습니다. 진행 중인 작업은 완료한 뒤 재부팅하세요.' : '\nPC 전체 상태이며 앱만의 사용량은 아닙니다.'}`
+        : '서버에 연결되면 PC의 메모리 상태를 표시합니다.';
     const [time, setTime] = useState(new Date().toLocaleTimeString());
     const [updateState, setUpdateState] = useState({
         status: 'idle',
@@ -143,9 +152,14 @@ const StatusBar = ({ title, helpText, locationStatus = { status: 'idle', message
                     <span className="material-icons" style={{ fontSize: '14px', color: '#94a3b8' }}>login</span>
                     <span>현재 시간: <span style={{ color: 'white' }}>{time}</span></span>
                 </div>
-                <div className="status-item" style={{ backgroundColor: '#334155', padding: '2px 8px', borderRadius: '4px', color: 'white' }}>
-                    <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#4ade80', marginRight: '6px' }}></div>
-                    <span>서버 상태: 양호</span>
+                <div className="status-item status-memory" title={memoryDetail} style={{ color: memoryColor }}>
+                    <span className="material-icons" style={{ fontSize: '14px' }}>memory</span>
+                    <span>{memoryLabel}</span>
+                    {system.sustainedLow ? <span>재부팅 권장</span> : null}
+                </div>
+                <div className="status-item" title="30초 간격의 상태 조회 응답 기준입니다." style={{ backgroundColor: '#334155', padding: '2px 8px', borderRadius: '4px', color: 'white' }}>
+                    <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: system.server === 'ready' ? '#4ade80' : '#fbbf24', marginRight: '6px' }}></div>
+                    <span>서버: {system.server === 'ready' ? '응답 정상' : system.server === 'checking' ? '확인 중' : '연결 확인 필요'}</span>
                 </div>
             </div>
         </footer>

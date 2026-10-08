@@ -674,6 +674,12 @@ module.exports = (db, appDataPath) => {
         return true;
     };
 
+    router.get('/system-status', (req, res) => {
+        res.set('Cache-Control', 'no-store');
+        const { memorySnapshot } = require('../services/serverPerformanceDiagnosticService.cjs');
+        res.json({ success: true, memory: memorySnapshot().system });
+    });
+
     router.get('/remote-status', (req, res) => {
         try {
             const remote = detectCurrentRemoteSession();

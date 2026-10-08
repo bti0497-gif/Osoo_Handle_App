@@ -225,6 +225,10 @@
   min-width: 0;
 }
 
+.status-left { flex: 1; overflow: hidden; }
+.status-right { flex-shrink: 0; gap: 0.75rem; }
+.status-memory { white-space: nowrap; }
+
 .status-item {
   display: flex;
   align-items: center;

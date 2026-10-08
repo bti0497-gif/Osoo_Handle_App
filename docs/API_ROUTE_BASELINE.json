@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 180,
-  "digest": "d0996fcfd3f1957fbaf0a80cb081db6441cebff3a9b2aa2e8877a57b73b7b9a0",
+  "endpointCount": 181,
+  "digest": "5fe5a0176d6f3c4ee3b171ca692b2ff125a35971941b070c92eba3235facfb4a",
   "endpoints": [
     {
       "method": "GET",
@@ -201,6 +201,14 @@
       "module": "./routes/authRoutes.cjs",
       "tier": 0,
       "mutation": true,
+      "syncWatch": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/system-status",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": false,
       "syncWatch": false
     },
     {
