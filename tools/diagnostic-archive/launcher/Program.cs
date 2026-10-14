@@ -74,7 +74,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             "진단로그 수집기",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
-        _startupItem = new ToolStripMenuItem("Windows 로그인 시 자동 시작")
+        _startupItem = new ToolStripMenuItem("로그인 시·매일 09시 자동 시작")
         {
             CheckOnClick = true,
             Checked = IsStartupRegistered(),
@@ -123,6 +123,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
 
         AppendActivity("INFO", "트레이 런처 시작");
+        if (_startupItem.Checked)
+        {
+            try { RegisterDailySchedule(true); }
+            catch (Exception error) { AppendActivity("WARN", $"매일 09시 예약 등록 실패: {error.Message}"); }
+        }
         _timer = new FormsTimer { Interval = 15_000 };
         _timer.Tick += async (_, _) => await CheckScheduleAsync();
         _timer.Start();
@@ -487,6 +492,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private static void SetStartupRegistration(bool enabled)
     {
+        RegisterDailySchedule(enabled);
         using var key = Registry.CurrentUser.CreateSubKey(StartupRegistryPath, writable: true)
             ?? throw new InvalidOperationException("현재 사용자 자동 시작 레지스트리를 열 수 없습니다.");
         if (enabled)
@@ -500,6 +506,29 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             key.DeleteValue(StartupRegistryName, throwOnMissingValue: false);
         }
+    }
+
+    private static void RegisterDailySchedule(bool enabled)
+    {
+        var script = Path.Combine(FindProjectRoot(), "tools", "diagnostic-archive", "launcher", "register-schedule.ps1");
+        var start = new ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true,
+        };
+        foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-ExecutablePath", Application.ExecutablePath })
+            start.ArgumentList.Add(argument);
+        if (!enabled) start.ArgumentList.Add("-Disable");
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("예약 등록 프로세스를 시작하지 못했습니다.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(20000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException("자동 시작 예약 등록 시간이 초과되었습니다.");
+        }
+        if (process.ExitCode != 0) throw new InvalidOperationException(FirstLine(error.GetAwaiter().GetResult()));
+        output.GetAwaiter().GetResult();
     }
 
     private void AppendActivity(string level, string message)
