@@ -18,8 +18,8 @@ export const EQUIPMENT_PROCESS_METHODS = [
 ];
 
 // 처리 흐름 순서(공정별 보기)와 장비 종류 순서(종류별 보기).
-export const EQUIPMENT_PROCESS_ORDER = ['침사조', '유량조정조', '혐기조', '무산소조', '포기조', '막분리조', '침전조', '응집침전조', '방류조'];
-export const EQUIPMENT_TYPE_ORDER = ['펌프류', '약품펌프류', '교반기류', '브로아류', '스크린류', '계측기류', '유량계', '감속기', '탱크류', '막분리', '소독기류', '여과기'];
+export const EQUIPMENT_PROCESS_ORDER = ['침사조', '유량조정조', '혐기조', '무산소조', '포기조', '막분리조', '침전조', '응집침전조', '부상조', '방류조', '제어반', '기타'];
+export const EQUIPMENT_TYPE_ORDER = ['펌프류', '약품펌프류', '교반기류', '브로아류', '스크린류', '계측기류', '유량계', '감속기', '탱크류', '막분리', '막', '소독기류', '여과기', '제어반', '기타'];
 
 // 기본 카드 생성 헬퍼: 다중 대수는 `${name} ${호기}` / `${관리번호}${호기}` 규칙.
 const card = (id, managementNo, category1, category2, name, extras = {}) => {

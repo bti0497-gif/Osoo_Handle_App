@@ -7,6 +7,7 @@ const { db } = require('../database.cjs');
 const { decodeUserContextHeader } = require('../utils/httpUserHeaders.cjs');
 const { getBigQueryClient, DATASET_ID } = require('../services/bigQueryClientService.cjs');
 const { syncCertificateCacheForSiteMonth } = require('../services/certificateCacheSyncService.cjs');
+const { recordDiagnostic } = require('../services/diagnosticLogService.cjs');
 
 let sharpModule = null;
 let pdfDocumentModule = null;
@@ -1096,7 +1097,8 @@ module.exports = function (appDataPath) {
     const existing = findLocalCertificate(id, year, month);
     if (existing?.previewPath || existing?.filePath) return existing;
 
-    const downloaded = await downloadDriveFileWithMeta(id);
+    const { measurePhase } = require('../services/requestPhaseService.cjs');
+    const downloaded = await measurePhase('certificate.download', () => downloadDriveFileWithMeta(id));
     const fileName = String(downloaded?.meta?.name || expectedName || 'certificate').trim();
     if (!isAllowedManualMedia(toBaseName(fileName))) {
       throw new Error('성적서 형식이 아닌 파일은 로컬 캐시에 저장할 수 없습니다.');
@@ -1122,22 +1124,25 @@ module.exports = function (appDataPath) {
     const ext = path.extname(fileName).toLowerCase();
     const previewPath = `${targetPath}.preview.jpg`;
     if (mimeType.startsWith('image/') || ['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
-      await sharp(downloaded.buffer, { limitInputPixels: 80_000_000 })
+      await measurePhase('certificate.preview', () => sharp(downloaded.buffer, { limitInputPixels: 80_000_000 })
         .rotate()
         .resize({ width: 720, height: 960, fit: 'inside', withoutEnlargement: true })
         .jpeg({ quality: 72, mozjpeg: true })
-        .toFile(previewPath);
+        .toFile(previewPath));
     }
     return findLocalCertificate(id, year, month);
   }
 
   async function syncLocalCertificateFiles({ items, year, month, siteNames }) {
     const key = `${year}-${month}:${siteNames.join('|')}`;
-    if (localSyncJobs.has(key)) return localSyncJobs.get(key);
+    // Another caller may be synchronizing a different subset of this month.
+    // Wait for it, then process our own requested files instead of dropping them.
+    while (localSyncJobs.has(key)) await localSyncJobs.get(key);
     const allowedSiteKeys = new Set(siteNames.map(normalizeSiteNameKey).filter(Boolean));
     const job = (async () => {
       const results = [];
       for (const item of items) {
+        const startedAt = Date.now();
         try {
           await cacheCertificateFile({
             id: String(item.id || '').trim(), year, month,
@@ -1147,8 +1152,28 @@ module.exports = function (appDataPath) {
         } catch (error) {
           console.warn(`[Certificate local cache] ${item.fileName || item.id}: ${error.message}`);
           results.push({ id: item.id, success: false, message: error.message });
+          try {
+            recordDiagnostic(db, appDataPath, {
+              level: 'warn', area: 'certificate-cache', action: 'file-cache-failed', result: 'failed',
+              siteName: siteNames[0], message: 'Certificate local download/cache failed',
+              details: { fileId: item.id, year, month, durationMs: Date.now() - startedAt,
+                errorCode: String(error.code || error.response?.status || error.statusCode || '').slice(0, 80),
+                error: error.message },
+            });
+          } catch (_) { /* evidence must not interrupt remaining downloads */ }
         }
       }
+      try {
+        recordDiagnostic(db, appDataPath, {
+          level: results.some((item) => !item.success) ? 'warn' : 'info',
+          area: 'certificate-cache', action: 'month-cache-completed',
+          result: results.some((item) => !item.success) ? 'partial' : 'success',
+          siteName: siteNames[0], message: 'Certificate month cache result',
+          details: { year, month, requestedCount: items.length,
+            cachedCount: results.filter((item) => item.success).length,
+            failedFileIds: results.filter((item) => !item.success).map((item) => item.id) },
+        });
+      } catch (_) { /* best-effort */ }
       return results;
     })().finally(() => localSyncJobs.delete(key));
     localSyncJobs.set(key, job);

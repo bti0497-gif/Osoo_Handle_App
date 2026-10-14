@@ -1,5 +1,6 @@
 ﻿const crypto = require('crypto');
 let excelJsModule = null;
+const { measurePhase } = require('./requestPhaseService.cjs');
 const ExcelJS = new Proxy({}, {
   get(_target, property) {
     if (!excelJsModule) excelJsModule = require('exceljs');
@@ -1391,11 +1392,11 @@ module.exports = {
   buildBatchExportExcel,
   buildBatchPreviewPdf,
   buildPreviewManifest,
-  buildPageRenderData,
+  buildPageRenderData: (...args) => measurePhase('daily-log.render-data-service', () => buildPageRenderData(...args)),
   buildPagePreviewPdf,
-  buildBindingsForDate,
+  buildBindingsForDate: (...args) => measurePhase('daily-log.binding-data-service', () => buildBindingsForDate(...args)),
   findPageInManifest,
   normalizeDateRange,
   parsePageKey,
-  getActiveDates,
+  getActiveDates: (...args) => measurePhase('daily-log.active-dates-sql', () => getActiveDates(...args)),
 };

@@ -3,6 +3,7 @@ import { rememberRoadworkSessionUrl } from './roadworkSessionBridge';
 import { hasRoadworkFillData, summarizeRoadworkData, useRoadworkHelperViewModel } from './useRoadworkHelperViewModel';
 import { RoadworkHelperModel } from './RoadworkHelperModel';
 import { capturePhotoInputDiagnostic } from './photoInputDiagnostic';
+import { inspectRoadworkResponse, ROADWORK_PAGE_EVIDENCE_SCRIPT } from './roadworkSessionEvidence';
 import './components/RoadworkHelperModal.css';
 
 const DEFAULT_ROADWORK_URL = 'https://nwpo.ex.co.kr:5002/index.jsp';
@@ -30,7 +31,7 @@ const ROADWORK_KEEP_ALIVE_SCRIPT = `
     method: 'GET',
     credentials: 'include',
     cache: 'no-store',
-  }).then((response) => {
+  }).then(async (response) => {
     let finalOrigin = '';
     let finalPath = '';
     try {
@@ -39,6 +40,7 @@ const ROADWORK_KEEP_ALIVE_SCRIPT = `
       finalPath = finalUrl.pathname;
     } catch {}
     return {
+      ...await (${inspectRoadworkResponse.toString()})(response),
       success: response.ok,
       statusCode: response.status,
       finalOrigin,
@@ -75,6 +77,15 @@ const normalizeKeepAliveCheck = (value, source) => ({
   redirectedToLogin: value?.redirectedToLogin === true,
   checkedAt: String(value?.checkedAt || new Date().toISOString()).slice(0, 40),
   errorName: String(value?.errorName || '').slice(0, 80),
+  responseRedirected: value?.responseRedirected === true,
+  bodyInspected: value?.bodyInspected === true,
+  bodySampleBytes: Number.isInteger(value?.bodySampleBytes) ? Math.max(0, Math.min(32768, value.bodySampleBytes)) : 0,
+  bodySampleLimited: value?.bodySampleLimited === true,
+  loginFormMarker: value?.loginFormMarker === true,
+  loginRedirectMarker: value?.loginRedirectMarker === true,
+  sessionExpiryMarker: value?.sessionExpiryMarker === true,
+  bodyInspectionError: value?.bodyInspectionError === true,
+  bodyInspectionStatus: value?.bodyInspected === true ? 'sample-observed' : value?.bodyInspectionError === true ? 'inspection-error' : 'not-captured',
 });
 
 const ROADWORK_STATUS_SCRIPT = `
@@ -1035,9 +1046,13 @@ export default function RoadworkHelperView({ currentUser }) {
   const webviewRef = useRef(null);
   const lastRefreshAtRef = useRef(0);
   const wasLoginPageRef = useRef(true);
+  // A non-login page is observed, not proof that the portal authenticated the user.
+  const lastLoginPageExitAtRef = useRef(null);
   const hasLoadedPageRef = useRef(false);
   const loadFailureTimerRef = useRef(null);
   const lastNonLoginUrlRef = useRef('');
+  const lastAuthMarkerLogAtRef = useRef(0);
+  const navigationEvidenceRef = useRef([]);
   const lastKeepAliveCheckRef = useRef(null);
   const lastKeepAliveRegistrationRef = useRef({ path: '', at: 0 });
   const lastUnexpectedLoginAtRef = useRef(0);
@@ -1217,7 +1232,15 @@ export default function RoadworkHelperView({ currentUser }) {
     if (now - lastUnexpectedLoginAtRef.current < 1500) return;
     lastUnexpectedLoginAtRef.current = now;
 
-    let check = lastKeepAliveCheckRef.current;
+    const precedingCheck = lastKeepAliveCheckRef.current;
+    let check = precedingCheck;
+    let pageEvidence = { status: 'unavailable' };
+    try {
+      const webview = webviewRef.current;
+      if (webview) {
+        pageEvidence = await webview.executeJavaScript(ROADWORK_PAGE_EVIDENCE_SCRIPT);
+      }
+    } catch { /* best-effort read-only DOM markers */ }
     const previousUrl = lastNonLoginUrlRef.current;
     if (window.electronAPI?.invokeRoadwork && previousUrl) {
       try {
@@ -1238,6 +1261,13 @@ export default function RoadworkHelperView({ currentUser }) {
       pagePath: toRoadworkPagePath(currentUrl),
       previousPagePath: toRoadworkPagePath(previousUrl),
       keepAlive: check,
+      precedingCheck,
+      sessionStage: lastLoginPageExitAtRef.current ? 'returned-after-login-page-exit' : 'initial-login-wait',
+      lastLoginPageExitAt: lastLoginPageExitAtRef.current,
+      authenticationConfirmed: false,
+      navigationEvidence: navigationEvidenceRef.current.slice(-8),
+      pageEvidence,
+      interpretation: 'HTTP success and portal shell path do not prove an authenticated session; markers are heuristic evidence only.',
     });
   }, [recordRoadworkDiagnostic, roadworkPartition]);
 
@@ -1300,7 +1330,18 @@ export default function RoadworkHelperView({ currentUser }) {
           recordRoadworkDiagnostic('session-keepalive-failed', {
             trigger: 'interval',
             pagePath: toRoadworkPagePath(webview.getURL?.()),
+            sessionStage: /\/security\/login\.do(?:[?#]|$)/i.test(webview.getURL?.() || '')
+              ? (lastLoginPageExitAtRef.current ? 'returned-after-login-page-exit' : 'initial-login-wait') : 'non-login-page-observed',
+            lastLoginPageExitAt: lastLoginPageExitAtRef.current,
+            authenticationConfirmed: false,
             ...check,
+          });
+        } else if ((check.loginFormMarker || check.loginRedirectMarker || check.sessionExpiryMarker)
+          && Date.now() - lastAuthMarkerLogAtRef.current >= 30 * 60 * 1000) {
+          lastAuthMarkerLogAtRef.current = Date.now();
+          recordRoadworkDiagnostic('session-keepalive-auth-markers', {
+            trigger: 'interval', pagePath: toRoadworkPagePath(webview.getURL?.()), ...check,
+            interpretation: 'Response contained login/expiry markers despite HTTP success; not a confirmed authentication failure.',
           });
         }
       }).catch((error) => {
@@ -1447,6 +1488,7 @@ export default function RoadworkHelperView({ currentUser }) {
         void recordUnexpectedLogin('did-finish-load', currentUrl);
       }
       if (wasLoginPageRef.current && !isLoginPage) {
+        lastLoginPageExitAtRef.current = new Date().toISOString();
         recordRoadworkDiagnostic('webview-login-transition', { result: 'login-page-exited', pageOrigin });
       }
       wasLoginPageRef.current = isLoginPage;
@@ -1454,6 +1496,8 @@ export default function RoadworkHelperView({ currentUser }) {
 
     const handleNavigate = (event) => {
       const currentUrl = String(event.url || '');
+      navigationEvidenceRef.current.push({ at: new Date().toISOString(), path: toRoadworkPagePath(currentUrl), source: String(event.type || 'navigation') });
+      if (navigationEvidenceRef.current.length > 8) navigationEvidenceRef.current.shift();
       const isLoginPage = /\/security\/login\.do(?:[?#]|$)/i.test(currentUrl);
       setShowRefreshToast(isLoginPage);
       if (!isLoginPage) {
@@ -1463,6 +1507,7 @@ export default function RoadworkHelperView({ currentUser }) {
         void recordUnexpectedLogin('did-navigate', currentUrl);
       }
       if (wasLoginPageRef.current && !isLoginPage) {
+        lastLoginPageExitAtRef.current = new Date().toISOString();
         let pageOrigin = '';
         try {
           pageOrigin = new URL(currentUrl).origin;

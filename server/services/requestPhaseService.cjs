@@ -12,11 +12,12 @@ function runRequest(request, next) {
 function measurePhase(name, action) {
   const request = storage.getStore();
   const started = performance.now();
+  const previousPhase = request?.currentPhase || null;
   const finish = () => {
     if (!request) return;
     request.phases.push({ name, durationMs: Math.round(performance.now() - started) });
     if (request.phases.length > 16) request.phases.shift();
-    request.currentPhase = null;
+    if (request.currentPhase === name) request.currentPhase = previousPhase;
   };
   if (request) request.currentPhase = name;
   try {

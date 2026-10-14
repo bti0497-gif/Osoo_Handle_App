@@ -15,6 +15,12 @@ const SECRET_KEY_TOKENS = new Set([
   'authorization', 'cookie', 'private',
 ]);
 const MAX_STRING_LENGTH = 2000;
+// Explicit scalar-only exceptions: telemetry counts, never key codes or strings.
+const SAFE_INPUT_STATISTICS = new Set([
+  'keyboardHookReady', 'keyboardHookError', 'keyboardInjected', 'keyboardNonInjected',
+  'keyboardInjectedLast5Seconds', 'keyboardNonInjectedLast5Seconds',
+  'lastKeyboardAgeMs', 'lastInjectedKeyboardAgeMs', 'lastNonInjectedKeyboardAgeMs',
+]);
 const MAX_DETAIL_LENGTH = 15000;
 const LOCAL_FILE_RETENTION_DAYS = 14;
 const UPLOADED_ROW_RETENTION_DAYS = 14;
@@ -66,7 +72,10 @@ function sanitize(value, depth = 0) {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '_');
       const keyTokens = normalizedKey.split('_').filter(Boolean);
-      if (keyTokens.some((token) => SECRET_KEY_TOKENS.has(token))) {
+      const safeStatistic = SAFE_INPUT_STATISTICS.has(key)
+        && (child === null || typeof child === 'boolean' || (Number.isSafeInteger(child) && child >= 0));
+      if ((SAFE_INPUT_STATISTICS.has(key) && !safeStatistic)
+        || (!safeStatistic && keyTokens.some((token) => SECRET_KEY_TOKENS.has(token)))) {
         out[key] = '<redacted>';
       } else {
         out[key] = sanitize(child, depth + 1);

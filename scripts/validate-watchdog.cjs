@@ -40,7 +40,7 @@ assert.ok(mainProcess.includes("['update', 'full-exit'].forEach((reason) =>"), '
 assert.ok(mainProcess.includes('waitForServerReadyAndClearMaintenanceLocks'), 'server-ready maintenance lock recovery contract is missing');
 assert.ok(/catch\r?\n\s*\{/.test(watchdogSource) && watchdogSource.includes('return true;'), 'watchdog does not fail safe when process path inspection is denied');
 assert.ok(watchdogSource.includes('TimeSpan.FromMinutes(1)') && watchdogSource.includes('lastStatusKey'), 'watchdog status writes are not throttled for always-on field PCs');
-assert.ok(watchdogSource.includes('version=1.0.13'), 'watchdog behavioral changes did not bump the diagnostic version');
+assert.ok(watchdogSource.includes('version=1.0.14'), 'watchdog behavioral changes did not bump the diagnostic version');
 assert.ok(watchdogSource.includes('remote-input-state.json') && watchdogSource.includes('SetWindowsHookEx'), 'diagnostic-only input provenance monitor is missing');
 assert.ok(!/VkCode\.ToString|ScanCode\.ToString|Position\.X\.ToString|Position\.Y\.ToString/.test(watchdogSource), 'input-monitor must not serialize keys or pointer coordinates');
 assert.ok(watchdogSource.includes('remote-input-observation') && watchdogSource.includes('foreground-app-input-aggregate;origin-unverified'), 'watchdog does not persist low-volume, foreground-only input summaries');
@@ -158,7 +158,7 @@ try {
   const restartStatus = run(restartRuntime);
   assert.strictEqual(restartStatus.state, 'dry-run-restart');
   const remoteState = JSON.parse(fs.readFileSync(path.join(restartRuntime, 'remote-session-state.json'), 'utf8'));
-  assert.strictEqual(remoteState.version, '1.0.13');
+  assert.strictEqual(remoteState.version, '1.0.14');
   assert.ok(watchdogSource.includes('entry.InstanceId & 0xFFFF'), 'Chrome Remote Desktop detector must extract the displayed event ID from InstanceId');
   assert.ok(watchdogSource.includes('hostProcessCount') && watchdogSource.includes('visibleSessionWindow'), 'remote observations must separate process presence from session evidence');
   assert.ok(['active', 'clear', 'unknown'].includes(remoteState.state));

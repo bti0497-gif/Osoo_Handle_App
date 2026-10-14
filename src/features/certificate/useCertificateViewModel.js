@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CertificateModel } from './CertificateModel';
 
 const PRIVILEGED_ROLES = new Set(['admin', 'super_admin', 'central_admin', 'group_admin']);
@@ -74,6 +74,7 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
     const [selectedYear, setSelectedYear] = useState(currentYear);
     const [selectedMonth, setSelectedMonth] = useState(currentMonth);
     const [errorMessage, setErrorMessage] = useState('');
+    const loadSequenceRef = useRef(0);
     const [viewMode, setViewModeState] = useState(() => (
         localStorage.getItem(VIEW_MODE_STORAGE_KEY) === 'list' ? 'list' : 'card'
     ));
@@ -83,8 +84,11 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
     const fallbackSiteName = currentUser?.site_name1 || '현장';
 
     const loadRecords = useCallback(async ({ force = false } = {}) => {
+        const sequence = ++loadSequenceRef.current;
+        const isCurrent = () => sequence === loadSequenceRef.current;
         setIsLoading(true);
         setErrorMessage('');
+        let localPublished = false;
         try {
             const authHeaders = buildCertificateAuthHeaders(currentUser);
             const month = String(selectedMonth).padStart(2, '0');
@@ -94,7 +98,8 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
                 authHeaders,
                 { force },
             );
-            const normalized = Array.isArray(res?.items) ? res.items.map(normalizeRecord) : [];
+            const publish = async (items) => {
+            const normalized = items.map(normalizeRecord);
             const list = await Promise.all(normalized.map(async (item) => {
                 if (!item.previewUrl) return item;
                 try {
@@ -107,6 +112,10 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
                     return { ...item, previewUrl: '' };
                 }
             }));
+            if (!isCurrent()) {
+                list.forEach((item) => { if (item.previewUrl.startsWith('blob:')) URL.revokeObjectURL(item.previewUrl); });
+                return;
+            }
             setRecords(list);
             setSelectedCertificateIds((prev) => {
                 const validIds = new Set(list.map((item) => item.id));
@@ -119,26 +128,64 @@ export const useCertificateViewModel = (currentUser, { showToast, showAlert } = 
                     list.some((item) => item.id === previousId) ? previousId : list[0].id
                 ));
             }
+            };
+            await publish(Array.isArray(res?.items) ? res.items : []);
+            if (!isCurrent()) return;
+            localPublished = true;
+            // Always reconcile: a nonempty local list can still be incomplete.
+            const remote = await CertificateModel.fetchList(
+                { year: selectedYear, month, source: 'drive' }, authHeaders, { force: true },
+            );
+            if (!isCurrent()) return;
+            if (remote?.offline) {
+                setErrorMessage('Drive 확인이 안 되어 로컬 성적서만 표시합니다.');
+                return;
+            }
+            const remoteItems = Array.isArray(remote?.items) ? remote.items : [];
+            const merge = (local) => [...new Map([...remoteItems, ...local].map((item) => [item.id, item])).values()];
+            await publish(merge(Array.isArray(res?.items) ? res.items : []));
+            if (!isCurrent()) return;
+            const missing = remoteItems.filter((item) => !item.localCached);
+            let failed = 0;
+            for (let offset = 0; offset < missing.length; offset += 200) {
+                if (!isCurrent()) return;
+                const saved = await CertificateModel.syncLocalFiles({
+                    items: missing.slice(offset, offset + 200), year: selectedYear, month,
+                }, authHeaders);
+                failed += Number(saved?.failedCount || 0);
+            }
+            if (!isCurrent()) return;
+            if (missing.length) {
+                CertificateModel.clearListCache();
+                const refreshed = await CertificateModel.fetchList(
+                    { year: selectedYear, month }, authHeaders, { force: true },
+                );
+                await publish(merge(Array.isArray(refreshed?.items) ? refreshed.items : []));
+            }
+            if (isCurrent() && failed) setErrorMessage(`성적서 ${failed}건을 로컬에 저장하지 못했습니다. 다시 조회하면 재시도합니다.`);
         } catch (err) {
+            if (!isCurrent()) return;
             console.error(err);
             if (err.code === 'SITE_NOT_CONFIGURED' || err.message?.includes('설정에서 현장을 먼저 확정') || err.data?.code === 'SITE_NOT_CONFIGURED' || err.data?.message?.includes('설정에서 현장을 먼저 확정')) {
                 setErrorMessage('설정에서 현장을 먼저 확정해 주세요.');
+            } else if (localPublished) {
+                setErrorMessage('Drive 확인 또는 다운로드에 실패했습니다. 현재 확보한 목록은 유지합니다.');
             } else {
                 showToast?.('성적서 목록을 불러오지 못했습니다.', 'error');
             }
-            setRecords([]);
-            setSelectedId(null);
+            if (!localPublished) { setRecords([]); setSelectedId(null); }
         } finally {
-            setIsLoading(false);
+            if (isCurrent()) setIsLoading(false);
         }
     }, [currentUser, selectedYear, selectedMonth, showToast]);
 
     useEffect(() => {
         loadRecords();
+        return () => { loadSequenceRef.current += 1; };
     }, [loadRecords]);
 
     useEffect(() => {
-        const handleCacheUpdated = () => loadRecords();
+        const handleCacheUpdated = () => loadRecords({ force: true });
         window.addEventListener('osoo:certificate-cache-updated', handleCacheUpdated);
         return () => window.removeEventListener('osoo:certificate-cache-updated', handleCacheUpdated);
     }, [loadRecords]);

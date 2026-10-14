@@ -15,8 +15,8 @@ using System.Threading;
 [assembly: System.Reflection.AssemblyDescription("Background watchdog for Osoo Handle App")]
 [assembly: System.Reflection.AssemblyCompany("Osoo")]
 [assembly: System.Reflection.AssemblyProduct("Osoo Handle App Watchdog")]
-[assembly: System.Reflection.AssemblyVersion("1.0.13.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.0.13.0")]
+[assembly: System.Reflection.AssemblyVersion("1.0.14.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.0.14.0")]
 
 namespace OsooWatchdog
 {
@@ -117,6 +117,8 @@ namespace OsooWatchdog
         private static int pendingMouseInjected;
         private static int pendingMouseNonInjected;
         private static int pendingLowerIntegrityInjected;
+        private static readonly string inputMonitorId = Guid.NewGuid().ToString("N");
+        private static long totalKeyInjected, totalKeyNonInjected, totalMouseInjected, totalMouseNonInjected;
 
         [DataContract]
         private sealed class RemoteSessionSnapshot
@@ -208,11 +210,11 @@ namespace OsooWatchdog
                     Injected = injected, LowerIntegrity = lowerIntegrity });
                 if (keyboard)
                 {
-                    if (injected) pendingKeyInjected++;
-                    else pendingKeyNonInjected++;
+                    if (injected) { pendingKeyInjected++; totalKeyInjected++; }
+                    else { pendingKeyNonInjected++; totalKeyNonInjected++; }
                 }
-                else if (injected) pendingMouseInjected++;
-                else pendingMouseNonInjected++;
+                else if (injected) { pendingMouseInjected++; totalMouseInjected++; }
+                else { pendingMouseNonInjected++; totalMouseNonInjected++; }
                 if (lowerIntegrity) pendingLowerIntegrityInjected++;
                 while (Samples.Count > 4096) Samples.Dequeue();
             }
@@ -266,6 +268,15 @@ namespace OsooWatchdog
 
         private static void WriteSummary()
         {
+            string cumulativeJson;
+            lock (Gate)
+            {
+                cumulativeJson = ",\"inputMonitorId\":\"" + inputMonitorId + "\",\"cumulative\":{\"keyboardInjected\":"
+                    + totalKeyInjected.ToString(CultureInfo.InvariantCulture)
+                    + ",\"keyboardNonInjected\":" + totalKeyNonInjected.ToString(CultureInfo.InvariantCulture)
+                    + ",\"mouseInjected\":" + totalMouseInjected.ToString(CultureInfo.InvariantCulture)
+                    + ",\"mouseNonInjected\":" + totalMouseNonInjected.ToString(CultureInfo.InvariantCulture) + "}";
+            }
             DateTime now = DateTime.UtcNow;
             int keyInjected = 0, keyPhysical = 0, keyInjectedRecent = 0, keyPhysicalRecent = 0;
             int mouseInjected = 0, mousePhysical = 0, mouseInjectedRecent = 0, mousePhysicalRecent = 0, lowerIntegrity = 0;
@@ -329,7 +340,7 @@ namespace OsooWatchdog
                 lastInputObservationAtTicks = now.Ticks;
                 nextInputObservationAtTicks = now.AddSeconds(30).Ticks;
             }
-            string json = "{\"version\":\"1.0.13\",\"checkedAt\":\"" + now.ToString("o") + "\",\"foregroundIsApp\":"
+            string json = "{\"version\":\"1.0.14\",\"checkedAt\":\"" + now.ToString("o") + "\",\"foregroundIsApp\":"
                 + foregroundIsApp.ToString().ToLowerInvariant()
                 + ",\"keyboardHookReady\":" + keyboardReady.ToString().ToLowerInvariant()
                 + ",\"mouseHookReady\":" + mouseReady.ToString().ToLowerInvariant()
@@ -350,7 +361,7 @@ namespace OsooWatchdog
                 + ",\"lastNonInjectedKeyboardAgeMs\":" + AgeMillisecondsJson(now.Ticks, lastNonInjectedKeyTicks)
                 + ",\"lastMouseAgeMs\":" + AgeMillisecondsJson(now.Ticks, lastMouseTicks)
                 + ",\"lastInjectedMouseAgeMs\":" + AgeMillisecondsJson(now.Ticks, lastInjectedMouseTicks)
-                + ",\"lastNonInjectedMouseAgeMs\":" + AgeMillisecondsJson(now.Ticks, lastNonInjectedMouseTicks) + "}";
+                + ",\"lastNonInjectedMouseAgeMs\":" + AgeMillisecondsJson(now.Ticks, lastNonInjectedMouseTicks) + cumulativeJson + "}";
             string temporary = outputPath + ".tmp";
             File.WriteAllText(temporary, json, new UTF8Encoding(false));
             bool replaced = false;
@@ -414,7 +425,7 @@ namespace OsooWatchdog
                 string timestamp = observedAt.ToString("o", CultureInfo.InvariantCulture);
                 string windowStartedAt = new DateTime(windowStartedAtTicks, DateTimeKind.Utc).ToString("o", CultureInfo.InvariantCulture);
                 string eventJson = "{\"observation_id\":\"" + Guid.NewGuid().ToString("N") + "\""
-                    + ",\"createdAt\":\"" + timestamp + "\",\"version\":\"1.0.13\",\"watchdog_version\":\"1.0.13\""
+                    + ",\"createdAt\":\"" + timestamp + "\",\"version\":\"1.0.14\",\"watchdog_version\":\"1.0.14\""
                     + ",\"detector_version\":\"4\",\"area\":\"watchdog\",\"action\":\"remote-input-observation\""
                     + ",\"result\":\"" + overallState + "\",\"overall_state\":\"" + overallState + "\""
                     + ",\"decision_reason\":\"foreground-app-input-aggregate;origin-unverified\""
@@ -520,7 +531,7 @@ namespace OsooWatchdog
                     return 2;
                 }
 
-                Log("watchdog-start", "ok", "version=1.0.13; mode=" + (options.MonitorOnly ? "diagnostic-only" : "supervisor")
+                Log("watchdog-start", "ok", "version=1.0.14; mode=" + (options.MonitorOnly ? "diagnostic-only" : "supervisor")
                     + "; dryRun=" + options.DryRun.ToString(CultureInfo.InvariantCulture));
                 if (!options.Once) RemoteInputMonitor.Start(runtimeDirectory);
                 do
@@ -1274,7 +1285,7 @@ namespace OsooWatchdog
             DateTime checkedAt = DateTime.UtcNow;
             string evidenceText = String.Join("; ", evidence.ToArray());
             string json = "{\n"
-                + "  \"version\": \"1.0.13\",\n"
+                + "  \"version\": \"1.0.14\",\n"
                 + "  \"checkedAt\": " + JsonString(checkedAt.ToString("o")) + ",\n"
                 + "  \"state\": " + JsonString(state) + ",\n"
                 + "  \"sessionType\": " + JsonString(sessionType) + ",\n"
@@ -1354,7 +1365,7 @@ namespace OsooWatchdog
                     + ",\"transports\":" + GetChromotingTransportsJson() + "}}";
                 string eventJson = "{\"observation_id\":" + JsonString(Guid.NewGuid().ToString("N"))
                     + ",\"createdAt\":" + JsonString(observedAt)
-                    + ",\"version\":\"1.0.13\",\"watchdog_version\":\"1.0.13\",\"detector_version\":\"4\",\"area\":\"watchdog\",\"action\":\"remote-session-detection\""
+                    + ",\"version\":\"1.0.14\",\"watchdog_version\":\"1.0.14\",\"detector_version\":\"4\",\"area\":\"watchdog\",\"action\":\"remote-session-detection\""
                     + ",\"result\":" + JsonString(overallState)
                     + ",\"overall_state\":" + JsonString(overallState)
                     + ",\"decision_reason\":" + JsonString(decisionReason)
@@ -1660,7 +1671,7 @@ namespace OsooWatchdog
             if (statusKey == lastStatusKey && now - lastStatusAt < TimeSpan.FromMinutes(1)) return;
             lastStatusKey = statusKey;
             lastStatusAt = now;
-            string json = "{\n  \"version\": \"1.0.13\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
+            string json = "{\n  \"version\": \"1.0.14\",\n  \"checkedAt\": \"" + now.ToString("o") + "\",\n  \"state\": \"" + Escape(state) + "\",\n  \"appPath\": " + JsonString(appPath) + ",\n  \"maintenanceReason\": " + JsonString(reason) + "\n}";
             AtomicWrite(Path.Combine(runtimeDirectory, "watchdog-status.json"), json);
         }
 
@@ -1680,7 +1691,7 @@ namespace OsooWatchdog
                 string createdAt = DateTime.UtcNow.ToString("o");
                 string line = createdAt + "\t" + action + "\t" + result + (String.IsNullOrEmpty(details) ? "" : "\t" + details) + Environment.NewLine;
                 File.AppendAllText(logPath, line, new UTF8Encoding(false));
-                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.13\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
+                string eventJson = "{\"createdAt\":\"" + createdAt + "\",\"version\":\"1.0.14\",\"action\":\"" + Escape(action) + "\",\"result\":\"" + Escape(result) + "\",\"details\":" + JsonString(details) + "}" + Environment.NewLine;
                 File.AppendAllText(Path.Combine(runtimeDirectory, "watchdog-events.jsonl"), eventJson, new UTF8Encoding(false));
             }
             catch { }

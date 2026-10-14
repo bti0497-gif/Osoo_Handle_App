@@ -148,6 +148,11 @@ const CertificateView = ({ currentUser }) => {
                 </div>}
 
                 <div style={{ overflowY: 'auto', flex: 1, background: viewMode === 'card' ? '#f8fafc' : '#ffffff' }}>
+                    {visibleRecords.length > 0 && (isLoading || errorMessage) && (
+                        <div role="status" aria-live="polite" style={{ padding: '8px 12px', fontSize: '13px', color: '#475569' }}>
+                            {errorMessage || '로컬 목록을 표시했습니다. Drive 목록 대조 및 누락 성적서 저장 중입니다.'}
+                        </div>
+                    )}
                     {visibleRecords.length === 0 ? (
                         <div style={{
                             height: '100%',

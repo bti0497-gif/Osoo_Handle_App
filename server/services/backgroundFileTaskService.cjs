@@ -145,7 +145,7 @@ async function processPendingBackgroundFileTasks(db, { shouldContinue = () => tr
     ORDER BY created_at ASC, id ASC
     LIMIT ?
   `).all(now, Math.max(1, Number(limit) || 50));
-  const summary = { total: tasks.length, completed: 0, failed: 0, paused: false };
+  const summary = { total: tasks.length, completed: 0, failed: 0, paused: false, taskTimings: [] };
 
   for (const task of tasks) {
     if (!shouldContinue()) {
@@ -159,11 +159,15 @@ async function processPendingBackgroundFileTasks(db, { shouldContinue = () => tr
     `).run(new Date().toISOString(), task.id);
     if (!claimed.changes) continue;
 
+    const started = performance.now();
+    const evidence = { type: task.task_type, attempt: Number(task.attempts || 0) + 1, result: 'completed' };
     try {
-      await executeTask(db, task);
+      await require('./requestPhaseService.cjs').measurePhase(`file-sync.${task.task_type}`, () => executeTask(db, task));
       db.prepare('DELETE FROM background_file_tasks WHERE id = ?').run(task.id);
       summary.completed += 1;
     } catch (error) {
+      evidence.result = 'failed';
+      evidence.externalErrorCode = String(error.code || error.statusCode || '').slice(0, 80);
       const attempts = Number(task.attempts || 0) + 1;
       const retryMs = Math.min(60 * 60 * 1000, Math.max(10 * 60 * 1000, attempts * 10 * 60 * 1000));
       const failedAt = new Date();
@@ -178,6 +182,9 @@ async function processPendingBackgroundFileTasks(db, { shouldContinue = () => tr
         task.id
       );
       summary.failed += 1;
+    } finally {
+      evidence.durationMs = Math.round(performance.now() - started);
+      summary.taskTimings.push(evidence);
     }
   }
   return summary;

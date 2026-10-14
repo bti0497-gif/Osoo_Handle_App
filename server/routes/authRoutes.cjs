@@ -575,6 +575,10 @@ module.exports = (db, appDataPath) => {
                 };
             } else inputSignals = { status: 'stale', ageMs: Number.isFinite(ageMs) ? ageMs : null };
         } catch (_) {}
+        try {
+            inputSignals.focusToSubmit = require('../services/loginInputIntervalService.cjs')
+                .finish(appDataPath, safeClientContext.inputIntervalId);
+        } catch (_) { inputSignals.focusToSubmit = { status: 'unavailable' }; }
         const decisionReason = [
             'login-submit',
             `remote-session-${sessionState}`,
@@ -674,6 +678,15 @@ module.exports = (db, appDataPath) => {
         return true;
     };
 
+    router.post('/login-input-interval', (req, res) => {
+        // Only anonymous aggregate counters are sampled; no body or input text is read.
+        try {
+            return res.json(require('../services/loginInputIntervalService.cjs').begin(appDataPath));
+        } catch (_) {
+            return res.json({ success: true, status: 'monitor-unavailable', intervalId: null });
+        }
+    });
+
     router.get('/system-status', (req, res) => {
         res.set('Cache-Control', 'no-store');
         const { memorySnapshot } = require('../services/serverPerformanceDiagnosticService.cjs');
@@ -767,6 +780,7 @@ module.exports = (db, appDataPath) => {
             : 'unknown';
         const safeClientContext = {
             requestPurpose,
+            inputIntervalId: /^[a-f0-9-]{36}$/i.test(String(diagnosticContext.inputIntervalId || '')) ? diagnosticContext.inputIntervalId : null,
             loginAttemptId: /^[a-z0-9-]{1,64}$/i.test(String(diagnosticContext.loginAttemptId || ''))
                 ? String(diagnosticContext.loginAttemptId)
                 : null,
@@ -923,6 +937,7 @@ module.exports = (db, appDataPath) => {
             : {};
         const safeClientContext = {
             requestPurpose: 'login-screen',
+            inputIntervalId: /^[a-f0-9-]{36}$/i.test(String(diagnosticContext.inputIntervalId || '')) ? diagnosticContext.inputIntervalId : null,
             loginAttemptId: /^[a-z0-9-]{1,64}$/i.test(String(diagnosticContext.loginAttemptId || ''))
                 ? String(diagnosticContext.loginAttemptId)
                 : null,
@@ -1158,23 +1173,46 @@ module.exports = (db, appDataPath) => {
         return res.json({ success: true });
     });
 
+    // Diagnostic failures must never affect synchronization or its retry policy.
+    const recordBackgroundOutcome = (req, taskType, startedAt, evidence) => {
+        if (evidence.outcome === 'completed' && Date.now() - startedAt < 10000) return;
+        try {
+            recordDiagnostic(db, appDataPath, {
+                level: evidence.outcome === 'failed' ? 'warn' : 'info',
+                area: 'background-sync', action: taskType, result: evidence.outcome,
+                siteId: req.siteContext?.siteId || '',
+                siteName: req.siteContext?.siteName || undefined,
+                message: 'Background synchronization outcome',
+                details: { ...evidence, durationMs: Date.now() - startedAt, diagnosticRevision: 1 },
+            });
+        } catch (_) { /* best-effort evidence only */ }
+    };
+
     router.post('/background-tasks/run-data-sync', async (req, res) => {
+        const startedAt = Date.now();
         try {
             const result = await runBigQuerySyncIfIdle('persistent-background-task');
+            const { classifyDataSync } = require('../services/backgroundSyncDiagnosticService.cjs');
+            recordBackgroundOutcome(req, 'data-sync', startedAt, classifyDataSync(result));
             return res.json({ success: true, result });
         } catch (error) {
+            recordBackgroundOutcome(req, 'data-sync', startedAt, { outcome: 'failed', reason: 'execution-error' });
             return res.status(500).json({ success: false, error: error.message });
         }
     });
 
     router.post('/background-tasks/run-file-sync', async (req, res) => {
+        const startedAt = Date.now();
         try {
             const summary = await processPendingBackgroundFileTasks(db, {
                 shouldContinue: createUserIdleGuard(),
                 limit: 50,
             });
+            const { classifyFileSync } = require('../services/backgroundSyncDiagnosticService.cjs');
+            recordBackgroundOutcome(req, 'file-sync', startedAt, classifyFileSync(summary));
             return res.json({ success: true, summary });
         } catch (error) {
+            recordBackgroundOutcome(req, 'file-sync', startedAt, { outcome: 'failed', reason: 'execution-error' });
             return res.status(500).json({ success: false, error: error.message });
         }
     });

@@ -1,6 +1,7 @@
 ﻿const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const { measurePhase } = require('../services/requestPhaseService.cjs');
 const {
   buildBatchExportExcel,
   buildPreviewManifest,
@@ -139,10 +140,10 @@ module.exports = function (db, baseDir, appDataPath) {
       }
 
       const range = normalizeDateRange(startDate, endDate);
-      const acquired = await acquireDailyLogDatabase(db, appDataPath, getRequestContext(req), range.startDate, range.endDate);
+      const acquired = await measurePhase('daily-log.acquire-database', () => acquireDailyLogDatabase(db, appDataPath, getRequestContext(req), range.startDate, range.endDate));
       try {
-        if (!acquired.isRemote) await syncCertificateCacheForRange(range, acquired.context);
-        const activeDates = getActiveDates(acquired.db, range.startDate, range.endDate, acquired.context);
+        if (!acquired.isRemote) await measurePhase('daily-log.certificate-cache-sync', () => syncCertificateCacheForRange(range, acquired.context));
+        const activeDates = measurePhase('daily-log.active-dates-query', () => getActiveDates(acquired.db, range.startDate, range.endDate, acquired.context));
         return res.json({ success: true, activeDates, dataSource: acquired.isRemote ? 'bigquery' : 'local' });
       } finally {
         acquired.release();
@@ -198,10 +199,10 @@ module.exports = function (db, baseDir, appDataPath) {
         return res.status(404).json({ error: 'Preview page not found' });
       }
 
-      const acquired = await acquireDailyLogDatabase(db, appDataPath, getRequestContext(req), range.startDate, range.endDate);
+      const acquired = await measurePhase('daily-log.acquire-database', () => acquireDailyLogDatabase(db, appDataPath, getRequestContext(req), range.startDate, range.endDate));
       try {
-        if (!acquired.isRemote) await syncCertificateCacheForRange(range, acquired.context);
-        const renderData = buildPageRenderData(acquired.db, targetPage, acquired.context);
+        if (!acquired.isRemote) await measurePhase('daily-log.certificate-cache-sync', () => syncCertificateCacheForRange(range, acquired.context));
+        const renderData = measurePhase('daily-log.build-preview-data', () => buildPageRenderData(acquired.db, targetPage, acquired.context));
         return res.json({
           success: true,
           page: renderData,

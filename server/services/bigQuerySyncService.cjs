@@ -296,6 +296,14 @@ async function ensureTargetTableColumns(table, rows) {
 
 // 5. 단일 테이블 동기화 함수
 async function syncTable(tableName) {
+  const { measurePhase } = require('./requestPhaseService.cjs');
+  const startedAt = Date.now();
+  const timings = [];
+  const timed = async (name, action) => {
+    const started = performance.now();
+    try { return await measurePhase(`bigquery.${tableName}.${name}`, action); }
+    finally { timings.push({ name, durationMs: Math.round(performance.now() - started) }); }
+  };
   const bq = getBigQueryClient();
   if (!bq) return { success: false, message: 'BigQuery client not ready' };
 
@@ -344,14 +352,14 @@ async function syncTable(tableName) {
 
   try {
     // 5-4. BigQuery 전송 (Load Job - 로컬 파일 업로드)
-    await ensureTargetTableColumns(targetTable, bqRows);
-    const [targetMetadata] = await targetTable.getMetadata();
-    await stagingTable.create({ schema: targetMetadata.schema });
+    await timed('ensure-schema', () => ensureTargetTableColumns(targetTable, bqRows));
+    const [targetMetadata] = await timed('read-schema', () => targetTable.getMetadata());
+    await timed('create-staging', () => stagingTable.create({ schema: targetMetadata.schema }));
 
-    const [job] = await stagingTable.load(
+    const [job] = await timed('upload-load', () => stagingTable.load(
       tmpFile,
       { sourceFormat: 'NEWLINE_DELIMITED_JSON', writeDisposition: 'WRITE_TRUNCATE' }
-    );
+    ));
 
     // 임시 파일 삭제
     try { fs.unlinkSync(tmpFile); } catch (_) {}
@@ -380,7 +388,7 @@ async function syncTable(tableName) {
       )`;
     }
 
-    await bq.query({
+    await timed('remote-merge', () => bq.query({
       query: `
         BEGIN TRANSACTION;
         DELETE FROM \`${DATASET_ID}.${tableName}\` T
@@ -394,7 +402,7 @@ async function syncTable(tableName) {
         FROM \`${DATASET_ID}.${stagingTableName}\`;
         COMMIT TRANSACTION;
       `,
-    });
+    }));
 
     // 5-5. 로컬 상태 '완료' (is_synced = 1)로 업데이트
     // 전송 도중 같은 행이 다시 저장되면 라우트가 is_synced를 0으로 되돌린다.
@@ -417,7 +425,7 @@ async function syncTable(tableName) {
       action: `sync:${tableName}`,
       result: 'ok',
       message: `${tableName} ${rows.length} rows synced`,
-      details: { tableName, count: rows.length, siteBreakdown },
+      details: { tableName, count: rows.length, siteBreakdown, durationMs: Date.now() - startedAt, timings, sdkRetryCount: 'not-exposed' },
     });
     return { success: true, count: rows.length };
 
@@ -441,7 +449,8 @@ async function syncTable(tableName) {
       action: `sync:${tableName}`,
       result: 'failed',
       message: errorMsg,
-      details: { tableName, rowCount: rows.length, siteBreakdown, error: err },
+      details: { tableName, rowCount: rows.length, siteBreakdown, error: err, durationMs: Date.now() - startedAt, timings,
+        externalErrorCode: String(err.code || err.statusCode || '').slice(0, 80), sdkRetryCount: 'not-exposed' },
     });
     return { success: false, error: errorMsg };
   }

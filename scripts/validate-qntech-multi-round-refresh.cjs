@@ -32,6 +32,26 @@ const mapped = mapProjectsToWaterRows(mockProjects, ['유량조정조'], [], {
 });
 const groups = new Set(mapped.importedRows.map((row) => row.measurement_group));
 const orders = mapped.importedRows.map((row) => row.measurement_order).sort((a, b) => a - b);
+// Actual Pyeongtaek timestamps previously split into two days after 15:00Z.
+const splitProjects = [
+  [51690, '2026-10-08T14:57:46.618Z'],
+  [51692, '2026-10-08T15:31:15.987Z'],
+  [51694, '2026-10-08T15:53:08.179Z'],
+].map(([id, regDt]) => ({ ...mockProjects[0], id, regDt }));
+const originalProjects = JSON.stringify(splitProjects);
+for (const queryDate of ['2026-10-08', '2026-10-09']) {
+  const rows = mapProjectsToWaterRows(splitProjects, ['L1'], [], { fallbackDate: queryDate }).importedRows;
+  if (rows.length !== 3 || rows.some((row) => row.date !== queryDate)
+    || new Set(rows.map((row) => row.measurement_group)).size !== 3
+    || rows.map((row) => row.measurement_order).join(',') !== '1,2,3') {
+    throw new Error('QnTECH query business date or independent analysis rounds changed');
+  }
+}
+if (JSON.stringify(splitProjects) !== originalProjects) throw new Error('QnTECH source timestamps were mutated');
+const importServiceSource = fs.readFileSync(path.join(baseDir, 'server/services/qntechWaterImportService.cjs'), 'utf8');
+if ((importServiceSource.match(/fallbackDate: context\.date/g) || []).length !== 3) {
+  throw new Error('Single-day, values and range imports must all pass the query business date');
+}
 if (groups.size !== 3 || orders.join(',') !== '1,2,3') {
   throw new Error('QnTECH 동일 날짜 3개 프로젝트가 독립된 1·2·3회차로 유지되지 않습니다.');
 }

@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const ExcelJS = require('exceljs');
-const { insertImageToCell, buildExcelTempPath, openExcelFile } = require('../excelOpenService.cjs');
+const { insertImageToCell, getMergedCellExtent, buildExcelTempPath, openExcelFile } = require('../excelOpenService.cjs');
 const { resolveReportTemplatePath } = require('../reportTemplateService.cjs');
 
 const TEMPLATE_NAME = '설비이력카드';
@@ -205,6 +205,15 @@ async function buildEquipmentCardWorkbook({ db, appDataPath, baseDir, siteId, eq
   };
   const pages = [history.slice(0, firstRows.end - firstRows.start + 1)];
   pages.push(...chunk(history.slice(pages[0].length), continuationRows.end - continuationRows.start + 1));
+  // The source template has sheet 2 selected. Always open the populated first
+  // page and omit the empty continuation page for a single-page card.
+  workbook.views = (workbook.views.length ? workbook.views : [{}]).map((view) => ({ ...view, activeTab: 0, firstSheet: 0 }));
+  if (pages.length === 1 && continuationTemplate !== firstSheet) {
+    const unusedSheetName = continuationTemplate.name;
+    workbook.definedNames.model = workbook.definedNames.model.filter((entry) =>
+      !(entry.ranges || []).some((range) => range.startsWith(`${unusedSheetName}!`) || range.startsWith(`'${unusedSheetName}'!`)));
+    workbook.removeWorksheet(continuationTemplate.id);
+  }
 
   const setFirstInfo = (name, value) => {
     const range = parseDefinedRange(workbook, name);
@@ -250,16 +259,37 @@ async function buildEquipmentCardWorkbook({ db, appDataPath, baseDir, siteId, eq
     if (fs.existsSync(photoPath)) {
       const photoRange = parseDefinedRange(workbook, '장비사진') || parseDefinedRange(workbook, '장비 사진');
       if (photoRange) {
-        await insertImageToCell(workbook, firstSheet, photoRange, photoPath, { fitBy: 'height', pct: 0.9 });
+        const photoSheet = workbook.getWorksheet(photoRange.sheetName);
+        if (!photoSheet) throw new Error('장비사진 이름 정의의 시트를 찾을 수 없습니다.');
+        // Named anchor M4 is the master of M4:W16. The shared image helper
+        // requires numeric column indices and the full merged-cell extent.
+        const extent = getMergedCellExtent(photoSheet, photoRange.startCol, photoRange.startRow);
+        await insertImageToCell(workbook, photoSheet, extent, photoPath, { fitBy: 'height', pct: 0.9 });
+      } else {
+        throw new Error('설비이력카드 양식의 장비사진 이름 정의가 없습니다.');
       }
+    } else {
+      throw new Error('등록된 장비 대표사진의 로컬 파일을 찾을 수 없습니다.');
     }
   }
 
-  return { workbook, equipment, history, pageCount: pages.length };
+  let boundHistoryCount = 0;
+  pages.forEach((entries, index) => {
+    const sheet = index === 0 ? firstSheet : workbook.getWorksheet(String(index + 1));
+    const start = index === 0 ? firstRows.start : continuationRows.start;
+    entries.forEach((entry, offset) => {
+      if (sheet.getCell(`D${start + offset}`).value !== entry.content || sheet.getCell(`A${start + offset}`).value !== entry.date) {
+        throw new Error('장비 점검이력의 Excel 셀 바인딩 검증에 실패했습니다.');
+      }
+      boundHistoryCount += 1;
+    });
+  });
+  const embeddedPhotoCount = firstSheet.getImages().length;
+  return { workbook, equipment, history, pageCount: pages.length, boundHistoryCount, embeddedPhotoCount };
 }
 
 async function exportEquipmentCard({ db, appDataPath, baseDir, siteId, equipmentId, openFile = true }) {
-  const { workbook, equipment, history, pageCount } = await buildEquipmentCardWorkbook({
+  const { workbook, equipment, history, pageCount, boundHistoryCount, embeddedPhotoCount } = await buildEquipmentCardWorkbook({
     db, appDataPath, baseDir, siteId, equipmentId,
   });
   const baseName = sanitizeFileName(`설비이력카드_${equipment.management_no || equipment.equipment_name}_${new Date().toISOString().slice(0, 10)}`);
@@ -270,7 +300,7 @@ async function exportEquipmentCard({ db, appDataPath, baseDir, siteId, equipment
     suffix += 1;
   }
   await workbook.xlsx.writeFile(outputPath);
-  if (openFile) await openExcelFile(outputPath);
+  const fileOpenSucceeded = openFile ? await openExcelFile(outputPath) : null;
   return {
     success: true,
     file: path.basename(outputPath),
@@ -278,6 +308,10 @@ async function exportEquipmentCard({ db, appDataPath, baseDir, siteId, equipment
     historyCount: history.length,
     historySourceCounts: countHistorySources(history),
     pageCount,
+    boundHistoryCount,
+    embeddedPhotoCount,
+    fileOpenRequested: openFile,
+    fileOpenSucceeded,
   };
 }
 

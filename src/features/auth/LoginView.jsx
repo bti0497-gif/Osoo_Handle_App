@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AuthModel } from './AuthModel';
+import { useLoginInputDiagnostic } from './useLoginInputDiagnostic';
 
 const LoginView = ({ onLogin, loginHintName = '' }) => {
+    const { beginInterval, takeIntervalId } = useLoginInputDiagnostic();
     const [name, setName] = useState(() => String(loginHintName || localStorage.getItem('lastLoginName') || '').trim());
     const [pass, setPass] = useState('');
     const [error, setError] = useState('');
@@ -39,6 +41,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
             // Never carry a password or an old rejection across tray/app restore.
             setPass('');
             setError('');
+            beginInterval();
             window.focus();
             window.requestAnimationFrame(() => {
                 const active = document.activeElement;
@@ -59,7 +62,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
             window.removeEventListener('focus', handleWindowFocus);
             if (typeof unsubscribe === 'function') unsubscribe();
         };
-    }, []);
+    }, [beginInterval]);
 
     useEffect(() => {
         const nextName = String(loginHintName || '').trim();
@@ -91,6 +94,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
             const nativeInput = String(passRef.current?.value || '');
             const stateInput = String(pass || '');
             const result = await onLogin(name, nativeInput, {
+                inputIntervalId: takeIntervalId(),
                 loginAttemptId: `${submittedAt.toString(36)}-${submitSequence}`,
                 submitSequence,
                 inputSource: 'native-field',
@@ -110,6 +114,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                 setError(result.message || '이름 또는 비밀번호를 다시 확인해 주세요.');
                 // Never retain a hidden stale value after a rejected login.
                 setPass('');
+                beginInterval();
                 window.requestAnimationFrame(() => passRef.current?.focus());
             }
         } finally {
@@ -164,6 +169,7 @@ const LoginView = ({ onLogin, loginHintName = '' }) => {
                             placeholder="비밀번호"
                             value={pass}
                             ref={passRef}
+                            onFocus={beginInterval}
                             onPointerDown={() => window.focus()}
                             onChange={(e) => {
                                 lastInputEditAtRef.current = Date.now();

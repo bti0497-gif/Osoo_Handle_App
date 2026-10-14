@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "endpointCount": 181,
-  "digest": "5fe5a0176d6f3c4ee3b171ca692b2ff125a35971941b070c92eba3235facfb4a",
+  "endpointCount": 182,
+  "digest": "6555cb9456a444fb5227f523defaf2c4c1877c289cd28c0b9643c19235baca54",
   "endpoints": [
     {
       "method": "GET",
@@ -105,6 +105,14 @@
       "module": "./routes/authRoutes.cjs",
       "tier": 0,
       "mutation": false,
+      "syncWatch": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login-input-interval",
+      "module": "./routes/authRoutes.cjs",
+      "tier": 0,
+      "mutation": true,
       "syncWatch": false
     },
     {

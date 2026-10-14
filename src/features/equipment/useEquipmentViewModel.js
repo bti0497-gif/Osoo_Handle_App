@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getApiBase } from '../../core/api/serverConfig.js';
 import EquipmentModel from './EquipmentModel';
+import { sumMaintenanceCost } from './equipmentCostPolicy';
 import {
   EQUIPMENT_CATALOG,
   EQUIPMENT_PROCESS_ORDER,
@@ -34,7 +35,7 @@ function mechanicalProcessGroup(category1) {
   if (['침사조', '유량조정조'].includes(category1)) return 1;
   if (['혐기조', '무산소조'].includes(category1)) return 2;
   if (['포기조', '막분리조'].includes(category1)) return 3;
-  if (['침전조', '응집침전조'].includes(category1)) return 4;
+  if (['침전조', '응집침전조', '부상조'].includes(category1)) return 4;
   if (['여과조', '소독조', '방류조'].includes(category1)) return 5;
   return null;
 }
@@ -280,10 +281,8 @@ export function useEquipmentViewModel() {
 
   const stats = useMemo(() => {
     const currentYear = String(new Date().getFullYear());
-    const totalCost = equipmentHistory.reduce((sum, entry) => sum + (Number(entry.price) || 0), 0);
-    const yearCost = equipmentHistory
-      .filter((entry) => String(entry.date || '').startsWith(currentYear))
-      .reduce((sum, entry) => sum + (Number(entry.price) || 0), 0);
+    const totalCost = sumMaintenanceCost(equipmentHistory);
+    const yearCost = sumMaintenanceCost(equipmentHistory, { startDate: `${currentYear}-01-01`, endDate: `${currentYear}-12-31` });
     const lastDate = equipmentHistory[0]?.date || '';
     return { historyCount: equipmentHistory.length, totalCost, yearCost, lastDate };
   }, [equipmentHistory]);

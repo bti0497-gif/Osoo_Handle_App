@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
 const ExcelJS = require('exceljs');
 
 module.exports = {
@@ -11,6 +12,7 @@ module.exports = {
   async run({ ctx, fixtures, dbPath, expected }) {
     let equipment20Id;
     let equipment50Id;
+    let equipmentSingleId;
     const baseDate = fixtures.dataset.fixedDate;
     const dateAt = (offset) => {
       const date = new Date(`${baseDate}T00:00:00Z`);
@@ -67,6 +69,47 @@ module.exports = {
 
       equipment50Id = await createEquipment('진단출력펌프50');
       await addHistories(equipment50Id, 50, '50건');
+      equipmentSingleId = await createEquipment('진단단일점검펌프');
+      const singleLinked = await ctx.request('POST', '/api/work-records', {
+        body: { date: dateAt(26), title: '슬러지반출펌프 고장 점검', content: '코일 단선', equipmentIds: [equipmentSingleId] },
+      });
+      ctx.assert(singleLinked.ok, '단일 점검기록 연결 실패', 'EQUIPMENT_SINGLE_LINK_FAILED');
+      const relativePath = `/장비이력/${equipmentSingleId}/regression.png`;
+      const photoPath = path.join(path.dirname(dbPath), '사진관리', relativePath.slice(1));
+      fs.mkdirSync(path.dirname(photoPath), { recursive: true });
+      await require('sharp')({ create: { width: 320, height: 640, channels: 3, background: '#3b82f6' } }).png().toFile(photoPath);
+      const db = new (require('better-sqlite3'))(dbPath);
+      try {
+        db.prepare(`INSERT INTO equipment_asset_photos (equipment_id,site_id,photo_type,original_name,stored_name,relative_path,sort_order)
+          VALUES (?,?,'main','regression.png','regression.png',?,0)`).run(equipmentSingleId, expected.siteId, relativePath);
+      } finally { db.close(); }
+    });
+
+    await ctx.step('equipment-export-single-photo-and-linked-history', async () => {
+      const response = await ctx.request('GET', `/api/equipment/${equipmentSingleId}/export-excel`, { query: { open: 'false' } });
+      ctx.assert(response.ok && response.json?.success, '대표사진 포함 단일 기록 출력 실패', 'EQUIPMENT_SINGLE_EXPORT_FAILED', response.json);
+      ctx.assert(response.json.boundHistoryCount === 1 && response.json.embeddedPhotoCount === 1
+        && response.json.fileOpenRequested === false && response.json.fileOpenSucceeded === null,
+        '실제 바인딩·사진 삽입·열기 요청 결과 진단이 잘못됐습니다.', 'EQUIPMENT_SINGLE_BINDING_SUMMARY_BROKEN');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(response.json.outputPath);
+      const first = workbook.getWorksheet('1');
+      ctx.assert(workbook.worksheets.length === 1 && workbook.views[0]?.activeTab === 0,
+        '빈 후속 시트가 열리거나 남아 있습니다.', 'EQUIPMENT_SINGLE_ACTIVE_SHEET_BROKEN');
+      ctx.assert(first.getCell('D19').value === '슬러지반출펌프 고장 점검: 코일 단선' && first.getCell('A19').value === dateAt(26),
+        '연결된 점검기록이 저장 파일에 바인딩되지 않았습니다.', 'EQUIPMENT_SINGLE_HISTORY_MISSING');
+      const images = first.getImages();
+      ctx.assert(images.length === 1, '대표사진이 저장 파일에 없습니다.', 'EQUIPMENT_SINGLE_PHOTO_MISSING');
+      const image = images[0];
+      ctx.assert(Number.isFinite(image.range.tl.col) && Number.isFinite(image.range.tl.row)
+        && image.range.tl.col >= 12 && image.range.tl.col < 23
+        && image.range.tl.row >= 3 && image.range.tl.row < 16
+        && image.range.ext.width > 20 && image.range.ext.height > 100,
+        '대표사진 좌표나 크기가 병합 영역에 맞지 않습니다.', 'EQUIPMENT_SINGLE_PHOTO_ANCHOR_BROKEN');
+      const metadata = await require('sharp')(workbook.getImage(image.imageId).buffer).metadata();
+      ctx.assert(Math.abs(metadata.width / metadata.height - 0.5) < 0.01,
+        '대표사진 비율이 깨졌습니다.', 'EQUIPMENT_SINGLE_PHOTO_RATIO_BROKEN');
+      fs.rmSync(response.json.outputPath, { force: true });
     });
 
     await ctx.step('equipment-export-20-records', async () => {

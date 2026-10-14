@@ -14,6 +14,7 @@ const apiSpec = {
     path: '/api/auth',
     endpoints: [
       { method: 'POST', path: '/login', description: '로그인' },
+      { method: 'POST', path: '/login-input-interval', description: '로그인 입력 구간 집계 시작' },
       { method: 'POST', path: '/logout', description: '로그아웃' },
       { method: 'GET', path: '/current-user', description: '현재 사용자 정보' },
       { method: 'GET', path: '/system-status', description: 'PC 메모리 및 서버 응답 상태' },

@@ -75,6 +75,18 @@ function memorySnapshot() {
   };
 }
 
+function summarizeMemoryTrend(history) {
+  const latest = history[history.length - 1];
+  if (!latest) return [];
+  return [60, 300, 1800].map((seconds) => {
+    const previous = [...history].reverse().find((row) => row.at <= latest.at - seconds * 1000);
+    return previous ? { targetSeconds: seconds, actualSeconds: Math.round((latest.at - previous.at) / 1000),
+      rssDeltaBytes: latest.rssBytes - previous.rssBytes,
+      heapDeltaBytes: latest.heapUsedBytes - previous.heapUsedBytes,
+      externalDeltaBytes: latest.externalBytes - previous.externalBytes } : { targetSeconds: seconds, available: false };
+  });
+}
+
 function createServerPerformanceDiagnosticService({
   recordDiagnostic,
   db,
@@ -109,6 +121,8 @@ function createServerPerformanceDiagnosticService({
     maxEventLoopLagMs: 0, maxProcessRssBytes: 0, minSystemFreePercent: null,
   };
   const recentSamples = [];
+  const memoryHistory = [];
+  let lastMemoryHistoryAt = 0;
   const recentCompletedRequests = [];
   const activeRequests = new Map();
   const pushBounded = (list, value, limit) => {
@@ -116,7 +130,8 @@ function createServerPerformanceDiagnosticService({
     if (list.length > limit) list.shift();
   };
   const evidenceSnapshot = () => ({
-    diagnosticRevision: 2,
+    diagnosticRevision: 3,
+    memoryTrend: summarizeMemoryTrend(memoryHistory),
     recentSamples: recentSamples.slice(),
     recentCompletedRequests: recentCompletedRequests.slice(),
     latestLagObservedAt,
@@ -296,8 +311,15 @@ function createServerPerformanceDiagnosticService({
           method: oldestRequest.method,
           path: oldestRequest.path.slice(0, 160),
           elapsedMs: oldestRequest.elapsedMs,
+          currentPhase: oldestRequest.currentPhase,
+          phases: oldestRequest.phases.slice(-4),
         } : null,
       }, 15);
+      if (now - lastMemoryHistoryAt >= 30000) {
+        lastMemoryHistoryAt = now;
+        pushBounded(memoryHistory, { at: now, rssBytes: memory.process.rssBytes,
+          heapUsedBytes: memory.process.heapUsedBytes, externalBytes: memory.process.externalBytes }, 121);
+      }
       if (memory.system.freePercent !== null
         && memory.system.freePercent < 10
         && now - lastResourcePressureLogAt >= 30 * 60 * 1_000) {
@@ -348,6 +370,7 @@ function createServerPerformanceDiagnosticService({
       startedMonotonicAt: performance.now(),
       maxObservedEventLoopLagMs: 0,
       method: String(req.method || '').toUpperCase(),
+      startMemory: process.memoryUsage(),
       path: pathName,
       siteId: String(req.get('x-osoo-site-id') || req.get('x-user-site') || '').slice(0, 80) || null,
     };
@@ -374,6 +397,8 @@ function createServerPerformanceDiagnosticService({
         siteId: request.siteId,
         monotonicDurationMs: round(performance.now() - request.startedMonotonicAt),
         phases: (request.phases || []).slice(),
+        rssDeltaBytes: process.memoryUsage().rss - request.startMemory.rss,
+        heapDeltaBytes: process.memoryUsage().heapUsed - request.startMemory.heapUsed,
       };
       pushBounded(recentCompletedRequests, { ...lastCompletedRequest }, 8);
       if (!shouldRecordSlowApiRequest(request, res.statusCode, durationMs, slowApiMs)) return;
@@ -397,6 +422,8 @@ function createServerPerformanceDiagnosticService({
           eventLoopLagMs: latestEventLoopLagMs,
           maxObservedEventLoopLagMs: request.maxObservedEventLoopLagMs,
           phases: request.phases || [],
+          memoryChangeDuringRequest: { rssDeltaBytes: lastCompletedRequest.rssDeltaBytes, heapDeltaBytes: lastCompletedRequest.heapDeltaBytes,
+            interpretation: 'Whole server process change during request; concurrent work may contribute.' },
           monotonicDurationMs: lastCompletedRequest.monotonicDurationMs,
           ...evidenceSnapshot(),
           activeRequestCount: activeRequests.size,
@@ -446,6 +473,7 @@ function createServerPerformanceDiagnosticService({
 }
 
 module.exports = {
+  summarizeMemoryTrend,
   memorySnapshot,
   createServerPerformanceDiagnosticService,
   isStartedRecoveryEvent,

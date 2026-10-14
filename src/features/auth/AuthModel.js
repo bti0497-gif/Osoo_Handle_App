@@ -8,6 +8,7 @@ function isAdminUser(userData) {
 }
 
 export const AuthModel = {
+    beginInputInterval: () => apiClient.post('/api/auth/login-input-interval', {}, { timeout: 2000 }),
     async recordLoginUiDiagnostic(event, details = {}) {
         try {
             await apiClient.post('/api/auth/ui-diagnostic', { event, details });

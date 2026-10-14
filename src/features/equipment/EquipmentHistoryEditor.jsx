@@ -62,6 +62,9 @@ export default function EquipmentHistoryEditor({
                 onChange={(event) => onChangeField('price', event.target.value)}
                 placeholder="예: 320000"
               />
+              {String(draft.type || '').replace(/\s+/g, '') === '수리의뢰' && (
+                <small>의뢰 금액은 기록으로 보존하며 유지비용 합계에서는 제외합니다.</small>
+              )}
             </HistoryField>
             <HistoryField label="수리·공사내용" required wide>
               <textarea

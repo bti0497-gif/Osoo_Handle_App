@@ -251,6 +251,11 @@ function buildSourceLabel(project, measurementOrder, totalForDate) {
 
 function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappings = [], options = {}) {
   const { fallbackDate = '' } = options;
+  // Import callers pass the date-scoped QnTECH query date. It is the business
+  // day for every returned project, not merely a fallback for missing regDt.
+  if (fallbackDate && !/^\d{4}-\d{2}-\d{2}$/.test(fallbackDate)) {
+    throw new Error('Invalid QnTECH import date');
+  }
   const rowMap = new Map();
   const unmatchedSamples = [];
   const unmatchedItems = [];
@@ -258,7 +263,7 @@ function mapProjectsToWaterRows(projects, activeLocations, configuredSampleMappi
   const sourceSampleByRowKey = new Map();
   const projectsWithDate = (Array.isArray(projects) ? projects : []).map((project) => ({
     project,
-    projectDate: normalizeProjectDate(project?.regDt, fallbackDate)
+    projectDate: fallbackDate || normalizeProjectDate(project?.regDt, '')
   }));
   const totalCountByDate = new Map();
 

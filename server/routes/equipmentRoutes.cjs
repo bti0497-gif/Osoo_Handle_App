@@ -230,7 +230,10 @@ function createEquipmentRoutes(db, appDataPath) {
           historySourceCounts: result.historySourceCounts || {},
           pageCount: result.pageCount,
           fileName: result.file,
-          opened: openFile,
+          opened: result.fileOpenSucceeded,
+          openRequested: openFile,
+          boundHistoryCount: result.boundHistoryCount,
+          embeddedPhotoCount: result.embeddedPhotoCount,
           durationMs: Date.now() - startedAt,
         },
       });
