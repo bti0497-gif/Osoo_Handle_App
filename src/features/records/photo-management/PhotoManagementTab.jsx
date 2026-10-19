@@ -424,7 +424,13 @@ export default function PhotoManagementTab({ date, onError }) {
                 {loading ? (
                     <div className="unified-photo-management__empty">사진 정보를 확인하는 중입니다.</div>
                 ) : rows.length === 0 ? (
-                    <div className="unified-photo-management__empty">선택한 달에 사진을 등록할 대상이 없습니다.</div>
+                    <div className="unified-photo-management__empty" role="status">
+                        {category === 'sludge'
+                            ? '선택한 달에 슬러지 반출량이 입력되지 않았습니다. 유량관리에서 반출량을 먼저 입력해 주세요.'
+                            : category === 'medicine'
+                                ? '선택한 달에 약품 입고 데이터가 없습니다. 약품 입고량을 먼저 입력해 주세요.'
+                                : '선택한 달에 키트 입고 데이터가 없습니다. 키트 입고량을 먼저 입력해 주세요.'}
+                    </div>
                 ) : (
                     <div className="unified-photo-management__rows">
                         {category === 'sludge' && rows.map((row) => (

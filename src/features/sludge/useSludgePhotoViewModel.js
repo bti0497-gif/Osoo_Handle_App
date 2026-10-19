@@ -17,17 +17,13 @@ function makeEmptyEntry(date) {
     date: date || '',
     sludge_amount: '',
     sludge_photo_taken_at: null,
-    sludgePhotoFile: null,
+    sludgePhotoFiles: [],
     sludgePhotoUrl: null,
-    certPhotoFile: null,
+    certPhotoFiles: [],
     certPhotoUrl: null,
     savedAt: null,
     isSaved: false,
   };
-}
-
-function getFilePath(file) {
-  return file?.path && file.path !== '' ? file.path : null;
 }
 
 function itemToEntry(item) {
@@ -35,9 +31,9 @@ function itemToEntry(item) {
     date: item.date,
     sludge_amount: item.sludge_amount != null ? String(item.sludge_amount) : '',
     sludge_photo_taken_at: item.sludge_photo_taken_at || null,
-    sludgePhotoFile: null,
+    sludgePhotoFiles: [],
     sludgePhotoUrl: item.sludge_photo_url || null,
-    certPhotoFile: null,
+    certPhotoFiles: [],
     certPhotoUrl: item.certificate_photo_url || null,
     savedAt: item.last_modified || item.created_at || null,
     isSaved: true,
@@ -87,33 +83,35 @@ export function useSludgePhotoViewModel() {
   }, [loadMonth]);
 
   const handleCalendarMonthChange = useCallback(({ activeStartDate }) => {
-    if (!activeStartDate) return;
+    if (isSaving || !activeStartDate) return;
     setYear(activeStartDate.getFullYear());
     setMonth(activeStartDate.getMonth() + 1);
-  }, []);
+  }, [isSaving]);
 
   const handleCalendarDayClick = useCallback((dateStr) => {
+    if (isSaving) return;
     setSelectedDate(dateStr);
-  }, []);
+  }, [isSaving]);
 
   const handleRowClick = useCallback((date) => {
+    if (isSaving) return;
     setSelectedDate(date);
-  }, []);
+  }, [isSaving]);
 
   const handleAmountChange = useCallback((value) => {
     setEditEntry((prev) => ({ ...prev, sludge_amount: value, isSaved: false }));
   }, []);
 
-  const handleSludgePhoto = useCallback((file) => {
-    if (!file) return;
-    const url = URL.createObjectURL(file);
-    setEditEntry((prev) => ({ ...prev, sludgePhotoFile: file, sludgePhotoUrl: url, isSaved: false }));
+  const handleSludgePhoto = useCallback((files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    setEditEntry((prev) => ({ ...prev, sludgePhotoFiles: [...prev.sludgePhotoFiles, ...list], isSaved: false }));
   }, []);
 
-  const handleCertPhoto = useCallback((file) => {
-    if (!file) return;
-    const url = URL.createObjectURL(file);
-    setEditEntry((prev) => ({ ...prev, certPhotoFile: file, certPhotoUrl: url, isSaved: false }));
+  const handleCertPhoto = useCallback((files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    setEditEntry((prev) => ({ ...prev, certPhotoFiles: [...prev.certPhotoFiles, ...list], isSaved: false }));
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -121,7 +119,8 @@ export function useSludgePhotoViewModel() {
       showToast('날짜를 선택해 주세요.', 'warning');
       return;
     }
-    const hasData = editEntry.sludge_amount !== '' || editEntry.sludgePhotoFile != null || editEntry.certPhotoFile != null;
+    const hasData = editEntry.sludge_amount !== '' || editEntry.sludgePhotoFiles.length > 0 || editEntry.certPhotoFiles.length > 0
+      || Boolean(editEntry.sludgePhotoUrl || editEntry.certPhotoUrl);
     if (!hasData) {
       showToast('저장할 내용이 없습니다.', 'info');
       return;
@@ -132,19 +131,21 @@ export function useSludgePhotoViewModel() {
       const payload = {
         date: editEntry.date,
         sludge_amount: editEntry.sludge_amount !== '' ? editEntry.sludge_amount : null,
-        sludge_photo_path: getFilePath(editEntry.sludgePhotoFile),
-        certificate_photo_path: getFilePath(editEntry.certPhotoFile),
         note: null,
       };
-      if (!payload.sludge_photo_path && editEntry.sludgePhotoFile) {
-        const r = await SludgePhotoModel.uploadPhoto(editEntry.date, 'sludge', editEntry.sludgePhotoFile);
-        if (!r?.success) throw new Error(r?.error || '반출사진 업로드 실패');
+      const queue = [
+        ...editEntry.sludgePhotoFiles.map((file) => ({ file, type: 'sludge', key: 'sludgePhotoFiles', urlKey: 'sludgePhotoUrl' })),
+        ...editEntry.certPhotoFiles.map((file) => ({ file, type: 'certificate', key: 'certPhotoFiles', urlKey: 'certPhotoUrl' })),
+      ];
+      for (const { file, type, key, urlKey } of queue) {
+        const r = await SludgePhotoModel.uploadPhoto(editEntry.date, type, file);
+        if (!r?.success) throw new Error(r?.error || '사진 업로드 실패');
         if (r.driveUploaded === false) driveUploadFailureCount += 1;
-      }
-      if (!payload.certificate_photo_path && editEntry.certPhotoFile) {
-        const r = await SludgePhotoModel.uploadPhoto(editEntry.date, 'certificate', editEntry.certPhotoFile);
-        if (!r?.success) throw new Error(r?.error || '청소필증 업로드 실패');
-        if (r.driveUploaded === false) driveUploadFailureCount += 1;
+        // 재시도 시 이미 로컬 저장된 사진은 다시 올리지 않는다.
+        setEditEntry((prev) => prev.date === editEntry.date ? {
+          ...prev, [key]: prev[key].filter((candidate) => candidate !== file),
+          [urlKey]: r.url || prev[urlKey],
+        } : prev);
       }
       const result = await SludgePhotoModel.save(payload);
       if (!result?.success) throw new Error(result?.error || '저장 실패');
@@ -165,7 +166,7 @@ export function useSludgePhotoViewModel() {
   }, [editEntry, showToast, loadMonth]);
 
   const handleDelete = useCallback(async () => {
-    if (!editEntry.isSaved || !editEntry.date) return;
+    if (isSaving || !editEntry.isSaved || !editEntry.date) return;
     const ok = await showConfirm(`${editEntry.date} 반출 기록을 삭제하시겠습니까?`);
     if (!ok) return;
     try {
@@ -179,7 +180,7 @@ export function useSludgePhotoViewModel() {
     } catch (err) {
       showToast(err.message || '삭제 실패', 'error');
     }
-  }, [editEntry, showConfirm, showToast, loadMonth]);
+  }, [isSaving, editEntry, showConfirm, showToast, loadMonth]);
 
   const handleExport = useCallback(async () => {
     if (savedItems.length === 0) {
@@ -217,8 +218,9 @@ export function useSludgePhotoViewModel() {
 
   const hasChanges = !editEntry.isSaved && (
     editEntry.sludge_amount !== '' ||
-    editEntry.sludgePhotoFile != null ||
-    editEntry.certPhotoFile != null
+    editEntry.sludgePhotoFiles.length > 0 ||
+    editEntry.certPhotoFiles.length > 0 ||
+    Boolean(editEntry.sludgePhotoUrl || editEntry.certPhotoUrl)
   );
 
   return {

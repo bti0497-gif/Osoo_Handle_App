@@ -1,4 +1,6 @@
 .unified-photo-management {
+    width: 100%;
+    min-width: 0;
     display: grid;
     grid-template-columns: 190px minmax(0, 1fr);
     height: 100%;
@@ -354,6 +356,9 @@
 }
 
 .unified-photo-management__empty {
+    flex: 1;
+    display: grid;
+    place-content: center;
     padding: 32px 20px;
     color: #94a3b8;
     text-align: center;

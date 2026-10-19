@@ -89,19 +89,24 @@ export default function SludgePhotoView() {
           type="number"
           value={editEntry.sludge_amount}
           onChange={e => handleAmountChange(e.target.value)}
+          disabled={isSaving}
           placeholder="0"
           style={amountInput(newEntry ? '#bae6fd' : '#bfdbfe')}
         />
       </div>
       <SludgePhotoButton
-        label="반출사진"
-        hasPhoto={!!(editEntry.sludgePhotoUrl || editEntry.sludgePhotoFile)}
-        onFile={handleSludgePhoto}
+        label={`반출사진${editEntry.sludgePhotoFiles.length ? ` (${editEntry.sludgePhotoFiles.length}장 대기)` : ''}`}
+        multiple
+        busy={isSaving}
+        hasPhoto={!!(editEntry.sludgePhotoUrl || editEntry.sludgePhotoFiles.length)}
+        onFiles={handleSludgePhoto}
       />
       <SludgePhotoButton
-        label="청소필증"
-        hasPhoto={!!(editEntry.certPhotoUrl || editEntry.certPhotoFile)}
-        onFile={handleCertPhoto}
+        label={`청소필증${editEntry.certPhotoFiles.length ? ` (${editEntry.certPhotoFiles.length}장 대기)` : ''}`}
+        multiple
+        busy={isSaving}
+        hasPhoto={!!(editEntry.certPhotoUrl || editEntry.certPhotoFiles.length)}
+        onFiles={handleCertPhoto}
       />
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
         {hasChanges && (
