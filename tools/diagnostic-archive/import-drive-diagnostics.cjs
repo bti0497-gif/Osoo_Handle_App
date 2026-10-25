@@ -3,8 +3,18 @@
 
 const fs = require('fs');
 const path = require('path');
-const Database = require('better-sqlite3');
 const { APP_DATA_ROOT } = require('../../server/config/runtimeConfig.cjs');
+// Never load the app's native module: Electron builds replace its ABI.
+const sqliteModulePath = path.join(APP_DATA_ROOT, 'diagnostic-analysis', 'collector-runtime',
+  `node-${process.versions.node}`, 'node_modules', 'better-sqlite3');
+function openIsolatedDatabase(file) {
+  if (!fs.existsSync(sqliteModulePath)) {
+    throw new Error('Collector runtime missing for Node ' + process.versions.node
+      + '. Run tools/diagnostic-archive/launcher/build-collector.ps1; do not rebuild app dependencies.');
+  }
+  const Database = require(sqliteModulePath);
+  return new Database(file);
+}
 
 const TEXT = {
   diagnosticRoot: '\uC571\uC9C4\uB2E8\uB85C\uADF8',
@@ -23,7 +33,7 @@ const ARCHIVE_DB_PATH = path.join(APP_DATA_ROOT, 'diagnostic-analysis', 'diagnos
 
 function openArchiveDatabase() {
   fs.mkdirSync(path.dirname(ARCHIVE_DB_PATH), { recursive: true });
-  const db = new Database(ARCHIVE_DB_PATH);
+  const db = openIsolatedDatabase(ARCHIVE_DB_PATH);
   db.pragma('journal_mode = WAL');
   db.exec(`
     CREATE TABLE IF NOT EXISTS drive_diagnostic_events (

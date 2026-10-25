@@ -12,6 +12,7 @@
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <AssemblyName>OsooDiagnosticTray</AssemblyName>
+    <Version>1.1.0</Version>
     <RootNamespace>OsooDiagnosticTray</RootNamespace>
   </PropertyGroup>
 </Project>

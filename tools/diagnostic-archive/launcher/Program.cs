@@ -122,7 +122,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             }
         }
 
-        AppendActivity("INFO", "트레이 런처 시작");
+        AppendActivity("INFO", $"트레이 런처 1.1.0 시작 · 독립 Node 실행환경: {_nodePath}");
         if (_startupItem.Checked)
         {
             try { RegisterDailySchedule(true); }
@@ -457,6 +457,14 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private static string FindNodePath(string configured)
     {
+        var isolated = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "Osoo_Handle_App", "diagnostic-analysis", "collector-runtime", "node-path.txt");
+        if (File.Exists(isolated))
+        {
+            var pinned = File.ReadAllText(isolated, Encoding.UTF8).Trim();
+            if (File.Exists(pinned)) return pinned;
+            throw new FileNotFoundException("수집기 전용 Node가 없습니다. 수집기를 다시 빌드해 주세요.", pinned);
+        }
         if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured)) return configured;
         var fromEnvironment = Environment.GetEnvironmentVariable("OSOO_DIAGNOSTIC_NODE_PATH");
         if (!string.IsNullOrWhiteSpace(fromEnvironment) && File.Exists(fromEnvironment)) return fromEnvironment;

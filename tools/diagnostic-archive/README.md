@@ -51,6 +51,18 @@ Drive 인증 정보와 `GOOGLE_DRIVE_FOLDER_ID`는 앱과 동일한 런타임 �
 
 ## 트레이 자동 수집기
 
+### 1.1.0 독립 실행환경
+
+수집기는 앱 프로젝트의 `better-sqlite3`를 사용하지 않습니다. 기존 `diagnostics.db`와 보고서는 유지하며, 전용 Node 실행파일과 SQLite 모듈을 `%APPDATA%\Osoo_Handle_App\diagnostic-analysis\collector-runtime\node-<Node버전>\`에 보관합니다. 앱을 Electron ABI로 빌드해도 이 모듈은 바뀌지 않습니다. `node-path.txt`가 지정하는 전용 Node가 트레이 설정의 과거 NodePath보다 우선합니다. 수집 스크립트·Drive 비네이티브 연동 코드는 기존 프로젝트에서 재사용하므로 저장소 이동 시 ProjectRoot는 계속 유효해야 합니다.
+
+수집기만 빌드할 때는 다음 명령을 사용합니다. 프로젝트 루트의 npm rebuild나 현장 앱 릴리즈러너를 실행하지 않습니다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/diagnostic-archive/launcher/build-collector.ps1
+```
+
+새 실행파일은 `launcher/publish-next/`에 생성됩니다. 실행 중인 기존 수집기의 작업이 끝난 뒤 종료하고 기존 `publish/`에 교체합니다. 기존 로그인 자동시작·09시 예약 경로와 09:00~18:45 수집·19시 종료 정책은 유지합니다. 수동 스크립트 실행도 `node-path.txt`의 전용 Node로 실행해야 합니다. 데이터 적재·보고서 저장 이후에만 Drive 원본을 정리하는 조건은 변경하지 않았습니다.
+
 중앙관리자 PC에서만 사용하는 별도 Windows 트레이 앱입니다. 앱 본체의 Electron 설정·패키지에는 포함하지 않습니다. Node.js와 이 저장소의 수집 스크립트를 호출하며, AI 서비스는 호출하지 않습니다.
 
 - Windows 사용자 로그인 시 및 매일 오전 9시에 자동 시작합니다. 작업 스케줄러의 `Osoo Diagnostic Archive Daily`는 놓친 시작을 재실행하며, 현재 사용자 로그인 상태에서만 트레이를 실행합니다. PC 절전 해제나 비밀번호 저장은 하지 않습니다. 트레이 메뉴에서 자동 시작을 끄면 로그인 등록과 일일 예약을 함께 해제합니다.
