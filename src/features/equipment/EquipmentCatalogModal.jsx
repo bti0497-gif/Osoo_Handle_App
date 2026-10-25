@@ -27,7 +27,7 @@ export default function EquipmentCatalogModal({
         <header>
           <div>
             <h2>장비 카탈로그</h2>
-            <p>체크한 설비가 장비 목록에 등록되고, 체크를 해제하면 목록에서 제거됩니다. 개수형은 대수를 조절할 수 있습니다.</p>
+            <p>체크한 설비를 등록하고 개수형은 대수를 조절합니다. 체크 해제 시 이력이 없는 설비는 삭제될 수 있습니다. 기록을 보존하며 숨기려면 '장비 수정'의 '장비목록에 표시' 체크를 해제해 주세요.</p>
           </div>
           <button type="button" className="catalog-close" onClick={onClose} aria-label="닫기"><span className="material-icons">close</span></button>
         </header>

@@ -152,7 +152,10 @@ function createEquipmentAssetService(db) {
     const historyCount = db.prepare('SELECT COUNT(*) AS count FROM facility_logs WHERE equipment_id = ?').get(id).count;
     const linkCount = db.prepare('SELECT COUNT(*) AS count FROM work_record_equipment_links WHERE equipment_id = ?').get(id).count;
     if (historyCount > 0 || linkCount > 0) {
-      throw new ServiceError('이 장비에는 유지보수 이력 또는 업무 연결이 있어 삭제할 수 없습니다.', {
+      const reason = historyCount > 0
+        ? '이 장비에는 정비이력이 있어 삭제할 수 없습니다.'
+        : '이 장비에는 연결된 업무기록이 있어 삭제할 수 없습니다. 삭제가 꼭 필요하면 업무사진관리에서 해당 기록의 장비 연결을 먼저 해제해 주세요.';
+      throw new ServiceError(`${reason}\n사용하지 않는 장비는 '장비 수정'에서 '장비목록에 표시' 체크를 해제하고 '수정 적용'을 눌러 주세요.\n숨겨도 장비 정보·정비이력·사진·업무 연결은 보존됩니다. 나중에 '숨김' 버튼으로 장비를 찾아 같은 체크를 다시 켜면 기존 이력과 함께 표시됩니다.`, {
         status: 409,
         code: 'EQUIPMENT_IN_USE',
       });

@@ -100,6 +100,20 @@ export default function EquipmentEditorModal({
               </select>
             </Field>
           </div>
+          {draft.id ? (
+            <div className="equipment-visibility-setting">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={Number(draft.is_visible ?? 1) !== 0}
+                  disabled={saving}
+                  onChange={(event) => onChangeField('is_visible', event.target.checked)}
+                />
+                장비목록에 표시
+              </label>
+              <small>체크를 해제하고 수정 적용하면 목록에서만 숨깁니다. 장비 정보·이력·사진·업무 연결은 보존되며, 숨김 목록에서 다시 체크하면 복원됩니다.</small>
+            </div>
+          ) : null}
           <label className="equipment-editor-photo-bar">
             <span className="material-icons">add_photo_alternate</span>
             <b>{draft.photoName || '대표사진 선택'}</b>
