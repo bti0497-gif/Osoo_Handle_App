@@ -1,5 +1,7 @@
 ## Plan: Electron to WinForms Transition
 
+2026-10-28: 별도 전환 프로젝트 `E:\Osoo-FieldApp-DotNet`과 GitHub 비공개 저장소 `Osoo_FieldApp_DotNet`을 준비했다. 현재 실행 계획은 [새 프로젝트의 닷넷 전환 로드맵](https://github.com/bti0497-gif/Osoo_FieldApp_DotNet/blob/main/docs/DOTNET_MIGRATION_ROADMAP.md)의 Phase 0~7을 따른다. 아래 내용은 과거 계획과 운영 개선 근거로 보존한다. Windows별 자동 호환 설치본 선택을 계획에 포함하되 Windows 7 지원과 설치 방식은 미확정이다. 현재는 환경 준비와 메인/로그인 UI 시제품 단계이며 사용자 승인 후 실제 백엔드/API를 연결한다.
+
 Electron 운영 안정화를 먼저 마무리한 뒤, UI만 WinForms로 단계 전환하고 Node/Express 백엔드는 최대한 재사용하는 전략이다. 이렇게 하면 전환 리스크를 줄이고 현장 운영 중단 없이 병행 배포가 가능하다.
 
 2026-10-15 사용자 일정 조건: 2027년 약 10개 현장 추가 전에 .NET 전환을 완료한다. 현장별 준비 기준은 [현장 환경 인벤토리](field-environment-inventory.md)를 사용한다. Windows 7 현장 포함 여부와 실제 PC 공유 관계를 먼저 확정하고, 설치·업데이트·롤백 검증과 파일럿 운영을 현장 확대보다 앞에 배치한다. 구체적인 현장 추가일이 미정이므로 월별 확정 일정은 별도로 합의한다.
