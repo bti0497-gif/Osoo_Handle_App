@@ -4,6 +4,7 @@ import { hasRoadworkFillData, summarizeRoadworkData, useRoadworkHelperViewModel 
 import { RoadworkHelperModel } from './RoadworkHelperModel';
 import { capturePhotoInputDiagnostic } from './photoInputDiagnostic';
 import { inspectRoadworkResponse, ROADWORK_PAGE_EVIDENCE_SCRIPT } from './roadworkSessionEvidence';
+import { useRoadworkActionEvidence } from './useRoadworkActionEvidence';
 import './components/RoadworkHelperModal.css';
 
 const DEFAULT_ROADWORK_URL = 'https://nwpo.ex.co.kr:5002/index.jsp';
@@ -1064,6 +1065,11 @@ export default function RoadworkHelperView({ currentUser }) {
   const [webviewUrl, setWebviewUrl] = useState('');
   const [configuredRoadworkUrl, setConfiguredRoadworkUrl] = useState(DEFAULT_ROADWORK_URL);
   const [webviewGeneration, setWebviewGeneration] = useState(0);
+  const portalActionEvidenceRef = useRoadworkActionEvidence(
+    webviewRef,
+    `${roadworkPartition}-${webviewUrl}-${preloadPath}-${webviewGeneration}`,
+    recordRoadworkDiagnostic,
+  );
   const [showRefreshToast, setShowRefreshToast] = useState(true);
   const [roadworkStatus, setRoadworkStatus] = useState({ isDailyLog: false, canAutoFill: false, date: '', isEditableData: false, newButtonRect: null });
   const [statusMessage, setStatusMessage] = useState('');
@@ -1266,10 +1272,13 @@ export default function RoadworkHelperView({ currentUser }) {
       lastLoginPageExitAt: lastLoginPageExitAtRef.current,
       authenticationConfirmed: false,
       navigationEvidence: navigationEvidenceRef.current.slice(-8),
+      recentPortalActions: portalActionEvidenceRef.current.filter((item) => now - Date.parse(item.at) < 120000),
+      logoutIntentObserved: portalActionEvidenceRef.current.some((item) => item.kind === 'logout-intent' && now - Date.parse(item.at) < 120000),
+      actionEvidenceLimit: 'A logout click is intent only; missing evidence does not prove session expiry. Save messages are UI evidence, not confirmed persistence.',
       pageEvidence,
       interpretation: 'HTTP success and portal shell path do not prove an authenticated session; markers are heuristic evidence only.',
     });
-  }, [recordRoadworkDiagnostic, roadworkPartition]);
+  }, [recordRoadworkDiagnostic, roadworkPartition, portalActionEvidenceRef]);
 
   const clearPendingLoadFailure = React.useCallback(() => {
     if (loadFailureTimerRef.current) window.clearTimeout(loadFailureTimerRef.current);
@@ -1396,7 +1405,7 @@ export default function RoadworkHelperView({ currentUser }) {
     }, 1200);
 
     return () => window.clearInterval(intervalId);
-  }, [captureExternalRoadworkContext, roadworkPartition]);
+  }, [captureExternalRoadworkContext, roadworkPartition, recordRoadworkDiagnostic]);
 
   // 외부 WebSquare가 같은 URL 안에서 필터·그리드·권한 레이아웃만 바꾸는 경우에도
   // 즉시 포착한다. 동일 상태는 기록하지 않으므로 장시간 사용 중 로그가 폭증하지 않는다.
